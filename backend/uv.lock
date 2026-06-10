@@ -356,7 +356,6 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
-    { name = "types-passlib" },
 ]
 
 [package.metadata]
@@ -377,7 +376,6 @@ dev = [
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=0.23" },
     { name = "ruff", specifier = ">=0.6" },
-    { name = "types-passlib" },
 ]
 
 [[package]]
@@ -874,15 +872,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/25/44/ec35f1b6e83094b997da438a02c8c9b0ade2b1e84cfc48bd4656780760a6/starlette-1.2.1.tar.gz", hash = "sha256:9b9b5ebb992e67d6093741e63c2f59e4f6fff986f81163c087867bd7b924b3f6", size = 2701854, upload-time = "2026-05-31T01:07:51.847Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1c/54/196d0c1db10af76baa4f64894448505d60d3cdf70ef92cbb35f46a4e4c71/starlette-1.2.1-py3-none-any.whl", hash = "sha256:4de0082d08c8f6764a85a54cf1120d6939507a19905c7768acad2a9f875d2b89", size = 73350, upload-time = "2026-05-31T01:07:50.09Z" },
-]
-
-[[package]]
-name = "types-passlib"
-version = "1.7.7.20260211"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b5/f4/718ff8cbef9366e597aefd58929321702d3e183998cea89949ab5423281f/types_passlib-1.7.7.20260211.tar.gz", hash = "sha256:af73afffe1ce94c95c7f6072bd261572c29845de74fdffa3a265fc7634bca056", size = 25666, upload-time = "2026-02-10T15:11:59.517Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/14/6a/e9fc6a5b8f9a380a4a56b9f1e4dba5c6899561868017b17f6de382808b6f/types_passlib-1.7.7.20260211-py3-none-any.whl", hash = "sha256:c0f1ad440c513a6c07f333b28249530686056fd54a7b3ac6128ae31fd46305d3", size = 40457, upload-time = "2026-02-10T15:11:58.647Z" },
 ]
 
 [[package]]

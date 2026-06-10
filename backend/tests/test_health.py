@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.main import create_app
 
@@ -32,7 +33,7 @@ async def test_openapi_includes_health_route(client: "AsyncClient") -> None:
 
 @pytest.mark.asyncio
 async def test_health_returns_503_when_db_unreachable() -> None:
-    """With a database_url that points at an invalid port, /health must return 503."""
+    """Mock AsyncSessionLocal so the route raises deterministically; /health must return 503."""
     app = create_app()
 
     class _FakeSession:
@@ -43,9 +44,9 @@ async def test_health_returns_503_when_db_unreachable() -> None:
             pass
 
         async def execute(self, *args: object, **kwargs: object) -> None:
-            raise OSError("Connection refused (port 59999)")
+            raise SQLAlchemyError("injected DB failure")
 
-    with patch("app.core.db.AsyncSessionLocal", return_value=_FakeSession()):
+    with patch("app.api.routes.health.AsyncSessionLocal", return_value=_FakeSession()):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             response = await ac.get("/health")
