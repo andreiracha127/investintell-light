@@ -1,148 +1,48 @@
 export default function Home() {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        minHeight: "100%",
-        padding: "40px 24px",
-      }}
-    >
-      <div
-        style={{
-          backgroundColor: "var(--color-surface-2)",
-          border: "1px solid var(--color-border)",
-          borderRadius: "12px",
-          padding: "40px 48px",
-          maxWidth: "480px",
-          width: "100%",
-          textAlign: "center",
-        }}
-      >
-        <h1
-          style={{
-            fontSize: "24px",
-            fontWeight: 700,
-            color: "var(--color-text-primary)",
-            marginBottom: "8px",
-            letterSpacing: "-0.02em",
-          }}
-        >
+    <div className="flex items-center justify-center min-h-full px-6 py-10">
+      <div className="bg-surface-2 border border-border rounded-xl px-12 py-10 max-w-[480px] w-full text-center">
+        <h1 className="text-2xl font-bold text-text-primary mb-2 tracking-tight">
           Investintell Light
         </h1>
 
-        <p
-          style={{
-            fontSize: "14px",
-            color: "var(--color-text-secondary)",
-            marginBottom: "32px",
-          }}
-        >
+        <p className="text-sm text-text-secondary mb-8">
           Stock &amp; portfolio analysis — design token preview
         </p>
 
         {/* Design token demo: financial semantics + tabular-nums */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "center",
-            gap: "32px",
-          }}
-        >
+        <div className="flex justify-center gap-8">
           <div>
-            <div
-              style={{
-                fontSize: "11px",
-                fontWeight: 600,
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                color: "var(--color-text-muted)",
-                marginBottom: "4px",
-              }}
-            >
+            <div className="text-[11px] font-semibold tracking-[0.06em] uppercase text-text-muted mb-1">
               Gain
             </div>
-            <span
-              className="tabular-nums"
-              style={{
-                fontSize: "22px",
-                fontWeight: 700,
-                color: "var(--color-gain)",
-              }}
-            >
+            <span className="tabular-nums text-[22px] font-bold text-gain">
               +12.47%
             </span>
           </div>
 
           <div>
-            <div
-              style={{
-                fontSize: "11px",
-                fontWeight: 600,
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                color: "var(--color-text-muted)",
-                marginBottom: "4px",
-              }}
-            >
+            <div className="text-[11px] font-semibold tracking-[0.06em] uppercase text-text-muted mb-1">
               Loss
             </div>
-            <span
-              className="tabular-nums"
-              style={{
-                fontSize: "22px",
-                fontWeight: 700,
-                color: "var(--color-loss)",
-              }}
-            >
+            <span className="tabular-nums text-[22px] font-bold text-loss">
               -3.81%
             </span>
           </div>
 
           <div>
-            <div
-              style={{
-                fontSize: "11px",
-                fontWeight: 600,
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                color: "var(--color-text-muted)",
-                marginBottom: "4px",
-              }}
-            >
+            <div className="text-[11px] font-semibold tracking-[0.06em] uppercase text-text-muted mb-1">
               Flat
             </div>
-            <span
-              className="tabular-nums"
-              style={{
-                fontSize: "22px",
-                fontWeight: 700,
-                color: "var(--color-neutral-value)",
-              }}
-            >
+            <span className="tabular-nums text-[22px] font-bold text-neutral-value">
               0.00%
             </span>
           </div>
         </div>
 
         {/* Accent strip */}
-        <div
-          style={{
-            marginTop: "32px",
-            padding: "12px",
-            backgroundColor: "var(--color-surface-3)",
-            borderRadius: "8px",
-            border: "1px solid var(--color-border)",
-          }}
-        >
-          <span
-            style={{
-              fontSize: "12px",
-              color: "var(--color-accent)",
-              fontWeight: 500,
-            }}
-          >
+        <div className="mt-8 p-3 bg-surface-3 rounded-lg border border-border">
+          <span className="text-xs text-accent font-medium">
             Graphite theme · dark-first · Tailwind 4 @theme tokens
           </span>
         </div>

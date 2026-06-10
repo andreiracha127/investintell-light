@@ -50,10 +50,6 @@ body {
 }
 
 /*
-  Tabular numerals utility — apply to any element displaying financial figures
-  so that digit columns align consistently in tables/lists.
-  Usage: <span class="tabular-nums">...</span>
+  tabular-nums — Tailwind 4 ships this utility built-in (font-variant-numeric system).
+  Use <span class="tabular-nums"> directly; no custom rule needed.
 */
-.tabular-nums {
-  font-variant-numeric: tabular-nums;
-}

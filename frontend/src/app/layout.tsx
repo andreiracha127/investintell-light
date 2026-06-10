@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Link from "next/link";
 import "./globals.css";
 import { Providers } from "./providers";
 
@@ -31,43 +32,18 @@ export default function RootLayout({
         <Providers>
           <div className="flex h-screen overflow-hidden">
             {/* ── Left Sidebar ──────────────────────────────────────────── */}
-            <aside
-              style={{
-                width: "220px",
-                flexShrink: 0,
-                backgroundColor: "var(--color-surface-1)",
-                borderRight: "1px solid var(--color-border)",
-                display: "flex",
-                flexDirection: "column",
-                overflow: "hidden",
-              }}
-            >
+            <aside className="w-[220px] shrink-0 flex flex-col overflow-hidden bg-surface-1 border-r border-border">
               {/* Product name */}
-              <div
-                style={{
-                  padding: "20px 16px 16px",
-                  borderBottom: "1px solid var(--color-border)",
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: "15px",
-                    fontWeight: 600,
-                    color: "var(--color-accent)",
-                    letterSpacing: "-0.01em",
-                  }}
-                >
+              <div className="px-4 pt-5 pb-4 border-b border-border">
+                <span className="text-[15px] font-semibold tracking-tight text-accent">
                   Investintell Light
                 </span>
               </div>
 
               {/* Navigation */}
               <nav
-                style={{
-                  flex: 1,
-                  overflowY: "auto",
-                  padding: "12px 8px",
-                }}
+                aria-label="Primary"
+                className="flex-1 overflow-y-auto py-3 px-2"
               >
                 <NavGroup label="Stocks">
                   <NavItem href="/stocks/analysis">Stock Analysis</NavItem>
@@ -94,53 +70,20 @@ export default function RootLayout({
             </aside>
 
             {/* ── Main area ─────────────────────────────────────────────── */}
-            <div
-              style={{
-                flex: 1,
-                display: "flex",
-                flexDirection: "column",
-                overflow: "hidden",
-              }}
-            >
+            <div className="flex-1 flex flex-col overflow-hidden">
               {/* Header bar */}
-              <header
-                style={{
-                  height: "52px",
-                  flexShrink: 0,
-                  backgroundColor: "var(--color-surface-1)",
-                  borderBottom: "1px solid var(--color-border)",
-                  display: "flex",
-                  alignItems: "center",
-                  padding: "0 20px",
-                }}
-              >
+              <header className="h-[52px] shrink-0 flex items-center px-5 bg-surface-1 border-b border-border">
                 <input
                   type="text"
                   placeholder="Search ticker…"
                   disabled
-                  style={{
-                    width: "240px",
-                    height: "32px",
-                    padding: "0 12px",
-                    borderRadius: "6px",
-                    border: "1px solid var(--color-border)",
-                    backgroundColor: "var(--color-surface-2)",
-                    color: "var(--color-text-muted)",
-                    fontSize: "13px",
-                    cursor: "not-allowed",
-                    outline: "none",
-                  }}
+                  aria-label="Search ticker"
+                  className="w-[240px] h-8 px-3 rounded-[6px] border border-border bg-surface-2 text-text-muted text-[13px] cursor-not-allowed outline-none"
                 />
               </header>
 
               {/* Page content */}
-              <main
-                style={{
-                  flex: 1,
-                  overflowY: "auto",
-                  backgroundColor: "var(--color-surface-0)",
-                }}
-              >
+              <main className="flex-1 overflow-y-auto bg-surface-0">
                 {children}
               </main>
             </div>
@@ -161,18 +104,8 @@ function NavGroup({
   children: React.ReactNode;
 }) {
   return (
-    <div style={{ marginBottom: "20px" }}>
-      <div
-        style={{
-          fontSize: "10px",
-          fontWeight: 700,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-          color: "var(--color-text-muted)",
-          padding: "0 8px",
-          marginBottom: "4px",
-        }}
-      >
+    <div className="mb-5">
+      <div className="text-[10px] font-bold tracking-[0.08em] uppercase text-text-muted px-2 mb-1">
         {label}
       </div>
       <div>{children}</div>
@@ -188,18 +121,11 @@ function NavItem({
   children: React.ReactNode;
 }) {
   return (
-    <a
+    <Link
       href={href}
-      style={{
-        display: "block",
-        padding: "6px 8px",
-        borderRadius: "5px",
-        fontSize: "13px",
-        color: "var(--color-text-secondary)",
-        textDecoration: "none",
-      }}
+      className="block px-2 py-1.5 rounded-[5px] text-[13px] text-text-secondary no-underline hover:bg-surface-2 hover:text-text-primary transition-colors"
     >
       {children}
-    </a>
+    </Link>
   );
 }
