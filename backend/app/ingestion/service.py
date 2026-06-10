@@ -19,6 +19,11 @@ Fetch-window policy:
   7-day overlap (captures late Tiingo corrections) through today.
 The caller's requested [start, end] window is intentionally NOT used to bound
 the fetch — the cache is filled wide once, then read narrow forever.
+
+Concurrent cold-fetch window: two simultaneous requests for the same cold
+ticker may both reach Tiingo and attempt to upsert the same rows; ON CONFLICT
+DO UPDATE keeps the DB correct (last writer wins on each row).
+TODO: add a per-ticker asyncio.Lock to collapse the redundant Tiingo fetch.
 """
 
 import datetime as dt
@@ -58,6 +63,11 @@ _EOD_PRICE_COLUMNS = (
     "div_cash",
     "split_factor",
 )
+
+# asyncpg hard-limits query parameters to 32 767 (INT16_MAX).  Each EOD row
+# binds 14 parameters (2 PK columns + 12 price columns).  2000 rows × 14 = 28 000,
+# safely under the ceiling with room for future column additions.
+_EOD_UPSERT_CHUNK = 2000
 
 TickerAction = Literal["fresh", "fetched_full", "fetched_incremental"]
 
@@ -293,9 +303,15 @@ async def ensure_eod_data(
                 action = "fetched_full"
 
             # 3. Fetch and bulk-upsert prices, then mark the instrument fetched.
+            #    asyncpg caps query parameters at 32 767; chunk the rows so each
+            #    execute call stays well under that limit (_EOD_UPSERT_CHUNK rows
+            #    × 14 params/row = 28 000 params, safely below the ceiling).
+            #    All chunks are executed within the same transaction; the single
+            #    commit below atomically finalises the whole ticker.
             rows = await client.get_eod_prices(ticker, fetch_start, today)
-            if rows:
-                await session.execute(build_eod_upsert(rows))
+            for chunk_start in range(0, len(rows), _EOD_UPSERT_CHUNK):
+                chunk = rows[chunk_start : chunk_start + _EOD_UPSERT_CHUNK]
+                await session.execute(build_eod_upsert(chunk))
             await session.execute(build_mark_fetched(ticker))
             await session.commit()
         except Exception:

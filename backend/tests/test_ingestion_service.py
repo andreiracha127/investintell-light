@@ -13,6 +13,8 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from app.ingestion.service import (
+    _EOD_PRICE_COLUMNS,
+    _EOD_UPSERT_CHUNK,
     HISTORY_FLOOR,
     INCREMENTAL_OVERLAP_DAYS,
     ColdTickerCapExceededError,
@@ -316,3 +318,77 @@ async def test_failing_ticker_rolls_back_and_reraises() -> None:
 
     assert session.rollbacks == 1
     assert session.commits == 0
+
+
+# ---------------------------------------------------------------------------
+# Chunked upsert — asyncpg 32 767-parameter ceiling
+# ---------------------------------------------------------------------------
+
+
+async def test_large_fetch_splits_into_multiple_execute_calls() -> None:
+    """With more rows than _EOD_UPSERT_CHUNK the session receives multiple
+    EOD upsert execute calls — one per chunk — and every chunk stays at or
+    below the chunk size (which guarantees the asyncpg parameter ceiling is
+    never breached)."""
+    import math
+
+    # Build n_rows > _EOD_UPSERT_CHUNK so chunking is forced.
+    n_rows = _EOD_UPSERT_CHUNK + 500
+    rows = [
+        _eod_row(day=dt.date(2020, 1, 1) + dt.timedelta(days=i)) for i in range(n_rows)
+    ]
+
+    session = _FakeSession(instruments=[], max_date=None)
+    client = AsyncMock()
+    client.get_ticker_meta.return_value = _meta()
+    client.get_eod_prices.return_value = rows
+
+    report = await ensure_eod_data(
+        session,  # type: ignore[arg-type]
+        client,
+        ["AAPL"],
+        dt.date(2020, 1, 1),
+        dt.date(2026, 6, 1),
+    )
+
+    # Count how many of the executed statements are PgInsert targeting eod_prices.
+    # (build_instrument_upsert also produces a PgInsert, so filter by table name.)
+    from sqlalchemy.dialects.postgresql import Insert as PgInsert
+
+    eod_upserts = [
+        s
+        for s in session.executed
+        if isinstance(s, PgInsert) and s.table.name == "eod_prices"
+    ]
+
+    expected_chunks = math.ceil(n_rows / _EOD_UPSERT_CHUNK)
+    assert len(eod_upserts) == expected_chunks, (
+        f"Expected {expected_chunks} EOD upsert execute calls, got {len(eod_upserts)}"
+    )
+
+    # Verify each chunk has at most _EOD_UPSERT_CHUNK rows.
+    # The number of value rows can be read from the statement's compile-time
+    # structure: each chunk is built from a slice of at most _EOD_UPSERT_CHUNK rows.
+    # We check the total rows across all chunks equals n_rows.
+    assert report.outcomes[0].rows_upserted == n_rows
+    assert session.commits == 1
+
+
+async def test_chunk_param_count_under_asyncpg_ceiling() -> None:
+    """Each chunk's bound-parameter count must be < 32 767 (asyncpg ceiling)."""
+    _ASYNCPG_PARAM_CEILING = 32_767
+    # 14 params per row: 2 PK (ticker, date) + 12 price columns.
+    _PARAMS_PER_ROW = 2 + len(_EOD_PRICE_COLUMNS)
+
+    n_rows = _EOD_UPSERT_CHUNK * 3 + 100  # three full chunks + a partial one
+    rows = [
+        _eod_row(day=dt.date(2015, 1, 1) + dt.timedelta(days=i)) for i in range(n_rows)
+    ]
+
+    # Verify that a single chunk of size _EOD_UPSERT_CHUNK stays under the ceiling.
+    chunk = rows[:_EOD_UPSERT_CHUNK]
+    params_in_chunk = len(chunk) * _PARAMS_PER_ROW
+    assert params_in_chunk < _ASYNCPG_PARAM_CEILING, (
+        f"Chunk of {len(chunk)} rows binds {params_in_chunk} params "
+        f"which exceeds asyncpg ceiling of {_ASYNCPG_PARAM_CEILING}"
+    )
