@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     tiingo_timeout_seconds: float = 15.0
     tiingo_max_retries: int = 3
 
+    # --- EOD ingestion / price-series settings (F1.3) ---
+    # An instrument is "fresh" when eod_last_fetched_at is within this window.
+    eod_staleness_hours: float = 24.0
+    # Hard cap on cold/stale tickers ingested per request (fail loud — never a subset).
+    max_cold_tickers_per_request: int = 5
+    # Hard cap on data points returned by the price-series endpoint.
+    price_series_max_points: int = 7000
+
 
 @functools.lru_cache
 def get_settings() -> Settings:

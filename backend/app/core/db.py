@@ -9,6 +9,8 @@ Project conventions (non-negotiable):
   N+1 loads fail loudly at development time rather than silently degrading production.
 """
 
+from collections.abc import AsyncGenerator
+
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -31,3 +33,12 @@ AsyncSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
     expire_on_commit=False,
     class_=AsyncSession,
 )
+
+
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
+    """FastAPI dependency yielding one AsyncSession per request.
+
+    No implicit commit: route/service code decides transaction boundaries.
+    """
+    async with AsyncSessionLocal() as session:
+        yield session

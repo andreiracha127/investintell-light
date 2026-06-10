@@ -27,16 +27,103 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/stocks/{ticker}/prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Price Series
+         * @description Return the EOD price series for *ticker*, ingesting on demand if cold/stale.
+         */
+        get: operations["get_price_series_stocks__ticker__prices_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
         /** HealthResponse */
         HealthResponse: {
             /** Status */
             status: string;
             /** Database */
             database: string;
+        };
+        /**
+         * PricePoint
+         * @description One EOD bar in a price series response.
+         */
+        PricePoint: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Open */
+            open: number;
+            /** High */
+            high: number;
+            /** Low */
+            low: number;
+            /** Close */
+            close: number;
+            /** Volume */
+            volume: number;
+            /** Adj Close */
+            adj_close: number;
+            /** Div Cash */
+            div_cash: number;
+            /** Split Factor */
+            split_factor: number;
+        };
+        /**
+         * PriceSeriesResponse
+         * @description EOD price series for one ticker over [start_date, end_date].
+         */
+        PriceSeriesResponse: {
+            /** Ticker */
+            ticker: string;
+            /**
+             * Start Date
+             * Format: date
+             */
+            start_date: string;
+            /**
+             * End Date
+             * Format: date
+             */
+            end_date: string;
+            /** Count */
+            count: number;
+            /** Prices */
+            prices: components["schemas"]["PricePoint"][];
+        };
+        /** ValidationError */
+        ValidationError: {
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
         };
     };
     responses: never;
@@ -63,6 +150,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    get_price_series_stocks__ticker__prices_get: {
+        parameters: {
+            query?: {
+                /** @description Defaults to end_date - 365d */
+                start_date?: string | null;
+                /** @description Defaults to today */
+                end_date?: string | null;
+            };
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceSeriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
