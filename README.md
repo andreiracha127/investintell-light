@@ -71,21 +71,22 @@ make web     # frontend on :3000
 
 | Target      | Description                                                     |
 |-------------|-----------------------------------------------------------------|
-| `check`     | Backend: ruff, mypy, pytest. Frontend: lint, typecheck.        |
-| `serve`     | Start backend with uvicorn --reload on port 8000.              |
-| `web`       | Start frontend Next.js dev server.                             |
-| `migrate`   | Run `alembic upgrade head`.                                    |
-| `types`     | Export OpenAPI schema then regenerate `frontend/src/lib/api/api.d.ts`. |
-| `smoke`     | Hit `/health` and assert 200 + expected payload (backend must be running). |
-| `db-up`     | `docker compose up -d db`                                      |
-| `db-down`   | `docker compose down`                                          |
+| `check`       | Backend: ruff, mypy, pytest. Frontend: lint, typecheck, typegen staleness gate. |
+| `serve`       | Start backend with uvicorn --reload on port 8000.              |
+| `web`         | Start frontend Next.js dev server.                             |
+| `migrate`     | Run `alembic upgrade head`.                                    |
+| `types`       | Export OpenAPI schema then regenerate `frontend/src/lib/api/api.d.ts`. |
+| `types-check` | Same as `types`, then fail if `openapi.json` or `api.d.ts` differ from HEAD. |
+| `smoke`       | Hit `/health` and assert 200 + expected payload (backend must be running). |
+| `db-up`       | `docker compose up -d db`                                      |
+| `db-down`     | `docker compose down`                                          |
 
 ## Conventions
 
 - **Fail loud.** Routes never return 200 with a degraded payload; errors propagate as 4xx/5xx with detail messages.
 - **DB-first.** Routes never call external APIs (Tiingo, investintell-allocation) directly — all external data is ingested by background sync workers and served from TimescaleDB.
 - **`response_model` everywhere.** Every FastAPI route declares an explicit Pydantic response model.
-- **Typegen gate.** `backend/openapi.json` and `frontend/src/lib/api/api.d.ts` are committed contract artifacts. CI fails if they are stale. Regenerate with `make types` after any schema change.
+- **Typegen gate.** `backend/openapi.json` and `frontend/src/lib/api/api.d.ts` are committed contract artifacts. `make check` (via `make types-check`) fails locally if they are stale — the same gate that runs in CI. Regenerate with `make types` after any schema change.
 
 ## Phase status
 

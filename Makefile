@@ -1,4 +1,4 @@
-.PHONY: check serve web migrate types smoke db-up db-down
+.PHONY: check serve web migrate types types-check smoke db-up db-down
 
 # ── Quality gates ────────────────────────────────────────────────────────────
 check:
@@ -7,6 +7,7 @@ check:
 	cd backend && uv run pytest -q
 	cd frontend && pnpm lint
 	cd frontend && pnpm run typecheck
+	$(MAKE) types-check
 
 # ── Dev servers ──────────────────────────────────────────────────────────────
 serve:
@@ -29,6 +30,11 @@ db-down:
 types:
 	cd backend && uv run python scripts/export_openapi.py
 	cd frontend && pnpm run types
+
+types-check:
+	cd backend && uv run python scripts/export_openapi.py
+	cd frontend && pnpm run types
+	git diff --exit-code -- backend/openapi.json frontend/src/lib/api/api.d.ts
 
 # ── Smoke test (requires live backend on :8000) ───────────────────────────────
 smoke:
