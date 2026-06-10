@@ -14,9 +14,11 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Metadata for autogenerate support. Import your Base.metadata here when models exist.
-# e.g.: from app.models import Base; target_metadata = Base.metadata
-target_metadata = None
+# Metadata for autogenerate support.
+# Importing app.models ensures all ORM classes are registered on Base.metadata.
+from app.models import Base  # noqa: E402
+
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
