@@ -1,8 +1,12 @@
+import logging
+
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import text
 
 from app.core.db import AsyncSessionLocal
 from app.schemas.health import HealthResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -18,9 +22,10 @@ async def health_check() -> HealthResponse:
         async with AsyncSessionLocal() as session:
             await session.execute(text("SELECT 1"))
     except Exception as exc:
+        logger.exception("Database health check failed")
         raise HTTPException(
             status_code=503,
-            detail=f"Database unreachable: {exc}",
+            detail="database unreachable",
         ) from exc
 
     return HealthResponse(status="ok", database="ok")
