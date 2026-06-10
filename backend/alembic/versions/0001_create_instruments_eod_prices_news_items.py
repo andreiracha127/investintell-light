@@ -59,18 +59,18 @@ def upgrade() -> None:
         "eod_prices",
         sa.Column("ticker", sa.String(), nullable=False),
         sa.Column("date", sa.Date(), nullable=False),
-        sa.Column("open", sa.Float(), nullable=False),
-        sa.Column("high", sa.Float(), nullable=False),
-        sa.Column("low", sa.Float(), nullable=False),
-        sa.Column("close", sa.Float(), nullable=False),
+        sa.Column("open", sa.Double(), nullable=False),
+        sa.Column("high", sa.Double(), nullable=False),
+        sa.Column("low", sa.Double(), nullable=False),
+        sa.Column("close", sa.Double(), nullable=False),
         sa.Column("volume", sa.BigInteger(), nullable=False),
-        sa.Column("adj_open", sa.Float(), nullable=False),
-        sa.Column("adj_high", sa.Float(), nullable=False),
-        sa.Column("adj_low", sa.Float(), nullable=False),
-        sa.Column("adj_close", sa.Float(), nullable=False),
+        sa.Column("adj_open", sa.Double(), nullable=False),
+        sa.Column("adj_high", sa.Double(), nullable=False),
+        sa.Column("adj_low", sa.Double(), nullable=False),
+        sa.Column("adj_close", sa.Double(), nullable=False),
         sa.Column("adj_volume", sa.BigInteger(), nullable=False),
-        sa.Column("div_cash", sa.Float(), server_default="0", nullable=False),
-        sa.Column("split_factor", sa.Float(), server_default="1", nullable=False),
+        sa.Column("div_cash", sa.Double(), server_default="0", nullable=False),
+        sa.Column("split_factor", sa.Double(), server_default="1", nullable=False),
         sa.ForeignKeyConstraint(
             ["ticker"],
             ["instruments.ticker"],
@@ -83,8 +83,10 @@ def upgrade() -> None:
 
     # Convert eod_prices to a TimescaleDB hypertable partitioned on `date`.
     # chunk_time_interval => INTERVAL '1 month' gives ~monthly chunks.
-    # migrate_data => TRUE is a no-op for an empty table but keeps the call
-    # idempotent if the table somehow has data at migration time.
+    # migrate_data => TRUE copies any pre-existing rows into the hypertable
+    # chunk structure; it does NOT make this call idempotent.  True idempotency
+    # would require if_not_exists => TRUE.  Re-runs are prevented by Alembic's
+    # alembic_version tracking, not by this flag.
     op.execute(
         "SELECT create_hypertable("
         "  'eod_prices',"

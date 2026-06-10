@@ -40,6 +40,11 @@ class Instrument(Base):
         nullable=False,
         server_default=func.now(),
     )
+    # NOTE: onupdate=func.now() fires only when SQLAlchemy ORM update statements
+    # are emitted.  Any Core-level upsert (INSERT ... ON CONFLICT DO UPDATE) is
+    # invisible to the ORM trigger, so the F1.3 ingestion service MUST explicitly
+    # include `updated_at=func.now()` in its set_ clause — it will NOT be set
+    # automatically by the database or by this onupdate hook.
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

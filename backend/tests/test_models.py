@@ -76,11 +76,17 @@ def test_eod_prices_date_index_exists() -> None:
 def test_eod_prices_div_cash_has_server_default() -> None:
     col = _col("eod_prices", "div_cash")
     assert col.server_default is not None
+    assert col.server_default.arg == "0", (  # type: ignore[union-attr]
+        f"div_cash server_default expected '0', got {col.server_default.arg!r}"
+    )
 
 
 def test_eod_prices_split_factor_has_server_default() -> None:
     col = _col("eod_prices", "split_factor")
     assert col.server_default is not None
+    assert col.server_default.arg == "1", (  # type: ignore[union-attr]
+        f"split_factor server_default expected '1', got {col.server_default.arg!r}"
+    )
 
 
 def test_eod_prices_fk_to_instruments() -> None:
