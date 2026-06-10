@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+/*
+  Graphite Design System — dark-first
+  All color tokens are defined here via @theme and referenced via CSS variables.
+  No hardcoded hex values in components.
+*/
+
+/* ── Base: force dark color scheme ────────────────────────────────────────── */
+:root {
+  color-scheme: dark;
+}
+
+/* ── Tailwind 4 CSS-first token definitions ────────────────────────────────── */
+@theme {
+  /* ── Surfaces (dark-first graphite/near-black scale) ── */
+  --color-surface-0: #0b0d10;   /* page background — near-black graphite */
+  --color-surface-1: #13161c;   /* sidebar / primary panel */
+  --color-surface-2: #1a1e27;   /* card / secondary panel */
+  --color-surface-3: #222736;   /* raised element (tooltip, dropdown) */
+  --color-border:    #2a2f3d;   /* default border / divider */
+
+  /* ── Brand accent: cyan-teal family ── */
+  --color-accent:         #22d3ee;   /* primary interactive accent */
+  --color-accent-muted:   #0e7490;   /* muted / subtle accent */
+  --color-accent-strong:  #67e8f9;   /* strong / hover state */
+
+  /* ── Financial semantics (P&L / return coloring only) ── */
+  --color-gain:          #22c55e;   /* positive return — green */
+  --color-gain-muted:    #166534;   /* subtle positive background */
+  --color-loss:          #ef4444;   /* negative return — red */
+  --color-loss-muted:    #7f1d1d;   /* subtle negative background */
+  --color-neutral-value: #94a3b8;   /* flat / unchanged value */
+
+  /* ── Text tokens ── */
+  --color-text-primary:   #e2e8f0;   /* main body text */
+  --color-text-secondary: #94a3b8;   /* labels, metadata */
+  --color-text-muted:     #475569;   /* disabled, placeholder */
+
+  /* ── Font stack ── */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+/* ── Global base styles ─────────────────────────────────────────────────── */
+body {
+  background-color: var(--color-surface-0);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+}
+
+/*
+  Tabular numerals utility — apply to any element displaying financial figures
+  so that digit columns align consistently in tables/lists.
+  Usage: <span class="tabular-nums">...</span>
+*/
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
