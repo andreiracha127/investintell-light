@@ -103,29 +103,37 @@ class TokenBucketLimiter:
     async def acquire(self) -> None:
         """Wait until a token is available, then consume it.
 
+        The lock is never awaited inside a ``finally`` block.  Instead, when a
+        wait is required the lock is released by exiting the ``async with``
+        block, the sleep happens outside any lock, and the loop re-enters the
+        ``async with`` from scratch — safe under cancellation.
+
         Raises:
             TiingoRateLimitError: If the hourly or daily hard cap is reached.
         """
-        async with self._lock:
-            now = self._time_func()
-            self._evict_old(now)
-            self._check_caps(now)
+        while True:
+            async with self._lock:
+                now = self._time_func()
+                self._evict_old(now)
+                self._check_caps(now)
 
-            # Refill and wait if no token available.
-            self._refill()
-            while self._tokens < 1.0:
-                wait = (1.0 - self._tokens) / self._rate
-                # Release the lock while sleeping so other coroutines can check.
-                self._lock.release()
-                try:
-                    await asyncio.sleep(wait)
-                finally:
-                    await self._lock.acquire()
                 self._refill()
+                if self._tokens >= 1.0:
+                    # Token available — consume it and record.
+                    self._tokens -= 1.0
+                    now = self._time_func()
+                    self._record(now)
+                    return
 
-            self._tokens -= 1.0
-            now = self._time_func()
-            self._record(now)
+                # Not enough tokens yet.  Compute how long to wait, then
+                # release the lock by exiting the ``async with`` block before
+                # sleeping so other coroutines are not blocked.
+                wait = (1.0 - self._tokens) / self._rate
+
+            # Sleep outside the lock — safe to cancel here.
+            await asyncio.sleep(wait)
+            # Loop back: re-enter the lock and re-check everything from
+            # scratch (including caps, which may have been hit while we slept).
 
     # ------------------------------------------------------------------
     # Introspection (for tests / monitoring)
@@ -133,17 +141,25 @@ class TokenBucketLimiter:
 
     @property
     def hourly_count(self) -> int:
-        """Number of acquisitions in the current 1-hour sliding window."""
+        """Number of acquisitions in the current 1-hour sliding window.
+
+        Non-mutating: counts without evicting, so it is safe to call without
+        holding the lock and will not affect limiter state.
+        """
         now = self._time_func()
-        self._evict_old(now)
-        return len(self._hourly_window)
+        boundary = now - 3600.0
+        return sum(1 for ts in self._hourly_window if ts > boundary)
 
     @property
     def daily_count(self) -> int:
-        """Number of acquisitions in the current 24-hour sliding window."""
+        """Number of acquisitions in the current 24-hour sliding window.
+
+        Non-mutating: counts without evicting, so it is safe to call without
+        holding the lock and will not affect limiter state.
+        """
         now = self._time_func()
-        self._evict_old(now)
-        return len(self._daily_window)
+        boundary = now - 86400.0
+        return sum(1 for ts in self._daily_window if ts > boundary)
 
     # Convenience so callers can do ``async with limiter:`` if desired.
     async def __aenter__(self) -> "TokenBucketLimiter":

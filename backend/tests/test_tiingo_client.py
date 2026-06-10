@@ -312,3 +312,164 @@ def test_settings_tiingo_fields_load(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.tiingo_daily_cap == 90000
     assert s.tiingo_timeout_seconds == 15.0
     assert s.tiingo_max_retries == 3
+
+
+# ---------------------------------------------------------------------------
+# Fix 1: limiter.acquire() called once per physical request (incl. retries)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_limiter_acquire_called_per_physical_request() -> None:
+    """503 then 200 → acquire() must be called exactly 2 times (one per attempt)."""
+    acquire_count = 0
+
+    class CountingLimiter(TokenBucketLimiter):
+        async def acquire(self) -> None:
+            nonlocal acquire_count
+            acquire_count += 1
+            # No real rate-limiting in this test — just count.
+
+    responses = [
+        make_response(503, "Service Unavailable"),
+        make_response(200, _EOD_PAYLOAD),
+    ]
+    transport = response_sequence_transport(responses)
+    http = httpx.AsyncClient(transport=transport)
+
+    limiter = CountingLimiter(
+        rate_per_sec=1000.0,
+        burst=1000,
+        hourly_cap=9000,
+        daily_cap=90000,
+    )
+
+    async def no_sleep(_: float) -> None:
+        pass
+
+    with patch("asyncio.sleep", side_effect=no_sleep):
+        client = TiingoClient(
+            token="testtoken",
+            limiter=limiter,
+            http_client=http,
+            max_retries=3,
+        )
+        rows = await client.get_eod_prices(
+            "AAPL",
+            datetime.date(2024, 1, 2),
+            datetime.date(2024, 1, 3),
+        )
+
+    assert len(rows) == 2
+    assert acquire_count == 2, f"Expected 2 acquire() calls, got {acquire_count}"
+
+
+# ---------------------------------------------------------------------------
+# Fix 6a: get_news happy path
+# ---------------------------------------------------------------------------
+
+_NEWS_PAYLOAD = [
+    {
+        "id": 1001,
+        "title": "Apple reports record earnings",
+        "url": "https://example.com/news/1001",
+        "publishedDate": "2024-01-15T14:30:00+00:00",
+        "source": "Reuters",
+        "description": "Apple Inc. reported record quarterly earnings.",
+        "tickers": ["AAPL", "MSFT"],
+    },
+    {
+        "id": 1002,
+        "title": "Tech stocks rally",
+        "url": "https://example.com/news/1002",
+        "publishedDate": "2024-01-15T16:00:00+00:00",
+        "source": "Bloomberg",
+        "description": None,
+        "tickers": ["AAPL"],
+    },
+]
+
+
+@pytest.mark.asyncio
+async def test_get_news_happy_path() -> None:
+    """200 JSON with 2 news items → list of TiingoNewsItem with correct fields."""
+    captured_requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_requests.append(request)
+        return make_response(200, _NEWS_PAYLOAD)
+
+    transport = httpx.MockTransport(handler)
+    http = httpx.AsyncClient(transport=transport)
+
+    async def no_sleep(_: float) -> None:
+        pass
+
+    with patch("asyncio.sleep", side_effect=no_sleep):
+        client = TiingoClient(token="testtoken", limiter=make_limiter(), http_client=http)
+        items = await client.get_news(["AAPL", "MSFT"], limit=50)
+
+    assert len(items) == 2
+
+    assert items[0].id == 1001
+    assert items[0].title == "Apple reports record earnings"
+    assert items[0].tickers == ["AAPL", "MSFT"]
+    assert isinstance(items[0].published_date, datetime.datetime)
+    assert items[0].published_date.year == 2024
+    assert items[0].published_date.month == 1
+    assert items[0].published_date.day == 15
+
+    assert items[1].id == 1002
+    assert items[1].description is None
+
+    # Verify the request URL contained correct query params.
+    assert len(captured_requests) == 1
+    req = captured_requests[0]
+    assert "tickers=aapl%2Cmsft" in str(req.url) or "tickers=aapl,msft" in str(req.url)
+    assert "limit=50" in str(req.url)
+
+
+@pytest.mark.asyncio
+async def test_get_news_limit_capped_at_100() -> None:
+    """limit > 100 must be silently capped to 100 in the request URL."""
+    captured_requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_requests.append(request)
+        return make_response(200, _NEWS_PAYLOAD)
+
+    transport = httpx.MockTransport(handler)
+    http = httpx.AsyncClient(transport=transport)
+
+    async def no_sleep(_: float) -> None:
+        pass
+
+    with patch("asyncio.sleep", side_effect=no_sleep):
+        client = TiingoClient(token="testtoken", limiter=make_limiter(), http_client=http)
+        await client.get_news(["AAPL"], limit=999)
+
+    req = captured_requests[0]
+    assert "limit=100" in str(req.url)
+
+
+# ---------------------------------------------------------------------------
+# Fix 6b: get_eod_prices schema mismatch (200 dict instead of list)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_eod_prices_schema_mismatch_dict_raises_bad_response() -> None:
+    """200 JSON dict (instead of list) from EOD endpoint → TiingoBadResponseError."""
+    bad_payload = {"error": "unexpected format", "code": 999}
+    transport = single_response_transport(make_response(200, bad_payload))
+    http = httpx.AsyncClient(transport=transport)
+
+    async def no_sleep(_: float) -> None:
+        pass
+
+    with patch("asyncio.sleep", side_effect=no_sleep):
+        client = TiingoClient(token="testtoken", limiter=make_limiter(), http_client=http)
+        with pytest.raises(TiingoBadResponseError, match="Expected list"):
+            await client.get_eod_prices(
+                "AAPL", datetime.date(2024, 1, 1), datetime.date(2024, 1, 2)
+            )

@@ -25,7 +25,7 @@ from app.tiingo.models import TiingoEodRow, TiingoNewsItem, TiingoTickerMeta
 from app.tiingo.rate_limiter import TokenBucketLimiter
 
 # Plain-text body wording that Tiingo uses for disguised rate-limit responses.
-_RATE_LIMIT_KEYWORDS = ("run over", "limit")
+_RATE_LIMIT_KEYWORDS = ("run over", "rate limit", "request limit", "symbol look up")
 _BODY_SNIPPET_LEN = 200
 
 
@@ -94,14 +94,16 @@ class TiingoClient:
         """Single request path: acquire token, send, handle errors, parse JSON.
 
         Retries 429 / 5xx / transport errors with exponential back-off.
+        One physical request = one limiter token.  acquire() is called inside
+        the retry loop so every attempt (including retries) is rate-limited.
+        If acquire() raises TiingoRateLimitError it propagates immediately.
         """
-        await self._limiter.acquire()
-
         url = f"{self._base_url}{path}"
         headers = {"Authorization": f"Token {self._token}"}
 
         last_exc: Exception | None = None
         for attempt in range(self._max_retries + 1):
+            await self._limiter.acquire()
             try:
                 response = await self._http.get(url, params=params, headers=headers)
             except (httpx.TimeoutException, httpx.TransportError) as exc:
