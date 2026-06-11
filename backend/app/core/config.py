@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     # Read-only connection to the investintell-allocation mother DB — used from F6 onward.
     investintell_db_url: str | None = None
 
+    # --- API / CORS settings (F2) ---
+    # Browser origins allowed to call the API (the Next.js frontend dev server).
+    cors_allow_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
     # --- Tiingo client settings (F1) ---
     tiingo_base_url: str = "https://api.tiingo.com"
     tiingo_rate_per_sec: float = 2.0

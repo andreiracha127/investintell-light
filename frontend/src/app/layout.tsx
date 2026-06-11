@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
 import { Providers } from "./providers";
+import { TickerSearch } from "@/components/TickerSearch";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -46,7 +47,7 @@ export default function RootLayout({
                 className="flex-1 overflow-y-auto py-3 px-2"
               >
                 <NavGroup label="Stocks">
-                  <NavItem href="/stocks/analysis">Stock Analysis</NavItem>
+                  <NavItem href="/stocks/AAPL">Stock Analysis</NavItem>
                 </NavGroup>
 
                 <NavGroup label="Portfolio">
@@ -73,13 +74,7 @@ export default function RootLayout({
             <div className="flex-1 flex flex-col overflow-hidden">
               {/* Header bar */}
               <header className="h-[52px] shrink-0 flex items-center px-5 bg-surface-1 border-b border-border">
-                <input
-                  type="text"
-                  placeholder="Search ticker…"
-                  disabled
-                  aria-label="Search ticker"
-                  className="w-[240px] h-8 px-3 rounded-[6px] border border-border bg-surface-2 text-text-muted text-[13px] cursor-not-allowed outline-none"
-                />
+                <TickerSearch />
               </header>
 
               {/* Page content */}

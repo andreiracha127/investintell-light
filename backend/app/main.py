@@ -2,9 +2,11 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import health as health_router
 from app.api.routes import stocks as stocks_router
+from app.core.config import get_settings
 from app.core.db import engine
 from app.core.tiingo_provider import provider as tiingo_provider
 
@@ -23,6 +25,12 @@ def create_app() -> FastAPI:
         title="Investintell Light API",
         version="0.1.0",
         lifespan=lifespan,
+    )
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=get_settings().cors_allow_origins,
+        allow_methods=["GET"],
+        allow_headers=["*"],
     )
     application.include_router(health_router.router)
     application.include_router(stocks_router.router)
