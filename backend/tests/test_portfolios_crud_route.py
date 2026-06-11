@@ -376,11 +376,17 @@ def _install_put_stubs(
     monkeypatch: pytest.MonkeyPatch,
     existing: SimpleNamespace | None,
     portfolio_found: bool = True,
+    fund_tickers: set[str] | None = None,
 ) -> dict[str, list[Any]]:
     calls: dict[str, list[Any]] = {"insert": [], "update": []}
 
     async def fake_exists(session: Any, portfolio_id: int) -> bool:
         return portfolio_found
+
+    async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
+        return (fund_tickers or set()) & set(tickers)
+
+    monkeypatch.setattr(portfolio_crud, "select_fund_tickers", fake_fund_tickers)
 
     async def fake_get_position(
         session: Any, portfolio_id: int, ticker: str
@@ -434,6 +440,23 @@ async def test_put_position_update_path_does_not_re_ensure(
     assert ensure_calls == []  # UPDATE path must NOT re-ensure
     assert calls["update"] == [("MSFT", 8.0, None)]
     assert calls["insert"] == []
+
+
+async def test_put_position_fund_ticker_insert_skips_tiingo_ensure(
+    monkeypatch: pytest.MonkeyPatch, ensure_calls: list[list[str]]
+) -> None:
+    """Fund tickers (synced funds table) are valid positions priced from
+    fund_nav — the INSERT path must NOT validate them against Tiingo (F8.5)."""
+    calls = _install_put_stubs(monkeypatch, existing=None, fund_tickers={"VFIAX"})
+    async with _client() as ac:
+        response = await ac.put(
+            "/portfolios/1/positions/vfiax", json={"quantity": 10, "acq_price": 450}
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"ticker": "VFIAX", "quantity": 10.0, "acq_price": 450.0}
+    assert ensure_calls == []  # fund ticker — Tiingo never consulted
+    assert calls["insert"] == [(1, "VFIAX", 10.0, 450.0)]
 
 
 async def test_put_position_missing_portfolio_404(

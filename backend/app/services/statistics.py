@@ -203,11 +203,21 @@ async def _load_portfolio_prices(
     Raises:
         HTTPException 404: unknown portfolio_id.
         HTTPException 4xx: provider failure / unknown ticker (from ensure).
-        InsufficientDataError: portfolio has no positions.
+        InsufficientDataError: portfolio has no positions, or holds fund
+            positions (NAV-priced — not supported by the EOD analyses yet).
     """
     portfolio = await _load_portfolio_or_404(session, portfolio_id)
     quantities = _require_positions(portfolio)
     tickers = list(quantities)
+    # Fund positions (F8.5 saved proposals) are NAV-priced and have no EOD
+    # rows — the replay/beta/correlation engines are not fund-aware yet.
+    # Cheap guard: clear 422 instead of a Tiingo 404 or a 500 downstream.
+    fund_tickers = await portfolio_crud.select_fund_tickers(session, tickers)
+    if fund_tickers:
+        raise InsufficientDataError(
+            "fund positions not yet supported in this analysis: "
+            f"{', '.join(sorted(fund_tickers))}"
+        )
     await ensure_eod_or_http_error(session, client, tickers, start, end)
     series_by_ticker = await _load_series_map(session, tickers, start, end)
     return portfolio, quantities, series_by_ticker

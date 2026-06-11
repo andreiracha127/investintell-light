@@ -2022,6 +2022,48 @@
           }
         }
       }
+    },
+    "/builder/save": {
+      "post": {
+        "tags": [
+          "builder"
+        ],
+        "summary": "Save",
+        "description": "Persist a builder proposal as a real portfolio (F8.5).\n\nEach weight is sized at the asset's SPOT price (equities: latest\nadj_close; funds: latest NAV, stored under the fund's ticker) against\n``notional_usd``; the spot price becomes the position's cost basis.\nDomain failures \u2014 asset without a price, fund without a ticker, duplicate\nportfolio name, weight too small for the notional \u2014 are 422 verbatim.",
+        "operationId": "save_builder_save_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaveResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5539,6 +5581,126 @@
         ],
         "title": "RiskContributionOut",
         "description": "One asset's share of total portfolio risk (CTR convention)."
+      },
+      "SaveRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Portfolio name; same rules as POST /portfolios."
+          },
+          "notional_usd": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Notional Usd",
+            "default": 1000000
+          },
+          "weights": {
+            "items": {
+              "$ref": "#/components/schemas/SaveWeightIn"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Weights"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "weights"
+        ],
+        "title": "SaveRequest",
+        "description": "Body for POST /builder/save \u2014 persist a proposal as a real portfolio.\n\n``quantity = weight * notional_usd / spot_price`` per position (rounded to\n4 decimals); the spot price becomes the position's cost basis."
+      },
+      "SaveResponse": {
+        "properties": {
+          "portfolio_id": {
+            "type": "integer",
+            "title": "Portfolio Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "notional_usd": {
+            "type": "number",
+            "title": "Notional Usd"
+          },
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/SavedPositionOut"
+            },
+            "type": "array",
+            "title": "Positions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "portfolio_id",
+          "name",
+          "notional_usd",
+          "positions"
+        ],
+        "title": "SaveResponse"
+      },
+      "SaveWeightIn": {
+        "properties": {
+          "asset": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FundRefIn"
+              },
+              {
+                "$ref": "#/components/schemas/EquityRefIn"
+              }
+            ],
+            "title": "Asset",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "equity": "#/components/schemas/EquityRefIn",
+                "fund": "#/components/schemas/FundRefIn"
+              }
+            }
+          },
+          "weight": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Weight"
+          }
+        },
+        "type": "object",
+        "required": [
+          "asset",
+          "weight"
+        ],
+        "title": "SaveWeightIn",
+        "description": "One proposed weight to persist. Zero/near-zero weights should be\nfiltered out by the caller \u2014 a weight that rounds to quantity 0 is a 422."
+      },
+      "SavedPositionOut": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "quantity": {
+            "type": "number",
+            "title": "Quantity"
+          },
+          "price": {
+            "type": "number",
+            "title": "Price"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "quantity",
+          "price"
+        ],
+        "title": "SavedPositionOut"
       },
       "ScenarioParams": {
         "properties": {

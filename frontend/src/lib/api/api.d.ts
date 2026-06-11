@@ -598,6 +598,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/builder/save": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save
+         * @description Persist a builder proposal as a real portfolio (F8.5).
+         *
+         *     Each weight is sized at the asset's SPOT price (equities: latest
+         *     adj_close; funds: latest NAV, stored under the fund's ticker) against
+         *     ``notional_usd``; the spot price becomes the position's cost basis.
+         *     Domain failures — asset without a price, fund without a ticker, duplicate
+         *     portfolio name, weight too small for the notional — are 422 verbatim.
+         */
+        post: operations["save_builder_save_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2196,6 +2222,58 @@ export interface components {
             contribution: number;
         };
         /**
+         * SaveRequest
+         * @description Body for POST /builder/save — persist a proposal as a real portfolio.
+         *
+         *     ``quantity = weight * notional_usd / spot_price`` per position (rounded to
+         *     4 decimals); the spot price becomes the position's cost basis.
+         */
+        SaveRequest: {
+            /**
+             * Name
+             * @description Portfolio name; same rules as POST /portfolios.
+             */
+            name: string;
+            /**
+             * Notional Usd
+             * @default 1000000
+             */
+            notional_usd: number;
+            /** Weights */
+            weights: components["schemas"]["SaveWeightIn"][];
+        };
+        /** SaveResponse */
+        SaveResponse: {
+            /** Portfolio Id */
+            portfolio_id: number;
+            /** Name */
+            name: string;
+            /** Notional Usd */
+            notional_usd: number;
+            /** Positions */
+            positions: components["schemas"]["SavedPositionOut"][];
+        };
+        /**
+         * SaveWeightIn
+         * @description One proposed weight to persist. Zero/near-zero weights should be
+         *     filtered out by the caller — a weight that rounds to quantity 0 is a 422.
+         */
+        SaveWeightIn: {
+            /** Asset */
+            asset: components["schemas"]["FundRefIn"] | components["schemas"]["EquityRefIn"];
+            /** Weight */
+            weight: number;
+        };
+        /** SavedPositionOut */
+        SavedPositionOut: {
+            /** Ticker */
+            ticker: string;
+            /** Quantity */
+            quantity: number;
+            /** Price */
+            price: number;
+        };
+        /**
          * ScenarioParams
          * @description Echo of the resolved scenario parameters.
          */
@@ -3652,6 +3730,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OptimizeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_builder_save_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SaveResponse"];
                 };
             };
             /** @description Validation Error */

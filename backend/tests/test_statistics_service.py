@@ -216,9 +216,15 @@ def _install_resolver_stubs(
     async def fake_get_portfolio(session: Any, portfolio_id: int) -> Any | None:
         return portfolio if portfolio is not None and portfolio.id == portfolio_id else None
 
+    async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
+        return set()
+
     monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
     monkeypatch.setattr(statistics_service, "_select_adj_close_rows", fake_rows)
     monkeypatch.setattr(statistics_service.portfolio_crud, "get_portfolio", fake_get_portfolio)
+    monkeypatch.setattr(
+        statistics_service.portfolio_crud, "select_fund_tickers", fake_fund_tickers
+    )
 
 
 def _fake_portfolio(

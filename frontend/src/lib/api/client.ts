@@ -31,6 +31,7 @@ type ScreenResultsCsvOperation =
   paths["/screener/screens/{screen_id}/results.csv"]["get"];
 type FundsOperation = paths["/funds"]["get"];
 type BuilderOptimizeOperation = paths["/builder/optimize"]["post"];
+type BuilderSaveOperation = paths["/builder/save"]["post"];
 type FundsCsvOperation = paths["/funds.csv"]["get"];
 type FundProfileOperation = paths["/funds/{instrument_id}"]["get"];
 
@@ -145,6 +146,10 @@ export type BuilderObjective = OptimizeRequest["objective"];
 export type BuilderViewIn = NonNullable<OptimizeRequest["views"]>[number];
 export type WeightOut = OptimizeResponse["weights"][number];
 export type BuilderDiagnostics = OptimizeResponse["diagnostics"];
+export type BuilderSaveRequest =
+  BuilderSaveOperation["requestBody"]["content"]["application/json"];
+export type BuilderSaveResponse =
+  BuilderSaveOperation["responses"]["201"]["content"]["application/json"];
 
 export type Candle = StockAnalysis["candles"][number];
 export type CumulativeReturns = StockAnalysis["cumulative_returns"];
@@ -631,6 +636,16 @@ export function postBuilderOptimize(
   signal?: AbortSignal,
 ): Promise<OptimizeResponse> {
   return request<OptimizeResponse>("/builder/optimize", signal, {
+    method: "POST",
+    json: body,
+  });
+}
+
+export function postBuilderSave(
+  body: BuilderSaveRequest,
+  signal?: AbortSignal,
+): Promise<BuilderSaveResponse> {
+  return request<BuilderSaveResponse>("/builder/save", signal, {
     method: "POST",
     json: body,
   });

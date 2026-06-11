@@ -172,8 +172,12 @@ async def put_position(
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
     position = await portfolio_crud.get_position(session, portfolio_id, symbol)
     if position is None:
-        start, end = _ensure_window()
-        await ensure_eod_or_http_error(session, client, [symbol], start, end)
+        # Fund tickers (synced funds table) are valid positions priced from
+        # fund_nav — they must NOT be validated against Tiingo (F8.5).
+        is_fund = bool(await portfolio_crud.select_fund_tickers(session, [symbol]))
+        if not is_fund:
+            start, end = _ensure_window()
+            await ensure_eod_or_http_error(session, client, [symbol], start, end)
         position = await portfolio_crud.insert_position(
             session, portfolio_id, symbol, payload.quantity, payload.acq_price
         )
@@ -222,12 +226,28 @@ async def get_portfolio_overview(
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
 
     tickers = [position.ticker for position in portfolio.positions]
+    fund_tickers: set[str] = set()
     if tickers:
-        start, end = _ensure_window()
-        await ensure_eod_or_http_error(session, client, tickers, start, end)
+        # Fund-aware pricing (F8.5): tickers known to the synced funds table
+        # are priced from fund_nav and skipped by the Tiingo ensure — UNLESS
+        # they already have eod_prices rows (pre-existing equity/ETF positions
+        # keep their refresh + EOD pricing unchanged).
+        fund_tickers = await portfolio_crud.select_fund_tickers(session, tickers)
+        eod_known = await portfolio_crud.select_tickers_with_eod(session, tickers)
+        ensure_tickers = [
+            t for t in tickers if t not in fund_tickers or t in eod_known
+        ]
+        if ensure_tickers:
+            start, end = _ensure_window()
+            await ensure_eod_or_http_error(session, client, ensure_tickers, start, end)
 
     closes = await portfolio_crud.select_last_two_closes(session, tickers)
     names = await portfolio_crud.select_instrument_names(session, tickers)
+    nav_tickers = [t for t in fund_tickers if t not in closes]
+    if nav_tickers:
+        closes.update(await portfolio_crud.select_last_two_navs(session, nav_tickers))
+        fund_names = await portfolio_crud.select_fund_names(session, nav_tickers)
+        names = {**fund_names, **names}
     try:
         rows, aggregates = portfolio_crud.build_overview(
             portfolio.positions, closes, names, cash=portfolio.cash

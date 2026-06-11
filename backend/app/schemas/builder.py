@@ -8,7 +8,9 @@ fractions (0.05 = 5%), never 0-100. ``q`` in views is an ANNUAL return
 import uuid
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.schemas.portfolios import validate_portfolio_name
 
 # ── Asset references ─────────────────────────────────────────────────────────
 
@@ -111,3 +113,45 @@ class OptimizeResponse(BaseModel):
     weights: list[WeightOut]
     expected: ExpectedOut
     diagnostics: DiagnosticsOut
+
+
+# ── Save as portfolio (F8.5) ─────────────────────────────────────────────────
+
+
+class SaveWeightIn(BaseModel):
+    """One proposed weight to persist. Zero/near-zero weights should be
+    filtered out by the caller — a weight that rounds to quantity 0 is a 422."""
+
+    asset: AssetRefIn
+    weight: Annotated[float, Field(gt=0, le=1, allow_inf_nan=False)]
+
+
+class SaveRequest(BaseModel):
+    """Body for POST /builder/save — persist a proposal as a real portfolio.
+
+    ``quantity = weight * notional_usd / spot_price`` per position (rounded to
+    4 decimals); the spot price becomes the position's cost basis.
+    """
+
+    name: str = Field(description="Portfolio name; same rules as POST /portfolios.")
+    notional_usd: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 1_000_000
+    weights: Annotated[list[SaveWeightIn], Field(min_length=1, max_length=50)]
+
+    @field_validator("name")
+    @classmethod
+    def _check_name(cls, value: str) -> str:
+        return validate_portfolio_name(value)
+
+
+class SavedPositionOut(BaseModel):
+    ticker: str
+    quantity: float
+    # Spot price used for sizing AND stored as the position's cost basis.
+    price: float
+
+
+class SaveResponse(BaseModel):
+    portfolio_id: int
+    name: str
+    notional_usd: float
+    positions: list[SavedPositionOut]

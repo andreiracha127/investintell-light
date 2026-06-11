@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.eod_price import EodPrice
+from app.models.fund import Fund, FundNav
 from app.models.instrument import Instrument
 from app.models.portfolio import Portfolio, Position
 from app.schemas.portfolios import (
@@ -268,6 +269,102 @@ async def select_last_two_closes(
     for ticker, date_, close in result.all():
         closes.setdefault(ticker, []).append((date_, close))
     return closes
+
+
+async def select_fund_tickers(
+    session: AsyncSession, tickers: Sequence[str]
+) -> set[str]:
+    """Subset of *tickers* that exist as fund tickers in the local funds table.
+
+    Used to make portfolio pricing fund-aware (F8.5): fund tickers are priced
+    from fund_nav and must NOT be sent to the Tiingo EOD ensure.
+    """
+    if not tickers:
+        return set()
+    result = await session.execute(
+        select(Fund.ticker).where(Fund.ticker.in_(tickers)).distinct()
+    )
+    return {row[0] for row in result.all()}
+
+
+async def select_tickers_with_eod(
+    session: AsyncSession, tickers: Sequence[str]
+) -> set[str]:
+    """Subset of *tickers* that have at least one eod_prices row."""
+    if not tickers:
+        return set()
+    result = await session.execute(
+        select(EodPrice.ticker).where(EodPrice.ticker.in_(tickers)).distinct()
+    )
+    return {row[0] for row in result.all()}
+
+
+async def select_last_two_navs(
+    session: AsyncSession, tickers: Sequence[str]
+) -> dict[str, list[tuple[dt.date, float]]]:
+    """The two most recent (nav_date, nav) rows per FUND ticker, newest first.
+
+    Same shape as ``select_last_two_closes`` so ``build_overview`` consumes
+    both transparently (NAV plays the role of last/prev close for funds).
+    Rows with NULL NAV are skipped. When several share classes carry the same
+    ticker, the lowest instrument_id wins (deterministic).
+    """
+    if not tickers:
+        return {}
+    # Deterministic ticker -> instrument_id (min uuid) for duplicated tickers.
+    id_rows = await session.execute(
+        select(Fund.ticker, Fund.instrument_id)
+        .where(Fund.ticker.in_(tickers))
+        .order_by(Fund.ticker, Fund.instrument_id)
+    )
+    instrument_by_ticker: dict[str, Any] = {}
+    for ticker, instrument_id in id_rows.all():
+        instrument_by_ticker.setdefault(ticker, instrument_id)
+    if not instrument_by_ticker:
+        return {}
+    ticker_by_instrument = {v: k for k, v in instrument_by_ticker.items()}
+
+    rn = (
+        func.row_number()
+        .over(partition_by=FundNav.instrument_id, order_by=FundNav.nav_date.desc())
+        .label("rn")
+    )
+    latest = (
+        select(FundNav.instrument_id, FundNav.nav_date, FundNav.nav, rn)
+        .where(
+            FundNav.instrument_id.in_(list(instrument_by_ticker.values())),
+            FundNav.nav.is_not(None),
+        )
+        .subquery()
+    )
+    result = await session.execute(
+        select(latest.c.instrument_id, latest.c.nav_date, latest.c.nav)
+        .where(latest.c.rn <= 2)
+        .order_by(latest.c.instrument_id, latest.c.nav_date.desc())
+    )
+    navs: dict[str, list[tuple[dt.date, float]]] = {}
+    for instrument_id, nav_date, nav in result.all():
+        navs.setdefault(ticker_by_instrument[instrument_id], []).append(
+            (nav_date, float(nav))
+        )
+    return navs
+
+
+async def select_fund_names(
+    session: AsyncSession, tickers: Sequence[str]
+) -> dict[str, str | None]:
+    """Display names from the local funds table (missing tickers are absent)."""
+    if not tickers:
+        return {}
+    result = await session.execute(
+        select(Fund.ticker, Fund.name)
+        .where(Fund.ticker.in_(tickers))
+        .order_by(Fund.ticker, Fund.instrument_id)
+    )
+    names: dict[str, str | None] = {}
+    for ticker, name in result.all():
+        names.setdefault(ticker, name)
+    return names
 
 
 async def select_instrument_names(

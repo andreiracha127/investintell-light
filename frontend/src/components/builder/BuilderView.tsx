@@ -235,7 +235,9 @@ export function BuilderView() {
           />
         ) : mutation.data ? (
           <ResultsPanel
+            key={mutation.submittedAt}
             result={mutation.data}
+            objective={objective}
             assetsByKey={assetsByKey}
             base={base}
             colors={colors}

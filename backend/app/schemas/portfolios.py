@@ -20,7 +20,7 @@ MAX_POSITIONS = 50
 MAX_NAME_LENGTH = 80
 
 
-def _validate_name(value: str) -> str:
+def validate_portfolio_name(value: str) -> str:
     name = value.strip()
     if not 1 <= len(name) <= MAX_NAME_LENGTH:
         raise ValueError(
@@ -77,7 +77,7 @@ class PortfolioCreate(BaseModel):
     @field_validator("name")
     @classmethod
     def _check_name(cls, value: str) -> str:
-        return _validate_name(value)
+        return validate_portfolio_name(value)
 
     @model_validator(mode="after")
     def _check_duplicate_tickers(self) -> "PortfolioCreate":
@@ -104,7 +104,7 @@ class PortfolioPatch(BaseModel):
     @field_validator("name")
     @classmethod
     def _check_name(cls, value: str | None) -> str | None:
-        return None if value is None else _validate_name(value)
+        return None if value is None else validate_portfolio_name(value)
 
     @model_validator(mode="after")
     def _check_not_empty(self) -> "PortfolioPatch":

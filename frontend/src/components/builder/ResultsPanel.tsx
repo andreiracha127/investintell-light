@@ -3,18 +3,31 @@
 /**
  * Builder results — KPI tiles, the proposed-weights table (inline weight
  * bars, current/delta columns when seeded from a saved portfolio), the
- * Current-vs-Proposed donuts, a collapsible μ diagnostics table, and the
- * client-side CSV export. Pure presentation over the optimize response.
+ * Current-vs-Proposed donuts, a collapsible μ diagnostics table, the
+ * client-side CSV export, and Save-as-portfolio (POST /builder/save).
  */
+import { useMutation } from "@tanstack/react-query";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 
-import type { OptimizeResponse } from "@/lib/api/client";
+import {
+  postBuilderSave,
+  type BuilderObjective,
+  type BuilderSaveRequest,
+  type OptimizeResponse,
+} from "@/lib/api/client";
 import { buildAllocationOption } from "@/lib/charts/allocation";
 import type { ChartColors } from "@/lib/charts/theme";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { EChart } from "@/components/charts/EChart";
 import { Card, KpiTile, valueTone } from "@/components/ui/panels";
-import { BUTTON_CLASS } from "@/components/screener/shared";
+import {
+  BUTTON_CLASS,
+  BUTTON_PRIMARY_CLASS,
+  ErrorPanel,
+  FIELD_LABEL_CLASS,
+  INPUT_CLASS,
+} from "@/components/screener/shared";
 
 import { assetKey, assetName, assetTicker, type UniverseAsset } from "./assets";
 
@@ -33,18 +46,48 @@ interface WeightRow {
   kind: "fund" | "equity";
 }
 
+/** Weights below this are numeric solver noise — a quantity would round to 0. */
+const SAVE_WEIGHT_FLOOR = 1e-6;
+
 export function ResultsPanel({
   result,
+  objective,
   assetsByKey,
   base,
   colors,
 }: {
   result: OptimizeResponse;
+  objective: BuilderObjective;
   assetsByKey: Map<string, UniverseAsset>;
   base: BaseAllocation | null;
   colors: ChartColors | null;
 }) {
   const { weights, expected, diagnostics } = result;
+
+  /* ── Save as portfolio ─────────────────────────────────────────────── */
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState(
+    () => `Builder ${objective} ${new Date().toISOString().slice(0, 10)}`,
+  );
+  const [notionalText, setNotionalText] = useState("1000000");
+  const saveMutation = useMutation({
+    mutationFn: (body: BuilderSaveRequest) => postBuilderSave(body),
+  });
+
+  const notional = Number(notionalText);
+  const notionalOk = Number.isFinite(notional) && notional > 0;
+  const canSave = saveName.trim().length > 0 && notionalOk && !saveMutation.isPending;
+
+  const onSave = () => {
+    if (!canSave) return;
+    saveMutation.mutate({
+      name: saveName.trim(),
+      notional_usd: notional,
+      weights: weights
+        .filter((w) => w.weight > SAVE_WEIGHT_FLOOR)
+        .map((w) => ({ asset: w.asset, weight: w.weight })),
+    });
+  };
 
   const rows: WeightRow[] = useMemo(
     () =>
@@ -153,8 +196,8 @@ export function ResultsPanel({
             </button>
             <button
               type="button"
-              disabled
-              title="Available when the builder integrates spot prices"
+              onClick={() => setSaveOpen((v) => !v)}
+              aria-expanded={saveOpen}
               className={BUTTON_CLASS}
             >
               Save as portfolio
@@ -162,6 +205,71 @@ export function ResultsPanel({
           </span>
         }
       >
+        {saveOpen && (
+          <div className="mb-3 border border-border bg-surface-2 p-3">
+            <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+              <label className="flex min-w-[280px] flex-1 flex-col gap-1">
+                <span className={FIELD_LABEL_CLASS}>Portfolio name</span>
+                <input
+                  value={saveName}
+                  onChange={(e) => setSaveName(e.target.value)}
+                  aria-label="Portfolio name"
+                  maxLength={80}
+                  className={INPUT_CLASS}
+                />
+              </label>
+              <label className="flex w-[160px] flex-col gap-1">
+                <span className={FIELD_LABEL_CLASS}>Notional USD</span>
+                <input
+                  value={notionalText}
+                  onChange={(e) => setNotionalText(e.target.value)}
+                  inputMode="decimal"
+                  aria-label="Notional USD"
+                  placeholder="1000000"
+                  className={`${INPUT_CLASS} tabular-nums`}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={onSave}
+                disabled={!canSave}
+                className={BUTTON_PRIMARY_CLASS}
+              >
+                {saveMutation.isPending ? "Saving…" : "Save"}
+              </button>
+            </div>
+            {saveMutation.isSuccess && (
+              <p className="ix-fs mb-0 mt-3 flex flex-wrap items-center gap-x-3 border border-border bg-field px-3 py-2">
+                <span>
+                  Saved as{" "}
+                  <span className="font-bold text-accent">
+                    {saveMutation.data.name}
+                  </span>{" "}
+                  ({saveMutation.data.positions.length} positions, notional{" "}
+                  <span className="tabular-nums">
+                    {formatNumber(saveMutation.data.notional_usd, 0)}
+                  </span>
+                  ).
+                </span>
+                <Link
+                  href="/portfolio"
+                  className="font-bold text-accent underline-offset-2 hover:underline"
+                >
+                  Open in Portfolio →
+                </Link>
+              </p>
+            )}
+            {saveMutation.isError && (
+              <div className="mt-3">
+                <ErrorPanel
+                  title="Save failed"
+                  message={saveMutation.error.message}
+                  onRetry={onSave}
+                />
+              </div>
+            )}
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full min-w-[560px] border-collapse ix-fs tabular-nums lining-nums">
             <thead>

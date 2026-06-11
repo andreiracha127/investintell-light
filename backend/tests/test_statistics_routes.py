@@ -83,10 +83,16 @@ def _install_stubs(
             return portfolio
         return None
 
+    async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
+        return set()
+
     monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
     monkeypatch.setattr(statistics_service, "_select_adj_close_rows", fake_adj_close)
     monkeypatch.setattr(
         statistics_service.portfolio_crud, "get_portfolio", fake_get_portfolio
+    )
+    monkeypatch.setattr(
+        statistics_service.portfolio_crud, "select_fund_tickers", fake_fund_tickers
     )
 
 
@@ -103,6 +109,29 @@ async def stub_client(
 # ---------------------------------------------------------------------------
 # /statistics/scenario
 # ---------------------------------------------------------------------------
+
+
+async def test_scenario_fund_position_guarded_with_422(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Portfolios holding fund positions (F8.5) are not EOD-analyzable yet —
+    the guard returns a clear 422 instead of a Tiingo 404 or a 500."""
+    _install_stubs(monkeypatch)
+
+    async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
+        return {"AAPL"}  # pretend one holding is a synced fund ticker
+
+    monkeypatch.setattr(
+        statistics_service.portfolio_crud, "select_fund_tickers", fake_fund_tickers
+    )
+    transport = ASGITransport(app=_app_with_overrides())
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        response = await ac.post(
+            "/statistics/scenario",
+            json={"portfolio_id": 7, "start_date": START, "end_date": END},
+        )
+    assert response.status_code == 422
+    assert "fund positions not yet supported" in response.json()["detail"]
 
 
 async def test_scenario_happy_path_shape(stub_client: AsyncClient) -> None:

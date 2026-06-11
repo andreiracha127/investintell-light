@@ -55,6 +55,9 @@ def _install_stubs(
     portfolio: SimpleNamespace | None,
     closes: ClosesMap,
     names: dict[str, str | None] | None = None,
+    fund_tickers: set[str] | None = None,
+    navs: ClosesMap | None = None,
+    fund_names: dict[str, str | None] | None = None,
 ) -> list[list[str]]:
     ensure_calls: list[list[str]] = []
 
@@ -73,10 +76,26 @@ def _install_stubs(
     async def fake_names(session: Any, tickers: Any) -> dict[str, str | None]:
         return names or {}
 
+    async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
+        return (fund_tickers or set()) & set(tickers)
+
+    async def fake_eod_known(session: Any, tickers: Any) -> set[str]:
+        return set(closes) & set(tickers)
+
+    async def fake_navs(session: Any, tickers: Any) -> ClosesMap:
+        return {t: rows for t, rows in (navs or {}).items() if t in set(tickers)}
+
+    async def fake_fund_names(session: Any, tickers: Any) -> dict[str, str | None]:
+        return fund_names or {}
+
     monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
     monkeypatch.setattr(portfolio_crud, "get_portfolio", fake_get)
     monkeypatch.setattr(portfolio_crud, "select_last_two_closes", fake_closes)
     monkeypatch.setattr(portfolio_crud, "select_instrument_names", fake_names)
+    monkeypatch.setattr(portfolio_crud, "select_fund_tickers", fake_fund_tickers)
+    monkeypatch.setattr(portfolio_crud, "select_tickers_with_eod", fake_eod_known)
+    monkeypatch.setattr(portfolio_crud, "select_last_two_navs", fake_navs)
+    monkeypatch.setattr(portfolio_crud, "select_fund_names", fake_fund_names)
     return ensure_calls
 
 
@@ -206,6 +225,60 @@ async def test_overview_empty_portfolio_zeroed_null_aggregates_no_ensure(
         "as_of": None,
     }
     assert ensure_calls == []  # nothing to refresh
+
+
+async def test_overview_fund_position_priced_via_nav(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fund position (no eod_prices rows) is priced from fund_nav: latest
+    NAV = last, second-latest = prev; Tiingo is never consulted for it."""
+    ensure_calls = _install_stubs(
+        monkeypatch,
+        _portfolio(
+            [_position("AAPL", 2.0, 100.0), _position("VFIAX", 10.0, 440.0)],
+        ),
+        closes={"AAPL": [(_LAST, 110.0), (_PREV, 105.0)]},
+        names={"AAPL": "Apple Inc"},
+        fund_tickers={"VFIAX"},
+        navs={"VFIAX": [(_LAST, 450.0), (_PREV, 445.0)]},
+        fund_names={"VFIAX": "Vanguard 500 Index Admiral"},
+    )
+    async with _client() as ac:
+        response = await ac.get("/portfolios/1/overview")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    # Only the equity is refreshed via Tiingo — the fund ticker is skipped.
+    assert ensure_calls == [["AAPL"]]
+    fund_row = next(r for r in body["positions"] if r["ticker"] == "VFIAX")
+    assert fund_row["name"] == "Vanguard 500 Index Admiral"
+    assert fund_row["last_close"] == 450.0
+    assert fund_row["prev_close"] == 445.0
+    assert fund_row["change"] == pytest.approx(5.0)
+    assert fund_row["change_pct"] == pytest.approx(5.0 / 445.0)
+    assert fund_row["market_value"] == pytest.approx(4500.0)
+    assert fund_row["pnl"] == pytest.approx(100.0)  # (450 - 440) * 10
+    assert body["aggregates"]["total_market_value"] == pytest.approx(220.0 + 4500.0)
+
+
+async def test_overview_fund_only_portfolio_skips_ensure_entirely(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_calls = _install_stubs(
+        monkeypatch,
+        _portfolio([_position("VFIAX", 1.0, None)]),
+        closes={},
+        fund_tickers={"VFIAX"},
+        navs={"VFIAX": [(_LAST, 450.0)]},
+    )
+    async with _client() as ac:
+        response = await ac.get("/portfolios/1/overview")
+
+    assert response.status_code == 200, response.text
+    assert ensure_calls == []
+    (row,) = response.json()["positions"]
+    assert row["last_close"] == 450.0
+    assert row["prev_close"] is None
 
 
 async def test_overview_missing_portfolio_404(monkeypatch: pytest.MonkeyPatch) -> None:
