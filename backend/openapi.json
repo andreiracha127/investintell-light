@@ -291,6 +291,405 @@
           }
         }
       }
+    },
+    "/portfolios": {
+      "get": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "List Portfolios",
+        "description": "List portfolios (id order), hard-capped at the service's LIST_HARD_CAP.",
+        "operationId": "list_portfolios_portfolios_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PortfolioListItem"
+                  },
+                  "type": "array",
+                  "title": "Response List Portfolios Portfolios Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Create Portfolio",
+        "description": "Create a portfolio with optional initial positions.\n\nPosition tickers are validated against Tiingo via the EOD ensure \u2014 a typo\nfails loud (404) BEFORE anything is persisted \u2014 which also warms the EOD\ncache for the overview.",
+        "operationId": "create_portfolio_portfolios_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/portfolios/{portfolio_id}": {
+      "get": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Get Portfolio",
+        "description": "One portfolio with its positions (sorted by ticker).",
+        "operationId": "get_portfolio_portfolios__portfolio_id__get",
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Patch Portfolio",
+        "description": "Partially update name and/or cash.",
+        "operationId": "patch_portfolio_portfolios__portfolio_id__patch",
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Delete Portfolio",
+        "description": "Delete a portfolio; its positions cascade away at the DB level.",
+        "operationId": "delete_portfolio_portfolios__portfolio_id__delete",
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/portfolios/{portfolio_id}/positions/{ticker}": {
+      "put": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Put Position",
+        "description": "Upsert one position.\n\nINSERT path validates the ticker against Tiingo (and warms the EOD cache);\nthe UPDATE path deliberately does NOT re-ensure \u2014 the ticker was already\nvalidated when the position was created.",
+        "operationId": "put_position_portfolios__portfolio_id__positions__ticker__put",
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          },
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PositionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PositionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Delete Position",
+        "description": "Delete one position; 404 covers both a missing portfolio and a missing ticker.",
+        "operationId": "delete_position_portfolios__portfolio_id__positions__ticker__delete",
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          },
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/portfolios/{portfolio_id}/overview": {
+      "get": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Get Portfolio Overview",
+        "description": "Render-ready position table with P&L and column-header aggregates (D6).\n\nLast/prev closes come from the two most recent eod_prices rows per ticker;\nthe EOD ensure runs first so stale tickers are refreshed.  An empty\nportfolio is a legitimate 200 with zeroed/null aggregates.",
+        "operationId": "get_portfolio_overview_portfolios__portfolio_id__overview_get",
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioOverviewResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/portfolios/{portfolio_id}/news": {
+      "get": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Get Portfolio News",
+        "description": "Aggregated news across all portfolio tickers, newest first.\n\nStaleness is checked per ticker but all stale tickers are refreshed with\nONE combined Tiingo call (see ``ensure_news``).  Degrade path mirrors\nGET /stocks/{ticker}/news exactly: refresh failure with cached articles\nserves them with ``stale=true``; with an empty cache it fails loud.",
+        "operationId": "get_portfolio_news_portfolios__portfolio_id__news_get",
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "description": "Max articles returned.",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "Max articles returned."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioNewsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -882,6 +1281,86 @@
         "title": "NewsResponse",
         "description": "News articles for one ticker, newest first.\n\n``stale`` is True when the Tiingo refresh failed but cached articles were\nserved \u2014 a declared degradation, never a silent fallback."
       },
+      "OverviewAggregates": {
+        "properties": {
+          "total_market_value": {
+            "type": "number",
+            "title": "Total Market Value",
+            "description": "Sum of position market values, currency units (0 when empty)."
+          },
+          "total_cost_basis": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Cost Basis",
+            "description": "Sum over positions with a known acq_price; null when ALL are unknown."
+          },
+          "total_pnl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Pnl",
+            "description": "Sum of pnl over positions with a known acq_price; null when no position has a cost basis."
+          },
+          "total_pnl_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Pnl Pct",
+            "description": "total_pnl / total_cost_basis as a decimal fraction, never 0-100; null when no position has a cost basis."
+          },
+          "cash": {
+            "type": "number",
+            "title": "Cash",
+            "description": "Uninvested cash balance, currency units."
+          },
+          "total_value": {
+            "type": "number",
+            "title": "Total Value",
+            "description": "total_market_value + cash, currency units."
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of",
+            "description": "Max as_of across positions; null for an empty portfolio."
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_market_value",
+          "total_cost_basis",
+          "total_pnl",
+          "total_pnl_pct",
+          "cash",
+          "total_value",
+          "as_of"
+        ],
+        "title": "OverviewAggregates",
+        "description": "Portfolio-level aggregates rendered in the table column headers (D6)."
+      },
       "PortfolioAnalysisRequest": {
         "properties": {
           "positions": {
@@ -993,6 +1472,187 @@
         "title": "PortfolioAnalysisResponse",
         "description": "Render-ready single-call payload for the static portfolio page.\n\nTwo views, two questions (see ``app.analytics.portfolio``): ``nav``,\n``benchmark_comparison`` and the return-based ``stats`` are a buy-and-hold\nREPLAY (fixed quantities, weights drift); ``risk_contributions`` and\n``diversification_ratio`` are a covariance DECOMPOSITION at the effective\ninitial weights held constant. The backend computes ALL finance; the\nfrontend only draws. Every fractional field is a decimal fraction\n(0.05 = 5%), never 0-100."
       },
+      "PortfolioCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Portfolio name; 1..80 characters after trimming, unique across the installation."
+          },
+          "cash": {
+            "type": "number",
+            "title": "Cash",
+            "description": "Uninvested cash, currency units.",
+            "default": 0.0
+          },
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/PositionCreate"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Positions",
+            "description": "Initial positions (at most 50); tickers must be unique."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "PortfolioCreate",
+        "description": "Body for POST /portfolios."
+      },
+      "PortfolioListItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "cash": {
+            "type": "number",
+            "title": "Cash"
+          },
+          "position_count": {
+            "type": "integer",
+            "title": "Position Count"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "cash",
+          "position_count",
+          "created_at"
+        ],
+        "title": "PortfolioListItem",
+        "description": "One row of GET /portfolios (positions omitted, count only)."
+      },
+      "PortfolioNewsResponse": {
+        "properties": {
+          "portfolio_id": {
+            "type": "integer",
+            "title": "Portfolio Id"
+          },
+          "tickers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tickers",
+            "description": "Portfolio tickers the articles were matched on."
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale",
+            "default": false
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NewsArticle"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "portfolio_id",
+          "tickers",
+          "count",
+          "items"
+        ],
+        "title": "PortfolioNewsResponse",
+        "description": "Aggregated news across all portfolio tickers, newest first.\n\n``stale`` is True when the Tiingo refresh failed but cached articles were\nserved \u2014 a declared degradation, never a silent fallback (same contract\nas GET /stocks/{ticker}/news)."
+      },
+      "PortfolioOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "cash": {
+            "type": "number",
+            "title": "Cash"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/PositionOut"
+            },
+            "type": "array",
+            "title": "Positions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "cash",
+          "created_at",
+          "updated_at",
+          "positions"
+        ],
+        "title": "PortfolioOut",
+        "description": "One persisted portfolio with its positions (sorted by ticker)."
+      },
+      "PortfolioOverviewResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/PositionOverview"
+            },
+            "type": "array",
+            "title": "Positions"
+          },
+          "aggregates": {
+            "$ref": "#/components/schemas/OverviewAggregates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "positions",
+          "aggregates"
+        ],
+        "title": "PortfolioOverviewResponse",
+        "description": "Render-ready overview for GET /portfolios/{id}/overview."
+      },
       "PortfolioParams": {
         "properties": {
           "mode": {
@@ -1049,6 +1709,37 @@
         ],
         "title": "PortfolioParams",
         "description": "Echo of the resolved request parameters."
+      },
+      "PortfolioPatch": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "New portfolio name (same rules as on create)."
+          },
+          "cash": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cash",
+            "description": "New cash balance, currency units."
+          }
+        },
+        "type": "object",
+        "title": "PortfolioPatch",
+        "description": "Body for PATCH /portfolios/{id} \u2014 at least one field must be present."
       },
       "PortfolioStats": {
         "properties": {
@@ -1119,6 +1810,70 @@
         "title": "PortfolioStats",
         "description": "Point statistics over the portfolio's daily returns in the analyzed\nwindow. Beta/correlation are versus the benchmark on the aligned date\ngrid; the diversification ratio is evaluated at the effective initial\nweights (decomposition view)."
       },
+      "PositionBody": {
+        "properties": {
+          "quantity": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Quantity",
+            "description": "Shares/units held; > 0."
+          },
+          "acq_price": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acq Price",
+            "description": "Acquisition price per share/unit; null = unknown (P&L renders null)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "quantity"
+        ],
+        "title": "PositionBody",
+        "description": "Quantity/acquisition-price payload for the position upsert (PUT)."
+      },
+      "PositionCreate": {
+        "properties": {
+          "quantity": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Quantity",
+            "description": "Shares/units held; > 0."
+          },
+          "acq_price": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acq Price",
+            "description": "Acquisition price per share/unit; null = unknown (P&L renders null)."
+          },
+          "ticker": {
+            "type": "string",
+            "title": "Ticker",
+            "description": "Instrument ticker (normalized to uppercase)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "quantity",
+          "ticker"
+        ],
+        "title": "PositionCreate",
+        "description": "One position in the create-portfolio payload."
+      },
       "PositionIn": {
         "properties": {
           "ticker": {
@@ -1157,6 +1912,179 @@
         ],
         "title": "PositionIn",
         "description": "One requested position: a ticker plus EITHER a weight OR a quantity.\n\nWhich field is required depends on the request ``mode`` (cross-checked at\nthe request level): mode=weights demands ``weight``, mode=quantities\ndemands ``quantity``."
+      },
+      "PositionOut": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "quantity": {
+            "type": "number",
+            "title": "Quantity"
+          },
+          "acq_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acq Price"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "quantity",
+          "acq_price"
+        ],
+        "title": "PositionOut",
+        "description": "One persisted position."
+      },
+      "PositionOverview": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Display name from the instruments cache."
+          },
+          "quantity": {
+            "type": "number",
+            "title": "Quantity"
+          },
+          "acq_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acq Price",
+            "description": "Acquisition price per share/unit; null = unknown."
+          },
+          "last_close": {
+            "type": "number",
+            "title": "Last Close",
+            "description": "Most recent EOD close, currency units."
+          },
+          "prev_close": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Close",
+            "description": "Second-most-recent EOD close; null when only one row exists."
+          },
+          "change": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change",
+            "description": "last_close - prev_close, currency units; null without prev_close."
+          },
+          "change_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Pct",
+            "description": "change / prev_close as a decimal fraction (0.05 = 5%), never 0-100; null without prev_close."
+          },
+          "market_value": {
+            "type": "number",
+            "title": "Market Value",
+            "description": "quantity * last_close, currency units."
+          },
+          "cost_basis": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Basis",
+            "description": "quantity * acq_price, currency units; null when acq_price is unknown."
+          },
+          "pnl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pnl",
+            "description": "market_value - cost_basis, currency units; null when acq_price is unknown."
+          },
+          "pnl_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pnl Pct",
+            "description": "pnl / cost_basis as a decimal fraction (0.10 = 10%), never 0-100; null when acq_price is unknown."
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date",
+            "title": "As Of",
+            "description": "Date of last_close."
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "name",
+          "quantity",
+          "acq_price",
+          "last_close",
+          "prev_close",
+          "change",
+          "change_pct",
+          "market_value",
+          "cost_basis",
+          "pnl",
+          "pnl_pct",
+          "as_of"
+        ],
+        "title": "PositionOverview",
+        "description": "One render-ready overview row; the backend computes ALL finance."
       },
       "PricePoint": {
         "properties": {

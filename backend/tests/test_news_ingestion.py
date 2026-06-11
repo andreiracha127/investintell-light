@@ -151,6 +151,72 @@ async def test_stale_ticker_with_zero_articles_returns_zero_without_write() -> N
     assert session.commits == 0
 
 
+class _FakeSessionQueue(_FakeSession):
+    """Per-call scalar() returns — one entry per ticker, in input order."""
+
+    def __init__(self, last_fetched_queue: list[dt.datetime | None]) -> None:
+        super().__init__(last_fetched=None)
+        self._queue = list(last_fetched_queue)
+
+    async def scalar(self, stmt: object) -> dt.datetime | None:
+        return self._queue.pop(0)
+
+
+async def test_batch_refreshes_only_stale_tickers_in_one_call() -> None:
+    """Per-ticker staleness, ONE combined Tiingo fetch for the stale subset."""
+    session = _FakeSessionQueue(
+        [_NOW - dt.timedelta(minutes=5), None, _NOW - dt.timedelta(minutes=45)]
+    )
+    client = AsyncMock()
+    client.get_news.return_value = [_news_item(1)]
+
+    upserted = await ensure_news(
+        session,  # type: ignore[arg-type]
+        client,
+        ["aapl", "msft", "nvda"],
+        limit=25,
+        staleness_minutes=30.0,
+    )
+
+    # AAPL is fresh — only MSFT (never fetched) and NVDA (stale) are fetched,
+    # together, in a single combined call.
+    client.get_news.assert_awaited_once_with(["MSFT", "NVDA"], limit=25)
+    assert upserted == 1
+    assert session.commits == 1
+
+
+async def test_batch_with_all_fresh_tickers_skips_client_entirely() -> None:
+    session = _FakeSessionQueue(
+        [_NOW - dt.timedelta(minutes=1), _NOW - dt.timedelta(minutes=2)]
+    )
+    client = AsyncMock()
+
+    upserted = await ensure_news(
+        session,  # type: ignore[arg-type]
+        client,
+        ["AAPL", "MSFT"],
+        staleness_minutes=30.0,
+    )
+
+    client.get_news.assert_not_called()
+    assert upserted == 0
+
+
+async def test_batch_dedupes_and_normalizes_tickers() -> None:
+    session = _FakeSessionQueue([None, None])
+    client = AsyncMock()
+    client.get_news.return_value = []
+
+    await ensure_news(
+        session,  # type: ignore[arg-type]
+        client,
+        [" aapl ", "AAPL", "msft", ""],
+        staleness_minutes=30.0,
+    )
+
+    client.get_news.assert_awaited_once_with(["AAPL", "MSFT"], limit=50)
+
+
 async def test_tiingo_error_propagates() -> None:
     from app.tiingo.exceptions import TiingoRateLimitError
 

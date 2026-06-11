@@ -13,11 +13,11 @@ guard is satisfied; the renormalized values are echoed in ``allocation``.
 """
 
 import datetime as dt
-import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.schemas._tickers import normalize_ticker as _normalize_ticker
 from app.schemas.analysis import (
     DatedValue,
     DrawdownOut,
@@ -25,8 +25,6 @@ from app.schemas.analysis import (
     RangeKey,
     SeriesPoint,
 )
-
-_TICKER_RE = re.compile(r"^[A-Z0-9.\-]{1,10}$")
 
 MIN_POSITIONS = 2
 MAX_POSITIONS = 50
@@ -36,15 +34,6 @@ MAX_POSITIONS = 50
 WEIGHT_SUM_TOLERANCE = 1e-3
 
 PortfolioMode = Literal["weights", "quantities"]
-
-
-def _normalize_ticker(value: str, label: str) -> str:
-    symbol = value.strip().upper()
-    if not _TICKER_RE.fullmatch(symbol):
-        raise ValueError(
-            f"Invalid {label} {value!r}: expected 1-10 characters from A-Z, 0-9, '.', '-'."
-        )
-    return symbol
 
 
 class PositionIn(BaseModel):

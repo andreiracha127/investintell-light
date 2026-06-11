@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api._shared import ensure_eod_or_http_error
+from app.api._shared import ensure_eod_or_http_error, raise_news_fetch_error
 from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
@@ -53,11 +53,7 @@ from app.services.stock_analysis import (
     lookback_pad_days,
 )
 from app.tiingo.client import TiingoClient
-from app.tiingo.exceptions import (
-    TiingoAuthError,
-    TiingoError,
-    TiingoRateLimitError,
-)
+from app.tiingo.exceptions import TiingoError
 
 logger = logging.getLogger(__name__)
 
@@ -252,25 +248,6 @@ async def _select_news_rows(
     return result.scalars().all()
 
 
-def _raise_news_fetch_error(exc: TiingoError) -> None:
-    """Map a Tiingo news-fetch failure to HTTP, mirroring the other endpoints."""
-    if isinstance(exc, TiingoRateLimitError):
-        raise HTTPException(
-            status_code=503,
-            detail="News provider rate limit reached — retry later.",
-        ) from exc
-    if isinstance(exc, TiingoAuthError):
-        # Server misconfiguration — do NOT leak token/auth details to the caller.
-        raise HTTPException(
-            status_code=502,
-            detail="News provider is not configured on the server.",
-        ) from exc
-    raise HTTPException(
-        status_code=502,
-        detail=f"News provider error: {exc}",
-    ) from exc
-
-
 @router.get("/{ticker}/news", response_model=NewsResponse)
 async def get_ticker_news(
     ticker: str,
@@ -307,7 +284,7 @@ async def get_ticker_news(
     except TiingoError as exc:
         rows = await _select_news_rows(session, symbol, limit)
         if not rows:
-            _raise_news_fetch_error(exc)
+            raise_news_fetch_error(exc)
         logger.warning(
             "News refresh for %s failed (%s: %s) — serving %d cached articles "
             "with stale=true.",

@@ -4,11 +4,11 @@ Offline unit tests for DB model metadata.
 No live database required — we inspect the SQLAlchemy metadata objects directly.
 """
 
-from sqlalchemy import ARRAY, BigInteger
+from sqlalchemy import ARRAY, BigInteger, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 
-# Importing Base triggers __init__.py which registers Instrument, EodPrice, NewsItem.
-from app.models import Base
+# Importing Base triggers __init__.py which registers all ORM models.
+from app.models import Base, Portfolio, Position
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -30,6 +30,8 @@ def test_all_tables_registered() -> None:
     assert "instruments" in Base.metadata.tables
     assert "eod_prices" in Base.metadata.tables
     assert "news_items" in Base.metadata.tables
+    assert "portfolios" in Base.metadata.tables
+    assert "positions" in Base.metadata.tables
 
 
 # ---------------------------------------------------------------------------
@@ -129,12 +131,70 @@ def test_news_items_published_at_index_exists() -> None:
 
 
 # ---------------------------------------------------------------------------
+# portfolios / positions (F4)
+# ---------------------------------------------------------------------------
+
+def test_portfolios_name_is_unique() -> None:
+    name_constraints = {
+        c.name
+        for c in _table("portfolios").constraints
+        if isinstance(c, UniqueConstraint)
+    }
+    assert "uq_portfolios_name" in name_constraints
+
+
+def test_portfolios_cash_has_server_default() -> None:
+    col = _col("portfolios", "cash")
+    assert col.server_default is not None
+    assert col.server_default.arg == "0"  # type: ignore[union-attr]
+
+
+def test_positions_fk_cascades_on_portfolio_delete() -> None:
+    fks = list(_table("positions").foreign_keys)
+    assert len(fks) == 1
+    fk = fks[0]
+    assert fk.column.table.name == "portfolios"
+    assert fk.column.name == "id"
+    assert fk.ondelete == "CASCADE"
+
+
+def test_positions_unique_per_portfolio_and_ticker() -> None:
+    unique = next(
+        c
+        for c in _table("positions").constraints
+        if isinstance(c, UniqueConstraint)
+    )
+    assert unique.name == "uq_positions_portfolio_id_ticker"
+    assert [col.name for col in unique.columns] == ["portfolio_id", "ticker"]
+
+
+def test_positions_portfolio_id_index_exists() -> None:
+    index_names = {idx.name for idx in _table("positions").indexes}
+    assert "ix_positions_portfolio_id" in index_names
+
+
+def test_positions_acq_price_is_nullable_quantity_is_not() -> None:
+    assert _col("positions", "acq_price").nullable is True
+    assert _col("positions", "quantity").nullable is False
+
+
+def test_portfolio_positions_relationship_conventions() -> None:
+    """lazy='raise' (project rule), delete-orphan cascade, passive DB deletes."""
+    rel = Portfolio.__mapper__.relationships["positions"]
+    assert rel.lazy == "raise"
+    assert rel.passive_deletes is True
+    assert "delete-orphan" in rel.cascade
+    back = Position.__mapper__.relationships["portfolio"]
+    assert back.lazy == "raise"
+
+
+# ---------------------------------------------------------------------------
 # Naming convention
 # ---------------------------------------------------------------------------
 
 def test_pk_names_follow_convention() -> None:
     """All PKs must be named pk_<tablename> per naming convention."""
-    for table_name in ("instruments", "eod_prices", "news_items"):
+    for table_name in ("instruments", "eod_prices", "news_items", "portfolios", "positions"):
         pk = _table(table_name).primary_key
         assert pk.name == f"pk_{table_name}", (
             f"PK for {table_name!r} is {pk.name!r}, expected 'pk_{table_name}'"
@@ -143,7 +203,7 @@ def test_pk_names_follow_convention() -> None:
 
 def test_index_names_start_with_ix() -> None:
     """All explicitly-named indexes must start with 'ix_'."""
-    for table_name in ("eod_prices", "news_items"):
+    for table_name in ("eod_prices", "news_items", "positions"):
         for idx in _table(table_name).indexes:
             if idx.name:
                 assert idx.name.startswith("ix_"), (

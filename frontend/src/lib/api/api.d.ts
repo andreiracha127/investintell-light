@@ -127,6 +127,139 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/portfolios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Portfolios
+         * @description List portfolios (id order), hard-capped at the service's LIST_HARD_CAP.
+         */
+        get: operations["list_portfolios_portfolios_get"];
+        put?: never;
+        /**
+         * Create Portfolio
+         * @description Create a portfolio with optional initial positions.
+         *
+         *     Position tickers are validated against Tiingo via the EOD ensure — a typo
+         *     fails loud (404) BEFORE anything is persisted — which also warms the EOD
+         *     cache for the overview.
+         */
+        post: operations["create_portfolio_portfolios_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/portfolios/{portfolio_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Portfolio
+         * @description One portfolio with its positions (sorted by ticker).
+         */
+        get: operations["get_portfolio_portfolios__portfolio_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Portfolio
+         * @description Delete a portfolio; its positions cascade away at the DB level.
+         */
+        delete: operations["delete_portfolio_portfolios__portfolio_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Patch Portfolio
+         * @description Partially update name and/or cash.
+         */
+        patch: operations["patch_portfolio_portfolios__portfolio_id__patch"];
+        trace?: never;
+    };
+    "/portfolios/{portfolio_id}/positions/{ticker}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Position
+         * @description Upsert one position.
+         *
+         *     INSERT path validates the ticker against Tiingo (and warms the EOD cache);
+         *     the UPDATE path deliberately does NOT re-ensure — the ticker was already
+         *     validated when the position was created.
+         */
+        put: operations["put_position_portfolios__portfolio_id__positions__ticker__put"];
+        post?: never;
+        /**
+         * Delete Position
+         * @description Delete one position; 404 covers both a missing portfolio and a missing ticker.
+         */
+        delete: operations["delete_position_portfolios__portfolio_id__positions__ticker__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/portfolios/{portfolio_id}/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Portfolio Overview
+         * @description Render-ready position table with P&L and column-header aggregates (D6).
+         *
+         *     Last/prev closes come from the two most recent eod_prices rows per ticker;
+         *     the EOD ensure runs first so stale tickers are refreshed.  An empty
+         *     portfolio is a legitimate 200 with zeroed/null aggregates.
+         */
+        get: operations["get_portfolio_overview_portfolios__portfolio_id__overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/portfolios/{portfolio_id}/news": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Portfolio News
+         * @description Aggregated news across all portfolio tickers, newest first.
+         *
+         *     Staleness is checked per ticker but all stale tickers are refreshed with
+         *     ONE combined Tiingo call (see ``ensure_news``).  Degrade path mirrors
+         *     GET /stocks/{ticker}/news exactly: refresh failure with cached articles
+         *     serves them with ``stale=true``; with an empty cache it fails loud.
+         */
+        get: operations["get_portfolio_news_portfolios__portfolio_id__news_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -484,6 +617,47 @@ export interface components {
             items: components["schemas"]["NewsArticle"][];
         };
         /**
+         * OverviewAggregates
+         * @description Portfolio-level aggregates rendered in the table column headers (D6).
+         */
+        OverviewAggregates: {
+            /**
+             * Total Market Value
+             * @description Sum of position market values, currency units (0 when empty).
+             */
+            total_market_value: number;
+            /**
+             * Total Cost Basis
+             * @description Sum over positions with a known acq_price; null when ALL are unknown.
+             */
+            total_cost_basis: number | null;
+            /**
+             * Total Pnl
+             * @description Sum of pnl over positions with a known acq_price; null when no position has a cost basis.
+             */
+            total_pnl: number | null;
+            /**
+             * Total Pnl Pct
+             * @description total_pnl / total_cost_basis as a decimal fraction, never 0-100; null when no position has a cost basis.
+             */
+            total_pnl_pct: number | null;
+            /**
+             * Cash
+             * @description Uninvested cash balance, currency units.
+             */
+            cash: number;
+            /**
+             * Total Value
+             * @description total_market_value + cash, currency units.
+             */
+            total_value: number;
+            /**
+             * As Of
+             * @description Max as_of across positions; null for an empty portfolio.
+             */
+            as_of: string | null;
+        };
+        /**
          * PortfolioAnalysisRequest
          * @description Ad-hoc portfolio definition to replay and decompose (no persistence).
          */
@@ -547,6 +721,110 @@ export interface components {
             histogram: components["schemas"]["HistogramOut"];
         };
         /**
+         * PortfolioCreate
+         * @description Body for POST /portfolios.
+         */
+        PortfolioCreate: {
+            /**
+             * Name
+             * @description Portfolio name; 1..80 characters after trimming, unique across the installation.
+             */
+            name: string;
+            /**
+             * Cash
+             * @description Uninvested cash, currency units.
+             * @default 0
+             */
+            cash: number;
+            /**
+             * Positions
+             * @description Initial positions (at most 50); tickers must be unique.
+             */
+            positions?: components["schemas"]["PositionCreate"][];
+        };
+        /**
+         * PortfolioListItem
+         * @description One row of GET /portfolios (positions omitted, count only).
+         */
+        PortfolioListItem: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Cash */
+            cash: number;
+            /** Position Count */
+            position_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * PortfolioNewsResponse
+         * @description Aggregated news across all portfolio tickers, newest first.
+         *
+         *     ``stale`` is True when the Tiingo refresh failed but cached articles were
+         *     served — a declared degradation, never a silent fallback (same contract
+         *     as GET /stocks/{ticker}/news).
+         */
+        PortfolioNewsResponse: {
+            /** Portfolio Id */
+            portfolio_id: number;
+            /**
+             * Tickers
+             * @description Portfolio tickers the articles were matched on.
+             */
+            tickers: string[];
+            /** Count */
+            count: number;
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
+            /** Items */
+            items: components["schemas"]["NewsArticle"][];
+        };
+        /**
+         * PortfolioOut
+         * @description One persisted portfolio with its positions (sorted by ticker).
+         */
+        PortfolioOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Cash */
+            cash: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Positions */
+            positions: components["schemas"]["PositionOut"][];
+        };
+        /**
+         * PortfolioOverviewResponse
+         * @description Render-ready overview for GET /portfolios/{id}/overview.
+         */
+        PortfolioOverviewResponse: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Positions */
+            positions: components["schemas"]["PositionOverview"][];
+            aggregates: components["schemas"]["OverviewAggregates"];
+        };
+        /**
          * PortfolioParams
          * @description Echo of the resolved request parameters.
          */
@@ -584,6 +862,22 @@ export interface components {
              * @description Portfolio value at start_date, in currency units. 10000 for mode='weights' (notional); the actual position value for mode='quantities'.
              */
             initial_nav: number;
+        };
+        /**
+         * PortfolioPatch
+         * @description Body for PATCH /portfolios/{id} — at least one field must be present.
+         */
+        PortfolioPatch: {
+            /**
+             * Name
+             * @description New portfolio name (same rules as on create).
+             */
+            name?: string | null;
+            /**
+             * Cash
+             * @description New cash balance, currency units.
+             */
+            cash?: number | null;
         };
         /**
          * PortfolioStats
@@ -638,6 +932,43 @@ export interface components {
             worst_day: components["schemas"]["DatedValue"];
         };
         /**
+         * PositionBody
+         * @description Quantity/acquisition-price payload for the position upsert (PUT).
+         */
+        PositionBody: {
+            /**
+             * Quantity
+             * @description Shares/units held; > 0.
+             */
+            quantity: number;
+            /**
+             * Acq Price
+             * @description Acquisition price per share/unit; null = unknown (P&L renders null).
+             */
+            acq_price?: number | null;
+        };
+        /**
+         * PositionCreate
+         * @description One position in the create-portfolio payload.
+         */
+        PositionCreate: {
+            /**
+             * Quantity
+             * @description Shares/units held; > 0.
+             */
+            quantity: number;
+            /**
+             * Acq Price
+             * @description Acquisition price per share/unit; null = unknown (P&L renders null).
+             */
+            acq_price?: number | null;
+            /**
+             * Ticker
+             * @description Instrument ticker (normalized to uppercase).
+             */
+            ticker: string;
+        };
+        /**
          * PositionIn
          * @description One requested position: a ticker plus EITHER a weight OR a quantity.
          *
@@ -661,6 +992,84 @@ export interface components {
              * @description Number of shares/units held; > 0.
              */
             quantity?: number | null;
+        };
+        /**
+         * PositionOut
+         * @description One persisted position.
+         */
+        PositionOut: {
+            /** Ticker */
+            ticker: string;
+            /** Quantity */
+            quantity: number;
+            /** Acq Price */
+            acq_price: number | null;
+        };
+        /**
+         * PositionOverview
+         * @description One render-ready overview row; the backend computes ALL finance.
+         */
+        PositionOverview: {
+            /** Ticker */
+            ticker: string;
+            /**
+             * Name
+             * @description Display name from the instruments cache.
+             */
+            name: string | null;
+            /** Quantity */
+            quantity: number;
+            /**
+             * Acq Price
+             * @description Acquisition price per share/unit; null = unknown.
+             */
+            acq_price: number | null;
+            /**
+             * Last Close
+             * @description Most recent EOD close, currency units.
+             */
+            last_close: number;
+            /**
+             * Prev Close
+             * @description Second-most-recent EOD close; null when only one row exists.
+             */
+            prev_close: number | null;
+            /**
+             * Change
+             * @description last_close - prev_close, currency units; null without prev_close.
+             */
+            change: number | null;
+            /**
+             * Change Pct
+             * @description change / prev_close as a decimal fraction (0.05 = 5%), never 0-100; null without prev_close.
+             */
+            change_pct: number | null;
+            /**
+             * Market Value
+             * @description quantity * last_close, currency units.
+             */
+            market_value: number;
+            /**
+             * Cost Basis
+             * @description quantity * acq_price, currency units; null when acq_price is unknown.
+             */
+            cost_basis: number | null;
+            /**
+             * Pnl
+             * @description market_value - cost_basis, currency units; null when acq_price is unknown.
+             */
+            pnl: number | null;
+            /**
+             * Pnl Pct
+             * @description pnl / cost_basis as a decimal fraction (0.10 = 10%), never 0-100; null when acq_price is unknown.
+             */
+            pnl_pct: number | null;
+            /**
+             * As Of
+             * Format: date
+             * @description Date of last_close.
+             */
+            as_of: string;
         };
         /**
          * PricePoint
@@ -937,6 +1346,285 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PortfolioAnalysisResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_portfolios_portfolios_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioListItem"][];
+                };
+            };
+        };
+    };
+    create_portfolio_portfolios_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortfolioCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_portfolio_portfolios__portfolio_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_portfolio_portfolios__portfolio_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_portfolio_portfolios__portfolio_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortfolioPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_position_portfolios__portfolio_id__positions__ticker__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PositionBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PositionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_position_portfolios__portfolio_id__positions__ticker__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_portfolio_overview_portfolios__portfolio_id__overview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioOverviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_portfolio_news_portfolios__portfolio_id__news_get: {
+        parameters: {
+            query?: {
+                /** @description Max articles returned. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioNewsResponse"];
                 };
             };
             /** @description Validation Error */
