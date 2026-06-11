@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import health as health_router
 from app.api.routes import portfolio as portfolio_router
 from app.api.routes import portfolios as portfolios_router
+from app.api.routes import screener as screener_router
 from app.api.routes import statistics as statistics_router
 from app.api.routes import stocks as stocks_router
 from app.core.config import get_settings
@@ -42,6 +43,7 @@ def create_app() -> FastAPI:
     application.include_router(portfolio_router.router)
     application.include_router(portfolios_router.router)
     application.include_router(statistics_router.router)
+    application.include_router(screener_router.router)
     return application
 
 

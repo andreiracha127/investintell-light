@@ -351,3 +351,47 @@ def test_screener_metrics_model_matches_metric_columns() -> None:
     actual = {c.name for c in _table("screener_metrics").c}
     expected = {"ticker", "computed_at", "as_of", *METRIC_COLUMNS}
     assert actual == expected
+
+
+# ---------------------------------------------------------------------------
+# screens / screen_filters (F6.4)
+# ---------------------------------------------------------------------------
+
+def test_screens_tables_registered() -> None:
+    assert "screens" in Base.metadata.tables
+    assert "screen_filters" in Base.metadata.tables
+
+
+def test_screens_name_unique_and_audit_columns() -> None:
+    name = _col("screens", "name")
+    assert name.nullable is False
+    assert name.unique is True
+    for col_name in ("created_at", "updated_at"):
+        col = _col("screens", col_name)
+        assert col.nullable is False
+        assert col.type.timezone is True  # type: ignore[attr-defined]
+
+
+def test_screen_filters_fk_cascades_on_screen_delete() -> None:
+    fks = list(_table("screen_filters").foreign_keys)
+    assert len(fks) == 1
+    fk = fks[0]
+    assert fk.column.table.name == "screens"
+    assert fk.ondelete == "CASCADE"
+
+
+def test_screen_filters_unique_per_screen_and_metric() -> None:
+    uniques = [
+        c for c in _table("screen_filters").constraints if isinstance(c, UniqueConstraint)
+    ]
+    assert any(
+        {col.name for col in c.columns} == {"screen_id", "metric_code"} for c in uniques
+    )
+
+
+def test_screen_filters_bounds_nullable_position_not_null() -> None:
+    assert _col("screen_filters", "min_value").nullable is True
+    assert _col("screen_filters", "max_value").nullable is True
+    position = _col("screen_filters", "position")
+    assert position.nullable is False
+    assert position.server_default is not None

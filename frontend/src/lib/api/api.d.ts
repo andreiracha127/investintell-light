@@ -344,6 +344,171 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/screener/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Metric Catalog
+         * @description The static metric catalog (categories + preset bands) — drives Select Metrics.
+         */
+        get: operations["get_metric_catalog_screener_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/screener/screens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Screens
+         * @description List screens (id order), hard-capped at the service's LIST_HARD_CAP.
+         */
+        get: operations["list_screens_screener_screens_get"];
+        put?: never;
+        /**
+         * Create Screen
+         * @description Create an empty screen (filters are added via PUT .../filters/{code}).
+         */
+        post: operations["create_screen_screener_screens_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/screener/screens/{screen_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Screen
+         * @description One screen with its filters (position order).
+         */
+        get: operations["get_screen_screener_screens__screen_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Screen
+         * @description Delete a screen; its filters cascade away at the DB level.
+         */
+        delete: operations["delete_screen_screener_screens__screen_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Patch Screen
+         * @description Rename a screen.
+         */
+        patch: operations["patch_screen_screener_screens__screen_id__patch"];
+        trace?: never;
+    };
+    "/screener/screens/{screen_id}/filters/{metric_code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Filter
+         * @description Upsert one filter (bounds null = unbounded; both null = metric selected).
+         *
+         *     Responds with the updated screen, the metric's universe distribution
+         *     (null when the snapshot has no data for it) and the new headline count.
+         */
+        put: operations["put_filter_screener_screens__screen_id__filters__metric_code__put"];
+        post?: never;
+        /**
+         * Delete Filter
+         * @description Remove one filter; same Build payload as the upsert (count updates live).
+         */
+        delete: operations["delete_filter_screener_screens__screen_id__filters__metric_code__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/screener/screens/{screen_id}/build/{metric_code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Build Metric
+         * @description Histogram of one metric over the WHOLE active universe + headline count.
+         *
+         *     The histogram ignores the screen's filters (it is the slider backdrop);
+         *     the headline count honors ALL of them. counts_normalized is 0..1 —
+         *     never pixel heights.
+         */
+        get: operations["build_metric_screener_screens__screen_id__build__metric_code__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/screener/screens/{screen_id}/results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Results
+         * @description Matching tickers with the screen's columns (filter position order).
+         *
+         *     An empty metrics snapshot is a legitimate 200 with total=0.
+         */
+        get: operations["get_results_screener_screens__screen_id__results_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/screener/screens/{screen_id}/results.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Results Csv
+         * @description The same result set as /results, unpaginated, hard-capped at 5 000 rows.
+         */
+        get: operations["get_results_csv_screener_screens__screen_id__results_csv_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -592,6 +757,18 @@ export interface components {
             ][];
         };
         /**
+         * BuildResponse
+         * @description GET /screener/screens/{id}/build/{metric_code}.
+         */
+        BuildResponse: {
+            distribution: components["schemas"]["DistributionOut"];
+            /**
+             * Headline Count
+             * @description Universe rows satisfying ALL the screen's current filters.
+             */
+            headline_count: number;
+        };
+        /**
          * Candle
          * @description One OHLCV candle built from RAW (un-adjusted) prices.
          *
@@ -753,6 +930,24 @@ export interface components {
             value: number;
         };
         /**
+         * DistributionOut
+         * @description Histogram over the active universe; counts_normalized in 0..1, never pixels.
+         */
+        DistributionOut: {
+            /**
+             * Bin Edges
+             * @description len(counts) + 1 edges; log-spaced for currency.
+             */
+            bin_edges: number[];
+            /** Counts */
+            counts: number[];
+            /**
+             * Counts Normalized
+             * @description counts / max(counts), in 0..1.
+             */
+            counts_normalized: number[];
+        };
+        /**
          * DrawdownOut
          * @description Maximum drawdown of the in-range ADJUSTED close series.
          */
@@ -772,6 +967,38 @@ export interface components {
              * Format: date
              */
             trough_date: string;
+        };
+        /**
+         * FilterBody
+         * @description Bounds for PUT /screener/screens/{id}/filters/{metric_code}.
+         *
+         *     Both bounds null is legitimate: the metric is selected (results column,
+         *     NULL exclusion) without numeric constraints.
+         */
+        FilterBody: {
+            /**
+             * Min Value
+             * @description Lower bound; null = unbounded.
+             */
+            min_value?: number | null;
+            /**
+             * Max Value
+             * @description Upper bound; null = unbounded.
+             */
+            max_value?: number | null;
+        };
+        /**
+         * FilterUpdateResponse
+         * @description PUT/DELETE filter response — one round-trip powers the Build UI.
+         *
+         *     ``distribution`` is null (rather than failing the successful write with
+         *     422) when the metric has zero non-NULL rows in the snapshot.
+         */
+        FilterUpdateResponse: {
+            screen: components["schemas"]["ScreenOut"];
+            distribution: components["schemas"]["DistributionOut"] | null;
+            /** Headline Count */
+            headline_count: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -805,6 +1032,28 @@ export interface components {
              * @description Each count divided by the maximum count (0-1), for direct bar heights.
              */
             counts_normalized: number[];
+        };
+        /**
+         * MetricDefOut
+         * @description One catalog metric — ``code`` is the screener_metrics column name.
+         */
+        MetricDefOut: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Abbreviation */
+            abbreviation: string;
+            /** Category */
+            category: string;
+            /** Sub Category */
+            sub_category: string;
+            /** Data Type */
+            data_type: string;
+            /** Scale Note */
+            scale_note: string;
+            /** Presets */
+            presets: components["schemas"]["PresetBandOut"][];
         };
         /**
          * NewsArticle
@@ -1325,6 +1574,18 @@ export interface components {
             as_of: string;
         };
         /**
+         * PresetBandOut
+         * @description One selectable filter band; null bound = unbounded on that side.
+         */
+        PresetBandOut: {
+            /** Name */
+            name: string;
+            /** Min Value */
+            min_value: number | null;
+            /** Max Value */
+            max_value: number | null;
+        };
+        /**
          * PricePoint
          * @description One EOD bar in a price series response.
          */
@@ -1398,6 +1659,18 @@ export interface components {
              * @description Number of aligned daily return pairs.
              */
             n_points: number;
+        };
+        /**
+         * ResultsColumnOut
+         * @description One results-table column (ticker/name are data_type 'string').
+         */
+        ResultsColumnOut: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Data Type */
+            data_type: string;
         };
         /**
          * RiskContributionOut
@@ -1555,6 +1828,104 @@ export interface components {
              * @description Historical 1-day VaR at 99% as a POSITIVE decimal fraction.
              */
             var_99: number;
+        };
+        /**
+         * ScreenCreate
+         * @description Body for POST /screener/screens.
+         */
+        ScreenCreate: {
+            /**
+             * Name
+             * @description Screen name; 1..80 characters after trimming, unique across the installation.
+             */
+            name: string;
+        };
+        /**
+         * ScreenFilterOut
+         * @description One persisted filter row.
+         */
+        ScreenFilterOut: {
+            /** Metric Code */
+            metric_code: string;
+            /** Min Value */
+            min_value: number | null;
+            /** Max Value */
+            max_value: number | null;
+            /** Position */
+            position: number;
+        };
+        /**
+         * ScreenListItem
+         * @description Row for GET /screener/screens.
+         */
+        ScreenListItem: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Filter Count */
+            filter_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * ScreenOut
+         * @description One screen with its filters (position order).
+         */
+        ScreenOut: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Filters */
+            filters: components["schemas"]["ScreenFilterOut"][];
+        };
+        /**
+         * ScreenPatch
+         * @description Body for PATCH /screener/screens/{id} — rename only.
+         */
+        ScreenPatch: {
+            /**
+             * Name
+             * @description New screen name (same rules as on create).
+             */
+            name: string;
+        };
+        /**
+         * ScreenResultsResponse
+         * @description GET /screener/screens/{id}/results — dynamic, whitelisted columns.
+         */
+        ScreenResultsResponse: {
+            /** Columns */
+            columns: components["schemas"]["ResultsColumnOut"][];
+            /** Rows */
+            rows: {
+                [key: string]: string | number | null;
+            }[];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
         };
         /**
          * StackedSeries
@@ -2264,6 +2635,350 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StockCorrelationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_metric_catalog_screener_metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricDefOut"][];
+                };
+            };
+        };
+    };
+    list_screens_screener_screens_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScreenListItem"][];
+                };
+            };
+        };
+    };
+    create_screen_screener_screens_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScreenCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScreenOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_screen_screener_screens__screen_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                screen_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScreenOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_screen_screener_screens__screen_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                screen_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_screen_screener_screens__screen_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                screen_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScreenPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScreenOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_filter_screener_screens__screen_id__filters__metric_code__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                screen_id: number;
+                metric_code: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FilterBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FilterUpdateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_filter_screener_screens__screen_id__filters__metric_code__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                screen_id: number;
+                metric_code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FilterUpdateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    build_metric_screener_screens__screen_id__build__metric_code__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                screen_id: number;
+                metric_code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_results_screener_screens__screen_id__results_get: {
+        parameters: {
+            query?: {
+                /** @description Column code to sort by. */
+                sort?: string;
+                dir?: "asc" | "desc";
+                /** @description Ticker/name prefix match. */
+                search?: string | null;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                screen_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScreenResultsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_results_csv_screener_screens__screen_id__results_csv_get: {
+        parameters: {
+            query?: {
+                /** @description Column code to sort by. */
+                sort?: string;
+                dir?: "asc" | "desc";
+                /** @description Ticker/name prefix match. */
+                search?: string | null;
+            };
+            header?: never;
+            path: {
+                screen_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": unknown;
                 };
             };
             /** @description Validation Error */

@@ -858,6 +858,585 @@
           }
         }
       }
+    },
+    "/screener/metrics": {
+      "get": {
+        "tags": [
+          "screener"
+        ],
+        "summary": "Get Metric Catalog",
+        "description": "The static metric catalog (categories + preset bands) \u2014 drives Select Metrics.",
+        "operationId": "get_metric_catalog_screener_metrics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MetricDefOut"
+                  },
+                  "type": "array",
+                  "title": "Response Get Metric Catalog Screener Metrics Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/screener/screens": {
+      "get": {
+        "tags": [
+          "screener"
+        ],
+        "summary": "List Screens",
+        "description": "List screens (id order), hard-capped at the service's LIST_HARD_CAP.",
+        "operationId": "list_screens_screener_screens_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ScreenListItem"
+                  },
+                  "type": "array",
+                  "title": "Response List Screens Screener Screens Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "screener"
+        ],
+        "summary": "Create Screen",
+        "description": "Create an empty screen (filters are added via PUT .../filters/{code}).",
+        "operationId": "create_screen_screener_screens_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScreenCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScreenOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/screener/screens/{screen_id}": {
+      "get": {
+        "tags": [
+          "screener"
+        ],
+        "summary": "Get Screen",
+        "description": "One screen with its filters (position order).",
+        "operationId": "get_screen_screener_screens__screen_id__get",
+        "parameters": [
+          {
+            "name": "screen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Screen Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScreenOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "screener"
+        ],
+        "summary": "Patch Screen",
+        "description": "Rename a screen.",
+        "operationId": "patch_screen_screener_screens__screen_id__patch",
+        "parameters": [
+          {
+            "name": "screen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Screen Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScreenPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScreenOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "screener"
+        ],
+        "summary": "Delete Screen",
+        "description": "Delete a screen; its filters cascade away at the DB level.",
+        "operationId": "delete_screen_screener_screens__screen_id__delete",
+        "parameters": [
+          {
+            "name": "screen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Screen Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/screener/screens/{screen_id}/filters/{metric_code}": {
+      "put": {
+        "tags": [
+          "screener"
+        ],
+        "summary": "Put Filter",
+        "description": "Upsert one filter (bounds null = unbounded; both null = metric selected).\n\nResponds with the updated screen, the metric's universe distribution\n(null when the snapshot has no data for it) and the new headline count.",
+        "operationId": "put_filter_screener_screens__screen_id__filters__metric_code__put",
+        "parameters": [
+          {
+            "name": "screen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Screen Id"
+            }
+          },
+          {
+            "name": "metric_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Metric Code"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FilterBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FilterUpdateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "screener"
+        ],
+        "summary": "Delete Filter",
+        "description": "Remove one filter; same Build payload as the upsert (count updates live).",
+        "operationId": "delete_filter_screener_screens__screen_id__filters__metric_code__delete",
+        "parameters": [
+          {
+            "name": "screen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Screen Id"
+            }
+          },
+          {
+            "name": "metric_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Metric Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FilterUpdateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/screener/screens/{screen_id}/build/{metric_code}": {
+      "get": {
+        "tags": [
+          "screener"
+        ],
+        "summary": "Build Metric",
+        "description": "Histogram of one metric over the WHOLE active universe + headline count.\n\nThe histogram ignores the screen's filters (it is the slider backdrop);\nthe headline count honors ALL of them. counts_normalized is 0..1 \u2014\nnever pixel heights.",
+        "operationId": "build_metric_screener_screens__screen_id__build__metric_code__get",
+        "parameters": [
+          {
+            "name": "screen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Screen Id"
+            }
+          },
+          {
+            "name": "metric_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Metric Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/screener/screens/{screen_id}/results": {
+      "get": {
+        "tags": [
+          "screener"
+        ],
+        "summary": "Get Results",
+        "description": "Matching tickers with the screen's columns (filter position order).\n\nAn empty metrics snapshot is a legitimate 200 with total=0.",
+        "operationId": "get_results_screener_screens__screen_id__results_get",
+        "parameters": [
+          {
+            "name": "screen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Screen Id"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Column code to sort by.",
+              "default": "ticker",
+              "title": "Sort"
+            },
+            "description": "Column code to sort by."
+          },
+          {
+            "name": "dir",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string",
+              "default": "asc",
+              "title": "Dir"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Ticker/name prefix match.",
+              "title": "Search"
+            },
+            "description": "Ticker/name prefix match."
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScreenResultsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/screener/screens/{screen_id}/results.csv": {
+      "get": {
+        "tags": [
+          "screener"
+        ],
+        "summary": "Get Results Csv",
+        "description": "The same result set as /results, unpaginated, hard-capped at 5 000 rows.",
+        "operationId": "get_results_csv_screener_screens__screen_id__results_csv_get",
+        "parameters": [
+          {
+            "name": "screen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Screen Id"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Column code to sort by.",
+              "default": "ticker",
+              "title": "Sort"
+            },
+            "description": "Column code to sort by."
+          },
+          {
+            "name": "dir",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string",
+              "default": "asc",
+              "title": "Dir"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 40
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Ticker/name prefix match.",
+              "title": "Search"
+            },
+            "description": "Ticker/name prefix match."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/csv": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1268,6 +1847,25 @@
         "title": "BetaResponse",
         "description": "Scatter + regression of two pseudo-assets' daily returns."
       },
+      "BuildResponse": {
+        "properties": {
+          "distribution": {
+            "$ref": "#/components/schemas/DistributionOut"
+          },
+          "headline_count": {
+            "type": "integer",
+            "title": "Headline Count",
+            "description": "Universe rows satisfying ALL the screen's current filters."
+          }
+        },
+        "type": "object",
+        "required": [
+          "distribution",
+          "headline_count"
+        ],
+        "title": "BuildResponse",
+        "description": "GET /screener/screens/{id}/build/{metric_code}."
+      },
       "Candle": {
         "properties": {
           "date": {
@@ -1545,6 +2143,41 @@
         "title": "DatedValue",
         "description": "A single dated return observation."
       },
+      "DistributionOut": {
+        "properties": {
+          "bin_edges": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Bin Edges",
+            "description": "len(counts) + 1 edges; log-spaced for currency."
+          },
+          "counts": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Counts"
+          },
+          "counts_normalized": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Counts Normalized",
+            "description": "counts / max(counts), in 0..1."
+          }
+        },
+        "type": "object",
+        "required": [
+          "bin_edges",
+          "counts",
+          "counts_normalized"
+        ],
+        "title": "DistributionOut",
+        "description": "Histogram over the active universe; counts_normalized in 0..1, never pixels."
+      },
       "DrawdownOut": {
         "properties": {
           "depth": {
@@ -1571,6 +2204,66 @@
         ],
         "title": "DrawdownOut",
         "description": "Maximum drawdown of the in-range ADJUSTED close series."
+      },
+      "FilterBody": {
+        "properties": {
+          "min_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Value",
+            "description": "Lower bound; null = unbounded."
+          },
+          "max_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Value",
+            "description": "Upper bound; null = unbounded."
+          }
+        },
+        "type": "object",
+        "title": "FilterBody",
+        "description": "Bounds for PUT /screener/screens/{id}/filters/{metric_code}.\n\nBoth bounds null is legitimate: the metric is selected (results column,\nNULL exclusion) without numeric constraints."
+      },
+      "FilterUpdateResponse": {
+        "properties": {
+          "screen": {
+            "$ref": "#/components/schemas/ScreenOut"
+          },
+          "distribution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DistributionOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "headline_count": {
+            "type": "integer",
+            "title": "Headline Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "screen",
+          "distribution",
+          "headline_count"
+        ],
+        "title": "FilterUpdateResponse",
+        "description": "PUT/DELETE filter response \u2014 one round-trip powers the Build UI.\n\n``distribution`` is null (rather than failing the successful write with\n422) when the metric has zero non-NULL rows in the snapshot."
       },
       "HTTPValidationError": {
         "properties": {
@@ -1638,6 +2331,58 @@
         ],
         "title": "HistogramOut",
         "description": "Histogram of in-range daily returns."
+      },
+      "MetricDefOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "abbreviation": {
+            "type": "string",
+            "title": "Abbreviation"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "sub_category": {
+            "type": "string",
+            "title": "Sub Category"
+          },
+          "data_type": {
+            "type": "string",
+            "title": "Data Type"
+          },
+          "scale_note": {
+            "type": "string",
+            "title": "Scale Note"
+          },
+          "presets": {
+            "items": {
+              "$ref": "#/components/schemas/PresetBandOut"
+            },
+            "type": "array",
+            "title": "Presets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "abbreviation",
+          "category",
+          "sub_category",
+          "data_type",
+          "scale_note",
+          "presets"
+        ],
+        "title": "MetricDefOut",
+        "description": "One catalog metric \u2014 ``code`` is the screener_metrics column name."
       },
       "NewsArticle": {
         "properties": {
@@ -2552,6 +3297,44 @@
         "title": "PositionOverview",
         "description": "One render-ready overview row; the backend computes ALL finance."
       },
+      "PresetBandOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "min_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Value"
+          },
+          "max_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "min_value",
+          "max_value"
+        ],
+        "title": "PresetBandOut",
+        "description": "One selectable filter band; null bound = unbounded on that side."
+      },
       "PricePoint": {
         "properties": {
           "date": {
@@ -2678,6 +3461,30 @@
         ],
         "title": "RegressionOut",
         "description": "OLS regression of y on x over the aligned daily returns."
+      },
+      "ResultsColumnOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "data_type": {
+            "type": "string",
+            "title": "Data Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "data_type"
+        ],
+        "title": "ResultsColumnOut",
+        "description": "One results-table column (ticker/name are data_type 'string')."
       },
       "RiskContributionOut": {
         "properties": {
@@ -2898,6 +3705,207 @@
         ],
         "title": "ScenarioStatistics",
         "description": "Typed statistics rail of the scenario \u2014 computed on DAILY data even when\nthe line series are weekly-bounded. NAV figures include cash; returns are\ndaily simple returns of the cash-inclusive total value."
+      },
+      "ScreenCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Screen name; 1..80 characters after trimming, unique across the installation."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ScreenCreate",
+        "description": "Body for POST /screener/screens."
+      },
+      "ScreenFilterOut": {
+        "properties": {
+          "metric_code": {
+            "type": "string",
+            "title": "Metric Code"
+          },
+          "min_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Value"
+          },
+          "max_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Value"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric_code",
+          "min_value",
+          "max_value",
+          "position"
+        ],
+        "title": "ScreenFilterOut",
+        "description": "One persisted filter row."
+      },
+      "ScreenListItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "filter_count": {
+            "type": "integer",
+            "title": "Filter Count"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "filter_count",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ScreenListItem",
+        "description": "Row for GET /screener/screens."
+      },
+      "ScreenOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "filters": {
+            "items": {
+              "$ref": "#/components/schemas/ScreenFilterOut"
+            },
+            "type": "array",
+            "title": "Filters"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "updated_at",
+          "filters"
+        ],
+        "title": "ScreenOut",
+        "description": "One screen with its filters (position order)."
+      },
+      "ScreenPatch": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "New screen name (same rules as on create)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ScreenPatch",
+        "description": "Body for PATCH /screener/screens/{id} \u2014 rename only."
+      },
+      "ScreenResultsResponse": {
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/ResultsColumnOut"
+            },
+            "type": "array",
+            "title": "Columns"
+          },
+          "rows": {
+            "items": {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "columns",
+          "rows",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "ScreenResultsResponse",
+        "description": "GET /screener/screens/{id}/results \u2014 dynamic, whitelisted columns."
       },
       "StackedSeries": {
         "properties": {
