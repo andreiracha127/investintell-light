@@ -253,6 +253,12 @@ def test_universe_constituents_status_default_active() -> None:
     assert col.server_default.arg == "active"  # type: ignore[union-attr]
 
 
+def test_universe_constituents_status_is_indexed() -> None:
+    """Backfill and metrics job both select WHERE status='active' (0004)."""
+    index_names = {idx.name for idx in _table("universe_constituents").indexes}
+    assert "ix_universe_constituents_status" in index_names
+
+
 def test_universe_constituents_source_and_synced_at_not_null() -> None:
     assert _col("universe_constituents", "source").nullable is False
     synced = _col("universe_constituents", "synced_at")
@@ -275,8 +281,9 @@ def test_fundamentals_snapshot_pk_and_fk_cascade() -> None:
 def test_fundamentals_snapshot_nullability() -> None:
     assert _col("fundamentals_snapshot", "period_end").nullable is False
     assert _col("fundamentals_snapshot", "synced_at").nullable is False
+    # cik is NOT NULL since migration 0004 — the sync fetches the snapshot BY cik.
+    assert _col("fundamentals_snapshot", "cik").nullable is False
     for nullable_col in (
-        "cik",
         "book_equity",
         "total_assets",
         "net_income_ttm",
@@ -293,3 +300,54 @@ def test_fundamentals_snapshot_nullability() -> None:
 
 def test_fundamentals_snapshot_cik_is_biginteger() -> None:
     assert isinstance(_col("fundamentals_snapshot", "cik").type, BigInteger)
+
+
+# ---------------------------------------------------------------------------
+# screener_metrics (F6.3)
+# ---------------------------------------------------------------------------
+
+def test_screener_metrics_registered() -> None:
+    assert "screener_metrics" in Base.metadata.tables
+
+
+def test_screener_metrics_pk_is_ticker() -> None:
+    pk = _table("screener_metrics").primary_key
+    assert pk.name == "pk_screener_metrics"
+    pk_cols = list(pk.columns)
+    assert len(pk_cols) == 1
+    assert pk_cols[0].name == "ticker"
+
+
+def test_screener_metrics_fk_cascades_on_constituent_delete() -> None:
+    fks = list(_table("screener_metrics").foreign_keys)
+    assert len(fks) == 1
+    fk = fks[0]
+    assert fk.column.table.name == "universe_constituents"
+    assert fk.column.name == "ticker"
+    assert fk.ondelete == "CASCADE"
+
+
+def test_screener_metrics_audit_columns_not_null() -> None:
+    computed_at = _col("screener_metrics", "computed_at")
+    assert computed_at.nullable is False
+    assert computed_at.type.timezone is True  # type: ignore[attr-defined]
+    assert _col("screener_metrics", "as_of").nullable is False
+
+
+def test_screener_metrics_every_metric_column_is_nullable() -> None:
+    """NULL = 'metric unavailable' is the cross-sectional contract."""
+    from app.sync.metrics import METRIC_COLUMNS
+
+    table = _table("screener_metrics")
+    for col_name in METRIC_COLUMNS:
+        assert table.c[col_name].nullable is True, col_name
+
+
+def test_screener_metrics_model_matches_metric_columns() -> None:
+    """The model's columns are exactly PK + audit + METRIC_COLUMNS — keeps the
+    upsert SET clause, the model and the migration in lockstep."""
+    from app.sync.metrics import METRIC_COLUMNS
+
+    actual = {c.name for c in _table("screener_metrics").c}
+    expected = {"ticker", "computed_at", "as_of", *METRIC_COLUMNS}
+    assert actual == expected

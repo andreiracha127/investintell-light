@@ -36,6 +36,7 @@ from sqlalchemy.dialects.postgresql import Insert as PgInsert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.chunks import chunked
 from app.core.config import get_settings
 from app.models.universe import FundamentalsSnapshot, UniverseConstituent
 
@@ -403,12 +404,10 @@ async def run_sync(
         session_factory = AsyncSessionLocal
     async with session_factory() as session:
         try:
-            for start in range(0, len(universe), _UPSERT_CHUNK):
-                chunk = universe[start : start + _UPSERT_CHUNK]
+            for chunk in chunked(universe, _UPSERT_CHUNK):
                 await session.execute(build_universe_upsert(chunk, now))
                 report.universe_upserted += len(chunk)
-            for start in range(0, len(snapshot_values), _UPSERT_CHUNK):
-                chunk_vals = snapshot_values[start : start + _UPSERT_CHUNK]
+            for chunk_vals in chunked(snapshot_values, _UPSERT_CHUNK):
                 await session.execute(build_fundamentals_upsert(chunk_vals))
                 report.fundamentals_upserted += len(chunk_vals)
             await session.commit()

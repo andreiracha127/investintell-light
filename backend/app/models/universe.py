@@ -12,7 +12,7 @@ Both tables are written ONLY by the batch sync (scripts/sync_universe.py) and
 the backfill script (status updates) — never in any request path.
 """
 
-import datetime
+from datetime import date, datetime
 
 from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -35,15 +35,16 @@ class UniverseConstituent(Base):
 
     # Lifecycle: 'active' | 'no_tiingo_data' (backfill found no Tiingo coverage)
     # | 'excluded' (manually removed from the universe).
+    # Indexed: the backfill and the metrics job both select WHERE status='active'.
     status: Mapped[str] = mapped_column(
-        String, nullable=False, server_default="active"
+        String, nullable=False, server_default="active", index=True
     )
 
     # Provenance of the constituent row, e.g. 'sec_company_tickers+mother_ccm'.
     source: Mapped[str] = mapped_column(String, nullable=False)
 
     # When the sync last touched this row (tz-aware, set by the sync run).
-    synced_at: Mapped[datetime.datetime] = mapped_column(
+    synced_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
 
@@ -58,10 +59,12 @@ class FundamentalsSnapshot(Base):
         primary_key=True,
     )
 
-    cik: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Always populated by the sync (the snapshot is fetched BY cik) — NOT NULL
+    # since migration 0004.
+    cik: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     # Fiscal period end of the latest fundamentals row in the mother DB.
-    period_end: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    period_end: Mapped[date] = mapped_column(Date, nullable=False)
 
     # RAW inputs from company_characteristics_monthly (all nullable — the
     # mother DB has gaps; F6.3 must treat NULL as "metric unavailable").
@@ -78,10 +81,8 @@ class FundamentalsSnapshot(Base):
     profitability_gross: Mapped[float | None] = mapped_column(nullable=True)
 
     # Filing date of the SEC source document behind the fundamentals row.
-    source_filing_date: Mapped[datetime.date | None] = mapped_column(
-        Date, nullable=True
-    )
+    source_filing_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
-    synced_at: Mapped[datetime.datetime] = mapped_column(
+    synced_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

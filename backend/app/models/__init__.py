@@ -12,6 +12,7 @@ from app.models.eod_price import EodPrice
 from app.models.instrument import Instrument
 from app.models.news_item import NewsItem
 from app.models.portfolio import Portfolio, Position
+from app.models.screener_metrics import ScreenerMetrics
 from app.models.universe import FundamentalsSnapshot, UniverseConstituent
 
 __all__ = [
@@ -22,5 +23,6 @@ __all__ = [
     "NewsItem",
     "Portfolio",
     "Position",
+    "ScreenerMetrics",
     "UniverseConstituent",
 ]

@@ -36,6 +36,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.dml import Update
 
+from app.core.chunks import chunked
 from app.core.config import get_settings
 from app.models.eod_price import EodPrice
 from app.models.instrument import Instrument
@@ -292,8 +293,7 @@ async def ingest_one_ticker(
         #    All chunks are executed within the same transaction; the single
         #    commit below atomically finalises the whole ticker.
         rows = await client.get_eod_prices(ticker, fetch_start, end)
-        for chunk_start in range(0, len(rows), _EOD_UPSERT_CHUNK):
-            chunk = rows[chunk_start : chunk_start + _EOD_UPSERT_CHUNK]
+        for chunk in chunked(rows, _EOD_UPSERT_CHUNK):
             await session.execute(build_eod_upsert(chunk))
         await session.execute(build_mark_fetched(ticker))
         await session.commit()
