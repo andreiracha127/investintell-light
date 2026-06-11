@@ -28,13 +28,27 @@ export function NewsPanel({ ticker }: { ticker: string }) {
     return null;
   }
 
+  return <NewsSection stale={data.stale} items={data.items} />;
+}
+
+/**
+ * Shared presentational news section — pure markup, no fetching. Also used by
+ * the portfolio news panel so both surfaces render articles identically.
+ */
+export function NewsSection({
+  stale,
+  items,
+}: {
+  stale: boolean;
+  items: NewsArticle[];
+}) {
   return (
     <section className="bg-surface-2 border border-border rounded-xl p-4">
       <div className="flex items-center gap-2 mb-3">
         <h2 className="text-[11px] font-semibold tracking-[0.06em] uppercase text-text-muted">
           News
         </h2>
-        {data.stale && (
+        {stale && (
           <span
             title="Live refresh failed — showing previously cached articles."
             className="px-1.5 py-px rounded-[4px] bg-surface-3 border border-border text-[10px] text-text-muted"
@@ -44,7 +58,7 @@ export function NewsPanel({ ticker }: { ticker: string }) {
         )}
       </div>
       <ul className="flex flex-col">
-        {data.items.map((item) => (
+        {items.map((item) => (
           <NewsRow key={item.id} item={item} />
         ))}
       </ul>

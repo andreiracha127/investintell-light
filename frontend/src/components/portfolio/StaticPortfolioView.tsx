@@ -6,16 +6,20 @@
  *
  * The frontend computes NO finance. The only numeric conversion is the
  * percent-input -> decimal-fraction step at the API boundary, done in exactly
- * one place (`buildRequest`). No persistence — saving portfolios ships in F4.
+ * one place (`buildRequest`). Quantities-mode results can be persisted via
+ * "Save as portfolio" (see `SaveAsPortfolio` for the weights-mode limitation).
  */
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  createPortfolio,
   postPortfolioAnalysis,
   RANGE_PRESETS,
   type PortfolioAnalysis,
   type PortfolioAnalysisRequest,
+  type PortfolioCreateRequest,
   type PortfolioMode,
   type RangePreset,
 } from "@/lib/api/client";
@@ -310,8 +314,12 @@ export function StaticPortfolioView() {
             {mutation.error.message}
           </p>
         </div>
-      ) : mutation.data && colors ? (
-        <Results data={mutation.data} colors={colors} />
+      ) : mutation.data && mutation.variables && colors ? (
+        <Results
+          data={mutation.data}
+          request={mutation.variables}
+          colors={colors}
+        />
       ) : (
         <p className="text-[13px] text-text-muted">
           Add at least two positions and press Analyze to run a static
@@ -326,9 +334,12 @@ export function StaticPortfolioView() {
 
 function Results({
   data,
+  request,
   colors,
 }: {
   data: PortfolioAnalysis;
+  /** The exact request that produced `data` — source for "Save as portfolio". */
+  request: PortfolioAnalysisRequest;
   colors: ChartColors;
 }) {
   const { params, allocation, stats } = data;
@@ -369,11 +380,17 @@ function Results({
 
   return (
     <div className="flex flex-col gap-5">
-      {/* ── Params echo ── */}
-      <p className="tabular-nums text-[12px] text-text-muted">
-        Window: {formatDate(params.start_date)} →{" "}
-        {formatDate(params.end_date)} · Benchmark: {params.benchmark}
-      </p>
+      {/* ── Params echo + save ── */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <p className="tabular-nums text-[12px] text-text-muted">
+          Window: {formatDate(params.start_date)} →{" "}
+          {formatDate(params.end_date)} · Benchmark: {params.benchmark}
+        </p>
+        {/* Keyed to the analyzed request so a fresh analysis resets the
+            save flow — a stale "Saved as …" must not imply the NEW result
+            was persisted. */}
+        <SaveAsPortfolio key={JSON.stringify(request)} request={request} />
+      </div>
 
       {/* ── Allocation + statistics ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -489,6 +506,125 @@ function Results({
       <Card title="Daily Return Distribution">
         <EChart option={histogramOption} className="h-[280px] w-full" />
       </Card>
+    </div>
+  );
+}
+
+/* ── Save as portfolio ────────────────────────────────────────────────────── */
+
+/**
+ * Persist the just-analyzed positions via POST /portfolios.
+ *
+ * Persistence is quantity-based by design (a portfolio stores
+ * ticker/quantity/acq_price), and the analysis response carries no
+ * window-start prices, so a faithful weight→quantity conversion is impossible
+ * without a backend change. Saving is therefore only offered for
+ * quantities-mode analyses; weights mode shows a disabled button with a hint.
+ */
+function SaveAsPortfolio({ request }: { request: PortfolioAnalysisRequest }) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+
+  const saveMutation = useMutation({
+    mutationFn: (body: PortfolioCreateRequest) => createPortfolio(body),
+    onSuccess: () => {
+      // The Portfolio Overview page lists portfolios from this cache key.
+      queryClient.invalidateQueries({ queryKey: ["portfolios"] });
+    },
+  });
+
+  if (request.mode !== "quantities") {
+    return (
+      <span
+        className="ml-auto flex items-center gap-2"
+        title="Switch to quantities mode to save"
+      >
+        <button
+          type="button"
+          disabled
+          className="px-3 py-1 rounded-[6px] bg-surface-1 border border-border text-[12px] text-text-muted opacity-50 cursor-not-allowed"
+        >
+          Save as portfolio
+        </button>
+        <span className="text-[11px] text-text-muted">
+          Switch to quantities mode to save
+        </span>
+      </span>
+    );
+  }
+
+  if (saveMutation.isSuccess) {
+    return (
+      <p className="ml-auto text-[12px] text-text-secondary">
+        Saved as{" "}
+        <span className="font-semibold text-text-primary">
+          {saveMutation.data.name}
+        </span>
+        {" · "}
+        <Link
+          href="/portfolio"
+          className="text-accent hover:text-accent-strong transition-colors"
+        >
+          View in Portfolio Overview
+        </Link>
+      </p>
+    );
+  }
+
+  const canSave = name.trim().length > 0 && !saveMutation.isPending;
+  const save = () => {
+    if (!canSave) return;
+    saveMutation.mutate({
+      name: name.trim(),
+      cash: 0,
+      positions: request.positions
+        .filter(
+          (p): p is typeof p & { quantity: number } => p.quantity != null,
+        )
+        .map((p) => ({ ticker: p.ticker, quantity: p.quantity })),
+    });
+  };
+
+  return (
+    <div className="ml-auto flex flex-col items-end gap-1">
+      {open ? (
+        <div className="flex items-center gap-2">
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") save();
+              else if (e.key === "Escape") setOpen(false);
+            }}
+            placeholder="Portfolio name"
+            aria-label="Name for the saved portfolio"
+            className={`w-[170px] ${INPUT_CLASS}`}
+          />
+          <button
+            type="button"
+            onClick={save}
+            disabled={!canSave}
+            className="px-3 py-1.5 rounded-[6px] bg-accent text-surface-0 text-[12px] font-semibold hover:bg-accent-strong transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {saveMutation.isPending ? "Saving…" : "Save"}
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="px-3 py-1 rounded-[6px] bg-surface-1 border border-border text-[12px] text-text-secondary hover:text-text-primary hover:border-accent-muted transition-colors"
+        >
+          Save as portfolio
+        </button>
+      )}
+      {saveMutation.isError && (
+        <p role="alert" className="text-[12px] text-loss break-words max-w-[420px] text-right">
+          {saveMutation.error.message}
+        </p>
+      )}
     </div>
   );
 }

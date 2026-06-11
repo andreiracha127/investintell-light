@@ -11,6 +11,11 @@ type AnalysisOperation = paths["/stocks/{ticker}/analysis"]["get"];
 type PricesOperation = paths["/stocks/{ticker}/prices"]["get"];
 type NewsOperation = paths["/stocks/{ticker}/news"]["get"];
 type PortfolioAnalysisOperation = paths["/portfolio/analysis"]["post"];
+type PortfoliosPath = paths["/portfolios"];
+type PortfolioPath = paths["/portfolios/{portfolio_id}"];
+type PositionPath = paths["/portfolios/{portfolio_id}/positions/{ticker}"];
+type OverviewOperation = paths["/portfolios/{portfolio_id}/overview"]["get"];
+type PortfolioNewsOperation = paths["/portfolios/{portfolio_id}/news"]["get"];
 
 export type StockAnalysis =
   AnalysisOperation["responses"]["200"]["content"]["application/json"];
@@ -31,6 +36,25 @@ export type AllocationPosition =
   PortfolioAnalysis["allocation"]["positions"][number];
 export type CorrelationMatrix = PortfolioAnalysis["correlation_matrix"];
 export type RiskContribution = PortfolioAnalysis["risk_contributions"][number];
+
+export type PortfolioListItem =
+  PortfoliosPath["get"]["responses"]["200"]["content"]["application/json"][number];
+export type PortfolioCreateRequest =
+  PortfoliosPath["post"]["requestBody"]["content"]["application/json"];
+export type Portfolio =
+  PortfoliosPath["post"]["responses"]["201"]["content"]["application/json"];
+export type PortfolioPatchRequest =
+  PortfolioPath["patch"]["requestBody"]["content"]["application/json"];
+export type PositionBody =
+  PositionPath["put"]["requestBody"]["content"]["application/json"];
+export type PositionOut =
+  PositionPath["put"]["responses"]["200"]["content"]["application/json"];
+export type PortfolioOverview =
+  OverviewOperation["responses"]["200"]["content"]["application/json"];
+export type OverviewPosition = PortfolioOverview["positions"][number];
+export type OverviewAggregates = PortfolioOverview["aggregates"];
+export type PortfolioNews =
+  PortfolioNewsOperation["responses"]["200"]["content"]["application/json"];
 
 export type Candle = StockAnalysis["candles"][number];
 export type CumulativeReturns = StockAnalysis["cumulative_returns"];
@@ -104,7 +128,7 @@ function extractDetail(body: unknown, fallback: string): string {
 async function request<T>(
   path: string,
   signal?: AbortSignal,
-  init?: { method: "POST"; json: unknown },
+  init?: { method: "POST" | "PUT" | "PATCH" | "DELETE"; json?: unknown },
 ): Promise<T> {
   const timeoutSignal = AbortSignal.timeout(15_000);
   const combinedSignal = signal
@@ -117,8 +141,10 @@ async function request<T>(
       signal: combinedSignal,
       ...(init && {
         method: init.method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(init.json),
+        ...(init.json !== undefined && {
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(init.json),
+        }),
       }),
     });
   } catch (err) {
@@ -141,6 +167,10 @@ async function request<T>(
       // Non-JSON error body — keep the HTTP status as the message.
     }
     throw new ApiError(res.status, detail);
+  }
+  // DELETE endpoints respond 204 with no body — there is nothing to parse.
+  if (res.status === 204) {
+    return undefined as T;
   }
   return (await res.json()) as T;
 }
@@ -181,6 +211,93 @@ export function fetchTickerNews(
   const qs = params.toString();
   return request<TickerNews>(
     `/stocks/${encodeURIComponent(ticker)}/news${qs ? `?${qs}` : ""}`,
+    signal,
+  );
+}
+
+/* ── Persisted portfolios (F4) ────────────────────────────────────────────── */
+
+export function fetchPortfolios(
+  signal?: AbortSignal,
+): Promise<PortfolioListItem[]> {
+  return request<PortfolioListItem[]>("/portfolios", signal);
+}
+
+export function createPortfolio(
+  body: PortfolioCreateRequest,
+  signal?: AbortSignal,
+): Promise<Portfolio> {
+  return request<Portfolio>("/portfolios", signal, {
+    method: "POST",
+    json: body,
+  });
+}
+
+export function patchPortfolio(
+  portfolioId: number,
+  body: PortfolioPatchRequest,
+  signal?: AbortSignal,
+): Promise<Portfolio> {
+  return request<Portfolio>(`/portfolios/${portfolioId}`, signal, {
+    method: "PATCH",
+    json: body,
+  });
+}
+
+export function deletePortfolio(
+  portfolioId: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request<void>(`/portfolios/${portfolioId}`, signal, {
+    method: "DELETE",
+  });
+}
+
+export function putPosition(
+  portfolioId: number,
+  ticker: string,
+  body: PositionBody,
+  signal?: AbortSignal,
+): Promise<PositionOut> {
+  return request<PositionOut>(
+    `/portfolios/${portfolioId}/positions/${encodeURIComponent(ticker)}`,
+    signal,
+    { method: "PUT", json: body },
+  );
+}
+
+export function deletePosition(
+  portfolioId: number,
+  ticker: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request<void>(
+    `/portfolios/${portfolioId}/positions/${encodeURIComponent(ticker)}`,
+    signal,
+    { method: "DELETE" },
+  );
+}
+
+export function fetchPortfolioOverview(
+  portfolioId: number,
+  signal?: AbortSignal,
+): Promise<PortfolioOverview> {
+  return request<PortfolioOverview>(
+    `/portfolios/${portfolioId}/overview`,
+    signal,
+  );
+}
+
+export function fetchPortfolioNews(
+  portfolioId: number,
+  query: NonNullable<PortfolioNewsOperation["parameters"]["query"]> = {},
+  signal?: AbortSignal,
+): Promise<PortfolioNews> {
+  const params = new URLSearchParams();
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  const qs = params.toString();
+  return request<PortfolioNews>(
+    `/portfolios/${portfolioId}/news${qs ? `?${qs}` : ""}`,
     signal,
   );
 }
