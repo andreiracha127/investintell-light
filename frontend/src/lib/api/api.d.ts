@@ -102,10 +102,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/portfolio/analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Analyze Portfolio
+         * @description Render-ready analysis payload for an ad-hoc portfolio — single call.
+         *
+         *     Buy-and-hold replay (NAV, returns-based stats, benchmark comparison) plus
+         *     covariance decomposition (risk contributions, diversification ratio,
+         *     correlation matrix) — see ``app.analytics.portfolio`` for the two-views
+         *     semantics. All fractional fields are decimal fractions (0.05 = 5%).
+         */
+        post: operations["analyze_portfolio_portfolio_analysis_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AllocationOut
+         * @description Resolved allocation at the first analyzed date (the replay strike point).
+         */
+        AllocationOut: {
+            /** Positions */
+            positions: components["schemas"]["AllocationPosition"][];
+            /**
+             * Initial Nav
+             * @description Sum of initial position values, in currency units.
+             */
+            initial_nav: number;
+        };
+        /**
+         * AllocationPosition
+         * @description One position of the resolved allocation at the first date.
+         */
+        AllocationPosition: {
+            /** Ticker */
+            ticker: string;
+            /**
+             * Weight
+             * @description Effective initial weight as a decimal fraction (0.5 = 50%), never 0-100. For mode='weights' the (renormalized) requested weight; for mode='quantities' the initial-date value weight.
+             */
+            weight: number;
+            /**
+             * Initial Value
+             * @description Position value at the first date, in currency units.
+             */
+            initial_value: number;
+        };
         /**
          * AnalysisHeader
          * @description Render-ready header strip values (RAW, un-adjusted prices).
@@ -226,6 +282,31 @@ export interface components {
             worst_day: components["schemas"]["DatedValue"];
         };
         /**
+         * BenchmarkComparison
+         * @description Cumulative return of the portfolio vs the benchmark, rebased to 0.
+         *
+         *     Both series share the same aligned date grid and start at exactly 0.0 on
+         *     the same first date. Values are decimal fractions (0.05 = 5%), never 0-100.
+         */
+        BenchmarkComparison: {
+            /**
+             * Portfolio
+             * @description [date, cumulative return] points; decimal fractions (0.05 = 5%).
+             */
+            portfolio: [
+                string,
+                number
+            ][];
+            /**
+             * Benchmark
+             * @description [date, cumulative return] points; decimal fractions (0.05 = 5%).
+             */
+            benchmark: [
+                string,
+                number
+            ][];
+        };
+        /**
          * Candle
          * @description One OHLCV candle built from RAW (un-adjusted) prices.
          *
@@ -248,6 +329,22 @@ export interface components {
             close: number;
             /** Volume */
             volume: number;
+        };
+        /**
+         * CorrelationMatrixOut
+         * @description Pairwise Pearson correlation of per-asset daily returns.
+         */
+        CorrelationMatrixOut: {
+            /**
+             * Tickers
+             * @description Row/column order of the matrix.
+             */
+            tickers: string[];
+            /**
+             * Matrix
+             * @description Row-major square matrix (-1..1); symmetric with unit diagonal.
+             */
+            matrix: number[][];
         };
         /**
          * CumulativeReturns
@@ -387,6 +484,185 @@ export interface components {
             items: components["schemas"]["NewsArticle"][];
         };
         /**
+         * PortfolioAnalysisRequest
+         * @description Ad-hoc portfolio definition to replay and decompose (no persistence).
+         */
+        PortfolioAnalysisRequest: {
+            /**
+             * Positions
+             * @description Between 2 and 50 positions.
+             */
+            positions: components["schemas"]["PositionIn"][];
+            /**
+             * Mode
+             * @description 'weights' = every position carries a weight; 'quantities' = share counts.
+             * @enum {string}
+             */
+            mode: "weights" | "quantities";
+            /**
+             * Range
+             * @description Visible-range preset; MAX = full COMMON history.
+             * @default 1Y
+             * @enum {string}
+             */
+            range: "1M" | "6M" | "1Y" | "5Y" | "MAX";
+            /**
+             * Benchmark
+             * @description Benchmark ticker for the comparison series and beta/correlation. May coincide with a position.
+             * @default SPY
+             */
+            benchmark: string;
+        };
+        /**
+         * PortfolioAnalysisResponse
+         * @description Render-ready single-call payload for the static portfolio page.
+         *
+         *     Two views, two questions (see ``app.analytics.portfolio``): ``nav``,
+         *     ``benchmark_comparison`` and the return-based ``stats`` are a buy-and-hold
+         *     REPLAY (fixed quantities, weights drift); ``risk_contributions`` and
+         *     ``diversification_ratio`` are a covariance DECOMPOSITION at the effective
+         *     initial weights held constant. The backend computes ALL finance; the
+         *     frontend only draws. Every fractional field is a decimal fraction
+         *     (0.05 = 5%), never 0-100.
+         */
+        PortfolioAnalysisResponse: {
+            params: components["schemas"]["PortfolioParams"];
+            allocation: components["schemas"]["AllocationOut"];
+            /**
+             * Nav
+             * @description [date, NAV] points in currency units; starts at initial_nav. Daily up to 5Y; weekly (W-FRI, last-of-week) for range MAX.
+             */
+            nav: [
+                string,
+                number
+            ][];
+            benchmark_comparison: components["schemas"]["BenchmarkComparison"];
+            stats: components["schemas"]["PortfolioStats"];
+            correlation_matrix: components["schemas"]["CorrelationMatrixOut"];
+            /**
+             * Risk Contributions
+             * @description Per-asset fractions of total risk; they sum to 1.
+             */
+            risk_contributions: components["schemas"]["RiskContributionOut"][];
+            histogram: components["schemas"]["HistogramOut"];
+        };
+        /**
+         * PortfolioParams
+         * @description Echo of the resolved request parameters.
+         */
+        PortfolioParams: {
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "weights" | "quantities";
+            /**
+             * Range
+             * @description Requested range preset.
+             * @enum {string}
+             */
+            range: "1M" | "6M" | "1Y" | "5Y" | "MAX";
+            /**
+             * Benchmark
+             * @description Benchmark ticker used for the comparison series.
+             */
+            benchmark: string;
+            /**
+             * Start Date
+             * Format: date
+             * @description First trading day of the analyzed window (first date where ALL position tickers have data).
+             */
+            start_date: string;
+            /**
+             * End Date
+             * Format: date
+             * @description Last trading day of the analyzed window (the common last date).
+             */
+            end_date: string;
+            /**
+             * Initial Nav
+             * @description Portfolio value at start_date, in currency units. 10000 for mode='weights' (notional); the actual position value for mode='quantities'.
+             */
+            initial_nav: number;
+        };
+        /**
+         * PortfolioStats
+         * @description Point statistics over the portfolio's daily returns in the analyzed
+         *     window. Beta/correlation are versus the benchmark on the aligned date
+         *     grid; the diversification ratio is evaluated at the effective initial
+         *     weights (decomposition view).
+         */
+        PortfolioStats: {
+            /**
+             * Annualized Volatility
+             * @description Annualized volatility as a decimal fraction (0.25 = 25%), never 0-100.
+             */
+            annualized_volatility: number;
+            /**
+             * Var 95
+             * @description Historical 1-day VaR at 95% as a POSITIVE decimal fraction (0.02 = 5% of days lose more than 2%), never 0-100.
+             */
+            var_95: number;
+            /**
+             * Var 99
+             * @description Historical 1-day VaR at 99% as a POSITIVE decimal fraction, never 0-100.
+             */
+            var_99: number;
+            /**
+             * Cvar 95
+             * @description Historical 1-day CVaR (expected shortfall) at 95% as a POSITIVE decimal fraction, never 0-100.
+             */
+            cvar_95: number;
+            /**
+             * Total Return
+             * @description Compounded total return of the replayed portfolio as a decimal fraction (0.5 = +50%), never 0-100.
+             */
+            total_return: number;
+            /**
+             * Beta
+             * @description Portfolio beta vs benchmark over aligned daily returns (unitless).
+             */
+            beta: number;
+            /**
+             * Correlation
+             * @description Pearson correlation vs benchmark over aligned daily returns (-1..1).
+             */
+            correlation: number;
+            /**
+             * Diversification Ratio
+             * @description Weighted-average asset volatility divided by portfolio volatility at the effective initial weights; >= 1 for long-only portfolios (unitless).
+             */
+            diversification_ratio: number;
+            max_drawdown: components["schemas"]["DrawdownOut"];
+            best_day: components["schemas"]["DatedValue"];
+            worst_day: components["schemas"]["DatedValue"];
+        };
+        /**
+         * PositionIn
+         * @description One requested position: a ticker plus EITHER a weight OR a quantity.
+         *
+         *     Which field is required depends on the request ``mode`` (cross-checked at
+         *     the request level): mode=weights demands ``weight``, mode=quantities
+         *     demands ``quantity``.
+         */
+        PositionIn: {
+            /**
+             * Ticker
+             * @description Instrument ticker (normalized to uppercase).
+             */
+            ticker: string;
+            /**
+             * Weight
+             * @description Target weight as a decimal fraction (0.5 = 50%), never 0-100; > 0.
+             */
+            weight?: number | null;
+            /**
+             * Quantity
+             * @description Number of shares/units held; > 0.
+             */
+            quantity?: number | null;
+        };
+        /**
          * PricePoint
          * @description One EOD bar in a price series response.
          */
@@ -434,6 +710,19 @@ export interface components {
             count: number;
             /** Prices */
             prices: components["schemas"]["PricePoint"][];
+        };
+        /**
+         * RiskContributionOut
+         * @description One asset's share of total portfolio risk (CTR convention).
+         */
+        RiskContributionOut: {
+            /** Ticker */
+            ticker: string;
+            /**
+             * Contribution
+             * @description Fraction of TOTAL portfolio risk (decimal fraction; all contributions sum to 1), evaluated at the effective initial weights.
+             */
+            contribution: number;
         };
         /**
          * StockAnalysisResponse
@@ -615,6 +904,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NewsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    analyze_portfolio_portfolio_analysis_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortfolioAnalysisRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioAnalysisResponse"];
                 };
             };
             /** @description Validation Error */

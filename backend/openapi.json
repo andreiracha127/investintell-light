@@ -249,10 +249,101 @@
           }
         }
       }
+    },
+    "/portfolio/analysis": {
+      "post": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Analyze Portfolio",
+        "description": "Render-ready analysis payload for an ad-hoc portfolio \u2014 single call.\n\nBuy-and-hold replay (NAV, returns-based stats, benchmark comparison) plus\ncovariance decomposition (risk contributions, diversification ratio,\ncorrelation matrix) \u2014 see ``app.analytics.portfolio`` for the two-views\nsemantics. All fractional fields are decimal fractions (0.05 = 5%).",
+        "operationId": "analyze_portfolio_portfolio_analysis_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioAnalysisRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioAnalysisResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AllocationOut": {
+        "properties": {
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/AllocationPosition"
+            },
+            "type": "array",
+            "title": "Positions"
+          },
+          "initial_nav": {
+            "type": "number",
+            "title": "Initial Nav",
+            "description": "Sum of initial position values, in currency units."
+          }
+        },
+        "type": "object",
+        "required": [
+          "positions",
+          "initial_nav"
+        ],
+        "title": "AllocationOut",
+        "description": "Resolved allocation at the first analyzed date (the replay strike point)."
+      },
+      "AllocationPosition": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "weight": {
+            "type": "number",
+            "title": "Weight",
+            "description": "Effective initial weight as a decimal fraction (0.5 = 50%), never 0-100. For mode='weights' the (renormalized) requested weight; for mode='quantities' the initial-date value weight."
+          },
+          "initial_value": {
+            "type": "number",
+            "title": "Initial Value",
+            "description": "Position value at the first date, in currency units."
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "weight",
+          "initial_value"
+        ],
+        "title": "AllocationPosition",
+        "description": "One position of the resolved allocation at the first date."
+      },
       "AnalysisHeader": {
         "properties": {
           "ticker": {
@@ -422,6 +513,55 @@
         "title": "AnalysisStats",
         "description": "Point statistics over IN-RANGE returns only (the rolling warm-up pad\nis never included). Beta/correlation are versus the benchmark on the\naligned in-range date grid."
       },
+      "BenchmarkComparison": {
+        "properties": {
+          "portfolio": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Portfolio",
+            "description": "[date, cumulative return] points; decimal fractions (0.05 = 5%)."
+          },
+          "benchmark": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Benchmark",
+            "description": "[date, cumulative return] points; decimal fractions (0.05 = 5%)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "portfolio",
+          "benchmark"
+        ],
+        "title": "BenchmarkComparison",
+        "description": "Cumulative return of the portfolio vs the benchmark, rebased to 0.\n\nBoth series share the same aligned date grid and start at exactly 0.0 on\nthe same first date. Values are decimal fractions (0.05 = 5%), never 0-100."
+      },
       "Candle": {
         "properties": {
           "date": {
@@ -461,6 +601,36 @@
         ],
         "title": "Candle",
         "description": "One OHLCV candle built from RAW (un-adjusted) prices.\n\nDaily for ranges up to 5Y; weekly (W-FRI buckets: open=first, high=max,\nlow=min, close=last, volume=sum) for range MAX."
+      },
+      "CorrelationMatrixOut": {
+        "properties": {
+          "tickers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tickers",
+            "description": "Row/column order of the matrix."
+          },
+          "matrix": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Matrix",
+            "description": "Row-major square matrix (-1..1); symmetric with unit diagonal."
+          }
+        },
+        "type": "object",
+        "required": [
+          "tickers",
+          "matrix"
+        ],
+        "title": "CorrelationMatrixOut",
+        "description": "Pairwise Pearson correlation of per-asset daily returns."
       },
       "CumulativeReturns": {
         "properties": {
@@ -712,6 +882,282 @@
         "title": "NewsResponse",
         "description": "News articles for one ticker, newest first.\n\n``stale`` is True when the Tiingo refresh failed but cached articles were\nserved \u2014 a declared degradation, never a silent fallback."
       },
+      "PortfolioAnalysisRequest": {
+        "properties": {
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/PositionIn"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 2,
+            "title": "Positions",
+            "description": "Between 2 and 50 positions."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "weights",
+              "quantities"
+            ],
+            "title": "Mode",
+            "description": "'weights' = every position carries a weight; 'quantities' = share counts."
+          },
+          "range": {
+            "type": "string",
+            "enum": [
+              "1M",
+              "6M",
+              "1Y",
+              "5Y",
+              "MAX"
+            ],
+            "title": "Range",
+            "description": "Visible-range preset; MAX = full COMMON history.",
+            "default": "1Y"
+          },
+          "benchmark": {
+            "type": "string",
+            "title": "Benchmark",
+            "description": "Benchmark ticker for the comparison series and beta/correlation. May coincide with a position.",
+            "default": "SPY"
+          }
+        },
+        "type": "object",
+        "required": [
+          "positions",
+          "mode"
+        ],
+        "title": "PortfolioAnalysisRequest",
+        "description": "Ad-hoc portfolio definition to replay and decompose (no persistence)."
+      },
+      "PortfolioAnalysisResponse": {
+        "properties": {
+          "params": {
+            "$ref": "#/components/schemas/PortfolioParams"
+          },
+          "allocation": {
+            "$ref": "#/components/schemas/AllocationOut"
+          },
+          "nav": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Nav",
+            "description": "[date, NAV] points in currency units; starts at initial_nav. Daily up to 5Y; weekly (W-FRI, last-of-week) for range MAX."
+          },
+          "benchmark_comparison": {
+            "$ref": "#/components/schemas/BenchmarkComparison"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/PortfolioStats"
+          },
+          "correlation_matrix": {
+            "$ref": "#/components/schemas/CorrelationMatrixOut"
+          },
+          "risk_contributions": {
+            "items": {
+              "$ref": "#/components/schemas/RiskContributionOut"
+            },
+            "type": "array",
+            "title": "Risk Contributions",
+            "description": "Per-asset fractions of total risk; they sum to 1."
+          },
+          "histogram": {
+            "$ref": "#/components/schemas/HistogramOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "params",
+          "allocation",
+          "nav",
+          "benchmark_comparison",
+          "stats",
+          "correlation_matrix",
+          "risk_contributions",
+          "histogram"
+        ],
+        "title": "PortfolioAnalysisResponse",
+        "description": "Render-ready single-call payload for the static portfolio page.\n\nTwo views, two questions (see ``app.analytics.portfolio``): ``nav``,\n``benchmark_comparison`` and the return-based ``stats`` are a buy-and-hold\nREPLAY (fixed quantities, weights drift); ``risk_contributions`` and\n``diversification_ratio`` are a covariance DECOMPOSITION at the effective\ninitial weights held constant. The backend computes ALL finance; the\nfrontend only draws. Every fractional field is a decimal fraction\n(0.05 = 5%), never 0-100."
+      },
+      "PortfolioParams": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "weights",
+              "quantities"
+            ],
+            "title": "Mode"
+          },
+          "range": {
+            "type": "string",
+            "enum": [
+              "1M",
+              "6M",
+              "1Y",
+              "5Y",
+              "MAX"
+            ],
+            "title": "Range",
+            "description": "Requested range preset."
+          },
+          "benchmark": {
+            "type": "string",
+            "title": "Benchmark",
+            "description": "Benchmark ticker used for the comparison series."
+          },
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date",
+            "description": "First trading day of the analyzed window (first date where ALL position tickers have data)."
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date",
+            "description": "Last trading day of the analyzed window (the common last date)."
+          },
+          "initial_nav": {
+            "type": "number",
+            "title": "Initial Nav",
+            "description": "Portfolio value at start_date, in currency units. 10000 for mode='weights' (notional); the actual position value for mode='quantities'."
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode",
+          "range",
+          "benchmark",
+          "start_date",
+          "end_date",
+          "initial_nav"
+        ],
+        "title": "PortfolioParams",
+        "description": "Echo of the resolved request parameters."
+      },
+      "PortfolioStats": {
+        "properties": {
+          "annualized_volatility": {
+            "type": "number",
+            "title": "Annualized Volatility",
+            "description": "Annualized volatility as a decimal fraction (0.25 = 25%), never 0-100."
+          },
+          "var_95": {
+            "type": "number",
+            "title": "Var 95",
+            "description": "Historical 1-day VaR at 95% as a POSITIVE decimal fraction (0.02 = 5% of days lose more than 2%), never 0-100."
+          },
+          "var_99": {
+            "type": "number",
+            "title": "Var 99",
+            "description": "Historical 1-day VaR at 99% as a POSITIVE decimal fraction, never 0-100."
+          },
+          "cvar_95": {
+            "type": "number",
+            "title": "Cvar 95",
+            "description": "Historical 1-day CVaR (expected shortfall) at 95% as a POSITIVE decimal fraction, never 0-100."
+          },
+          "total_return": {
+            "type": "number",
+            "title": "Total Return",
+            "description": "Compounded total return of the replayed portfolio as a decimal fraction (0.5 = +50%), never 0-100."
+          },
+          "beta": {
+            "type": "number",
+            "title": "Beta",
+            "description": "Portfolio beta vs benchmark over aligned daily returns (unitless)."
+          },
+          "correlation": {
+            "type": "number",
+            "title": "Correlation",
+            "description": "Pearson correlation vs benchmark over aligned daily returns (-1..1)."
+          },
+          "diversification_ratio": {
+            "type": "number",
+            "title": "Diversification Ratio",
+            "description": "Weighted-average asset volatility divided by portfolio volatility at the effective initial weights; >= 1 for long-only portfolios (unitless)."
+          },
+          "max_drawdown": {
+            "$ref": "#/components/schemas/DrawdownOut"
+          },
+          "best_day": {
+            "$ref": "#/components/schemas/DatedValue"
+          },
+          "worst_day": {
+            "$ref": "#/components/schemas/DatedValue"
+          }
+        },
+        "type": "object",
+        "required": [
+          "annualized_volatility",
+          "var_95",
+          "var_99",
+          "cvar_95",
+          "total_return",
+          "beta",
+          "correlation",
+          "diversification_ratio",
+          "max_drawdown",
+          "best_day",
+          "worst_day"
+        ],
+        "title": "PortfolioStats",
+        "description": "Point statistics over the portfolio's daily returns in the analyzed\nwindow. Beta/correlation are versus the benchmark on the aligned date\ngrid; the diversification ratio is evaluated at the effective initial\nweights (decomposition view)."
+      },
+      "PositionIn": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker",
+            "description": "Instrument ticker (normalized to uppercase)."
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight",
+            "description": "Target weight as a decimal fraction (0.5 = 50%), never 0-100; > 0."
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity",
+            "description": "Number of shares/units held; > 0."
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker"
+        ],
+        "title": "PositionIn",
+        "description": "One requested position: a ticker plus EITHER a weight OR a quantity.\n\nWhich field is required depends on the request ``mode`` (cross-checked at\nthe request level): mode=weights demands ``weight``, mode=quantities\ndemands ``quantity``."
+      },
       "PricePoint": {
         "properties": {
           "date": {
@@ -805,6 +1251,26 @@
         ],
         "title": "PriceSeriesResponse",
         "description": "EOD price series for one ticker over [start_date, end_date]."
+      },
+      "RiskContributionOut": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "contribution": {
+            "type": "number",
+            "title": "Contribution",
+            "description": "Fraction of TOTAL portfolio risk (decimal fraction; all contributions sum to 1), evaluated at the effective initial weights."
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "contribution"
+        ],
+        "title": "RiskContributionOut",
+        "description": "One asset's share of total portfolio risk (CTR convention)."
       },
       "StockAnalysisResponse": {
         "properties": {

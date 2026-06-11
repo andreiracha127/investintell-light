@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import health as health_router
+from app.api.routes import portfolio as portfolio_router
 from app.api.routes import stocks as stocks_router
 from app.core.config import get_settings
 from app.core.db import engine
@@ -29,11 +30,13 @@ def create_app() -> FastAPI:
     application.add_middleware(
         CORSMiddleware,
         allow_origins=get_settings().cors_allow_origins,
-        allow_methods=["GET"],
+        # POST is required by /portfolio/analysis (ad-hoc body, no persistence).
+        allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
     application.include_router(health_router.router)
     application.include_router(stocks_router.router)
+    application.include_router(portfolio_router.router)
     return application
 
 

@@ -32,7 +32,6 @@ from app.analytics import (
     best_worst_day,
     beta,
     correlation,
-    cumulative_return_series,
     historical_cvar,
     historical_var,
     max_drawdown,
@@ -55,6 +54,18 @@ from app.schemas.analysis import (
     HistogramOut,
     RangeKey,
     StockAnalysisResponse,
+)
+from app.services._series import (
+    rebased_cumulative as _rebased_cumulative,
+)
+from app.services._series import (
+    rebased_cumulative_weekly as _rebased_cumulative_weekly,
+)
+from app.services._series import (
+    resample_weekly as _resample_weekly,
+)
+from app.services._series import (
+    series_points as _series_points,
 )
 
 _HISTOGRAM_BINS = 20
@@ -112,14 +123,6 @@ def build_adj_close_series(records: Iterable[tuple[dt.date, float]]) -> pd.Serie
     return frame.set_index("date")["adj_close"].sort_index()
 
 
-def _series_points(series: pd.Series) -> list[tuple[dt.date, float]]:
-    """Convert a date-indexed float series to ``[(date, value), ...]`` points."""
-    return [
-        (_to_date(label), float(value))
-        for label, value in zip(series.index, series.to_numpy(dtype=float), strict=True)
-    ]
-
-
 def _weekly_candles(frame: pd.DataFrame) -> pd.DataFrame:
     """Resample daily candles to weekly W-FRI buckets (bounded payload for MAX).
 
@@ -142,45 +145,6 @@ def _candles(frame: pd.DataFrame) -> list[Candle]:
         )
         for label, row in frame.iterrows()
     ]
-
-
-def _rebased_cumulative(returns: pd.Series) -> list[tuple[dt.date, float]]:
-    """Cumulative-return points rebased to 0.0 at the first date of *returns*.
-
-    The first in-range date is the rebase point (its close is the base NAV),
-    so the chart starts at exactly 0; growth compounds from the second return
-    onward.
-    """
-    points: list[tuple[dt.date, float]] = [(_to_date(returns.index[0]), 0.0)]
-    if len(returns) > 1:
-        points.extend(_series_points(cumulative_return_series(returns.iloc[1:])))
-    return points
-
-
-def _resample_weekly(series: pd.Series) -> pd.Series:
-    """Resample a daily date-indexed float series to W-FRI taking last-of-week.
-
-    Empty weeks (all NaN) are dropped. Used for MAX-range line series so the
-    x-axis aligns with the weekly candle grid.
-    """
-    return series.resample("W-FRI").last().dropna()
-
-
-def _rebased_cumulative_weekly(returns: pd.Series) -> list[tuple[dt.date, float]]:
-    """Weekly cumulative-return points for MAX range, rebased to 0.0.
-
-    Builds the full daily cumulative series (first point = 0.0, rest compound),
-    then resamples to W-FRI taking last-of-week so the x-axis aligns with the
-    MAX candle grid. The first emitted point is the first in-range Friday.
-    """
-    # Build a daily cumulative series indexed from the first in-range date.
-    daily_cum = pd.Series(
-        [0.0] + list(cumulative_return_series(returns.iloc[1:]).to_numpy(dtype=float))
-        if len(returns) > 1
-        else [0.0],
-        index=returns.index[: (len(returns))],
-    )
-    return _series_points(_resample_weekly(daily_cum))
 
 
 def assemble_analysis(
