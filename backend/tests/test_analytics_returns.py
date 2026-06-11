@@ -53,6 +53,18 @@ def test_total_return_empty_raises() -> None:
         total_return(pd.Series([], dtype=float))
 
 
+def test_total_return_nan_raises() -> None:
+    returns = _dated([0.01, float("nan"), 0.02])
+    with pytest.raises(ValueError, match="NaN"):
+        total_return(returns)
+
+
+def test_cumulative_return_series_nan_raises() -> None:
+    returns = _dated([0.01, float("nan"), 0.02])
+    with pytest.raises(ValueError, match="NaN"):
+        cumulative_return_series(returns)
+
+
 def test_align_returns_drops_non_overlapping_dates() -> None:
     """Misaligned series must be inner-joined: only common dates survive."""
     idx_a = pd.date_range("2024-01-01", periods=5, freq="D")

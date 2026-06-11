@@ -34,9 +34,14 @@ def cumulative_return_series(returns: pd.Series) -> pd.Series:
 
     Raises:
         ValueError: if ``returns`` is empty.
+        ValueError: if ``returns`` contains NaN values.
     """
     if len(returns) < 1:
         raise ValueError("cumulative_return_series requires at least 1 return, got 0")
+    if returns.isna().any():
+        raise ValueError(
+            "cumulative_return_series received NaN values in input; clean the series first"
+        )
     return (1 + returns).cumprod() - 1
 
 
@@ -48,9 +53,12 @@ def total_return(returns: pd.Series) -> float:
 
     Raises:
         ValueError: if ``returns`` is empty.
+        ValueError: if ``returns`` contains NaN values.
     """
     if len(returns) < 1:
         raise ValueError("total_return requires at least 1 return, got 0")
+    if returns.isna().any():
+        raise ValueError("total_return received NaN values in input; clean the series first")
     return float((1 + returns).to_numpy(dtype=float).prod()) - 1.0
 
 
