@@ -16,7 +16,20 @@ export interface ChartColors {
   textMuted: string;
   grid: string;
   surface: string;
+  /** Categorical palette for multi-asset series (allocation donut, …). */
+  categories: string[];
 }
+
+const CATEGORY_VARS = [
+  "--color-cat-1",
+  "--color-cat-2",
+  "--color-cat-3",
+  "--color-cat-4",
+  "--color-cat-5",
+  "--color-cat-6",
+  "--color-cat-7",
+  "--color-cat-8",
+] as const;
 
 function readVar(styles: CSSStyleDeclaration, name: string): string {
   const value = styles.getPropertyValue(name).trim();
@@ -38,5 +51,6 @@ export function chartColors(): ChartColors {
     textMuted: readVar(styles, "--color-text-muted"),
     grid: readVar(styles, "--color-border"),
     surface: readVar(styles, "--color-surface-3"),
+    categories: CATEGORY_VARS.map((name) => readVar(styles, name)),
   };
 }

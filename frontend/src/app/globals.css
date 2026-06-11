@@ -32,6 +32,17 @@
   --color-loss-muted:    #7f1d1d;   /* subtle negative background */
   --color-neutral-value: #94a3b8;   /* flat / unchanged value */
 
+  /* ── Categorical palette (multi-asset series: allocation donut, …) ──
+     Accent-anchored hues tuned to read on the dark graphite surfaces. */
+  --color-cat-1: #22d3ee;   /* cyan — the accent anchor */
+  --color-cat-2: #818cf8;   /* indigo */
+  --color-cat-3: #34d399;   /* emerald */
+  --color-cat-4: #f472b6;   /* pink */
+  --color-cat-5: #fbbf24;   /* amber */
+  --color-cat-6: #a78bfa;   /* violet */
+  --color-cat-7: #fb923c;   /* orange */
+  --color-cat-8: #5eead4;   /* teal */
+
   /* ── Text tokens ── */
   --color-text-primary:   #e2e8f0;   /* main body text */
   --color-text-secondary: #94a3b8;   /* labels, metadata */

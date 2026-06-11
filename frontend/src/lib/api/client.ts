@@ -10,6 +10,7 @@ import type { paths } from "@/lib/api/api";
 type AnalysisOperation = paths["/stocks/{ticker}/analysis"]["get"];
 type PricesOperation = paths["/stocks/{ticker}/prices"]["get"];
 type NewsOperation = paths["/stocks/{ticker}/news"]["get"];
+type PortfolioAnalysisOperation = paths["/portfolio/analysis"]["post"];
 
 export type StockAnalysis =
   AnalysisOperation["responses"]["200"]["content"]["application/json"];
@@ -20,6 +21,17 @@ export type PriceSeries =
 export type TickerNews =
   NewsOperation["responses"]["200"]["content"]["application/json"];
 export type NewsArticle = TickerNews["items"][number];
+
+export type PortfolioAnalysisRequest =
+  PortfolioAnalysisOperation["requestBody"]["content"]["application/json"];
+export type PortfolioAnalysis =
+  PortfolioAnalysisOperation["responses"]["200"]["content"]["application/json"];
+export type PortfolioMode = PortfolioAnalysisRequest["mode"];
+export type PositionIn = PortfolioAnalysisRequest["positions"][number];
+export type AllocationPosition =
+  PortfolioAnalysis["allocation"]["positions"][number];
+export type CorrelationMatrix = PortfolioAnalysis["correlation_matrix"];
+export type RiskContribution = PortfolioAnalysis["risk_contributions"][number];
 
 export type Candle = StockAnalysis["candles"][number];
 export type CumulativeReturns = StockAnalysis["cumulative_returns"];
@@ -62,7 +74,11 @@ function extractDetail(body: unknown, fallback: string): string {
   return fallback;
 }
 
-async function request<T>(path: string, signal?: AbortSignal): Promise<T> {
+async function request<T>(
+  path: string,
+  signal?: AbortSignal,
+  init?: { method: "POST"; json: unknown },
+): Promise<T> {
   const timeoutSignal = AbortSignal.timeout(15_000);
   const combinedSignal = signal
     ? AbortSignal.any([signal, timeoutSignal])
@@ -70,7 +86,14 @@ async function request<T>(path: string, signal?: AbortSignal): Promise<T> {
 
   let res: Response;
   try {
-    res = await fetch(`${BASE_URL}${path}`, { signal: combinedSignal });
+    res = await fetch(`${BASE_URL}${path}`, {
+      signal: combinedSignal,
+      ...(init && {
+        method: init.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(init.json),
+      }),
+    });
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       // Distinguish a timeout from a caller-triggered abort (e.g. unmount).
@@ -93,6 +116,16 @@ async function request<T>(path: string, signal?: AbortSignal): Promise<T> {
     throw new ApiError(res.status, detail);
   }
   return (await res.json()) as T;
+}
+
+export function postPortfolioAnalysis(
+  body: PortfolioAnalysisRequest,
+  signal?: AbortSignal,
+): Promise<PortfolioAnalysis> {
+  return request<PortfolioAnalysis>("/portfolio/analysis", signal, {
+    method: "POST",
+    json: body,
+  });
 }
 
 export function fetchStockAnalysis(

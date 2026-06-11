@@ -30,6 +30,7 @@ import {
 } from "@/lib/format";
 import { EChart } from "@/components/charts/EChart";
 import { NewsPanel } from "@/components/stocks/NewsPanel";
+import { Card, StatRow, valueTone } from "@/components/ui/panels";
 
 /** Rolling window in trading days — fixed at the backend default for now (F7 may add a control). */
 const ROLLING_WINDOW = 63;
@@ -254,7 +255,7 @@ function AnalysisContent({
             <StatRow
               label="Total Return"
               value={formatPercent(stats.total_return, 2, { signed: true })}
-              tone={signTone(stats.total_return)}
+              tone={valueTone(stats.total_return)}
             />
             <StatRow
               label={`Beta vs ${params.benchmark}`}
@@ -292,58 +293,7 @@ function AnalysisContent({
   );
 }
 
-function signTone(value: number): string {
-  if (value > 0) return "text-gain";
-  if (value < 0) return "text-loss";
-  return "text-neutral-value";
-}
-
 /* ── Presentational helpers ───────────────────────────────────────────────── */
-
-function Card({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="bg-surface-2 border border-border rounded-xl p-4">
-      <h2 className="text-[11px] font-semibold tracking-[0.06em] uppercase text-text-muted mb-3">
-        {title}
-      </h2>
-      {children}
-    </section>
-  );
-}
-
-function StatRow({
-  label,
-  value,
-  tone = "text-text-primary",
-  detail,
-}: {
-  label: string;
-  value: string;
-  tone?: string;
-  detail?: string;
-}) {
-  return (
-    <div className="flex items-baseline justify-between py-2 border-b border-border last:border-b-0">
-      <dt className="text-[13px] text-text-secondary">{label}</dt>
-      <dd className="text-right">
-        <span className={`tabular-nums text-[13px] font-semibold ${tone}`}>
-          {value}
-        </span>
-        {detail && (
-          <span className="block tabular-nums text-[11px] text-text-muted">
-            {detail}
-          </span>
-        )}
-      </dd>
-    </div>
-  );
-}
 
 function StatePanel({
   title,
