@@ -30,8 +30,9 @@ Conventions (project-wide):
 - Pure pandas/numpy — no database access, no I/O, no FastAPI.
 - All fractional quantities are decimal fractions (0.05 = 5%), never 0-100.
 - ``prices`` inputs are date-indexed DataFrames of ADJUSTED closes, one column
-  per ticker, already inner-join aligned by the caller. Any NaN or fewer than
-  2 rows raises ``ValueError`` (fail loud, never NaN out).
+  per ticker, already inner-join aligned by the caller. Any NaN, infinite
+  value, or fewer than 2 rows raises ``ValueError`` (fail loud, never NaN or
+  inf out).
 - Long-only by design (F3 scope): every weight and quantity must be > 0.
 - Sample statistics use ddof=1, matching the single-asset engine (F2).
 """
@@ -270,7 +271,10 @@ def risk_contributions(
     contributions = weight_vector * sigma_w / portfolio_variance
     total = float(contributions.sum())
     # Internal invariant: CTRs are an exact algebraic decomposition of σ²_p.
-    assert abs(total - 1.0) < _CTR_SUM_TOL, f"risk contributions sum to {total}, not 1"
+    if abs(total - 1.0) >= _CTR_SUM_TOL:
+        raise ValueError(
+            f"risk_contributions: contributions sum to {total}, not 1 (numerical instability)"
+        )
     return {
         ticker: float(ctr) for ticker, ctr in zip(columns, contributions, strict=True)
     }

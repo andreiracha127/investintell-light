@@ -353,3 +353,63 @@ class TestValueErrorPaths:
         bad_row = pd.Series({"A": 0.0, "B": 20.0})
         with pytest.raises(ValueError, match="positive first-date prices"):
             weights_to_quantities(bad_row, {"A": 0.5, "B": 0.5})
+
+    def test_inf_from_zero_price_mid_series_rejected(self) -> None:
+        # A zero price mid-series produces an inf return via pct_change().
+        # All three analytics functions must reject it before computing.
+        prices = _price_frame(
+            {"A": [10.0, 0.0, 12.0, 11.0, 13.0, 12.0, 14.0, 13.0, 15.0, 14.0, 16.0],
+             "B": [20.0, 21.0, 22.0, 21.0, 23.0, 22.0, 24.0, 23.0, 25.0, 24.0, 26.0]}
+        )
+        # asset_returns_frame does NOT dropna/clip: pct_change on a zero price
+        # produces inf, which must be caught by the downstream validators.
+        returns = prices.pct_change().dropna()
+        # returns["A"] now contains inf at the row after the zero price
+        assert not np.isfinite(returns["A"]).all()
+        with pytest.raises(ValueError, match="infinite"):
+            correlation_matrix(returns)
+        with pytest.raises(ValueError, match="infinite"):
+            risk_contributions(returns, {"A": 0.5, "B": 0.5})
+        with pytest.raises(ValueError, match="infinite"):
+            diversification_ratio(returns, {"A": 0.5, "B": 0.5})
+
+    def test_direct_inf_in_returns_frame_rejected(self) -> None:
+        # Directly injecting ±inf into a returns frame must also be rejected.
+        returns = _orthogonal_returns(0.01, 0.01)
+        returns_with_inf = returns.copy()
+        returns_with_inf.iloc[3, 0] = np.inf
+        with pytest.raises(ValueError, match="infinite"):
+            correlation_matrix(returns_with_inf)
+        with pytest.raises(ValueError, match="infinite"):
+            risk_contributions(returns_with_inf, {"A": 0.5, "B": 0.5})
+        with pytest.raises(ValueError, match="infinite"):
+            diversification_ratio(returns_with_inf, {"A": 0.5, "B": 0.5})
+
+
+# ---------------------------------------------------------------------------
+# Column-permutation property tests
+# ---------------------------------------------------------------------------
+
+
+def test_risk_contributions_invariant_under_column_permutation() -> None:
+    """CTR dict must be identical (within 1e-12) regardless of column order."""
+    prices = _seeded_prices(["A", "B", "C"])
+    weights = {"A": 0.5, "B": 0.3, "C": 0.2}
+    returns_abc = asset_returns_frame(prices)
+    returns_cab = asset_returns_frame(prices[["C", "A", "B"]])
+    ctr_abc = risk_contributions(returns_abc, weights)
+    ctr_cab = risk_contributions(returns_cab, weights)
+    for ticker in ("A", "B", "C"):
+        assert abs(ctr_abc[ticker] - ctr_cab[ticker]) < 1e-12
+
+
+def test_correlation_matrix_invariant_under_column_permutation() -> None:
+    """Correlation matrix re-indexed to original order must match within 1e-12."""
+    prices = _seeded_prices(["A", "B", "C"])
+    returns_abc = asset_returns_frame(prices)
+    returns_bca = asset_returns_frame(prices[["B", "C", "A"]])
+    corr_abc = correlation_matrix(returns_abc)
+    corr_bca = correlation_matrix(returns_bca).reindex(
+        index=corr_abc.index, columns=corr_abc.columns
+    )
+    assert np.max(np.abs((corr_abc - corr_bca).to_numpy())) < 1e-12
