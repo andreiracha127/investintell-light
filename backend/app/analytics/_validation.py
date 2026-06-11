@@ -37,6 +37,18 @@ def reject_nan(series: pd.Series, func_name: str) -> None:
         )
 
 
+def reject_nan_frame(frame: pd.DataFrame, func_name: str) -> None:
+    """Raise ``ValueError`` if *frame* contains any NaN values.
+
+    DataFrame counterpart of :func:`reject_nan`, used by the portfolio engine
+    where inputs are date-by-ticker matrices.
+    """
+    if bool(frame.isna().any().any()):
+        raise ValueError(
+            f"{func_name} received NaN values in input; clean the data first"
+        )
+
+
 def reject_nan_float(value: float, func_name: str) -> None:
     """Raise ``ValueError`` if *value* is NaN.
 
