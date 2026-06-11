@@ -72,6 +72,13 @@ def _stub_count(monkeypatch: pytest.MonkeyPatch, count: int) -> None:
     monkeypatch.setattr(screener_service, "count_matching", fake_count)
 
 
+def _stub_available_count(monkeypatch: pytest.MonkeyPatch, count: int = 10) -> None:
+    async def fake_available(session: Any, code: str) -> int:
+        return count
+
+    monkeypatch.setattr(screener_service, "count_metric_available", fake_available)
+
+
 def _stub_metric_values(monkeypatch: pytest.MonkeyPatch, values: list[float]) -> None:
     """Stub ONLY the SQL read — the histogram pipeline stays live."""
 
@@ -279,6 +286,7 @@ async def test_put_filter_upserts_and_returns_build_payload(
     _stub_get_screen(monkeypatch, _screen(filters=[_filter()]))
     _stub_metric_values(monkeypatch, [5.0, 12.0, 14.0, 30.0])
     _stub_count(monkeypatch, 2)
+    _stub_available_count(monkeypatch, 4)
 
     async with _client() as ac:
         response = await ac.put(
@@ -291,6 +299,7 @@ async def test_put_filter_upserts_and_returns_build_payload(
     assert upserts == [(1, "pe_ratio", 10.0, 15.0)]
     assert body["screen"]["filters"][0]["metric_code"] == "pe_ratio"
     assert body["headline_count"] == 2
+    assert body["available_count"] == 4
     assert len(body["distribution"]["bin_edges"]) == 41
     assert sum(body["distribution"]["counts"]) == 4
     assert max(body["distribution"]["counts_normalized"]) == 1.0
@@ -308,6 +317,7 @@ async def test_put_filter_sparse_snapshot_returns_null_distribution(
     _stub_get_screen(monkeypatch, _screen(filters=[_filter()]))
     _stub_metric_values(monkeypatch, [])
     _stub_count(monkeypatch, 0)
+    _stub_available_count(monkeypatch, 0)
 
     async with _client() as ac:
         response = await ac.put("/screener/screens/1/filters/pe_ratio", json={})
@@ -316,6 +326,7 @@ async def test_put_filter_sparse_snapshot_returns_null_distribution(
     body = response.json()
     assert body["distribution"] is None
     assert body["headline_count"] == 0
+    assert body["available_count"] == 0
 
 
 async def test_put_filter_screen_404(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -336,6 +347,7 @@ async def test_delete_filter_returns_build_payload(
     _stub_get_screen(monkeypatch, _screen(filters=[]))
     _stub_metric_values(monkeypatch, [1.0, 2.0])
     _stub_count(monkeypatch, 3)
+    _stub_available_count(monkeypatch, 2)
 
     async with _client() as ac:
         response = await ac.delete("/screener/screens/1/filters/pe_ratio")
@@ -344,6 +356,7 @@ async def test_delete_filter_returns_build_payload(
     body = response.json()
     assert body["screen"]["filters"] == []
     assert body["headline_count"] == 3
+    assert body["available_count"] == 2
     assert body["distribution"] is not None
 
 
@@ -370,6 +383,7 @@ async def test_build_linear_distribution_and_headline_count(
     _stub_get_screen(monkeypatch, _screen(filters=[_filter()]))
     _stub_metric_values(monkeypatch, [float(v) / 100 for v in range(-20, 21)])
     _stub_count(monkeypatch, 7)
+    _stub_available_count(monkeypatch, 41)
 
     async with _client() as ac:
         response = await ac.get("/screener/screens/1/build/ret_1y")
@@ -381,6 +395,7 @@ async def test_build_linear_distribution_and_headline_count(
     steps = [b - a for a, b in zip(edges, edges[1:], strict=False)]
     assert all(math.isclose(s, steps[0], abs_tol=1e-12) for s in steps)
     assert body["headline_count"] == 7
+    assert body["available_count"] == 41
 
 
 async def test_build_market_cap_uses_log_spaced_edges(
@@ -389,6 +404,7 @@ async def test_build_market_cap_uses_log_spaced_edges(
     _stub_get_screen(monkeypatch, _screen())
     _stub_metric_values(monkeypatch, [10.0**exp for exp in range(7, 13)])
     _stub_count(monkeypatch, 0)
+    _stub_available_count(monkeypatch, 6)
 
     async with _client() as ac:
         response = await ac.get("/screener/screens/1/build/market_cap")
@@ -404,6 +420,7 @@ async def test_build_empty_column_422_with_actionable_message(
 ) -> None:
     _stub_get_screen(monkeypatch, _screen())
     _stub_metric_values(monkeypatch, [])
+    _stub_available_count(monkeypatch, 0)
 
     async with _client() as ac:
         response = await ac.get("/screener/screens/1/build/pe_ratio")
@@ -566,8 +583,9 @@ async def test_results_csv_shape_headers_and_hard_cap(
     )
     lines = response.text.strip().split("\n")
     assert lines[0] == "ticker,name,pe_ratio,market_cap"
-    assert lines[1] == "AAPL,Apple Inc,12.0,3000000000000.0"
-    assert lines[2] == "MSFT,Microsoft,14.0,"  # NULL → empty cell
+    # pe_ratio is "float" → 6 d.p.; market_cap is "currency" → 2 d.p.
+    assert lines[1] == "AAPL,Apple Inc,12.000000,3000000000000.00"
+    assert lines[2] == "MSFT,Microsoft,14.000000,"  # NULL → empty cell
     # Unpaginated but bounded: the CSV export reads at most CSV_HARD_CAP rows.
     assert calls == [
         {

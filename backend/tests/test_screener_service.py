@@ -68,6 +68,21 @@ def test_histogram_log_spaced_for_positive_currency() -> None:
     assert sum(dist.counts) == len(market_caps)  # min AND max are both counted
 
 
+def test_histogram_log_spaced_for_positive_int() -> None:
+    """F6.4 review: avg_volume_1m has data_type='int' and spans many magnitudes.
+
+    Volume values like 1K–10M need log-spacing just like market_cap; the log
+    branch must fire when data_type='int' and all values > 0.
+    """
+    volumes = [10.0**exp for exp in range(3, 8)]  # 1 000 .. 10 000 000
+    dist = svc.build_histogram(volumes, "int")
+
+    # Equal-ratio bins (log-spaced).
+    ratios = [b / a for a, b in zip(dist.bin_edges, dist.bin_edges[1:], strict=False)]
+    assert all(math.isclose(r, ratios[0], rel_tol=1e-9) for r in ratios)
+    assert sum(dist.counts) == len(volumes)
+
+
 def test_histogram_currency_with_nonpositive_value_falls_back_to_linear() -> None:
     dist = svc.build_histogram([0.0, 10.0, 100.0], "currency")
     steps = [b - a for a, b in zip(dist.bin_edges, dist.bin_edges[1:], strict=False)]
@@ -202,5 +217,60 @@ def test_render_csv_shape_and_null_cells() -> None:
     body = svc.render_csv(columns, rows)
     lines = body.strip().split("\n")
     assert lines[0] == "ticker,name,pe_ratio"
-    assert lines[1] == 'AAPL,"Apple, Inc.",28.5'
+    assert lines[1] == 'AAPL,"Apple, Inc.",28.500000'
     assert lines[2] == "MSFT,Microsoft Corp,"
+
+
+def test_render_csv_no_scientific_notation() -> None:
+    """F6.4 review: CSV cells must never contain 'e'/'E' (scientific notation).
+
+    market_cap 2.5e12 → '2500000000000.00' (currency, 2 d.p.)
+    avg_volume_1m 1234567 → '1234567' (int, 0 d.p.)
+    roe 1e-05 → '0.000010' (percent, 6 d.p.)
+    """
+    columns = [
+        ("ticker", "Ticker", "string"),
+        ("market_cap", "Market Cap", "currency"),
+        ("avg_volume_1m", "Avg Volume 1M", "int"),
+        ("roe", "Return on Equity", "percent"),
+    ]
+    rows = [
+        {
+            "ticker": "BIG",
+            "market_cap": 2.5e12,
+            "avg_volume_1m": 1_234_567.0,
+            "roe": 1e-5,
+        }
+    ]
+    body = svc.render_csv(columns, rows)
+    lines = body.strip().split("\n")
+    data_line = lines[1]
+
+    assert "e" not in data_line.lower(), f"scientific notation found: {data_line!r}"
+    assert "2500000000000.00" in data_line
+    assert "1234567" in data_line
+    assert "0.000010" in data_line
+
+
+# ---------------------------------------------------------------------------
+# compile-level: metric-values SELECT covers active universe + IS NOT NULL
+# ---------------------------------------------------------------------------
+
+
+def test_select_metric_values_query_filters_active_universe_and_not_null() -> None:
+    """F6.4 review: the build/distribution feed SELECT must restrict to the
+    active universe (status = 'active') and exclude NULL values for the metric.
+
+    Compiled against the PostgreSQL dialect with literal binds — deterministic,
+    no live DB required.
+    """
+    from sqlalchemy.dialects import postgresql  # noqa: PLC0415
+
+    col = svc.metric_column("pe_ratio")
+    stmt = svc._active_universe_select(col).where(col.is_not(None))
+    sql = str(
+        stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
+    )
+
+    assert "universe_constituents.status = 'active'" in sql
+    assert "screener_metrics.pe_ratio IS NOT NULL" in sql

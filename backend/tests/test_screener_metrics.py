@@ -243,6 +243,26 @@ def test_single_row_history_yields_levels_only() -> None:
             assert out[col] is None, col
 
 
+def test_avg_volume_1m_nan_guard_yields_none() -> None:
+    """F6.3 review: avg_volume_1m guard — NaN mean → None (fail-soft parity).
+
+    Inject NaN into the volume column to verify the guard fires and returns
+    None rather than propagating a float NaN into the snapshot.
+    """
+    _nan = float("nan")
+    index = pd.bdate_range(end=pd.Timestamp(_AS_OF), periods=5)
+    frame = pd.DataFrame(
+        {
+            "adj_close": [100.0] * 5,
+            "close": [100.0] * 5,
+            "volume": [_nan] * 5,  # all NaN → mean is NaN
+        },
+        index=index,
+    )
+    out = compute_ticker_metrics(frame, _no_benchmarks(), None, _AS_OF)
+    assert out["avg_volume_1m"] is None
+
+
 def test_price_close_uses_raw_close_and_avg_volume_is_trailing_month() -> None:
     index = pd.bdate_range(end=pd.Timestamp(_AS_OF), periods=60)
     frame = pd.DataFrame(
@@ -307,6 +327,24 @@ def test_nonpositive_book_equity_nulls_roe_and_de() -> None:
     assert out["roe"] is None
     assert out["de_ratio"] is None
     assert out["pe_ratio"] is not None  # untouched by the equity guard
+
+
+def test_null_book_equity_nulls_roe_and_de_but_not_gross_margin() -> None:
+    """book_equity=None → roe and de_ratio both NULL; gross_margin still computed.
+
+    F6.3 review: fundamentals row present but book_equity missing (e.g. the
+    mother DB has a partial snapshot) must not poison the other ratios.
+    """
+    out = compute_ticker_metrics(
+        _flat_then_jump(400),
+        _no_benchmarks(),
+        _fund_row(book_equity=None),
+        _AS_OF,
+    )
+    assert out["roe"] is None
+    assert out["de_ratio"] is None
+    assert out["gross_margin"] is not None  # revenue + gross_profit present → computed
+    assert out["market_cap"] is not None  # shares + price present → computed
 
 
 def test_null_shares_nulls_market_cap_and_pe() -> None:

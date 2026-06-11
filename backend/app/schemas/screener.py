@@ -170,6 +170,13 @@ class BuildResponse(BaseModel):
     headline_count: int = Field(
         description="Universe rows satisfying ALL the screen's current filters."
     )
+    available_count: int = Field(
+        description=(
+            "Non-NULL rows for this metric over the active universe. "
+            "Distinguishes 'zero matches' (headline_count=0, available_count>0) "
+            "from 'no data yet' (available_count=0) without inspecting the 422."
+        )
+    )
 
 
 class FilterUpdateResponse(BaseModel):
@@ -177,11 +184,19 @@ class FilterUpdateResponse(BaseModel):
 
     ``distribution`` is null (rather than failing the successful write with
     422) when the metric has zero non-NULL rows in the snapshot.
+    ``available_count`` exposes the non-NULL count so the UI can distinguish
+    "0 matches" from "no data" without relying solely on the 422 path.
     """
 
     screen: ScreenOut
     distribution: DistributionOut | None
     headline_count: int
+    available_count: int = Field(
+        description=(
+            "Non-NULL rows for this metric over the active universe. "
+            "0 implies the snapshot has not been computed yet."
+        )
+    )
 
 
 # ---------------------------------------------------------------------------

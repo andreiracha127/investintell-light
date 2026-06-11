@@ -71,15 +71,16 @@ async def _screen_or_404(session: AsyncSession, screen_id: int) -> Screen:
 
 async def _build_payload(
     session: AsyncSession, screen: Screen, metric: MetricDef
-) -> tuple[DistributionOut | None, int]:
-    """Distribution (null when the snapshot has no data) + headline count."""
+) -> tuple[DistributionOut | None, int, int]:
+    """Distribution (null when the snapshot has no data), headline count, available count."""
+    available_count = await screener_service.count_metric_available(session, metric.code)
     try:
         distribution = await screener_service.compute_distribution(session, metric)
         distribution_out = DistributionOut.model_validate(distribution)
     except screener_service.MetricDataUnavailableError:
         distribution_out = None
     headline_count = await screener_service.count_matching(session, screen.filters)
-    return distribution_out, headline_count
+    return distribution_out, headline_count, available_count
 
 
 # ---------------------------------------------------------------------------
@@ -168,11 +169,12 @@ async def put_filter(
         session, screen_id, metric.code, payload.min_value, payload.max_value
     )
     screen = await _screen_or_404(session, screen_id)
-    distribution, headline_count = await _build_payload(session, screen, metric)
+    distribution, headline_count, available_count = await _build_payload(session, screen, metric)
     return FilterUpdateResponse(
         screen=ScreenOut.model_validate(screen),
         distribution=distribution,
         headline_count=headline_count,
+        available_count=available_count,
     )
 
 
@@ -192,11 +194,12 @@ async def delete_filter(
             detail=f"Filter {metric.code!r} not found in screen {screen_id}.",
         )
     screen = await _screen_or_404(session, screen_id)
-    distribution, headline_count = await _build_payload(session, screen, metric)
+    distribution, headline_count, available_count = await _build_payload(session, screen, metric)
     return FilterUpdateResponse(
         screen=ScreenOut.model_validate(screen),
         distribution=distribution,
         headline_count=headline_count,
+        available_count=available_count,
     )
 
 
@@ -219,6 +222,7 @@ async def build_metric(
     """
     metric = _metric_or_422(metric_code)
     screen = await _screen_or_404(session, screen_id)
+    available_count = await screener_service.count_metric_available(session, metric.code)
     try:
         distribution = await screener_service.compute_distribution(session, metric)
     except screener_service.MetricDataUnavailableError as exc:
@@ -227,6 +231,7 @@ async def build_metric(
     return BuildResponse(
         distribution=DistributionOut.model_validate(distribution),
         headline_count=headline_count,
+        available_count=available_count,
     )
 
 

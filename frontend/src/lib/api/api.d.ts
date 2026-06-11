@@ -767,6 +767,11 @@ export interface components {
              * @description Universe rows satisfying ALL the screen's current filters.
              */
             headline_count: number;
+            /**
+             * Available Count
+             * @description Non-NULL rows for this metric over the active universe. Distinguishes 'zero matches' (headline_count=0, available_count>0) from 'no data yet' (available_count=0) without inspecting the 422.
+             */
+            available_count: number;
         };
         /**
          * Candle
@@ -993,12 +998,19 @@ export interface components {
          *
          *     ``distribution`` is null (rather than failing the successful write with
          *     422) when the metric has zero non-NULL rows in the snapshot.
+         *     ``available_count`` exposes the non-NULL count so the UI can distinguish
+         *     "0 matches" from "no data" without relying solely on the 422 path.
          */
         FilterUpdateResponse: {
             screen: components["schemas"]["ScreenOut"];
             distribution: components["schemas"]["DistributionOut"] | null;
             /** Headline Count */
             headline_count: number;
+            /**
+             * Available Count
+             * @description Non-NULL rows for this metric over the active universe. 0 implies the snapshot has not been computed yet.
+             */
+            available_count: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {

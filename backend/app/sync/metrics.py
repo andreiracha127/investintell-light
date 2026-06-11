@@ -371,7 +371,8 @@ def compute_ticker_metrics(
     month_volume = prices["volume"].loc[
         prices.index > as_of_ts - pd.DateOffset(months=1)
     ]
-    out["avg_volume_1m"] = float(month_volume.mean())
+    mean = float(month_volume.mean())
+    out["avg_volume_1m"] = None if pd.isna(mean) else mean
 
     out.update(_fundamentals_metrics(fundamentals, price_close))
     return out

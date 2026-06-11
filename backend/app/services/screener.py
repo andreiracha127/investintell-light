@@ -279,7 +279,7 @@ def _search_condition(search: str) -> ColumnElement[bool]:
 
 
 def build_histogram(values: Sequence[float], data_type: str) -> Distribution:
-    """40-bin histogram; log-spaced edges for currency metrics when all > 0.
+    """40-bin histogram; log-spaced edges for currency/int metrics when all > 0.
 
     Pure (unit-tested on synthetic data). Raises MetricDataUnavailableError
     on an empty input — the caller decides whether that is a 422 (build
@@ -292,7 +292,7 @@ def build_histogram(values: Sequence[float], data_type: str) -> Distribution:
     array = np.asarray(values, dtype=float)
     low = float(array.min())
     high = float(array.max())
-    if data_type == "currency" and low > 0 and high > low:
+    if data_type in ("currency", "int") and low > 0 and high > low:
         # The study's market-cap pattern: equal-ratio bins across magnitudes.
         edges = np.logspace(np.log10(low), np.log10(high), HISTOGRAM_BINS + 1)
         # Clamp the float endpoints so min/max values always fall inside.
@@ -320,6 +320,17 @@ async def select_metric_values(session: AsyncSession, code: str) -> list[float]:
     column = metric_column(code)
     result = await session.execute(_active_universe_select(column).where(column.is_not(None)))
     return [float(value) for (value,) in result.all()]
+
+
+async def count_metric_available(session: AsyncSession, code: str) -> int:
+    """COUNT of non-NULL rows for *code* over the active universe.
+
+    Lets callers distinguish "0 matches" from "no snapshot data" without
+    triggering the MetricDataUnavailableError path.
+    """
+    column = metric_column(code)
+    stmt = _active_universe_select(func.count()).where(column.is_not(None))
+    return int(await session.scalar(stmt) or 0)
 
 
 async def compute_distribution(session: AsyncSession, metric: MetricDef) -> Distribution:
@@ -426,15 +437,44 @@ async def fetch_results(
     return rows, total
 
 
+def _csv_cell(value: str | float | None, data_type: str) -> str:
+    """Format one CSV cell — stable decimal notation, no scientific notation.
+
+    None  → empty string (null/unavailable).
+    str   → passed through (ticker, name).
+    float → formatted by data_type:
+        currency  → two decimal places  ("2500000000000.00")
+        int       → zero decimal places ("1234567")
+        percent/float/other → six decimal places ("0.000010")
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if data_type == "currency":
+        return f"{value:.2f}"
+    if data_type == "int":
+        return f"{value:.0f}"
+    # "percent", "float", or any future type: six decimal places — no scientific
+    # notation for very small values (e.g. roe=1e-05 → "0.000010").
+    return f"{value:.6f}"
+
+
 def render_csv(
     columns: Sequence[tuple[str, str, str]],
     rows: Sequence[dict[str, str | float | None]],
 ) -> str:
-    """Render the result set as CSV (header = column codes; None → empty cell)."""
+    """Render the result set as CSV (header = column codes; None → empty cell).
+
+    Numeric cells are formatted by data_type via ``_csv_cell`` to avoid
+    scientific notation (e.g. market_cap 2.5e12 → "2500000000000.00").
+    """
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
-    codes = [code for code, _name, _data_type in columns]
-    writer.writerow(codes)
+    codes_and_types = [(code, data_type) for code, _name, data_type in columns]
+    writer.writerow([code for code, _dt in codes_and_types])
     for row in rows:
-        writer.writerow(["" if row.get(code) is None else row[code] for code in codes])
+        writer.writerow(
+            [_csv_cell(row.get(code), data_type) for code, data_type in codes_and_types]
+        )
     return buffer.getvalue()

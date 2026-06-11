@@ -1856,12 +1856,18 @@
             "type": "integer",
             "title": "Headline Count",
             "description": "Universe rows satisfying ALL the screen's current filters."
+          },
+          "available_count": {
+            "type": "integer",
+            "title": "Available Count",
+            "description": "Non-NULL rows for this metric over the active universe. Distinguishes 'zero matches' (headline_count=0, available_count>0) from 'no data yet' (available_count=0) without inspecting the 422."
           }
         },
         "type": "object",
         "required": [
           "distribution",
-          "headline_count"
+          "headline_count",
+          "available_count"
         ],
         "title": "BuildResponse",
         "description": "GET /screener/screens/{id}/build/{metric_code}."
@@ -2254,16 +2260,22 @@
           "headline_count": {
             "type": "integer",
             "title": "Headline Count"
+          },
+          "available_count": {
+            "type": "integer",
+            "title": "Available Count",
+            "description": "Non-NULL rows for this metric over the active universe. 0 implies the snapshot has not been computed yet."
           }
         },
         "type": "object",
         "required": [
           "screen",
           "distribution",
-          "headline_count"
+          "headline_count",
+          "available_count"
         ],
         "title": "FilterUpdateResponse",
-        "description": "PUT/DELETE filter response \u2014 one round-trip powers the Build UI.\n\n``distribution`` is null (rather than failing the successful write with\n422) when the metric has zero non-NULL rows in the snapshot."
+        "description": "PUT/DELETE filter response \u2014 one round-trip powers the Build UI.\n\n``distribution`` is null (rather than failing the successful write with\n422) when the metric has zero non-NULL rows in the snapshot.\n``available_count`` exposes the non-NULL count so the UI can distinguish\n\"0 matches\" from \"no data\" without relying solely on the 422 path."
       },
       "HTTPValidationError": {
         "properties": {

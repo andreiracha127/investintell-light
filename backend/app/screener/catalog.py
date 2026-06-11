@@ -60,6 +60,7 @@ _CUSTOM = PresetBand("Custom", None, None)
 
 def _bands(*bounds: tuple[str, float | None, float | None]) -> tuple[PresetBand, ...]:
     """Build a preset tuple from (name, min, max) triples + the Custom band."""
+    # TODO(F-later): data-driven quantile preset bands
     return tuple(PresetBand(name, lo, hi) for name, lo, hi in bounds) + (_CUSTOM,)
 
 
