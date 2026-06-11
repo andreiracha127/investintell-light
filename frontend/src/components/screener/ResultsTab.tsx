@@ -42,17 +42,15 @@ export function ResultsTab({
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
 
-  // Debounce the server-side search; new searches restart at page 1.
+  // Debounce the server-side search; a search change restarts at page 1
+  // (separate effect so state updaters stay pure).
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearch((prev) => {
-        const next = searchText.trim();
-        if (next !== prev) setPage(1);
-        return next;
-      });
-    }, 300);
+    const timer = setTimeout(() => setSearch(searchText.trim()), 300);
     return () => clearTimeout(timer);
   }, [searchText]);
+  useEffect(() => {
+    setPage(1);
+  }, [search]);
 
   const resultsQuery = useQuery({
     queryKey: ["screen-results", screenId, sort ?? "", dir, search, page],
