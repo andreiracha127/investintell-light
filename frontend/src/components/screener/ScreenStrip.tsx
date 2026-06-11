@@ -111,22 +111,26 @@ export function ScreenStrip({
   const mutationError = renameMutation.error ?? deleteMutation.error;
 
   return (
-    <div className="bg-surface-2 border border-border rounded-xl px-4 py-3 flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="bg-surface-2 border border-border ix-pad flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-1.5">
         {screens.map((screen) => (
           <button
             key={screen.id}
             type="button"
             onClick={() => onSelect(screen.id)}
             aria-pressed={screen.id === selected?.id}
-            className={`px-3 py-1 rounded-[6px] border text-[12px] font-medium transition-colors ${
+            className={`inline-flex h-[26px] items-center gap-1.5 border px-2.5 text-[11.5px] font-bold transition-colors ${
               screen.id === selected?.id
-                ? "bg-surface-3 border-accent-muted text-accent"
-                : "bg-surface-1 border-border text-text-secondary hover:text-text-primary"
+                ? "bg-accent-wash border-accent text-accent"
+                : "bg-field border-border-strong text-text-secondary hover:bg-layer-hover"
             }`}
           >
             {screen.name}
-            <span className="ml-1.5 tabular-nums text-[10px] text-text-muted">
+            <span
+              className={`tabular-nums text-[10px] font-normal ${
+                screen.id === selected?.id ? "text-accent" : "text-text-muted"
+              }`}
+            >
               {screen.filter_count}
             </span>
           </button>

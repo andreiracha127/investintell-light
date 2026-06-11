@@ -47,7 +47,6 @@ export function buildNavOption(
         showSymbol: false,
         lineStyle: { color: colors.accent, width: 2 },
         itemStyle: { color: colors.accent },
-        areaStyle: { color: colors.accentMuted, opacity: 0.12 },
       },
     ],
   };

@@ -28,30 +28,32 @@ export function buildCumulativeOption(
           ? formatPercent(value, 2, { signed: true })
           : String(value ?? ""),
     },
-    legend: {
-      top: 0,
-      right: 8,
-      textStyle: { color: colors.textSecondary },
-      icon: "roundRect",
-      itemWidth: 12,
-      itemHeight: 3,
-    },
-    grid: { left: 64, right: 16, top: 32, bottom: 28 },
+    // Legend lives in the panel header (Cockpit swatches), not inside the plot.
+    grid: { left: 64, right: 16, top: 16, bottom: 28 },
     xAxis: {
       type: "category",
       axisLine: { lineStyle: { color: colors.grid } },
       axisTick: { show: false },
-      axisLabel: { color: colors.textMuted },
+      axisLabel: { color: colors.textMuted, fontSize: 10 },
     },
     yAxis: {
       type: "value",
       splitLine: { lineStyle: { color: colors.grid } },
       axisLabel: {
         color: colors.textMuted,
+        fontSize: 10,
         formatter: (value: number) => formatPercent(value, 0),
       },
     },
     series: [
+      {
+        name: benchmarkLabel,
+        type: "line",
+        data: cumulative.benchmark,
+        showSymbol: false,
+        lineStyle: { color: colors.barMute, width: 2 },
+        itemStyle: { color: colors.barMute },
+      },
       {
         name: assetLabel,
         type: "line",
@@ -59,14 +61,6 @@ export function buildCumulativeOption(
         showSymbol: false,
         lineStyle: { color: colors.accent, width: 2 },
         itemStyle: { color: colors.accent },
-      },
-      {
-        name: benchmarkLabel,
-        type: "line",
-        data: cumulative.benchmark,
-        showSymbol: false,
-        lineStyle: { color: colors.textMuted, width: 1.5 },
-        itemStyle: { color: colors.textMuted },
       },
     ],
   };

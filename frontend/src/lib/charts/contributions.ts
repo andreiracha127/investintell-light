@@ -53,7 +53,8 @@ export function buildRiskContributionsOption(
         type: "bar",
         data: sorted.map((c) => c.contribution),
         barCategoryGap: "35%",
-        itemStyle: { color: colors.accent, borderRadius: [0, 3, 3, 0] },
+        // Flat square graphite bars — Cockpit style (no rounded corners).
+        itemStyle: { color: colors.bar },
         label: {
           show: true,
           position: "right",

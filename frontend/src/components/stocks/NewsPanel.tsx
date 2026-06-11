@@ -42,21 +42,19 @@ export function NewsSection({
   items: NewsArticle[];
 }) {
   return (
-    <section className="bg-surface-2 border border-border rounded-xl p-4">
-      <div className="flex items-center gap-2 mb-3">
-        <h2 className="text-[11px] font-semibold tracking-[0.06em] uppercase text-text-muted">
-          News
-        </h2>
+    <section className="ix-pad border border-border bg-surface-2">
+      <div className="mb-2.5 flex items-center gap-2">
+        <h2 className="ix-label m-0">Latest News</h2>
         {stale && (
           <span
             title="Live refresh failed — showing previously cached articles."
-            className="px-1.5 py-px rounded-[4px] bg-surface-3 border border-border text-[10px] text-text-muted"
+            className="border border-border bg-field px-1.5 py-px text-[10px] text-text-muted"
           >
             cached
           </span>
         )}
       </div>
-      <ul className="flex flex-col">
+      <ul className="m-0 flex list-none flex-col p-0">
         {items.map((item) => (
           <NewsRow key={item.id} item={item} />
         ))}
@@ -67,24 +65,25 @@ export function NewsSection({
 
 function NewsRow({ item }: { item: NewsArticle }) {
   return (
-    <li className="py-2.5 border-b border-border last:border-b-0">
+    <li className="border-b border-border last:border-b-0">
       <a
         href={item.url}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-[13px] font-medium text-text-primary hover:text-accent transition-colors"
+        className="flex items-baseline gap-3 py-[9px] transition-colors hover:bg-layer-hover"
       >
-        {item.title}
+        {item.source && (
+          <span className="flex-none border border-border bg-field px-1.5 py-[2px] text-[9.5px] font-bold uppercase tracking-[0.06em] text-text-secondary">
+            {item.source}
+          </span>
+        )}
+        <span className="min-w-0 flex-1 text-[13px] text-text-primary">
+          {item.title}
+        </span>
+        <span className="flex-none text-[10.5px] tabular-nums text-text-muted">
+          {formatDate(item.published_at.slice(0, 10))}
+        </span>
       </a>
-      <div className="mt-0.5 text-[11px] text-text-muted">
-        {item.source ? `${item.source} · ` : ""}
-        {formatDate(item.published_at.slice(0, 10))}
-      </div>
-      {item.description && (
-        <p className="mt-1 text-[12px] leading-relaxed text-text-secondary line-clamp-2">
-          {item.description}
-        </p>
-      )}
     </li>
   );
 }

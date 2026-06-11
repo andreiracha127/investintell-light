@@ -1,0 +1,32 @@
+/* ===========================================================================
+   FONTS — Investintell-Light Design System
+   ---------------------------------------------------------------------------
+   Cambria (serif titles) + Arial (sans data/body). Both are system fonts on
+   Windows/Office, declared below via local() so they resolve to the genuine
+   faces when installed. Web fallbacks (loaded here) are the nearest Google
+   Fonts: PT Serif for Cambria, Arimo (metric-compatible) for Arial.
+   To pin exact files, add url(...) sources to the @font-face blocks.
+   =========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Arimo:ital,wght@0,400;0,500;0,600;0,700;1,400&family=PT+Serif:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+
+/* ---------------------------------------------------------------------------
+   System fonts as @font-face via local() — resolves to the genuine
+   Cambria / Arial when installed (Windows / Office), with the Google webfonts
+   above as the fallback stack (see typography.css). The token keeps pointing at
+   the real family; this only declares where to find it.
+   If you upload real font files, add url(...) sources here.
+   --------------------------------------------------------------------------- */
+@font-face {
+  font-family: 'Cambria';
+  font-style: normal;
+  font-weight: 400 700;
+  src: local('Cambria'), local('Cambria Regular');
+}
+@font-face {
+  font-family: 'Arial';
+  font-style: normal;
+  font-weight: 400 700;
+  src: local('Arial'), local('ArialMT'), local('Helvetica');
+}
+

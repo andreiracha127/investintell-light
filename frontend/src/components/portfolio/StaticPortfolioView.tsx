@@ -8,6 +8,9 @@
  * percent-input -> decimal-fraction step at the API boundary, done in exactly
  * one place (`buildRequest`). Quantities-mode results can be persisted via
  * "Save as portfolio" (see `SaveAsPortfolio` for the weights-mode limitation).
+ *
+ * Visual language: Investintell Cockpit (Carbon-inspired) — flat square
+ * panels stacked with 1px separation, hairline borders, tabular numerals.
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
@@ -38,7 +41,7 @@ import {
   formatPercent,
 } from "@/lib/format";
 import { EChart } from "@/components/charts/EChart";
-import { Card, StatRow, valueTone } from "@/components/ui/panels";
+import { Card, PageTitle, StatRow, valueTone } from "@/components/ui/panels";
 
 interface PositionRow {
   id: number;
@@ -52,9 +55,16 @@ const MAX_POSITIONS = 50;
 /** Allowed deviation of the weight sum from 100, in percentage points. */
 const WEIGHT_SUM_TOLERANCE_PP = 0.1;
 
+/** Carbon text field: flat, square, bottom rule only; accent rule on focus. */
 const INPUT_CLASS =
-  "px-3 py-1.5 rounded-[6px] bg-surface-1 border border-border text-[13px] " +
-  "text-text-primary placeholder:text-text-muted focus:border-accent-muted focus:outline-none";
+  "h-[30px] px-2 bg-field border-0 border-b border-border-strong text-[13px] " +
+  "text-text-primary placeholder:text-text-muted focus:outline-none " +
+  "focus:border-b-2 focus:border-accent";
+
+const BUTTON_CLASS =
+  "h-[28px] px-3 bg-field border border-border-strong text-[12px] " +
+  "text-text-secondary hover:bg-layer-hover hover:text-text-primary " +
+  "transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
 export function StaticPortfolioView() {
   // Design tokens are only readable from the DOM — resolve after mount.
@@ -150,187 +160,203 @@ export function StaticPortfolioView() {
   };
 
   return (
-    <div className="px-6 py-5 max-w-[1400px] mx-auto flex flex-col gap-5">
-      <h1 className="text-2xl font-bold tracking-tight text-text-primary">
-        Static Portfolio Analysis
-      </h1>
+    <div className="mx-auto max-w-[1360px] px-[clamp(14px,3vw,28px)] pb-10 pt-5">
+      <PageTitle title="Static Portfolio Analysis" />
 
-      {/* ── Position form ── */}
-      <Card title="Positions">
-        <div className="flex flex-col gap-2">
-          {rows.map((row, index) => {
-            const isInvalid = validation.invalidValueIds.includes(row.id);
-            return (
-              <div key={row.id} className="flex items-center gap-2">
-                <input
-                  value={row.ticker}
-                  onChange={(e) =>
-                    updateRow(row.id, { ticker: e.target.value.toUpperCase() })
-                  }
-                  placeholder="TICKER"
-                  aria-label={`Position ${index + 1} ticker`}
-                  className={`w-[130px] uppercase ${INPUT_CLASS}`}
-                />
-                <input
-                  value={row.value}
-                  onChange={(e) => updateRow(row.id, { value: e.target.value })}
-                  placeholder={mode === "weights" ? "Weight %" : "Quantity"}
-                  aria-label={
-                    mode === "weights"
-                      ? `Position ${index + 1} weight in percent`
-                      : `Position ${index + 1} quantity`
-                  }
-                  aria-invalid={isInvalid}
-                  className={`w-[130px] tabular-nums ${INPUT_CLASS} ${
-                    isInvalid ? "border-[var(--color-loss)]" : ""
-                  }`}
-                />
-                <button
-                  type="button"
-                  onClick={() => removeRow(row.id)}
-                  disabled={rows.length <= MIN_POSITIONS}
-                  aria-label={`Remove position ${index + 1}`}
-                  className="px-2 py-1 rounded-[6px] text-text-muted hover:text-loss hover:bg-surface-1 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  ×
-                </button>
-              </div>
-            );
-          })}
-        </div>
-
-        {validation.invalidValueIds.length > 0 && (
-          <p
-            role="alert"
-            className="mt-2 text-[12px] text-loss"
-          >
-            Invalid number in highlighted field — use . or , as decimal separator
-          </p>
-        )}
-
-        <button
-          type="button"
-          onClick={addRow}
-          disabled={rows.length >= MAX_POSITIONS}
-          className="mt-3 px-3 py-1.5 rounded-[6px] bg-surface-1 border border-border text-[12px] text-text-secondary hover:text-text-primary hover:border-accent-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          + Add position
-        </button>
-
-        {/* ── Controls row ── */}
-        <div className="mt-4 pt-4 border-t border-border flex flex-wrap items-center gap-x-5 gap-y-3">
-          {/* Mode toggle */}
-          <div
-            role="group"
-            aria-label="Position mode"
-            className="flex rounded-[7px] border border-border bg-surface-1 p-0.5"
-          >
-            {(["weights", "quantities"] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => switchMode(m)}
-                aria-pressed={m === mode}
-                className={`px-3 py-1 rounded-[5px] text-[12px] font-medium transition-colors ${
-                  m === mode
-                    ? "bg-surface-3 text-accent"
-                    : "text-text-secondary hover:text-text-primary"
-                }`}
-              >
-                {m === "weights" ? "Weights" : "Quantities"}
-              </button>
-            ))}
+      <div className="flex flex-col gap-px">
+        {/* ── Position form ── */}
+        <Card title="Positions">
+          <div className="flex flex-col gap-2">
+            {rows.map((row, index) => {
+              const isInvalid = validation.invalidValueIds.includes(row.id);
+              return (
+                <div key={row.id} className="flex items-center gap-2">
+                  <input
+                    value={row.ticker}
+                    onChange={(e) =>
+                      updateRow(row.id, { ticker: e.target.value.toUpperCase() })
+                    }
+                    placeholder="TICKER"
+                    aria-label={`Position ${index + 1} ticker`}
+                    className={`w-[130px] uppercase ${INPUT_CLASS}`}
+                  />
+                  <input
+                    value={row.value}
+                    onChange={(e) => updateRow(row.id, { value: e.target.value })}
+                    placeholder={mode === "weights" ? "Weight %" : "Quantity"}
+                    aria-label={
+                      mode === "weights"
+                        ? `Position ${index + 1} weight in percent`
+                        : `Position ${index + 1} quantity`
+                    }
+                    aria-invalid={isInvalid}
+                    className={`w-[130px] text-right tabular-nums ${INPUT_CLASS} ${
+                      isInvalid ? "border-b-2 border-loss focus:border-loss" : ""
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeRow(row.id)}
+                    disabled={rows.length <= MIN_POSITIONS}
+                    aria-label={`Remove position ${index + 1}`}
+                    className="px-2 py-1 text-text-muted hover:bg-layer-hover hover:text-loss transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
           </div>
 
-          {/* Range */}
-          <div
-            role="group"
-            aria-label="Date range"
-            className="flex rounded-[7px] border border-border bg-surface-1 p-0.5"
-          >
-            {RANGE_PRESETS.map((preset) => (
-              <button
-                key={preset}
-                type="button"
-                onClick={() => setRange(preset)}
-                aria-pressed={preset === range}
-                className={`px-3 py-1 rounded-[5px] text-[12px] font-medium transition-colors ${
-                  preset === range
-                    ? "bg-surface-3 text-accent"
-                    : "text-text-secondary hover:text-text-primary"
-                }`}
-              >
-                {preset}
-              </button>
-            ))}
-          </div>
-
-          {/* Benchmark */}
-          <label className="flex items-center gap-2 text-[12px] text-text-secondary">
-            Benchmark
-            <input
-              value={benchmark}
-              onChange={(e) => setBenchmark(e.target.value.toUpperCase())}
-              placeholder="SPY"
-              aria-label="Benchmark ticker"
-              className={`w-[90px] uppercase ${INPUT_CLASS}`}
-            />
-          </label>
-
-          {/* Weight-sum indicator */}
-          {mode === "weights" && (
-            <span
-              className={`tabular-nums text-[13px] font-semibold ${
-                validation.weightSumOk ? "text-gain" : "text-loss"
-              }`}
-            >
-              Σ {formatNumber(validation.weightSumPct, 1)}%
-            </span>
+          {validation.invalidValueIds.length > 0 && (
+            <p role="alert" className="mt-2 text-[12px] text-loss">
+              Invalid number in highlighted field — use . or , as decimal separator
+            </p>
           )}
 
           <button
             type="button"
-            onClick={onAnalyze}
-            disabled={!validation.canSubmit || mutation.isPending}
-            className="ml-auto px-5 py-1.5 rounded-[7px] bg-accent text-surface-0 text-sm font-semibold hover:bg-accent-strong transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            onClick={addRow}
+            disabled={rows.length >= MAX_POSITIONS}
+            className={`mt-3 ${BUTTON_CLASS}`}
           >
-            {mutation.isPending ? "Analyzing…" : "Analyze"}
+            + Add position
           </button>
-        </div>
-      </Card>
 
-      {/* ── Results ── */}
-      {mutation.isPending ? (
-        <ResultsSkeleton />
-      ) : mutation.isError ? (
-        <div
-          role="alert"
-          className="bg-surface-2 border border-loss rounded-xl px-5 py-4"
-        >
-          <h2 className="text-sm font-semibold text-loss mb-1">
-            Analysis failed
-          </h2>
-          <p className="text-[13px] text-text-secondary break-words whitespace-pre-wrap">
-            {mutation.error.message}
+          {/* ── Controls row ── */}
+          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-border pt-4">
+            {/* Mode toggle — square segmented control */}
+            <div
+              role="group"
+              aria-label="Position mode"
+              className="flex h-[30px] items-stretch border border-border-strong text-[12px]"
+            >
+              {(["weights", "quantities"] as const).map((m, i) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => switchMode(m)}
+                  aria-pressed={m === mode}
+                  className={`flex items-center px-3 transition-colors ${
+                    m === mode
+                      ? "bg-accent font-bold text-on-accent"
+                      : `text-text-secondary hover:bg-layer-hover ${
+                          i > 0 ? "border-l border-border" : ""
+                        }`
+                  }`}
+                >
+                  {m === "weights" ? "Weights" : "Quantities"}
+                </button>
+              ))}
+            </div>
+
+            {/* Range — square segmented control */}
+            <div
+              role="group"
+              aria-label="Date range"
+              className="flex h-[30px] items-stretch border border-border-strong text-[12px]"
+            >
+              {RANGE_PRESETS.map((preset, i) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setRange(preset)}
+                  aria-pressed={preset === range}
+                  className={`flex items-center px-3 tabular-nums transition-colors ${
+                    preset === range
+                      ? "bg-accent font-bold text-on-accent"
+                      : `text-text-secondary hover:bg-layer-hover ${
+                          i > 0 ? "border-l border-border" : ""
+                        }`
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+
+            {/* Benchmark */}
+            <label className="flex items-center gap-2 text-[12px] text-text-secondary">
+              Benchmark
+              <input
+                value={benchmark}
+                onChange={(e) => setBenchmark(e.target.value.toUpperCase())}
+                placeholder="SPY"
+                aria-label="Benchmark ticker"
+                className={`w-[90px] uppercase ${INPUT_CLASS}`}
+              />
+            </label>
+
+            {/* Weight-sum indicator */}
+            {mode === "weights" && (
+              <span
+                className={`tabular-nums text-[13px] font-bold ${
+                  validation.weightSumOk ? "text-gain" : "text-loss"
+                }`}
+              >
+                Σ {formatNumber(validation.weightSumPct, 1)}%
+              </span>
+            )}
+
+            <button
+              type="button"
+              onClick={onAnalyze}
+              disabled={!validation.canSubmit || mutation.isPending}
+              className="ml-auto h-[34px] bg-accent px-5 text-[13px] font-bold text-on-accent hover:bg-accent-strong transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {mutation.isPending ? "Analyzing…" : "Analyze"}
+            </button>
+          </div>
+        </Card>
+
+        {/* ── Results ── */}
+        {mutation.isPending ? (
+          <ResultsSkeleton />
+        ) : mutation.isError ? (
+          <div role="alert" className="ix-pad border border-loss bg-surface-2">
+            <h2 className="mb-1 text-sm font-semibold text-loss">
+              Analysis failed
+            </h2>
+            <p className="break-words whitespace-pre-wrap text-[13px] text-text-secondary">
+              {mutation.error.message}
+            </p>
+          </div>
+        ) : mutation.data && mutation.variables && colors ? (
+          <Results
+            data={mutation.data}
+            request={mutation.variables}
+            colors={colors}
+          />
+        ) : (
+          <p className="pt-3 text-[13px] text-text-muted">
+            Add at least two positions and press Analyze to run a static
+            portfolio analysis.
           </p>
-        </div>
-      ) : mutation.data && mutation.variables && colors ? (
-        <Results
-          data={mutation.data}
-          request={mutation.variables}
-          colors={colors}
-        />
-      ) : (
-        <p className="text-[13px] text-text-muted">
-          Add at least two positions and press Analyze to run a static
-          portfolio analysis.
-        </p>
-      )}
+        )}
+      </div>
     </div>
   );
 }
 
 /* ── Results ──────────────────────────────────────────────────────────────── */
+
+/** Small swatch-line legend chip used in chart panel headers. */
+function LineLegend({ entries }: { entries: { label: string; color: string }[] }) {
+  return (
+    <div className="flex gap-3.5 text-[10.5px] text-text-muted">
+      {entries.map((entry) => (
+        <span key={entry.label} className="flex items-center gap-[5px]">
+          <span
+            aria-hidden
+            className="h-[2px] w-2.5"
+            style={{ background: entry.color }}
+          />
+          {entry.label}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 function Results({
   data,
@@ -345,7 +371,14 @@ function Results({
   const { params, allocation, stats } = data;
 
   const allocationOption = useMemo(
-    () => buildAllocationOption(allocation.positions, colors),
+    () =>
+      buildAllocationOption(
+        allocation.positions.map((position) => ({
+          name: position.ticker,
+          value: position.weight,
+        })),
+        colors,
+      ),
     [allocation.positions, colors],
   );
   const navOption = useMemo(
@@ -379,10 +412,10 @@ function Results({
   );
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-px">
       {/* ── Params echo + save ── */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <p className="tabular-nums text-[12px] text-text-muted">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border border-border bg-surface-2 px-[var(--ix-pad)] py-2">
+        <p className="m-0 tabular-nums text-[12px] text-text-muted">
           Window: {formatDate(params.start_date)} →{" "}
           {formatDate(params.end_date)} · Benchmark: {params.benchmark}
         </p>
@@ -393,39 +426,44 @@ function Results({
       </div>
 
       {/* ── Allocation + statistics ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <div className="grid gap-px bg-border lg:grid-cols-2">
         <Card title="Allocation">
-          <EChart option={allocationOption} className="h-[260px] w-full" />
-          <table className="w-full mt-3 text-[13px]">
-            <thead>
-              <tr className="text-[11px] uppercase tracking-[0.06em] text-text-muted">
-                <th className="py-1.5 text-left font-semibold">Ticker</th>
-                <th className="py-1.5 text-right font-semibold">Weight</th>
-                <th className="py-1.5 text-right font-semibold">
-                  Initial Value
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {allocation.positions.map((position) => (
-                <tr key={position.ticker} className="border-t border-border">
-                  <td className="py-1.5 font-semibold text-text-primary">
+          <div className="flex flex-wrap items-center gap-[18px]">
+            <EChart
+              option={allocationOption}
+              className="h-[170px] w-[170px] shrink-0"
+            />
+            <div className="flex min-w-[170px] flex-1 flex-col gap-1.5 tabular-nums">
+              {allocation.positions.map((position, i) => (
+                <div
+                  key={position.ticker}
+                  className="flex items-center gap-[9px] text-[12px]"
+                >
+                  <span
+                    aria-hidden
+                    className="h-2.5 w-2.5 shrink-0"
+                    style={{
+                      background:
+                        colors.categories[i % colors.categories.length],
+                    }}
+                  />
+                  <span className="flex-1 text-text-secondary">
                     {position.ticker}
-                  </td>
-                  <td className="py-1.5 text-right tabular-nums text-text-secondary">
-                    {formatPercent(position.weight, 1)}
-                  </td>
-                  <td className="py-1.5 text-right tabular-nums text-text-secondary">
+                  </span>
+                  <span className="text-text-muted">
                     {formatCurrency(position.initial_value)}
-                  </td>
-                </tr>
+                  </span>
+                  <span className="w-[52px] text-right font-bold text-text-primary">
+                    {formatPercent(position.weight, 1)}
+                  </span>
+                </div>
               ))}
-            </tbody>
-          </table>
+            </div>
+          </div>
         </Card>
 
         <Card title="Statistics">
-          <dl>
+          <dl className="m-0">
             <StatRow
               label="Annualized Volatility"
               value={formatPercent(stats.annualized_volatility)}
@@ -483,17 +521,28 @@ function Results({
             ? `initial ${formatCurrency(params.initial_nav)} (notional)`
             : undefined
         }
+        actions={<LineLegend entries={[{ label: "NAV", color: colors.accent }]} />}
       >
         <EChart option={navOption} className="h-[300px] w-full" />
       </Card>
 
       {/* ── Vs benchmark ── */}
-      <Card title={`Cumulative Return vs ${params.benchmark}`}>
+      <Card
+        title={`Cumulative Return · vs ${params.benchmark}`}
+        actions={
+          <LineLegend
+            entries={[
+              { label: "Portfolio", color: colors.accent },
+              { label: params.benchmark, color: colors.barMute },
+            ]}
+          />
+        }
+      >
         <EChart option={comparisonOption} className="h-[300px] w-full" />
       </Card>
 
       {/* ── Correlation + risk contributions ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <div className="grid gap-px bg-border lg:grid-cols-2">
         <Card title="Correlation Matrix">
           <EChart option={heatmapOption} className="h-[360px] w-full" />
         </Card>
@@ -543,7 +592,7 @@ function SaveAsPortfolio({ request }: { request: PortfolioAnalysisRequest }) {
         <button
           type="button"
           disabled
-          className="px-3 py-1 rounded-[6px] bg-surface-1 border border-border text-[12px] text-text-muted opacity-50 cursor-not-allowed"
+          className="h-[28px] cursor-not-allowed border border-border-strong bg-field px-3 text-[12px] text-text-muted opacity-50"
         >
           Save as portfolio
         </button>
@@ -556,7 +605,7 @@ function SaveAsPortfolio({ request }: { request: PortfolioAnalysisRequest }) {
 
   if (saveMutation.isSuccess) {
     return (
-      <p className="ml-auto text-[12px] text-text-secondary">
+      <p className="m-0 ml-auto text-[12px] text-text-secondary">
         Saved as{" "}
         <span className="font-semibold text-text-primary">
           {saveMutation.data.name}
@@ -606,22 +655,18 @@ function SaveAsPortfolio({ request }: { request: PortfolioAnalysisRequest }) {
             type="button"
             onClick={save}
             disabled={!canSave}
-            className="px-3 py-1.5 rounded-[6px] bg-accent text-surface-0 text-[12px] font-semibold hover:bg-accent-strong transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="h-[28px] bg-accent px-3 text-[12px] font-bold text-on-accent hover:bg-accent-strong transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {saveMutation.isPending ? "Saving…" : "Save"}
           </button>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="px-3 py-1 rounded-[6px] bg-surface-1 border border-border text-[12px] text-text-secondary hover:text-text-primary hover:border-accent-muted transition-colors"
-        >
+        <button type="button" onClick={() => setOpen(true)} className={BUTTON_CLASS}>
           Save as portfolio
         </button>
       )}
       {saveMutation.isError && (
-        <p role="alert" className="text-[12px] text-loss break-words max-w-[420px] text-right">
+        <p role="alert" className="max-w-[420px] break-words text-right text-[12px] text-loss">
           {saveMutation.error.message}
         </p>
       )}
@@ -634,17 +679,17 @@ function ResultsSkeleton() {
     <div
       aria-busy="true"
       aria-label="Loading portfolio analysis"
-      className="flex flex-col gap-5 animate-pulse"
+      className="flex animate-pulse flex-col gap-px"
     >
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <div className="h-[420px] rounded-xl bg-surface-2" />
-        <div className="h-[420px] rounded-xl bg-surface-2" />
+      <div className="grid gap-px lg:grid-cols-2">
+        <div className="h-[420px] bg-surface-2" />
+        <div className="h-[420px] bg-surface-2" />
       </div>
-      <div className="h-[300px] rounded-xl bg-surface-2" />
-      <div className="h-[300px] rounded-xl bg-surface-2" />
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <div className="h-[360px] rounded-xl bg-surface-2" />
-        <div className="h-[360px] rounded-xl bg-surface-2" />
+      <div className="h-[300px] bg-surface-2" />
+      <div className="h-[300px] bg-surface-2" />
+      <div className="grid gap-px lg:grid-cols-2">
+        <div className="h-[360px] bg-surface-2" />
+        <div className="h-[360px] bg-surface-2" />
       </div>
     </div>
   );

@@ -50,7 +50,7 @@ export function PortfolioSelect({
 
   if (portfoliosQuery.isError) {
     return (
-      <p role="alert" className="text-[12px] text-loss break-words">
+      <p role="alert" className="ix-fs break-words text-loss">
         Failed to load portfolios: {portfoliosQuery.error.message}
       </p>
     );
@@ -58,11 +58,11 @@ export function PortfolioSelect({
 
   if (portfolios && portfolios.length === 0) {
     return (
-      <p className="text-[12px] text-text-secondary">
+      <p className="ix-fs text-text-secondary">
         No portfolios yet —{" "}
         <Link
           href="/portfolio"
-          className="text-accent hover:text-accent-strong transition-colors"
+          className="text-accent transition-colors hover:text-accent-muted"
         >
           create one in Portfolio Overview
         </Link>
@@ -72,14 +72,14 @@ export function PortfolioSelect({
   }
 
   return (
-    <label htmlFor={selectId} className={LABEL_CLASS}>
+    <label htmlFor={selectId} className={`min-w-[160px] ${LABEL_CLASS}`}>
       {label}
       <select
         id={selectId}
         value={value ?? ""}
         onChange={(e) => onChange(Number(e.target.value))}
         disabled={portfoliosQuery.isPending}
-        className={`min-w-[160px] ${INPUT_CLASS}`}
+        className={INPUT_CLASS}
       >
         {portfoliosQuery.isPending ? (
           <option value="">Loading…</option>

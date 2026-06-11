@@ -37,7 +37,7 @@ import { EChart } from "@/components/charts/EChart";
 import {
   applyFilterResponse,
   ErrorPanel,
-  INPUT_CLASS,
+  FIELD_LABEL_CLASS,
   isSnapshotMissing,
   NO_DATA_NOTE,
   retryPolicy,
@@ -80,21 +80,19 @@ export function BuildTab({
   );
 
   return (
-    <section className="flex flex-col gap-3">
-      <div className="bg-surface-2 border border-border rounded-xl px-4 py-3 flex flex-wrap items-center gap-3">
-        <h2 className="text-[11px] font-semibold tracking-[0.06em] uppercase text-text-muted">
-          Build Filters
-        </h2>
+    <section className="flex flex-col gap-px">
+      <div className="bg-surface-2 border border-border px-[var(--ix-pad)] py-3 flex flex-wrap items-center gap-2.5">
+        <h2 className="ix-label m-0">Build Filters</h2>
         <span
           aria-live="polite"
-          className="ml-auto px-2 py-px rounded-[4px] bg-surface-3 border border-border tabular-nums text-[12px] text-accent"
+          className="ml-auto inline-flex h-[22px] items-center bg-accent-wash border border-accent px-2 tabular-nums text-[11px] font-bold text-accent"
         >
           {headline === null ? "— matches" : `${formatCompact(headline)} matches`}
         </span>
       </div>
 
       {filters.length === 0 ? (
-        <div className="bg-surface-2 border border-border rounded-xl px-6 py-10 text-center text-[13px] text-text-muted">
+        <div className="bg-surface-2 border border-border border-t-0 px-6 py-10 text-center text-[13px] text-text-muted">
           No metrics selected — pick some in Select Metrics.
         </div>
       ) : (
@@ -240,9 +238,9 @@ function FilterCard({
   const unit = isPercent ? "%" : "";
 
   return (
-    <div className="bg-surface-2 border border-border rounded-xl p-4 flex flex-col gap-3">
+    <div className="bg-surface-2 border border-border ix-pad flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-[13px] font-semibold text-text-primary">{name}</h3>
+        <h3 className="text-[13px] font-bold text-text-primary">{name}</h3>
         {metric && (
           <span className="text-[11px] text-text-muted">
             {metric.abbreviation} · {metric.scale_note}
@@ -254,7 +252,7 @@ function FilterCard({
           disabled={pending}
           aria-label={`Remove filter ${name}`}
           title={`Remove ${name}`}
-          className="ml-auto px-1.5 py-0.5 rounded-[6px] text-text-muted hover:text-loss hover:bg-surface-1 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          className="ml-auto px-1.5 py-0.5 text-text-muted hover:text-loss hover:bg-layer-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
         >
           ×
         </button>
@@ -265,11 +263,11 @@ function FilterCard({
         <div
           aria-busy="true"
           aria-label={`Loading ${name} distribution`}
-          className="h-[140px] rounded-[8px] bg-surface-1 animate-pulse"
+          className="h-[140px] bg-zebra animate-pulse"
         />
       ) : buildQuery.isError ? (
         isSnapshotMissing(buildQuery.error) ? (
-          <p className="h-[140px] flex items-center justify-center rounded-[8px] bg-surface-1 text-[13px] text-text-muted">
+          <p className="h-[140px] flex items-center justify-center bg-zebra text-[13px] text-text-muted">
             {NO_DATA_NOTE}
           </p>
         ) : (
@@ -280,13 +278,13 @@ function FilterCard({
           />
         )
       ) : availableCount === 0 ? (
-        <p className="h-[140px] flex items-center justify-center rounded-[8px] bg-surface-1 text-[13px] text-text-muted">
+        <p className="h-[140px] flex items-center justify-center bg-zebra text-[13px] text-text-muted">
           {NO_DATA_NOTE}
         </p>
       ) : option ? (
         <EChart option={option} className="h-[140px]" />
       ) : (
-        <p className="h-[140px] flex items-center justify-center rounded-[8px] bg-surface-1 text-[13px] text-text-muted">
+        <p className="h-[140px] flex items-center justify-center bg-zebra text-[13px] text-text-muted">
           No companies in this band.
         </p>
       )}
@@ -302,10 +300,10 @@ function FilterCard({
               disabled={pending}
               aria-pressed={matchesPreset(preset)}
               aria-label={`Apply preset ${preset.name} for ${name}`}
-              className={`px-2.5 py-0.5 rounded-full border text-[11px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+              className={`inline-flex h-[22px] items-center border px-2.5 text-[11px] font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                 matchesPreset(preset)
-                  ? "bg-surface-3 border-accent-muted text-accent"
-                  : "bg-surface-1 border-border text-text-secondary hover:text-text-primary"
+                  ? "bg-accent-wash border-accent text-accent"
+                  : "bg-field border-border-strong text-text-secondary hover:bg-layer-hover"
               }`}
             >
               {preset.name}
@@ -317,10 +315,10 @@ function FilterCard({
             disabled={pending}
             aria-pressed={customActive}
             aria-label={`Clear bounds for ${name}`}
-            className={`px-2.5 py-0.5 rounded-full border text-[11px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`inline-flex h-[22px] items-center border px-2.5 text-[11px] font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
               customActive
-                ? "bg-surface-3 border-accent-muted text-accent"
-                : "bg-surface-1 border-border text-text-secondary hover:text-text-primary"
+                ? "bg-accent-wash border-accent text-accent"
+                : "bg-field border-border-strong text-text-secondary hover:bg-layer-hover"
             }`}
           >
             Custom
@@ -329,42 +327,52 @@ function FilterCard({
       )}
 
       {/* Min/max bounds — commit on Enter or blur; empty = unbounded. */}
-      <div className="flex flex-wrap items-center gap-3 text-[12px] text-text-secondary">
-        <label className="flex items-center gap-1.5">
-          Min{unit && ` (${unit})`}
-          <input
-            value={minText}
-            onChange={(e) => setMinText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commitBounds();
-            }}
-            onBlur={commitBounds}
-            placeholder="—"
-            aria-label={`Minimum ${name}${isPercent ? " in percent" : ""}`}
-            aria-invalid={minInvalid}
-            className={`w-[110px] text-right tabular-nums ${INPUT_CLASS} ${
-              minInvalid ? "border-[var(--color-loss)]" : ""
-            }`}
-          />
+      <div className="flex flex-wrap items-end gap-3.5 text-[12px] text-text-secondary">
+        <label className="flex w-[130px] flex-col gap-[5px]">
+          <span className={FIELD_LABEL_CLASS}>Min</span>
+          <div
+            className={`flex h-[34px] items-center bg-field border-b ${
+              minInvalid ? "border-b-[var(--color-loss)]" : "border-b-border-strong"
+            } focus-within:border-b-2 focus-within:border-b-accent`}
+          >
+            <input
+              value={minText}
+              onChange={(e) => setMinText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitBounds();
+              }}
+              onBlur={commitBounds}
+              placeholder="—"
+              aria-label={`Minimum ${name}${isPercent ? " in percent" : ""}`}
+              aria-invalid={minInvalid}
+              className="h-full w-full border-none bg-transparent px-2 text-right text-[13px] tabular-nums text-text-primary placeholder:text-text-muted outline-none"
+            />
+            {unit && <span className="px-2 text-[11px] text-text-muted">{unit}</span>}
+          </div>
         </label>
-        <label className="flex items-center gap-1.5">
-          Max{unit && ` (${unit})`}
-          <input
-            value={maxText}
-            onChange={(e) => setMaxText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commitBounds();
-            }}
-            onBlur={commitBounds}
-            placeholder="—"
-            aria-label={`Maximum ${name}${isPercent ? " in percent" : ""}`}
-            aria-invalid={maxInvalid}
-            className={`w-[110px] text-right tabular-nums ${INPUT_CLASS} ${
-              maxInvalid ? "border-[var(--color-loss)]" : ""
-            }`}
-          />
+        <label className="flex w-[130px] flex-col gap-[5px]">
+          <span className={FIELD_LABEL_CLASS}>Max</span>
+          <div
+            className={`flex h-[34px] items-center bg-field border-b ${
+              maxInvalid ? "border-b-[var(--color-loss)]" : "border-b-border-strong"
+            } focus-within:border-b-2 focus-within:border-b-accent`}
+          >
+            <input
+              value={maxText}
+              onChange={(e) => setMaxText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitBounds();
+              }}
+              onBlur={commitBounds}
+              placeholder="—"
+              aria-label={`Maximum ${name}${isPercent ? " in percent" : ""}`}
+              aria-invalid={maxInvalid}
+              className="h-full w-full border-none bg-transparent px-2 text-right text-[13px] tabular-nums text-text-primary placeholder:text-text-muted outline-none"
+            />
+            {unit && <span className="px-2 text-[11px] text-text-muted">{unit}</span>}
+          </div>
         </label>
-        {pending && <span className="text-text-muted">Saving…</span>}
+        {pending && <span className="pb-2 text-text-muted">Saving…</span>}
       </div>
 
       {mutationError && (

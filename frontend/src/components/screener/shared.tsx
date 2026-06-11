@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Shared screener plumbing: input/button classes (Graphite tokens), the
+ * Shared screener plumbing: input/button classes (Cockpit Carbon tokens), the
  * standard retry policy, the fail-loud error panel, and the single place a
  * filter PUT/DELETE response is folded back into the query cache.
  */
@@ -9,14 +9,27 @@ import type { QueryClient } from "@tanstack/react-query";
 
 import { ApiError, type FilterUpdateResponse } from "@/lib/api/client";
 
+/** Carbon field: square, bottom-border only, accent focus rule. */
 export const INPUT_CLASS =
-  "px-2 py-1 rounded-[6px] bg-surface-1 border border-border text-[13px] " +
-  "text-text-primary placeholder:text-text-muted focus:border-accent-muted focus:outline-none";
+  "h-[34px] px-2 bg-field border-0 border-b border-border-strong text-[13px] " +
+  "text-text-primary placeholder:text-text-muted outline-none " +
+  "focus:border-b-2 focus:border-b-accent";
 
+/** Secondary (ghost) button — square, hairline-strong border. */
 export const BUTTON_CLASS =
-  "px-3 py-1 rounded-[6px] bg-surface-1 border border-border text-[12px] " +
-  "text-text-secondary hover:text-text-primary hover:border-accent-muted " +
+  "h-[34px] px-3.5 bg-field border border-border-strong text-[12.5px] " +
+  "text-text-secondary hover:bg-layer-hover " +
   "transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+
+/** Primary action button — solid accent, square. */
+export const BUTTON_PRIMARY_CLASS =
+  "h-[34px] px-4 bg-accent text-on-accent text-[12.5px] font-bold " +
+  "hover:bg-accent-muted transition-colors " +
+  "disabled:opacity-40 disabled:cursor-not-allowed";
+
+/** Carbon field label — 10px uppercase tracked. */
+export const FIELD_LABEL_CLASS =
+  "text-[10px] font-bold uppercase tracking-[0.07em] text-text-muted";
 
 /** Shared retry policy: never retry 4xx (deterministic), retry 5xx/network twice. */
 export const retryPolicy = (failureCount: number, err: Error) =>
@@ -57,16 +70,16 @@ export function ErrorPanel({
   onRetry: () => void;
 }) {
   return (
-    <div role="alert" className="bg-surface-2 border border-loss rounded-xl px-5 py-4">
+    <div
+      role="alert"
+      className="bg-surface-2 border border-border border-l-[3px] px-5 py-4"
+      style={{ borderLeftColor: "var(--color-loss)" }}
+    >
       <h2 className="text-sm font-semibold text-loss mb-1">{title}</h2>
       <p className="text-[13px] text-text-secondary break-words whitespace-pre-wrap">
         {message}
       </p>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="mt-3 px-4 py-1.5 rounded-[6px] bg-surface-3 border border-border text-sm text-text-primary hover:border-accent-muted transition-colors"
-      >
+      <button type="button" onClick={onRetry} className={`mt-3 ${BUTTON_CLASS}`}>
         Retry
       </button>
     </div>

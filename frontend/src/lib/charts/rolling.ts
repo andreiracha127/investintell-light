@@ -41,7 +41,7 @@ export function buildRollingOption(
       type: "category",
       axisLine: { lineStyle: { color: colors.grid } },
       axisTick: { show: false },
-      axisLabel: { color: colors.textMuted },
+      axisLabel: { color: colors.textMuted, fontSize: 10 },
     },
     yAxis: {
       type: "value",
@@ -51,6 +51,7 @@ export function buildRollingOption(
       splitLine: { lineStyle: { color: colors.grid } },
       axisLabel: {
         color: colors.textMuted,
+        fontSize: 10,
         formatter: (value: number) => formatValue(value),
       },
     },
@@ -60,7 +61,7 @@ export function buildRollingOption(
         type: "line",
         data: series,
         showSymbol: false,
-        lineStyle: { color: colors.accent, width: 1.5 },
+        lineStyle: { color: colors.accent, width: 1.6 },
         itemStyle: { color: colors.accent },
       },
     ],

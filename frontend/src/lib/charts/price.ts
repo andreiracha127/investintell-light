@@ -15,12 +15,10 @@ export function buildPriceOption(
   const dates = candles.map((c) => c.date);
   // ECharts candlestick item order: [open, close, low, high].
   const ohlc = candles.map((c) => [c.open, c.close, c.low, c.high]);
+  // Volume reads as context, not signal — uniform muted grey per the design.
   const volumes = candles.map((c) => ({
     value: c.volume,
-    itemStyle: {
-      color: c.close >= c.open ? colors.gain : colors.loss,
-      opacity: 0.45,
-    },
+    itemStyle: { color: colors.barMute, opacity: 0.85 },
   }));
 
   return {
@@ -55,7 +53,7 @@ export function buildPriceOption(
         data: dates,
         axisLine: { lineStyle: { color: colors.grid } },
         axisTick: { show: false },
-        axisLabel: { color: colors.textMuted },
+        axisLabel: { color: colors.textMuted, fontSize: 10 },
       },
     ],
     yAxis: [
@@ -66,6 +64,7 @@ export function buildPriceOption(
         splitLine: { lineStyle: { color: colors.grid } },
         axisLabel: {
           color: colors.textMuted,
+          fontSize: 10,
           formatter: (value: number) => formatCurrency(value),
         },
       },
@@ -76,6 +75,7 @@ export function buildPriceOption(
         splitLine: { show: false },
         axisLabel: {
           color: colors.textMuted,
+          fontSize: 10,
           formatter: (value: number) => formatCompact(value),
         },
       },

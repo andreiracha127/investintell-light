@@ -16,6 +16,14 @@ export interface ChartColors {
   textMuted: string;
   grid: string;
   surface: string;
+  /** Faint accent tint — low end of the heatmap gradient. */
+  accentWash: string;
+  /** Text rendered on top of accent-filled surfaces. */
+  textOnAccent: string;
+  /** Neutral graphite bar (primary series when not the accent). */
+  bar: string;
+  /** Muted comparison bar / benchmark line (grey). */
+  barMute: string;
   /** Categorical palette for multi-asset series (allocation donut, …). */
   categories: string[];
 }
@@ -46,11 +54,15 @@ export function chartColors(): ChartColors {
     loss: readVar(styles, "--color-loss"),
     accent: readVar(styles, "--color-accent"),
     accentMuted: readVar(styles, "--color-accent-muted"),
+    accentWash: readVar(styles, "--color-accent-wash"),
+    textOnAccent: readVar(styles, "--color-on-accent"),
     text: readVar(styles, "--color-text-primary"),
     textSecondary: readVar(styles, "--color-text-secondary"),
     textMuted: readVar(styles, "--color-text-muted"),
-    grid: readVar(styles, "--color-border"),
+    grid: readVar(styles, "--color-chart-grid"),
     surface: readVar(styles, "--color-surface-3"),
+    bar: readVar(styles, "--color-chart-bar"),
+    barMute: readVar(styles, "--color-chart-bar-mute"),
     categories: CATEGORY_VARS.map((name) => readVar(styles, name)),
   };
 }

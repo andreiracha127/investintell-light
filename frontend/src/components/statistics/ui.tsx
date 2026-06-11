@@ -1,14 +1,27 @@
 /**
  * Shared presentational bits for the Statistics tool pages — pure markup,
- * no hooks, no data fetching.
+ * no hooks, no data fetching. Carbon-style fields: flat, square, hairline
+ * bottom border that thickens in the accent color on focus.
  */
 
 export const INPUT_CLASS =
-  "px-3 py-1.5 rounded-[6px] bg-surface-1 border border-border text-[13px] " +
-  "text-text-primary placeholder:text-text-muted focus:border-accent-muted focus:outline-none";
+  "h-[34px] px-2 bg-field border-0 border-b border-border-strong " +
+  "text-[13px] font-normal normal-case tracking-normal text-text-primary " +
+  "placeholder:text-text-muted outline-none " +
+  "focus:border-b-2 focus:border-accent";
 
+/** Column field wrapper: 10px uppercase label text above the control. */
 export const LABEL_CLASS =
-  "flex items-center gap-2 text-[12px] text-text-secondary";
+  "flex flex-col gap-[5px] text-[10px] font-bold uppercase tracking-[0.07em] text-text-muted";
+
+/** Reference-picker panel that wraps each tool's form controls. */
+export function ParamsPanel({ children }: { children: React.ReactNode }) {
+  return (
+    <section className="ix-pad border border-border bg-surface-2">
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-3">{children}</div>
+    </section>
+  );
+}
 
 /** Primary submit button shared by all four tool forms. */
 export function RunButton({
@@ -25,10 +38,23 @@ export function RunButton({
       type="button"
       onClick={onClick}
       disabled={disabled || pending}
-      className="ml-auto px-5 py-1.5 rounded-[7px] bg-accent text-surface-0 text-sm font-semibold hover:bg-accent-strong transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+      className={`ml-auto h-[34px] bg-accent px-5 text-[12.5px] font-bold text-on-accent transition-colors hover:bg-accent-muted disabled:cursor-not-allowed disabled:opacity-40 ${
+        pending ? "opacity-70" : ""
+      }`}
     >
       {pending ? "Running…" : "Run"}
     </button>
+  );
+}
+
+/** Heatmap gradient legend (0.0 → 1.0) for a Card's `actions` slot. */
+export function HeatmapLegend() {
+  return (
+    <span className="flex items-center gap-2 text-[10.5px] tabular-nums text-text-muted">
+      0.0
+      <span className="h-[9px] w-[90px] bg-[linear-gradient(90deg,var(--color-accent-wash),var(--color-accent))]" />
+      1.0
+    </span>
   );
 }
 
@@ -37,10 +63,10 @@ export function ErrorPanel({ title, message }: { title: string; message: string 
   return (
     <div
       role="alert"
-      className="bg-surface-2 border border-loss rounded-xl px-5 py-4"
+      className="ix-pad border-l-[3px] border-loss bg-surface-2"
     >
-      <h2 className="text-sm font-semibold text-loss mb-1">{title}</h2>
-      <p className="text-[13px] text-text-secondary break-words whitespace-pre-wrap">
+      <h2 className="mb-1 text-sm font-bold text-loss">{title}</h2>
+      <p className="ix-fs whitespace-pre-wrap break-words text-text-secondary">
         {message}
       </p>
     </div>

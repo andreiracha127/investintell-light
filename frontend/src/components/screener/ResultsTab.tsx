@@ -112,13 +112,13 @@ export function ResultsTab({
       <div
         aria-busy="true"
         aria-label="Loading screen results"
-        className="h-[320px] rounded-xl bg-surface-2 animate-pulse"
+        className="h-[320px] bg-surface-2 animate-pulse"
       />
     );
   }
   if (resultsQuery.isError) {
     return isSnapshotMissing(resultsQuery.error) ? (
-      <div className="bg-surface-2 border border-border rounded-xl px-6 py-10 text-center text-[13px] text-text-muted">
+      <div className="bg-surface-2 border border-border px-6 py-10 text-center text-[13px] text-text-muted">
         {NO_DATA_NOTE}
       </div>
     ) : (
@@ -136,34 +136,52 @@ export function ResultsTab({
   const lastRow = Math.min(page * PAGE_SIZE, total);
 
   return (
-    <section className="bg-surface-2 border border-border rounded-xl p-4 flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <h2 className="text-[11px] font-semibold tracking-[0.06em] uppercase text-text-muted">
-          Results
-        </h2>
-        <span className="px-2 py-px rounded-[4px] bg-surface-3 border border-border tabular-nums text-[11px] text-accent">
+    <section className="bg-surface-2 border border-border">
+      <div className="flex flex-wrap items-center gap-2.5 px-[var(--ix-pad)] py-3">
+        <h2 className="ix-label m-0">Results</h2>
+        <span className="inline-flex h-[22px] items-center bg-accent-wash border border-accent px-2 tabular-nums text-[11px] font-bold text-accent">
           {formatCompact(total)} matches
         </span>
-        <input
-          value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
-          placeholder="Search ticker/name…"
-          aria-label="Search results by ticker or name"
-          className={`ml-auto w-[220px] ${INPUT_CLASS}`}
-        />
+        <div className="relative ml-auto w-[200px]">
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 16 16"
+            fill="none"
+            aria-hidden="true"
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted"
+          >
+            <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.4" />
+            <path d="M11 11l4 4" stroke="currentColor" strokeWidth="1.4" />
+          </svg>
+          <input
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            placeholder="Search ticker / name…"
+            aria-label="Search results by ticker or name"
+            className={`w-full pl-[30px] ${INPUT_CLASS} text-[12px]`}
+          />
+        </div>
         <button
           type="button"
           onClick={() => void exportCsv()}
           disabled={exporting}
           aria-label="Export results as CSV"
-          className={BUTTON_CLASS}
+          className={`${BUTTON_CLASS} inline-flex items-center gap-[7px] text-[12px]`}
         >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path
+              d="M8 1v9M4.5 7L8 10.5 11.5 7M2 14h12"
+              stroke="currentColor"
+              strokeWidth="1.3"
+            />
+          </svg>
           {exporting ? "Exporting…" : "Export CSV"}
         </button>
       </div>
 
       {exportError && (
-        <p role="alert" className="text-[12px] text-loss break-words">
+        <p role="alert" className="px-[var(--ix-pad)] pb-2 text-[12px] text-loss break-words">
           {exportError}
         </p>
       )}
@@ -173,25 +191,31 @@ export function ResultsTab({
           resultsQuery.isFetching ? "opacity-60" : ""
         }`}
       >
-        <table className="w-full text-[13px]">
+        <table className="w-full min-w-[760px] border-collapse ix-fs tabular-nums lining-nums">
           <thead>
-            <tr className="text-[11px] uppercase tracking-[0.06em] text-text-muted border-b border-border">
+            <tr className="bg-field">
               {columns.map((col) => {
                 const textCol = col.data_type === "string";
                 const active = sort === col.code;
                 return (
                   <th
                     key={col.code}
-                    className={`py-2 px-3 first:pl-0 last:pr-0 font-semibold ${
+                    className={`sticky top-0 whitespace-nowrap bg-field px-2.5 py-[9px] first:pl-[var(--ix-pad)] last:pr-[var(--ix-pad)] border-t border-t-border ${
                       textCol ? "text-left" : "text-right"
+                    } ${
+                      active
+                        ? "border-b-2 border-b-accent font-bold text-accent"
+                        : "border-b border-b-border-strong font-semibold text-text-secondary"
                     }`}
                   >
                     <button
                       type="button"
                       onClick={() => onSort(col.code)}
                       aria-label={`Sort by ${col.name}`}
-                      className={`uppercase tracking-[0.06em] transition-colors hover:text-text-primary ${
-                        active ? "text-accent" : ""
+                      className={`whitespace-nowrap transition-colors ${
+                        active
+                          ? "font-bold text-accent"
+                          : "font-semibold hover:text-text-primary"
                       }`}
                     >
                       {col.name}
@@ -210,7 +234,9 @@ export function ResultsTab({
             {rows.map((row, i) => (
               <tr
                 key={typeof row.ticker === "string" ? row.ticker : i}
-                className="border-b border-border last:border-b-0"
+                className={`border-b border-border transition-colors hover:bg-accent-wash ${
+                  i % 2 === 1 ? "bg-zebra" : ""
+                }`}
               >
                 {columns.map((col) => (
                   <ResultCell key={col.code} row={row} col={col} />
@@ -233,31 +259,45 @@ export function ResultsTab({
         </table>
       </div>
 
-      <div className="pt-2 border-t border-border flex flex-wrap items-center gap-3 text-[12px] text-text-secondary">
+      <div className="flex flex-wrap items-center gap-2.5 border-t border-border px-[var(--ix-pad)] py-2.5 text-[12px] text-text-secondary">
         <span className="tabular-nums">
           {total === 0 ? "0 rows" : `${firstRow}–${lastRow} of ${formatCompact(total)}`}
         </span>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-px">
           <button
             type="button"
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page <= 1 || resultsQuery.isFetching}
             aria-label="Previous page"
-            className={BUTTON_CLASS}
+            className="h-[30px] w-8 bg-field border border-border-strong text-text-secondary hover:bg-layer-hover transition-colors disabled:cursor-not-allowed disabled:text-text-muted disabled:hover:bg-field"
           >
-            ← Prev
+            ‹
           </button>
-          <span className="tabular-nums">
-            Page {page} / {totalPages}
-          </span>
+          {pageWindow(page, totalPages).map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setPage(p)}
+              disabled={resultsQuery.isFetching}
+              aria-label={`Page ${p}`}
+              aria-current={p === page ? "page" : undefined}
+              className={`flex h-[30px] items-center px-3 tabular-nums transition-colors ${
+                p === page
+                  ? "bg-accent border border-accent font-bold text-on-accent"
+                  : "bg-field border border-border-strong text-text-secondary hover:bg-layer-hover"
+              }`}
+            >
+              {p}
+            </button>
+          ))}
           <button
             type="button"
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page >= totalPages || resultsQuery.isFetching}
             aria-label="Next page"
-            className={BUTTON_CLASS}
+            className="h-[30px] w-8 bg-field border border-border-strong text-text-secondary hover:bg-layer-hover transition-colors disabled:cursor-not-allowed disabled:text-text-muted disabled:hover:bg-field"
           >
-            Next →
+            ›
           </button>
         </div>
       </div>
@@ -265,15 +305,25 @@ export function ResultsTab({
   );
 }
 
+/** Up to 5 page numbers centered on the current page — presentation only. */
+function pageWindow(page: number, totalPages: number): number[] {
+  const size = Math.min(5, totalPages);
+  const start = Math.min(Math.max(1, page - 2), totalPages - size + 1);
+  return Array.from({ length: size }, (_, i) => start + i);
+}
+
+const CELL_CLASS =
+  "ix-cell px-2.5 first:pl-[var(--ix-pad)] last:pr-[var(--ix-pad)]";
+
 function ResultCell({ row, col }: { row: ResultsRow; col: ResultsColumn }) {
   const value = row[col.code];
 
   if (col.code === "ticker" && typeof value === "string") {
     return (
-      <td className="py-2 px-3 first:pl-0">
+      <td className={CELL_CLASS}>
         <Link
           href={`/stocks/${encodeURIComponent(value)}`}
-          className="font-semibold text-text-primary hover:text-accent transition-colors"
+          className="font-bold text-accent hover:underline"
         >
           {value}
         </Link>
@@ -282,15 +332,22 @@ function ResultCell({ row, col }: { row: ResultsRow; col: ResultsColumn }) {
   }
   if (col.data_type === "string") {
     return (
-      <td className="py-2 px-3 first:pl-0 last:pr-0 text-left text-text-secondary">
+      <td className={`${CELL_CLASS} text-left text-text-secondary`}>
         <span className="block truncate max-w-[260px]">
           {value === null || value === undefined ? "—" : String(value)}
         </span>
       </td>
     );
   }
+  // Percent metrics read as variations — color by sign, Cockpit gain/loss.
+  const tone =
+    col.data_type === "percent" && typeof value === "number" && value !== 0
+      ? value > 0
+        ? "font-bold text-gain"
+        : "font-bold text-loss"
+      : "text-text-primary";
   return (
-    <td className="py-2 px-3 first:pl-0 last:pr-0 text-right tabular-nums text-text-primary">
+    <td className={`${CELL_CLASS} text-right tabular-nums ${tone}`}>
       {typeof value === "number" ? formatMetricValue(value, col.data_type) : "—"}
     </td>
   );

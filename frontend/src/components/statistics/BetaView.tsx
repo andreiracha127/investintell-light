@@ -15,7 +15,7 @@ import { buildScatterOption } from "@/lib/charts/scatter";
 import { chartColors, type ChartColors } from "@/lib/charts/theme";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { EChart } from "@/components/charts/EChart";
-import { Card, StatRow } from "@/components/ui/panels";
+import { Card, KpiTile, valueTone } from "@/components/ui/panels";
 import {
   AssetRefPicker,
   toAssetRef,
@@ -24,7 +24,7 @@ import {
 } from "@/components/statistics/AssetRefPicker";
 import { DateRangeInputs, defaultDateRange } from "@/components/statistics/DateRangeInputs";
 import { StatisticsShell } from "@/components/statistics/StatisticsShell";
-import { ErrorPanel, RunButton } from "@/components/statistics/ui";
+import { ErrorPanel, ParamsPanel, RunButton } from "@/components/statistics/ui";
 
 export function BetaView() {
   const [colors, setColors] = useState<ChartColors | null>(null);
@@ -61,27 +61,21 @@ export function BetaView() {
 
   return (
     <StatisticsShell>
-      <h1 className="text-2xl font-bold tracking-tight text-text-primary">
-        Beta
-      </h1>
-
-      <Card title="Parameters">
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-          <AssetRefPicker label="X (independent)" value={draftX} onChange={setDraftX} />
-          <AssetRefPicker label="Y (dependent)" value={draftY} onChange={setDraftY} />
-          <DateRangeInputs
-            start={startDate}
-            end={endDate}
-            onStartChange={setStartDate}
-            onEndChange={setEndDate}
-          />
-          <RunButton
-            pending={mutation.isPending}
-            disabled={!canRun}
-            onClick={onRun}
-          />
-        </div>
-      </Card>
+      <ParamsPanel>
+        <AssetRefPicker label="X (independent)" value={draftX} onChange={setDraftX} />
+        <AssetRefPicker label="Y (dependent)" value={draftY} onChange={setDraftY} />
+        <DateRangeInputs
+          start={startDate}
+          end={endDate}
+          onStartChange={setStartDate}
+          onEndChange={setEndDate}
+        />
+        <RunButton
+          pending={mutation.isPending}
+          disabled={!canRun}
+          onClick={onRun}
+        />
+      </ParamsPanel>
 
       {mutation.isPending ? (
         <BetaSkeleton />
@@ -90,7 +84,7 @@ export function BetaView() {
       ) : mutation.data && colors ? (
         <Results data={mutation.data} colors={colors} />
       ) : (
-        <p className="text-[13px] text-text-muted">
+        <p className="ix-pad ix-fs border border-border bg-surface-2 text-text-muted">
           Pick the two assets and a date window, then press Run to regress
           Y&apos;s daily returns on X&apos;s.
         </p>
@@ -116,25 +110,22 @@ function Results({
   );
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-[280px_1fr] gap-5 items-start">
-      <Card title="Regression" subtitle={`${labels.y} on ${labels.x}`}>
-        <p className="mt-1 mb-3">
-          <span className="block text-[11px] uppercase tracking-[0.06em] text-text-muted">
-            Beta
-          </span>
-          <span className="tabular-nums text-3xl font-bold text-accent">
-            {formatNumber(regression.beta, 3)}
-          </span>
-        </p>
-        <dl>
-          <StatRow
-            label="Alpha (daily)"
-            value={formatPercent(regression.alpha, 3, { signed: true })}
-          />
-          <StatRow label="Correlation (r)" value={formatNumber(regression.r, 3)} />
-          <StatRow label="Data points" value={formatNumber(regression.n_points, 0)} />
-        </dl>
-      </Card>
+    <div className="flex flex-col gap-px">
+      <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
+        <KpiTile
+          label="Beta"
+          value={formatNumber(regression.beta, 3)}
+          tone="text-accent"
+          detail={`${labels.y} on ${labels.x}`}
+        />
+        <KpiTile
+          label="Alpha (daily)"
+          value={formatPercent(regression.alpha, 3, { signed: true })}
+          tone={valueTone(regression.alpha)}
+        />
+        <KpiTile label="Correlation (r)" value={formatNumber(regression.r, 3)} />
+        <KpiTile label="Data points" value={formatNumber(regression.n_points, 0)} />
+      </div>
 
       <Card title="Daily Returns" subtitle={`${labels.y} vs ${labels.x}`}>
         <EChart option={scatterOption} className="h-[440px] w-full" />
@@ -148,10 +139,10 @@ function BetaSkeleton() {
     <div
       aria-busy="true"
       aria-label="Loading regression"
-      className="grid grid-cols-1 xl:grid-cols-[280px_1fr] gap-5 animate-pulse"
+      className="flex animate-pulse flex-col gap-px"
     >
-      <div className="h-[280px] rounded-xl bg-surface-2" />
-      <div className="h-[500px] rounded-xl bg-surface-2" />
+      <div className="h-[84px] bg-surface-2" />
+      <div className="h-[500px] bg-surface-2" />
     </div>
   );
 }

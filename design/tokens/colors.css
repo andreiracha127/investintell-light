@@ -1,0 +1,57 @@
+/* ===========================================================================
+   COLORS — Investintell-Light Design System
+   ---------------------------------------------------------------------------
+   Light ground always. A single deep accent, never used as a fill. Graphite/ink
+   for structure. Literal palette below; the SEMANTIC aliases (--accent, --surface-*,
+   --text-*) are the contract to build against — refactor consumers target those.
+   =========================================================================== */
+
+:root {
+  /* --- Base palette (literal tokens) --- */
+  --oxblood:        #7A1C24;  /* primary accent: hero numbers, ticks, rules, chart highlight */
+  --oxblood-dark:   #5E141A;  /* accent depth, pressed/active accent */
+  --ink:            #1A1D23;  /* headings & strong text */
+  --graphite:       #2B2F36;  /* chart bars, dark blocks */
+  --body:           #3A3F47;  /* running body copy */
+  --mute:           #6B7280;  /* subtitles & labels */
+  --faint:          #9AA0A8;  /* footer / least important */
+  --hairline:       #E3E5E9;  /* borders & rules */
+  --panel:          #F6F7F8;  /* panels & placeholders */
+  --white:          #FFFFFF;  /* background */
+  --grey-bar:       #C4C8CF;  /* neutral comparison bar in charts */
+
+  /* --- Accent tint scale (derived, used sparingly for hover/wash) --- */
+  --oxblood-wash:   #F4EAEB;  /* faint oxblood wash for selected rows / tints */
+  --oxblood-hover:  #6A181F;  /* hover step between oxblood and oxblood-dark */
+
+  /* --- Semantic: surfaces --- */
+  --surface-page:    var(--white);
+  --surface-card:    var(--white);
+  --surface-panel:   var(--panel);
+  --surface-block:   var(--graphite);   /* dark structural block */
+  --surface-selected:var(--oxblood-wash);
+
+  /* --- Semantic: text --- */
+  --text-title:    var(--ink);
+  --text-body:     var(--body);
+  --text-label:    var(--mute);
+  --text-faint:    var(--faint);
+  --text-on-dark:  var(--white);
+  --text-accent:   var(--oxblood);
+
+  /* --- Semantic: lines & accent --- */
+  --border-hairline: var(--hairline);
+  --accent:          var(--oxblood);
+  --accent-strong:   var(--oxblood-dark);
+  --rule-accent:     var(--oxblood);
+
+  /* --- Semantic: data viz --- */
+  --chart-bar:        var(--graphite);
+  --chart-bar-mute:   var(--grey-bar);
+  --chart-highlight:  var(--oxblood);
+
+  /* --- Status (used restrained, never decorative) --- */
+  --status-positive: #1F6B3B;  /* gains — deep, not neon */
+  --status-negative: var(--oxblood);
+  --status-neutral:  var(--mute);
+}

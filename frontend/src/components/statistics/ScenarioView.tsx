@@ -29,7 +29,7 @@ import { Card, StatRow } from "@/components/ui/panels";
 import { DateRangeInputs, defaultDateRange } from "@/components/statistics/DateRangeInputs";
 import { PortfolioSelect } from "@/components/statistics/PortfolioSelect";
 import { StatisticsShell } from "@/components/statistics/StatisticsShell";
-import { ErrorPanel, RunButton } from "@/components/statistics/ui";
+import { ErrorPanel, ParamsPanel, RunButton } from "@/components/statistics/ui";
 
 export function ScenarioView() {
   // Design tokens are only readable from the DOM — resolve after mount.
@@ -61,26 +61,20 @@ export function ScenarioView() {
 
   return (
     <StatisticsShell>
-      <h1 className="text-2xl font-bold tracking-tight text-text-primary">
-        Scenario
-      </h1>
-
-      <Card title="Parameters">
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
-          <PortfolioSelect value={portfolioId} onChange={setPortfolioId} />
-          <DateRangeInputs
-            start={startDate}
-            end={endDate}
-            onStartChange={setStartDate}
-            onEndChange={setEndDate}
-          />
-          <RunButton
-            pending={mutation.isPending}
-            disabled={!canRun}
-            onClick={onRun}
-          />
-        </div>
-      </Card>
+      <ParamsPanel>
+        <PortfolioSelect value={portfolioId} onChange={setPortfolioId} />
+        <DateRangeInputs
+          start={startDate}
+          end={endDate}
+          onStartChange={setStartDate}
+          onEndChange={setEndDate}
+        />
+        <RunButton
+          pending={mutation.isPending}
+          disabled={!canRun}
+          onClick={onRun}
+        />
+      </ParamsPanel>
 
       {mutation.isPending ? (
         <ScenarioSkeleton />
@@ -89,7 +83,7 @@ export function ScenarioView() {
       ) : mutation.data && colors ? (
         <Results data={mutation.data} colors={colors} />
       ) : (
-        <p className="text-[13px] text-text-muted">
+        <p className="ix-pad ix-fs border border-border bg-surface-2 text-text-muted">
           Pick a portfolio and a date window, then press Run to replay the
           portfolio&apos;s current holdings over that period.
         </p>
@@ -128,23 +122,23 @@ function Results({
   );
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <p className="tabular-nums text-[12px] text-text-muted">
+    <div className="flex flex-col gap-px">
+      <div className="ix-pad flex flex-wrap items-center gap-x-4 gap-y-2 border border-border bg-surface-2 py-2">
+        <p className="m-0 tabular-nums text-[12px] text-text-muted">
           {params.name} · {formatDate(params.start_date)} →{" "}
           {formatDate(params.end_date)} · Cash: {formatCurrency(params.cash)}
         </p>
         {params.frequency === "weekly" && (
           <span
             title="The window is long, so line series are weekly (W-FRI); statistics stay daily."
-            className="px-1.5 py-px rounded-[4px] bg-surface-3 border border-border text-[10px] text-text-muted"
+            className="border border-border-strong bg-field px-1.5 py-px text-[10px] text-text-muted"
           >
             Weekly series · daily statistics
           </span>
         )}
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-5 items-start">
+      <div className="grid grid-cols-1 items-start gap-px bg-border xl:grid-cols-[minmax(320px,380px)_1fr]">
         {/* ── Statistics rail ── */}
         <Card title="Statistics">
           <dl>
@@ -187,7 +181,7 @@ function Results({
         </Card>
 
         {/* ── Charts ── */}
-        <div className="flex flex-col gap-5 min-w-0">
+        <div className="flex min-w-0 flex-col gap-px">
           <Card title="Portfolio Performance" subtitle="value by holding, $">
             <EChart option={navOption} className="h-[320px] w-full" />
           </Card>
@@ -211,14 +205,14 @@ function ScenarioSkeleton() {
     <div
       aria-busy="true"
       aria-label="Loading scenario"
-      className="grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-5 animate-pulse"
+      className="grid animate-pulse grid-cols-1 gap-px xl:grid-cols-[minmax(320px,380px)_1fr]"
     >
-      <div className="h-[520px] rounded-xl bg-surface-2" />
-      <div className="flex flex-col gap-5">
-        <div className="h-[380px] rounded-xl bg-surface-2" />
-        <div className="h-[340px] rounded-xl bg-surface-2" />
-        <div className="h-[380px] rounded-xl bg-surface-2" />
-        <div className="h-[320px] rounded-xl bg-surface-2" />
+      <div className="h-[520px] bg-surface-2" />
+      <div className="flex flex-col gap-px">
+        <div className="h-[380px] bg-surface-2" />
+        <div className="h-[340px] bg-surface-2" />
+        <div className="h-[380px] bg-surface-2" />
+        <div className="h-[320px] bg-surface-2" />
       </div>
     </div>
   );

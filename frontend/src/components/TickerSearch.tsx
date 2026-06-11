@@ -10,6 +10,8 @@ export function TickerSearch() {
 
   return (
     <form
+      className="relative min-w-0 flex-1"
+      style={{ maxWidth: 380 }}
       onSubmit={(event) => {
         event.preventDefault();
         const ticker = value.trim().toUpperCase();
@@ -18,6 +20,17 @@ export function TickerSearch() {
         setValue("");
       }}
     >
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 16 16"
+        fill="none"
+        aria-hidden
+        className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-muted"
+      >
+        <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.4" />
+        <path d="M11 11l4 4" stroke="currentColor" strokeWidth="1.4" />
+      </svg>
       <input
         type="text"
         value={value}
@@ -26,7 +39,7 @@ export function TickerSearch() {
         aria-label="Search ticker"
         autoComplete="off"
         spellCheck={false}
-        className="w-[240px] h-8 px-3 rounded-[6px] border border-border bg-surface-2 text-text-primary placeholder:text-text-muted text-[13px] outline-none focus:border-accent-muted transition-colors uppercase"
+        className="h-9 w-full border-0 border-b border-border-strong bg-field pl-[34px] pr-3 text-[13px] uppercase text-text-primary outline-none placeholder:text-text-muted focus:border-b-2 focus:border-accent"
       />
     </form>
   );

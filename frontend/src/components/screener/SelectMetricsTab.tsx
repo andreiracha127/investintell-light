@@ -98,12 +98,10 @@ export function SelectMetricsTab({
   }, [catalog, search]);
 
   return (
-    <section className="bg-surface-2 border border-border rounded-xl p-4 flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <h2 className="text-[11px] font-semibold tracking-[0.06em] uppercase text-text-muted">
-          Metric Catalog
-        </h2>
-        <span className="px-2 py-px rounded-[4px] bg-surface-3 border border-border tabular-nums text-[11px] text-accent">
+    <section className="bg-surface-2 border border-border ix-pad flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <h2 className="ix-label m-0">Metric Catalog</h2>
+        <span className="inline-flex h-[22px] items-center bg-accent-wash border border-accent px-2 tabular-nums text-[11px] font-bold text-accent">
           {selectedCodes.size} selected
         </span>
         <input
@@ -204,10 +202,10 @@ function MetricRow({
         disabled={pending}
         aria-pressed={selected}
         aria-label={`${selected ? "Deselect" : "Select"} metric ${metric.name}`}
-        className={`w-full flex items-center gap-3 px-3 py-1.5 rounded-[6px] border text-left text-[13px] transition-colors disabled:opacity-50 disabled:cursor-wait ${
+        className={`w-full flex items-center gap-3 px-3 py-1.5 border text-left text-[13px] transition-colors disabled:opacity-50 disabled:cursor-wait ${
           selected
-            ? "bg-surface-3 border-accent-muted"
-            : "bg-surface-1 border-border hover:border-accent-muted"
+            ? "bg-accent-wash border-accent"
+            : "bg-field border-border hover:bg-layer-hover"
         }`}
       >
         <span
@@ -220,7 +218,7 @@ function MetricRow({
         </span>
         <span
           className={`font-medium ${
-            selected ? "text-text-primary" : "text-text-secondary"
+            selected ? "text-accent" : "text-text-secondary"
           }`}
         >
           {metric.name}
@@ -231,7 +229,7 @@ function MetricRow({
             {metric.sub_category}
           </span>
         )}
-        <span className="ml-auto px-1.5 py-px rounded-[4px] bg-surface-2 border border-border text-[10px] text-text-muted">
+        <span className="ml-auto px-1.5 py-px bg-surface-2 border border-border text-[10px] text-text-muted">
           {metric.data_type}
         </span>
       </button>

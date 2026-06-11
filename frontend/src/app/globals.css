@@ -1,66 +1,194 @@
 @import "tailwindcss";
 
 /*
-  Graphite Design System — dark-first
-  All color tokens are defined here via @theme and referenced via CSS variables.
-  No hardcoded hex values in components.
+  Investintell Cockpit — Carbon-inspired light-first design system.
+  Source of truth: /design/investintell-cockpit/InvestintellCockpit.dc.html
+  and /design/tokens/*.css (Investintell-Light Design System).
+
+  Rules: light ground, single deep accent (oxblood), flat square forms
+  (radius 0, no shadow), hairline borders, tabular numerals on all data.
+  Theme/accent/density switch via data attributes on <html>:
+    data-theme="light|dark"  data-accent="oxblood|blue|teal"
+    data-density="compact|comfortable"
 */
 
-/* ── Base: force dark color scheme ────────────────────────────────────────── */
-:root {
-  color-scheme: dark;
-}
-
-/* ── Tailwind 4 CSS-first token definitions ────────────────────────────────── */
+/* ── Tailwind 4 CSS-first token definitions ────────────────────────────── */
 @theme {
-  /* ── Surfaces (dark-first graphite/near-black scale) ── */
-  --color-surface-0: #0b0d10;   /* page background — near-black graphite */
-  --color-surface-1: #13161c;   /* sidebar / primary panel */
-  --color-surface-2: #1a1e27;   /* card / secondary panel */
-  --color-surface-3: #222736;   /* raised element (tooltip, dropdown) */
-  --color-border:    #2a2f3d;   /* default border / divider */
+  /* ── Surfaces (Carbon gray-10 ground, white layers) ── */
+  --color-surface-0: var(--ix-bg);           /* page background */
+  --color-surface-1: var(--ix-nav);          /* sidebar / header */
+  --color-surface-2: var(--ix-layer);        /* card / panel */
+  --color-surface-3: var(--ix-field);        /* fields / raised */
+  --color-layer-hover: var(--ix-layer-hover);
+  --color-layer-active: var(--ix-layer-active);
+  --color-field: var(--ix-field);
+  --color-zebra: var(--ix-zebra);            /* alternating table rows */
+  --color-border: var(--ix-border-subtle);   /* hairline border / divider */
+  --color-border-strong: var(--ix-border-strong);
 
-  /* ── Brand accent: cyan-teal family ── */
-  --color-accent:         #22d3ee;   /* primary interactive accent */
-  --color-accent-muted:   #0e7490;   /* muted / subtle accent */
-  --color-accent-strong:  #67e8f9;   /* strong / hover state */
+  /* ── Brand accent (oxblood default; switchable) ── */
+  --color-accent:        var(--ix-accent);
+  --color-accent-muted:  var(--ix-accent-hover);  /* hover / pressed accent */
+  --color-accent-strong: var(--ix-accent-hover);
+  --color-accent-wash:   var(--ix-accent-wash);   /* faint accent tint */
+  --color-on-accent:     var(--ix-text-on-accent);
 
   /* ── Financial semantics (P&L / return coloring only) ── */
-  --color-gain:          #22c55e;   /* positive return — green */
-  --color-gain-muted:    #166534;   /* subtle positive background */
-  --color-loss:          #ef4444;   /* negative return — red */
-  --color-loss-muted:    #7f1d1d;   /* subtle negative background */
-  --color-neutral-value: #94a3b8;   /* flat / unchanged value */
+  --color-gain:          var(--ix-pos);
+  --color-gain-muted:    var(--ix-pos-wash);
+  --color-loss:          var(--ix-neg);
+  --color-loss-muted:    var(--ix-neg-wash);
+  --color-neutral-value: var(--ix-text-3);
 
-  /* ── Categorical palette (multi-asset series: allocation donut, …) ──
-     Accent-anchored hues tuned to read on the dark graphite surfaces. */
-  --color-cat-1: #22d3ee;   /* cyan — the accent anchor */
-  --color-cat-2: #818cf8;   /* indigo */
-  --color-cat-3: #34d399;   /* emerald */
-  --color-cat-4: #f472b6;   /* pink */
-  --color-cat-5: #fbbf24;   /* amber */
-  --color-cat-6: #a78bfa;   /* violet */
-  --color-cat-7: #fb923c;   /* orange */
-  --color-cat-8: #5eead4;   /* teal */
+  /* ── Categorical palette (multi-asset series) — graphite ramp + accent ── */
+  --color-cat-1: var(--ix-accent);
+  --color-cat-2: var(--ix-graphite);
+  --color-cat-3: #565b63;
+  --color-cat-4: #7f858d;
+  --color-cat-5: var(--ix-grey-bar);
+  --color-cat-6: #d8dbe0;
+  --color-cat-7: #a08184;   /* muted accent-adjacent */
+  --color-cat-8: #4d5560;
 
   /* ── Text tokens ── */
-  --color-text-primary:   #e2e8f0;   /* main body text */
-  --color-text-secondary: #94a3b8;   /* labels, metadata */
-  --color-text-muted:     #475569;   /* disabled, placeholder */
+  --color-text-primary:   var(--ix-text);
+  --color-text-secondary: var(--ix-text-2);
+  --color-text-muted:     var(--ix-text-3);
 
-  /* ── Font stack ── */
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  /* ── Chart helpers ── */
+  --color-chart-grid: var(--ix-grid);
+  --color-chart-bar: var(--ix-graphite);
+  --color-chart-bar-mute: var(--ix-grey-bar);
+
+  /* ── Font stack — serif on titles, sans on data ── */
+  --font-sans: Arial, "Arimo", "Helvetica Neue", ui-sans-serif, sans-serif;
+  --font-serif: Cambria, "PT Serif", Georgia, serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  /* ── Flat forms: square corners everywhere ── */
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
 }
 
-/* ── Global base styles ─────────────────────────────────────────────────── */
+/* ── Literal palette + theme scopes ────────────────────────────────────── */
+:root {
+  color-scheme: light;
+
+  /* Carbon light (g10-like) */
+  --ix-bg: #f4f4f4;
+  --ix-layer: #ffffff;
+  --ix-layer-hover: #f0f0f0;
+  --ix-layer-active: #e8e8e8;
+  --ix-field: #ffffff;
+  --ix-zebra: #fafafa;
+  --ix-border-subtle: #e0e0e0;
+  --ix-border-strong: #c6c6c6;
+  --ix-text: #161616;
+  --ix-text-2: #525252;
+  --ix-text-3: #6f6f6f;
+  --ix-text-on-accent: #ffffff;
+  --ix-graphite: #2b2f36;
+  --ix-grey-bar: #c4c8cf;
+  --ix-grid: #ececec;
+  --ix-nav: #ffffff;
+  --ix-pos: #198038;
+  --ix-pos-wash: #e8f3ec;
+  --ix-neg: #a2191f;
+  --ix-neg-wash: #f6e8e9;
+
+  /* accent: oxblood (default) */
+  --ix-accent: #7a1c24;
+  --ix-accent-hover: #6a181f;
+  --ix-accent-wash: #f4eaeb;
+
+  /* density: compact (default) */
+  --ix-pad: 14px;
+  --ix-cell-py: 6px;
+  --ix-row-h: 34px;
+  --ix-fs: 12.5px;
+  --ix-fs-sm: 11px;
+}
+
+html[data-accent="blue"] {
+  --ix-accent: #0f62fe;
+  --ix-accent-hover: #0353e9;
+  --ix-accent-wash: #edf2ff;
+}
+html[data-accent="teal"] {
+  --ix-accent: #007d79;
+  --ix-accent-hover: #006b68;
+  --ix-accent-wash: #e5f4f3;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --ix-bg: #161616;
+  --ix-layer: #262626;
+  --ix-layer-hover: #333333;
+  --ix-layer-active: #393939;
+  --ix-field: #393939;
+  --ix-zebra: #2b2b2b;
+  --ix-border-subtle: #393939;
+  --ix-border-strong: #6f6f6f;
+  --ix-text: #f4f4f4;
+  --ix-text-2: #c6c6c6;
+  --ix-text-3: #8d8d8d;
+  --ix-text-on-accent: #ffffff;
+  --ix-graphite: #c6c6c6;
+  --ix-grey-bar: #6f6f6f;
+  --ix-grid: #333333;
+  --ix-nav: #262626;
+  --ix-pos: #42be65;
+  --ix-pos-wash: #16281b;
+  --ix-neg: #fa4d56;
+  --ix-neg-wash: #321a1c;
+}
+html[data-theme="dark"] { --ix-accent: #e0828a; --ix-accent-hover: #d76b73; --ix-accent-wash: #3a2326; }
+html[data-theme="dark"][data-accent="blue"] { --ix-accent: #78a9ff; --ix-accent-hover: #a6c8ff; --ix-accent-wash: #1c2a45; }
+html[data-theme="dark"][data-accent="teal"] { --ix-accent: #3ddbd9; --ix-accent-hover: #08bdba; --ix-accent-wash: #10302f; }
+
+html[data-density="comfortable"] {
+  --ix-pad: 18px;
+  --ix-cell-py: 10px;
+  --ix-row-h: 44px;
+  --ix-fs: 14px;
+  --ix-fs-sm: 12px;
+}
+
+/* ── Global base styles ────────────────────────────────────────────────── */
 body {
   background-color: var(--color-surface-0);
   color: var(--color-text-primary);
   font-family: var(--font-sans);
+  font-size: var(--ix-fs);
+  -webkit-font-smoothing: antialiased;
 }
 
-/*
-  tabular-nums — Tailwind 4 ships this utility built-in (font-variant-numeric system).
-  Use <span class="tabular-nums"> directly; no custom rule needed.
-*/
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--ix-border-strong); }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ── Cockpit utility classes (density-aware) ───────────────────────────── */
+@utility ix-pad { padding: var(--ix-pad); }
+@utility ix-cell { padding-top: var(--ix-cell-py); padding-bottom: var(--ix-cell-py); }
+@utility ix-fs { font-size: var(--ix-fs); }
+@utility ix-fs-sm { font-size: var(--ix-fs-sm); }
+
+/* Section heading: 11px uppercase tracked label (Carbon tile header) */
+@utility ix-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* Serif page title */
+@utility ix-title {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--color-text-primary);
+}

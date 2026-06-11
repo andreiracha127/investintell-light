@@ -5,12 +5,16 @@
  * table from `GET /portfolios/{id}/overview`.
  *
  * The frontend computes NO finance: every P&L/aggregate number comes from the
- * backend overview payload. The Tiingo-style table puts the portfolio
- * aggregates directly in the column headers (P&L and Mkt Value).
+ * backend overview payload (the only client-side arithmetic is chart/legend
+ * proportions of values the backend already provided). The dense table puts
+ * the portfolio aggregates directly in the column headers (P&L and Mkt Value).
+ *
+ * Visual language: Investintell Cockpit (Carbon-inspired) — flat square
+ * panels stacked with 1px separation, hairline borders, tabular numerals.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   ApiError,
@@ -33,16 +37,21 @@ import {
   formatPercent,
 } from "@/lib/format";
 import { parseDecimal } from "@/lib/parse";
-import { valueTone } from "@/components/ui/panels";
+import { buildAllocationOption, type AllocationSlice } from "@/lib/charts/allocation";
+import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import { EChart } from "@/components/charts/EChart";
+import { Card, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
 import { PortfolioNewsPanel } from "@/components/portfolio/PortfolioNewsPanel";
 
+/** Carbon text field: flat, square, bottom rule only; accent rule on focus. */
 const INPUT_CLASS =
-  "px-2 py-1 rounded-[6px] bg-surface-1 border border-border text-[13px] " +
-  "text-text-primary placeholder:text-text-muted focus:border-accent-muted focus:outline-none";
+  "h-[30px] px-2 bg-field border-0 border-b border-border-strong text-[13px] " +
+  "text-text-primary placeholder:text-text-muted focus:outline-none " +
+  "focus:border-b-2 focus:border-accent";
 
 const BUTTON_CLASS =
-  "px-3 py-1 rounded-[6px] bg-surface-1 border border-border text-[12px] " +
-  "text-text-secondary hover:text-text-primary hover:border-accent-muted " +
+  "h-[28px] px-3 bg-field border border-border-strong text-[12px] " +
+  "text-text-secondary hover:bg-layer-hover hover:text-text-primary " +
   "transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
 /** Shared retry policy: never retry 4xx (deterministic), retry 5xx/network twice. */
@@ -82,15 +91,25 @@ export function PortfolioOverviewView() {
   const selected = portfolios?.find((p) => p.id === selectedId) ?? null;
 
   return (
-    <div className="px-6 py-5 max-w-[1400px] mx-auto flex flex-col gap-5">
-      <h1 className="text-2xl font-bold tracking-tight text-text-primary">
-        Portfolio Overview
-      </h1>
+    <div className="mx-auto max-w-[1360px] px-[clamp(14px,3vw,28px)] pb-10 pt-5">
+      <PageTitle title="Portfolio Overview">
+        {portfolios && portfolios.length > 0 && (
+          <PortfolioSwitcher
+            portfolios={portfolios}
+            selected={selected}
+            onSelect={setSelectedId}
+          />
+        )}
+      </PageTitle>
 
       {portfoliosQuery.isPending ? (
-        <div aria-busy="true" aria-label="Loading portfolios" className="flex flex-col gap-5 animate-pulse">
-          <div className="h-[44px] rounded-xl bg-surface-2" />
-          <div className="h-[320px] rounded-xl bg-surface-2" />
+        <div
+          aria-busy="true"
+          aria-label="Loading portfolios"
+          className="flex animate-pulse flex-col gap-px"
+        >
+          <div className="h-[88px] bg-surface-2" />
+          <div className="h-[320px] bg-surface-2" />
         </div>
       ) : portfoliosQuery.isError ? (
         <ErrorPanel
@@ -101,19 +120,15 @@ export function PortfolioOverviewView() {
       ) : portfolios && portfolios.length === 0 ? (
         <EmptyState onCreated={setSelectedId} />
       ) : (
-        <>
-          <PortfolioStrip
-            portfolios={portfolios ?? []}
-            selected={selected}
-            onSelect={setSelectedId}
-          />
+        <div className="flex flex-col gap-px">
           {selected && (
             <>
+              <PortfolioManageBar selected={selected} onSelect={setSelectedId} />
               <OverviewSection key={selected.id} portfolioId={selected.id} />
               <PortfolioNewsPanel portfolioId={selected.id} />
             </>
           )}
-        </>
+        </div>
       )}
     </div>
   );
@@ -131,15 +146,15 @@ function ErrorPanel({
   onRetry: () => void;
 }) {
   return (
-    <div role="alert" className="bg-surface-2 border border-loss rounded-xl px-5 py-4">
-      <h2 className="text-sm font-semibold text-loss mb-1">{title}</h2>
-      <p className="text-[13px] text-text-secondary break-words whitespace-pre-wrap">
+    <div role="alert" className="ix-pad border border-loss bg-surface-2">
+      <h2 className="mb-1 text-sm font-semibold text-loss">{title}</h2>
+      <p className="break-words whitespace-pre-wrap text-[13px] text-text-secondary">
         {message}
       </p>
       <button
         type="button"
         onClick={onRetry}
-        className="mt-3 px-4 py-1.5 rounded-[6px] bg-surface-3 border border-border text-sm text-text-primary hover:border-accent-muted transition-colors"
+        className={`mt-3 ${BUTTON_CLASS}`}
       >
         Retry
       </button>
@@ -217,7 +232,7 @@ function EditableValue({
       aria-label={ariaLabel}
       aria-invalid={invalid}
       className={`w-[90px] text-right tabular-nums ${INPUT_CLASS} ${
-        invalid ? "border-[var(--color-loss)]" : ""
+        invalid ? "border-b-2 border-loss focus:border-loss" : ""
       }`}
     />
   );
@@ -293,7 +308,7 @@ function CreatePortfolioForm({
         </button>
       </div>
       {mutation.isError && (
-        <p role="alert" className="mt-1.5 text-[12px] text-loss break-words">
+        <p role="alert" className="mt-1.5 break-words text-[12px] text-loss">
           {mutation.error.message}
         </p>
       )}
@@ -303,7 +318,7 @@ function CreatePortfolioForm({
 
 function EmptyState({ onCreated }: { onCreated: (id: number) => void }) {
   return (
-    <div className="bg-surface-2 border border-border rounded-xl px-6 py-12 flex flex-col items-center gap-3">
+    <div className="flex flex-col items-center gap-3 border border-border bg-surface-2 px-6 py-12">
       <h2 className="text-sm font-semibold text-text-primary">
         No portfolios yet
       </h2>
@@ -315,9 +330,9 @@ function EmptyState({ onCreated }: { onCreated: (id: number) => void }) {
   );
 }
 
-/* ── Selector strip ───────────────────────────────────────────────────────── */
+/* ── Portfolio switcher (segmented control in the title row) ──────────────── */
 
-function PortfolioStrip({
+function PortfolioSwitcher({
   portfolios,
   selected,
   onSelect,
@@ -326,8 +341,72 @@ function PortfolioStrip({
   selected: PortfolioListItem | null;
   onSelect: (id: number | null) => void;
 }) {
-  const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="flex h-[34px] items-stretch border border-border-strong text-[12px]">
+        {portfolios.map((portfolio, index) => {
+          const active = portfolio.id === selected?.id;
+          return (
+            <button
+              key={portfolio.id}
+              type="button"
+              onClick={() => onSelect(portfolio.id)}
+              aria-pressed={active}
+              className={`flex items-center gap-[7px] px-3.5 transition-colors ${
+                active
+                  ? "bg-accent font-bold text-on-accent"
+                  : `text-text-secondary hover:bg-layer-hover ${
+                      index > 0 ? "border-l border-border" : ""
+                    }`
+              }`}
+            >
+              {portfolio.name}
+              <span
+                className={`tabular-nums ${
+                  active ? "opacity-75" : "text-text-muted"
+                }`}
+              >
+                {portfolio.position_count}
+              </span>
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => setCreating((open) => !open)}
+          aria-label="Create portfolio"
+          aria-expanded={creating}
+          title="Create portfolio"
+          className="flex items-center border-l border-border px-3 text-[16px] text-text-muted hover:bg-layer-hover hover:text-text-primary"
+        >
+          +
+        </button>
+      </div>
+      {creating && (
+        <CreatePortfolioForm
+          autoFocus
+          onCreated={(id) => {
+            setCreating(false);
+            onSelect(id);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ── Manage bar (rename / cash / delete for the selected portfolio) ───────── */
+
+function PortfolioManageBar({
+  selected,
+  onSelect,
+}: {
+  selected: PortfolioListItem;
+  onSelect: (id: number | null) => void;
+}) {
+  const queryClient = useQueryClient();
   const [renaming, setRenaming] = useState(false);
   const [renameText, setRenameText] = useState("");
 
@@ -365,116 +444,75 @@ function PortfolioStrip({
     renameMutation.error ?? cashMutation.error ?? deleteMutation.error;
 
   return (
-    <div className="bg-surface-2 border border-border rounded-xl px-4 py-3 flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        {portfolios.map((portfolio) => (
-          <button
-            key={portfolio.id}
-            type="button"
-            onClick={() => onSelect(portfolio.id)}
-            aria-pressed={portfolio.id === selected?.id}
-            className={`px-3 py-1 rounded-[6px] border text-[12px] font-medium transition-colors ${
-              portfolio.id === selected?.id
-                ? "bg-surface-3 border-accent-muted text-accent"
-                : "bg-surface-1 border-border text-text-secondary hover:text-text-primary"
-            }`}
-          >
-            {portfolio.name}
-            <span className="ml-1.5 tabular-nums text-[10px] text-text-muted">
-              {portfolio.position_count}
-            </span>
-          </button>
-        ))}
-
-        {creating ? (
-          <CreatePortfolioForm
+    <div className="border border-border bg-surface-2 px-[var(--ix-pad)] py-2">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] text-text-secondary">
+        {renaming ? (
+          <input
             autoFocus
-            onCreated={(id) => {
-              setCreating(false);
-              onSelect(id);
+            value={renameText}
+            onChange={(e) => setRenameText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && renameText.trim().length > 0) {
+                renameMutation.mutate({
+                  id: selected.id,
+                  name: renameText.trim(),
+                });
+              } else if (e.key === "Escape") {
+                setRenaming(false);
+              }
             }}
+            onBlur={() => setRenaming(false)}
+            aria-label="New name for selected portfolio"
+            className={`w-[180px] ${INPUT_CLASS}`}
           />
         ) : (
           <button
             type="button"
-            onClick={() => setCreating(true)}
+            onClick={() => {
+              setRenameText(selected.name);
+              setRenaming(true);
+            }}
+            disabled={renameMutation.isPending}
             className={BUTTON_CLASS}
           >
-            + New portfolio
+            {renameMutation.isPending ? "Renaming…" : "Rename"}
           </button>
         )}
-      </div>
 
-      {selected && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-2 border-t border-border text-[12px] text-text-secondary">
-          {renaming ? (
-            <input
-              autoFocus
-              value={renameText}
-              onChange={(e) => setRenameText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && renameText.trim().length > 0) {
-                  renameMutation.mutate({
-                    id: selected.id,
-                    name: renameText.trim(),
-                  });
-                } else if (e.key === "Escape") {
-                  setRenaming(false);
-                }
-              }}
-              onBlur={() => setRenaming(false)}
-              aria-label="New name for selected portfolio"
-              className={`w-[180px] ${INPUT_CLASS}`}
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setRenameText(selected.name);
-                setRenaming(true);
-              }}
-              disabled={renameMutation.isPending}
-              className={BUTTON_CLASS}
-            >
-              {renameMutation.isPending ? "Renaming…" : "Rename"}
-            </button>
-          )}
-
-          <span className="flex items-center gap-1.5">
-            Cash:
-            <EditableValue
-              display={formatCurrency(selected.cash)}
-              initialText={String(selected.cash)}
-              ariaLabel={`cash for ${selected.name}`}
-              parse={parseCash}
-              onSave={(value) => {
-                // parseCash never yields null; the guard keeps types honest.
-                if (value !== null) {
-                  cashMutation.mutate({ id: selected.id, cash: value });
-                }
-              }}
-              pending={cashMutation.isPending}
-            />
-          </span>
-
-          <button
-            type="button"
-            onClick={() => {
-              // Native confirm: deletion is destructive and cascades positions.
-              if (window.confirm(`Delete portfolio "${selected.name}"?`)) {
-                deleteMutation.mutate(selected.id);
+        <span className="flex items-center gap-1.5">
+          Cash:
+          <EditableValue
+            display={formatCurrency(selected.cash)}
+            initialText={String(selected.cash)}
+            ariaLabel={`cash for ${selected.name}`}
+            parse={parseCash}
+            onSave={(value) => {
+              // parseCash never yields null; the guard keeps types honest.
+              if (value !== null) {
+                cashMutation.mutate({ id: selected.id, cash: value });
               }
             }}
-            disabled={deleteMutation.isPending}
-            className={`${BUTTON_CLASS} ml-auto hover:text-loss hover:border-[var(--color-loss)]`}
-          >
-            {deleteMutation.isPending ? "Deleting…" : "Delete"}
-          </button>
-        </div>
-      )}
+            pending={cashMutation.isPending}
+          />
+        </span>
+
+        <button
+          type="button"
+          onClick={() => {
+            // Native confirm: deletion is destructive and cascades positions.
+            if (window.confirm(`Delete portfolio "${selected.name}"?`)) {
+              deleteMutation.mutate(selected.id);
+            }
+          }}
+          disabled={deleteMutation.isPending}
+          className={`${BUTTON_CLASS} ml-auto hover:text-loss hover:border-loss`}
+        >
+          {deleteMutation.isPending ? "Deleting…" : "Delete"}
+        </button>
+      </div>
 
       {mutationError && (
-        <p role="alert" className="text-[12px] text-loss break-words">
+        <p role="alert" className="mt-1.5 break-words text-[12px] text-loss">
           {mutationError.message}
         </p>
       )}
@@ -482,9 +520,15 @@ function PortfolioStrip({
   );
 }
 
-/* ── Overview table ───────────────────────────────────────────────────────── */
+/* ── Overview (KPIs + allocation + table) ─────────────────────────────────── */
 
 function OverviewSection({ portfolioId }: { portfolioId: number }) {
+  // Design tokens are only readable from the DOM — resolve after mount.
+  const [colors, setColors] = useState<ChartColors | null>(null);
+  useEffect(() => {
+    setColors(chartColors());
+  }, []);
+
   const overviewQuery = useQuery({
     queryKey: ["overview", portfolioId],
     queryFn: ({ signal }) => fetchPortfolioOverview(portfolioId, signal),
@@ -497,7 +541,7 @@ function OverviewSection({ portfolioId }: { portfolioId: number }) {
       <div
         aria-busy="true"
         aria-label="Loading portfolio overview"
-        className="h-[320px] rounded-xl bg-surface-2 animate-pulse"
+        className="h-[320px] animate-pulse bg-surface-2"
       />
     );
   }
@@ -510,8 +554,146 @@ function OverviewSection({ portfolioId }: { portfolioId: number }) {
       />
     );
   }
-  return <PositionsTable overview={overviewQuery.data} portfolioId={portfolioId} />;
+
+  const overview = overviewQuery.data;
+  return (
+    <>
+      <KpiStrip overview={overview} />
+      {colors && overview.positions.length > 0 && (
+        <AllocationPanel overview={overview} colors={colors} />
+      )}
+      <PositionsTable overview={overview} portfolioId={portfolioId} />
+    </>
+  );
 }
+
+/** Carbon KPI tile strip — 1px-gap grid over the hairline border color. */
+function KpiStrip({ overview }: { overview: PortfolioOverview }) {
+  const { aggregates, positions } = overview;
+  // Display-only ratio of two backend-provided values (cash share of total).
+  const cashWeight =
+    aggregates.total_value > 0 ? aggregates.cash / aggregates.total_value : null;
+
+  return (
+    <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
+      <KpiTile
+        label="Total Value"
+        value={formatCurrency(aggregates.total_value)}
+      />
+      <KpiTile
+        label="Total P&L"
+        value={
+          aggregates.total_pnl !== null
+            ? formatCurrency(aggregates.total_pnl, { signed: true })
+            : "—"
+        }
+        tone={
+          aggregates.total_pnl !== null
+            ? valueTone(aggregates.total_pnl)
+            : "text-text-muted"
+        }
+        detail={
+          aggregates.total_pnl_pct !== null
+            ? formatPercent(aggregates.total_pnl_pct, 2, { signed: true })
+            : undefined
+        }
+        detailTone={
+          aggregates.total_pnl_pct !== null
+            ? valueTone(aggregates.total_pnl_pct)
+            : "text-text-muted"
+        }
+      />
+      <KpiTile
+        label="Mkt Value"
+        value={formatCurrency(aggregates.total_market_value)}
+      />
+      <KpiTile
+        label="Cash"
+        value={formatCurrency(aggregates.cash)}
+        detail={
+          cashWeight !== null
+            ? `${formatPercent(cashWeight, 1)} weight`
+            : undefined
+        }
+      />
+      <KpiTile
+        label="Positions"
+        value={formatNumber(positions.length, 0)}
+        detail={
+          aggregates.as_of ? `EOD ${formatDate(aggregates.as_of)}` : undefined
+        }
+      />
+    </div>
+  );
+}
+
+/**
+ * Allocation donut + square-swatch legend. Slice values are the backend's
+ * per-position market values (plus cash); percentages shown are the slices'
+ * shares of the donut total — chart proportions, not finance.
+ */
+function AllocationPanel({
+  overview,
+  colors,
+}: {
+  overview: PortfolioOverview;
+  colors: ChartColors;
+}) {
+  const { aggregates, positions } = overview;
+
+  const slices = useMemo<AllocationSlice[]>(() => {
+    const positionSlices = positions.map((position) => ({
+      name: position.ticker,
+      value: position.market_value,
+    }));
+    return aggregates.cash > 0
+      ? [...positionSlices, { name: "Cash", value: aggregates.cash }]
+      : positionSlices;
+  }, [positions, aggregates.cash]);
+
+  const total = slices.reduce((sum, slice) => sum + slice.value, 0);
+  const option = useMemo(
+    () => buildAllocationOption(slices, colors),
+    [slices, colors],
+  );
+
+  return (
+    <Card title="Allocation">
+      <div className="flex flex-wrap items-center gap-[18px]">
+        <EChart option={option} className="h-[150px] w-[150px] shrink-0" />
+        <div className="flex min-w-[150px] max-w-[260px] flex-1 flex-col gap-1.5 tabular-nums">
+          {slices.map((slice, i) => (
+            <div
+              key={slice.name}
+              className="flex items-center gap-[9px] text-[12px]"
+            >
+              <span
+                aria-hidden
+                className="h-2.5 w-2.5 shrink-0"
+                style={{
+                  background: colors.categories[i % colors.categories.length],
+                }}
+              />
+              <span className="flex-1 text-text-secondary">{slice.name}</span>
+              <span className="font-bold text-text-primary">
+                {total > 0 ? formatPercent(slice.value / total, 1) : "—"}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/* ── Positions table ──────────────────────────────────────────────────────── */
+
+const TH_BASE =
+  "sticky top-0 bg-field px-2.5 py-2 ix-fs font-semibold " +
+  "text-text-secondary border-b border-border-strong whitespace-nowrap";
+// Tailwind class conflicts (text-left vs text-right) resolve by stylesheet
+// order, not attribute order — keep alignment out of the shared base.
+const TH_CLASS = `${TH_BASE} text-right`;
 
 function PositionsTable({
   overview,
@@ -549,28 +731,32 @@ function PositionsTable({
   const rowError = editMutation.error ?? removeMutation.error;
 
   return (
-    <section className="bg-surface-2 border border-border rounded-xl p-4">
-      <h2 className="text-[11px] font-semibold tracking-[0.06em] uppercase text-text-muted mb-3">
-        Positions
-        <span className="ml-1.5 normal-case tracking-normal font-normal">
-          {overview.name}
-        </span>
-      </h2>
+    <section className="border border-border bg-surface-2">
+      <div className="px-[var(--ix-pad)] py-3">
+        <h2 className="ix-label m-0">
+          Positions
+          <span className="ml-2 font-normal normal-case tracking-normal text-text-secondary">
+            {overview.name}
+          </span>
+        </h2>
+      </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-[13px]">
+        <table className="w-full min-w-[720px] border-collapse ix-fs tabular-nums">
           <thead>
-            <tr className="text-[11px] uppercase tracking-[0.06em] text-text-muted border-b border-border align-top">
-              <th className="py-2 pr-3 text-left font-semibold">Ticker</th>
-              <th className="py-2 px-3 text-right font-semibold">Last</th>
-              <th className="py-2 px-3 text-right font-semibold">Change</th>
-              <th className="py-2 px-3 text-right font-semibold">Cost</th>
-              <th className="py-2 px-3 text-right font-semibold">Shares</th>
+            <tr className="align-top">
+              <th className={`${TH_BASE} text-left pl-[var(--ix-pad)]`}>
+                Ticker
+              </th>
+              <th className={TH_CLASS}>Last</th>
+              <th className={TH_CLASS}>Change</th>
+              <th className={TH_CLASS}>Cost</th>
+              <th className={TH_CLASS}>Shares</th>
               {/* Aggregates live IN the column headers (Tiingo pattern, D6). */}
-              <th className="py-2 px-3 text-right font-semibold">
+              <th className={TH_CLASS}>
                 P&amp;L
                 <span
-                  className={`block tabular-nums normal-case tracking-normal text-[12px] ${
+                  className={`block text-[11px] font-bold tabular-nums ${
                     aggregates.total_pnl !== null
                       ? valueTone(aggregates.total_pnl)
                       : "text-text-muted"
@@ -583,13 +769,16 @@ function PositionsTable({
                     ` (${formatPercent(aggregates.total_pnl_pct, 2, { signed: true })})`}
                 </span>
               </th>
-              <th className="py-2 pl-3 text-right font-semibold">
+              <th className={TH_CLASS}>
                 Mkt Value
-                <span className="block tabular-nums normal-case tracking-normal text-[12px] text-text-primary">
+                <span className="block text-[11px] font-bold tabular-nums text-text-primary">
                   {formatCurrency(aggregates.total_market_value)}
                 </span>
               </th>
-              <th className="py-2 pl-2 w-[32px]" aria-label="Row actions" />
+              <th
+                className={`${TH_CLASS} w-[36px] pr-[var(--ix-pad)]`}
+                aria-label="Row actions"
+              />
             </tr>
           </thead>
           <tbody>
@@ -609,10 +798,11 @@ function PositionsTable({
               }}
               onDirty={() => addMutation.reset()}
             />
-            {positions.map((position) => (
+            {positions.map((position, index) => (
               <PositionRow
                 key={position.ticker}
                 position={position}
+                zebra={index % 2 === 1}
                 pending={
                   (editMutation.isPending &&
                     editMutation.variables?.ticker === position.ticker) ||
@@ -627,7 +817,10 @@ function PositionsTable({
             ))}
             {positions.length === 0 && (
               <tr>
-                <td colSpan={8} className="py-4 text-center text-[13px] text-text-muted">
+                <td
+                  colSpan={8}
+                  className="py-4 text-center text-[13px] text-text-muted"
+                >
                   No positions yet — add one above.
                 </td>
               </tr>
@@ -637,20 +830,23 @@ function PositionsTable({
       </div>
 
       {rowError && (
-        <p role="alert" className="mt-2 text-[12px] text-loss break-words">
+        <p
+          role="alert"
+          className="break-words px-[var(--ix-pad)] py-2 text-[12px] text-loss"
+        >
           {rowError.message}
         </p>
       )}
 
-      {/* Footer: EOD badge + cash + total value */}
-      <div className="mt-3 pt-3 border-t border-border flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] text-text-secondary">
+      {/* Footer: EOD tag + cash + total value */}
+      <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 border-t border-border px-[var(--ix-pad)] py-2.5 text-[12px] text-text-secondary">
         {aggregates.as_of && (
-          <span className="px-1.5 py-px rounded-[4px] bg-surface-3 border border-border text-[10px] text-text-muted">
+          <span className="border border-border bg-field px-[7px] py-[2px] text-[10px] text-text-muted">
             EOD · {formatDate(aggregates.as_of)}
           </span>
         )}
         <span className="tabular-nums">Cash: {formatCurrency(aggregates.cash)}</span>
-        <span className="ml-auto tabular-nums font-semibold text-text-primary">
+        <span className="ml-auto font-bold tabular-nums text-text-primary">
           Total value: {formatCurrency(aggregates.total_value)}
         </span>
       </div>
@@ -698,8 +894,8 @@ function AddPositionRow({
 
   return (
     <>
-      <tr className="border-b border-border bg-surface-1/40">
-        <td className="py-2 pr-3">
+      <tr className="border-b border-border bg-zebra">
+        <td className="ix-cell pl-[var(--ix-pad)] pr-2.5">
           <input
             value={ticker}
             onChange={(e) => {
@@ -711,9 +907,9 @@ function AddPositionRow({
             className={`w-[110px] uppercase ${INPUT_CLASS}`}
           />
         </td>
-        <td className="px-3" />
-        <td className="px-3" />
-        <td className="px-3 text-right">
+        <td className="px-2.5" />
+        <td className="px-2.5" />
+        <td className="px-2.5 text-right">
           <input
             value={cost}
             onChange={(e) => {
@@ -725,12 +921,12 @@ function AddPositionRow({
             aria-invalid={cost.trim() !== "" && parsedCost === undefined}
             className={`w-[90px] text-right tabular-nums ${INPUT_CLASS} ${
               cost.trim() !== "" && parsedCost === undefined
-                ? "border-[var(--color-loss)]"
+                ? "border-b-2 border-loss focus:border-loss"
                 : ""
             }`}
           />
         </td>
-        <td className="px-3 text-right">
+        <td className="px-2.5 text-right">
           <input
             value={shares}
             onChange={(e) => {
@@ -745,13 +941,13 @@ function AddPositionRow({
             aria-invalid={shares.trim() !== "" && parsedShares === undefined}
             className={`w-[90px] text-right tabular-nums ${INPUT_CLASS} ${
               shares.trim() !== "" && parsedShares === undefined
-                ? "border-[var(--color-loss)]"
+                ? "border-b-2 border-loss focus:border-loss"
                 : ""
             }`}
           />
         </td>
-        <td className="px-3" />
-        <td className="pl-3 text-right">
+        <td className="px-2.5" />
+        <td className="px-2.5 text-right">
           <button
             type="button"
             onClick={submit}
@@ -761,12 +957,12 @@ function AddPositionRow({
             {pending ? "Adding…" : "Add"}
           </button>
         </td>
-        <td className="pl-2" />
+        <td className="pr-[var(--ix-pad)]" />
       </tr>
       {error && (
         <tr className="border-b border-border">
-          <td colSpan={8} className="py-1.5">
-            <p role="alert" className="text-[12px] text-loss break-words">
+          <td colSpan={8} className="px-[var(--ix-pad)] py-1.5">
+            <p role="alert" className="break-words text-[12px] text-loss">
               {error}
             </p>
           </td>
@@ -778,11 +974,13 @@ function AddPositionRow({
 
 function PositionRow({
   position,
+  zebra,
   pending,
   onEdit,
   onRemove,
 }: {
   position: OverviewPosition;
+  zebra: boolean;
   pending: boolean;
   onEdit: (body: PositionBody) => void;
   onRemove: () => void;
@@ -793,24 +991,28 @@ function PositionRow({
     position.pnl !== null ? valueTone(position.pnl) : "text-text-muted";
 
   return (
-    <tr className="border-b border-border last:border-b-0">
-      <td className="py-2 pr-3">
+    <tr
+      className={`border-b border-border last:border-b-0 hover:bg-accent-wash ${
+        zebra ? "bg-zebra" : ""
+      }`}
+    >
+      <td className="ix-cell pl-[var(--ix-pad)] pr-2.5">
         <Link
           href={`/stocks/${encodeURIComponent(position.ticker)}`}
-          className="font-semibold text-text-primary hover:text-accent transition-colors"
+          className="font-bold text-accent hover:text-accent-strong transition-colors"
         >
           {position.ticker}
         </Link>
         {position.name && (
-          <span className="block text-[11px] text-text-muted truncate max-w-[220px]">
+          <span className="block max-w-[220px] truncate text-[10px] text-text-muted">
             {position.name}
           </span>
         )}
       </td>
-      <td className="px-3 text-right tabular-nums text-text-primary">
+      <td className="ix-cell px-2.5 text-right tabular-nums text-text-primary">
         {formatCurrency(position.last_close)}
       </td>
-      <td className={`px-3 text-right tabular-nums ${changeTone}`}>
+      <td className={`ix-cell px-2.5 text-right tabular-nums ${changeTone}`}>
         {position.change !== null && position.change_pct !== null ? (
           <>
             {formatCurrency(position.change, { signed: true })}
@@ -822,7 +1024,7 @@ function PositionRow({
           "—"
         )}
       </td>
-      <td className="px-3 text-right">
+      <td className="ix-cell px-2.5 text-right">
         <EditableValue
           display={
             position.acq_price !== null
@@ -839,7 +1041,7 @@ function PositionRow({
           pending={pending}
         />
       </td>
-      <td className="px-3 text-right">
+      <td className="ix-cell px-2.5 text-right">
         <EditableValue
           display={formatShares(position.quantity)}
           tone="text-text-secondary"
@@ -855,11 +1057,11 @@ function PositionRow({
           pending={pending}
         />
       </td>
-      <td className={`px-3 text-right tabular-nums ${pnlTone}`}>
+      <td className={`ix-cell px-2.5 text-right font-bold tabular-nums ${pnlTone}`}>
         {position.pnl !== null && position.pnl_pct !== null ? (
           <>
             {formatCurrency(position.pnl, { signed: true })}
-            <span className="block text-[11px]">
+            <span className="block text-[11px] font-normal">
               {formatPercent(position.pnl_pct, 2, { signed: true })}
             </span>
           </>
@@ -867,17 +1069,17 @@ function PositionRow({
           "—"
         )}
       </td>
-      <td className="pl-3 text-right tabular-nums font-semibold text-text-primary">
+      <td className="ix-cell px-2.5 text-right font-bold tabular-nums text-text-primary">
         {formatCurrency(position.market_value)}
       </td>
-      <td className="pl-2 text-right">
+      <td className="ix-cell pl-2 pr-[var(--ix-pad)] text-right">
         <button
           type="button"
           onClick={onRemove}
           disabled={pending}
           aria-label={`Remove position ${position.ticker}`}
           title={`Remove ${position.ticker}`}
-          className="px-1.5 py-0.5 rounded-[6px] text-text-muted hover:text-loss hover:bg-surface-1 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          className="px-1.5 py-0.5 text-text-muted hover:bg-layer-hover hover:text-loss transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
         >
           ×
         </button>

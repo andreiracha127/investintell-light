@@ -77,58 +77,62 @@ export function AssetRefPicker({
   onChange: (draft: AssetRefDraft) => void;
 }) {
   return (
-    <fieldset className="flex flex-wrap items-center gap-2">
-      <legend className="float-left mr-1 text-[12px] text-text-secondary">
+    <fieldset className="m-0 flex min-w-0 flex-col gap-[5px] border-0 p-0">
+      <legend className="p-0 text-[10px] font-bold uppercase tracking-[0.07em] text-text-muted">
         {label}
       </legend>
 
-      <div
-        role="group"
-        aria-label={`${label} kind`}
-        className="flex rounded-[7px] border border-border bg-surface-1 p-0.5"
-      >
-        {(["ticker", "portfolio"] as const).map((kind) => (
-          <button
-            key={kind}
-            type="button"
-            onClick={() => {
-              if (kind === value.kind) return;
-              // PortfolioSelect auto-fills the first portfolio for a null id.
-              onChange(
-                kind === "ticker"
-                  ? { kind: "ticker", ticker: "" }
-                  : { kind: "portfolio", id: null },
-              );
-            }}
-            aria-pressed={kind === value.kind}
-            className={`px-3 py-1 rounded-[5px] text-[12px] font-medium transition-colors ${
-              kind === value.kind
-                ? "bg-surface-3 text-accent"
-                : "text-text-secondary hover:text-text-primary"
-            }`}
-          >
-            {kind === "ticker" ? "Ticker" : "Portfolio"}
-          </button>
-        ))}
-      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <div
+          role="group"
+          aria-label={`${label} kind`}
+          className="flex h-[34px] border border-border-strong"
+        >
+          {(["ticker", "portfolio"] as const).map((kind, index) => (
+            <button
+              key={kind}
+              type="button"
+              onClick={() => {
+                if (kind === value.kind) return;
+                // PortfolioSelect auto-fills the first portfolio for a null id.
+                onChange(
+                  kind === "ticker"
+                    ? { kind: "ticker", ticker: "" }
+                    : { kind: "portfolio", id: null },
+                );
+              }}
+              aria-pressed={kind === value.kind}
+              className={`px-3 text-[12px] transition-colors ${
+                index > 0 ? "border-l border-border-strong" : ""
+              } ${
+                kind === value.kind
+                  ? "bg-accent font-bold text-on-accent"
+                  : "bg-field font-medium text-text-secondary hover:bg-layer-hover"
+              }`}
+            >
+              {kind === "ticker" ? "Ticker" : "Portfolio"}
+            </button>
+          ))}
+        </div>
 
-      {value.kind === "ticker" ? (
-        <input
-          value={value.ticker}
-          onChange={(e) =>
-            onChange({ kind: "ticker", ticker: e.target.value.toUpperCase() })
-          }
-          placeholder="TICKER"
-          aria-label={`${label} ticker`}
-          className={`w-[110px] uppercase ${INPUT_CLASS}`}
-        />
-      ) : (
-        <PortfolioSelect
-          label=""
-          value={value.id}
-          onChange={(id) => onChange({ kind: "portfolio", id })}
-        />
-      )}
+        {value.kind === "ticker" ? (
+          <input
+            value={value.ticker}
+            onChange={(e) =>
+              onChange({ kind: "ticker", ticker: e.target.value.toUpperCase() })
+            }
+            placeholder="TICKER"
+            aria-label={`${label} ticker`}
+            className={`w-[110px] !uppercase ${INPUT_CLASS}`}
+          />
+        ) : (
+          <PortfolioSelect
+            label=""
+            value={value.id}
+            onChange={(id) => onChange({ kind: "portfolio", id })}
+          />
+        )}
+      </div>
     </fieldset>
   );
 }

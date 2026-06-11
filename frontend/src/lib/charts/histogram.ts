@@ -18,9 +18,11 @@ export function buildHistogramOption(
   const midpoints = histogram.counts.map(
     (_, i) => (histogram.bin_edges[i] + histogram.bin_edges[i + 1]) / 2,
   );
-  const bars = histogram.counts.map((count, i) => ({
+  // Uniform graphite bars (Cockpit) — the distribution shape carries the
+  // information; gain/loss colouring is reserved for actual P&L surfaces.
+  const bars = histogram.counts.map((count) => ({
     value: count,
-    itemStyle: { color: midpoints[i] < 0 ? colors.loss : colors.gain },
+    itemStyle: { color: colors.bar, opacity: 0.75 },
   }));
 
   return {
@@ -40,13 +42,14 @@ export function buildHistogramOption(
       data: midpoints.map((m) => formatPercent(m, 1)),
       axisLine: { lineStyle: { color: colors.grid } },
       axisTick: { show: false },
-      axisLabel: { color: colors.textMuted },
+      axisLabel: { color: colors.textMuted, fontSize: 10 },
     },
     yAxis: {
       type: "value",
       splitLine: { lineStyle: { color: colors.grid } },
       axisLabel: {
         color: colors.textMuted,
+        fontSize: 10,
         formatter: (value: number) => formatCompact(value),
       },
     },

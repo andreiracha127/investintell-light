@@ -1,14 +1,8 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import Link from "next/link";
+import { Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
-import { TickerSearch } from "@/components/TickerSearch";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
+import { AppShell } from "@/components/shell/AppShell";
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
@@ -16,9 +10,15 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Investintell Light",
+  title: "Investintell Cockpit",
   description: "Stock and portfolio analysis",
 };
+
+/**
+ * Applies persisted theme/accent/density to <html> before first paint so the
+ * cockpit never flashes the default scheme. Mirrors AppShell's readSettings.
+ */
+const SETTINGS_SCRIPT = `(function(){try{var s=JSON.parse(localStorage.getItem("ix-cockpit-settings")||"{}");var e=document.documentElement;e.dataset.theme=s.theme==="dark"?"dark":"light";e.dataset.accent=s.accent==="blue"||s.accent==="teal"?s.accent:"oxblood";e.dataset.density=s.density==="comfortable"?"comfortable":"compact";}catch(_){}})();`;
 
 export default function RootLayout({
   children,
@@ -26,101 +26,19 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+    <html
+      lang="en"
+      data-theme="light"
+      data-accent="oxblood"
+      data-density="compact"
+      suppressHydrationWarning
+    >
+      <body className={`${geistMono.variable} antialiased`}>
+        <script dangerouslySetInnerHTML={{ __html: SETTINGS_SCRIPT }} />
         <Providers>
-          <div className="flex h-screen overflow-hidden">
-            {/* ── Left Sidebar ──────────────────────────────────────────── */}
-            <aside className="w-[220px] shrink-0 flex flex-col overflow-hidden bg-surface-1 border-r border-border">
-              {/* Product name */}
-              <div className="px-4 pt-5 pb-4 border-b border-border">
-                <span className="text-[15px] font-semibold tracking-tight text-accent">
-                  Investintell Light
-                </span>
-              </div>
-
-              {/* Navigation */}
-              <nav
-                aria-label="Primary"
-                className="flex-1 overflow-y-auto py-3 px-2"
-              >
-                <NavGroup label="Stocks">
-                  <NavItem href="/stocks/AAPL">Stock Analysis</NavItem>
-                </NavGroup>
-
-                <NavGroup label="Portfolio">
-                  <NavItem href="/portfolio">Overview</NavItem>
-                  <NavItem href="/portfolio/static">Static Analysis</NavItem>
-                </NavGroup>
-
-                <NavGroup label="Statistics">
-                  <NavItem href="/statistics/scenario">Scenario</NavItem>
-                  <NavItem href="/statistics/beta">Beta</NavItem>
-                  <NavItem href="/statistics/correlation">Correlation</NavItem>
-                  <NavItem href="/statistics/stock-correlation">
-                    Stock Correlation
-                  </NavItem>
-                </NavGroup>
-
-                <NavGroup label="Screener">
-                  <NavItem href="/screener">Screener</NavItem>
-                </NavGroup>
-              </nav>
-            </aside>
-
-            {/* ── Main area ─────────────────────────────────────────────── */}
-            <div className="flex-1 flex flex-col overflow-hidden">
-              {/* Header bar */}
-              <header className="h-[52px] shrink-0 flex items-center px-5 bg-surface-1 border-b border-border">
-                <TickerSearch />
-              </header>
-
-              {/* Page content */}
-              <main className="flex-1 overflow-y-auto bg-surface-0">
-                {children}
-              </main>
-            </div>
-          </div>
+          <AppShell>{children}</AppShell>
         </Providers>
       </body>
     </html>
-  );
-}
-
-/* ── Internal nav components ─────────────────────────────────────────────── */
-
-function NavGroup({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="mb-5">
-      <div className="text-[10px] font-bold tracking-[0.08em] uppercase text-text-muted px-2 mb-1">
-        {label}
-      </div>
-      <div>{children}</div>
-    </div>
-  );
-}
-
-function NavItem({
-  href,
-  children,
-}: {
-  href: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Link
-      href={href}
-      className="block px-2 py-1.5 rounded-[5px] text-[13px] text-text-secondary no-underline hover:bg-surface-2 hover:text-text-primary transition-colors"
-    >
-      {children}
-    </Link>
   );
 }

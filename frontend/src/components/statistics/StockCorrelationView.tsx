@@ -21,7 +21,12 @@ import { Card } from "@/components/ui/panels";
 import { PortfolioSelect } from "@/components/statistics/PortfolioSelect";
 import { StatisticsShell } from "@/components/statistics/StatisticsShell";
 import { WindowInput, parseWindow } from "@/components/statistics/WindowInput";
-import { ErrorPanel, RunButton } from "@/components/statistics/ui";
+import {
+  ErrorPanel,
+  HeatmapLegend,
+  ParamsPanel,
+  RunButton,
+} from "@/components/statistics/ui";
 
 export function StockCorrelationView() {
   const [colors, setColors] = useState<ChartColors | null>(null);
@@ -45,27 +50,21 @@ export function StockCorrelationView() {
 
   return (
     <StatisticsShell>
-      <h1 className="text-2xl font-bold tracking-tight text-text-primary">
-        Stock Correlation
-      </h1>
-
-      <Card title="Parameters">
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
-          <PortfolioSelect value={portfolioId} onChange={setPortfolioId} />
-          <WindowInput value={windowText} onChange={setWindowText} />
-          <RunButton
-            pending={mutation.isPending}
-            disabled={!canRun}
-            onClick={onRun}
-          />
-        </div>
-      </Card>
+      <ParamsPanel>
+        <PortfolioSelect value={portfolioId} onChange={setPortfolioId} />
+        <WindowInput value={windowText} onChange={setWindowText} />
+        <RunButton
+          pending={mutation.isPending}
+          disabled={!canRun}
+          onClick={onRun}
+        />
+      </ParamsPanel>
 
       {mutation.isPending ? (
         <div
           aria-busy="true"
           aria-label="Loading stock correlation"
-          className="h-[480px] rounded-xl bg-surface-2 animate-pulse"
+          className="h-[480px] animate-pulse bg-surface-2"
         />
       ) : mutation.isError ? (
         <ErrorPanel
@@ -75,7 +74,7 @@ export function StockCorrelationView() {
       ) : mutation.data && colors ? (
         <Results data={mutation.data} colors={colors} />
       ) : (
-        <p className="text-[13px] text-text-muted">
+        <p className="ix-pad ix-fs border border-border bg-surface-2 text-text-muted">
           Pick a portfolio and a trailing window, then press Run to compute the
           pairwise correlation of its holdings.
         </p>
@@ -99,12 +98,11 @@ function Results({
   );
 
   return (
-    <Card title="Correlation Matrix">
-      <div className="mb-2 flex items-center gap-2">
-        <span className="px-1.5 py-px rounded-[4px] bg-surface-3 border border-border text-[10px] text-text-muted">
-          as of {formatDate(data.as_of)} · {formatNumber(data.window, 0)}d window
-        </span>
-      </div>
+    <Card
+      title="Correlation Matrix"
+      subtitle={`as of ${formatDate(data.as_of)} · ${formatNumber(data.window, 0)}d window`}
+      actions={<HeatmapLegend />}
+    >
       <EChart option={heatmapOption} className="h-[440px] w-full" />
     </Card>
   );

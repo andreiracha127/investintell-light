@@ -30,7 +30,7 @@ import {
 } from "@/lib/format";
 import { EChart } from "@/components/charts/EChart";
 import { NewsPanel } from "@/components/stocks/NewsPanel";
-import { Card, StatRow, valueTone } from "@/components/ui/panels";
+import { Card, KpiTile, StatRow, valueTone } from "@/components/ui/panels";
 
 /** Rolling window in trading days — fixed at the backend default for now (F7 may add a control). */
 const ROLLING_WINDOW = 63;
@@ -88,7 +88,7 @@ export function StockAnalysisView({
         <button
           type="button"
           onClick={() => refetch()}
-          className="mt-4 px-4 py-1.5 rounded-[6px] bg-surface-3 border border-border text-sm text-text-primary hover:border-accent-muted transition-colors"
+          className="mt-4 px-4 py-1.5 bg-field border border-border-strong text-sm font-semibold text-text-primary hover:bg-layer-hover transition-colors"
         >
           Retry
         </button>
@@ -164,37 +164,37 @@ function AnalysisContent({
         : "text-neutral-value";
 
   return (
-    <div className="px-6 py-5 max-w-[1400px] mx-auto flex flex-col gap-5">
+    <div className="mx-auto flex max-w-[1360px] flex-col px-[clamp(14px,3vw,28px)] pb-10 pt-5">
       {/* ── Header row ── */}
-      <div className="flex flex-wrap items-end justify-between gap-4">
+      <div className="mb-[18px] flex flex-wrap items-end justify-between gap-4">
         <div>
-          <div className="flex items-baseline gap-3">
-            <h1 className="text-2xl font-bold tracking-tight text-text-primary">
+          <div className="flex flex-wrap items-baseline gap-2.5">
+            <h1 className="m-0 font-serif text-[clamp(24px,4vw,30px)] font-bold tracking-[-0.01em] text-text-primary">
               {header.ticker}
             </h1>
             {header.name && (
-              <span className="text-sm text-text-secondary">{header.name}</span>
+              <span className="text-[14px] text-text-secondary">{header.name}</span>
             )}
           </div>
-          <div className="mt-1 flex items-baseline gap-3">
-            <span className="tabular-nums text-[28px] font-bold text-text-primary">
+          <div className="mt-2 flex flex-wrap items-baseline gap-3 tabular-nums">
+            <span className="text-[30px] font-bold text-text-primary">
               {formatCurrency(header.last_close)}
             </span>
-            <span className={`tabular-nums text-[15px] font-semibold ${changeTone}`}>
+            <span className={`text-[15px] font-bold ${changeTone}`}>
               {formatCurrency(header.change, { signed: true })}{" "}
               ({formatPercent(header.change_pct, 2, { signed: true })})
             </span>
-            <span className="px-2 py-0.5 rounded-[5px] bg-surface-2 border border-border text-[11px] text-text-secondary">
+            <span className="border border-border bg-field px-[7px] py-[2px] text-[10.5px] text-text-muted">
               EOD · {formatDate(header.as_of)}
             </span>
           </div>
         </div>
 
-        {/* ── Range switcher ── */}
+        {/* ── Range switcher (Carbon content switcher) ── */}
         <div
           role="group"
           aria-label="Date range"
-          className="flex rounded-[7px] border border-border bg-surface-1 p-0.5"
+          className="flex h-[34px] items-stretch border border-border-strong tabular-nums"
         >
           {RANGE_PRESETS.map((preset) => (
             <button
@@ -202,10 +202,10 @@ function AnalysisContent({
               type="button"
               onClick={() => onRangeChange(preset)}
               aria-pressed={preset === range}
-              className={`px-3 py-1 rounded-[5px] text-[12px] font-medium transition-colors ${
+              className={`flex items-center border-r border-border px-3 text-[12px] transition-colors last:border-r-0 ${
                 preset === range
-                  ? "bg-surface-3 text-accent"
-                  : "text-text-secondary hover:text-text-primary"
+                  ? "bg-accent font-bold text-on-accent"
+                  : "text-text-muted hover:bg-layer-hover hover:text-text-primary"
               }`}
             >
               {preset}
@@ -214,31 +214,78 @@ function AnalysisContent({
         </div>
       </div>
 
+      {/* ── KPI tiles (Carbon gray-gap grid) ── */}
+      <div className="mb-px grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
+        <KpiTile
+          label="Ann. Volatility"
+          value={formatPercent(stats.annualized_volatility)}
+        />
+        <KpiTile
+          label={`Beta · ${params.benchmark}`}
+          value={formatNumber(stats.beta)}
+        />
+        <KpiTile
+          label={`Corr · ${params.benchmark}`}
+          value={formatNumber(stats.correlation)}
+        />
+        <KpiTile
+          label={`Total Return · ${range}`}
+          value={formatPercent(stats.total_return, 2, { signed: true })}
+          tone={valueTone(stats.total_return)}
+        />
+        <KpiTile
+          label="Max Drawdown"
+          value={formatPercent(stats.max_drawdown.depth)}
+          tone="text-loss"
+        />
+        <KpiTile label="VaR 95 (1d)" value={formatPercent(stats.var_95)} />
+      </div>
+
       {/* ── Price chart (candles + volume) ── */}
-      <Card title="Price">
-        <EChart option={priceOption} className="h-[420px] w-full" />
-      </Card>
+      <div className="mb-px">
+        <Card
+          title="Price · OHLC + Volume"
+          actions={
+            <div className="flex gap-3.5 text-[10.5px] text-text-muted">
+              <ChartLegend swatch="line-accent" label="OHLC close" />
+              <ChartLegend swatch="square-grey" label="Volume" />
+            </div>
+          }
+        >
+          <EChart option={priceOption} className="h-[420px] w-full" />
+        </Card>
+      </div>
 
       {/* ── Cumulative returns vs benchmark ── */}
-      <Card title={`Cumulative Return vs ${params.benchmark}`}>
-        <EChart option={cumulativeOption} className="h-[300px] w-full" />
-      </Card>
+      <div className="mb-px">
+        <Card
+          title={`Cumulative Return vs ${params.benchmark}`}
+          actions={
+            <div className="flex gap-3.5 text-[10.5px] text-text-muted">
+              <ChartLegend swatch="line-accent" label={header.ticker} />
+              <ChartLegend swatch="line-grey" label={params.benchmark} />
+            </div>
+          }
+        >
+          <EChart option={cumulativeOption} className="h-[300px] w-full" />
+        </Card>
+      </div>
 
       {/* ── Rolling row ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <Card title={`Rolling Volatility (${params.window}d)`}>
+      <div className="mb-px grid grid-cols-1 gap-px bg-border lg:grid-cols-3">
+        <Card title={`Rolling Volatility · ${params.window}d`}>
           <EChart option={volatilityOption} className="h-[200px] w-full" />
         </Card>
-        <Card title={`Rolling Beta (${params.window}d)`}>
+        <Card title={`Rolling Beta · ${params.window}d`}>
           <EChart option={betaOption} className="h-[200px] w-full" />
         </Card>
-        <Card title={`Rolling Correlation (${params.window}d)`}>
+        <Card title={`Rolling Correlation · ${params.window}d`}>
           <EChart option={correlationOption} className="h-[200px] w-full" />
         </Card>
       </div>
 
       {/* ── Distribution + statistics ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 gap-px bg-border lg:grid-cols-2">
         <Card title="Daily Return Distribution">
           <EChart option={histogramOption} className="h-[280px] w-full" />
         </Card>
@@ -288,12 +335,36 @@ function AnalysisContent({
       </div>
 
       {/* ── News (decorative — hides itself on error or when empty) ── */}
-      <NewsPanel ticker={header.ticker} />
+      <div className="mt-px">
+        <NewsPanel ticker={header.ticker} />
+      </div>
     </div>
   );
 }
 
 /* ── Presentational helpers ───────────────────────────────────────────────── */
+
+/** Small legend entry: 10×2px accent/grey line or 8×8px outlined square. */
+function ChartLegend({
+  swatch,
+  label,
+}: {
+  swatch: "line-accent" | "line-grey" | "square-grey";
+  label: string;
+}) {
+  return (
+    <span className="flex items-center gap-[5px]">
+      {swatch === "line-accent" && <span className="h-[2px] w-[10px] bg-accent" />}
+      {swatch === "line-grey" && (
+        <span className="h-[2px] w-[10px] bg-[var(--color-chart-bar-mute)]" />
+      )}
+      {swatch === "square-grey" && (
+        <span className="h-2 w-2 bg-[var(--color-chart-bar-mute)]" />
+      )}
+      {label}
+    </span>
+  );
+}
 
 function StatePanel({
   title,
@@ -304,8 +375,8 @@ function StatePanel({
 }) {
   return (
     <div className="flex items-center justify-center min-h-full px-6 py-10">
-      <div className="bg-surface-2 border border-border rounded-xl px-10 py-8 max-w-[520px] w-full text-center">
-        <h1 className="text-lg font-bold text-text-primary mb-3">{title}</h1>
+      <div className="w-full max-w-[520px] border border-border border-l-[3px] border-l-[var(--color-loss)] bg-surface-2 px-8 py-6">
+        <h1 className="mb-3 text-lg font-bold text-text-primary">{title}</h1>
         {children}
       </div>
     </div>
@@ -317,19 +388,24 @@ function LoadingSkeleton() {
     <div
       aria-busy="true"
       aria-label="Loading analysis"
-      className="px-6 py-5 max-w-[1400px] mx-auto flex flex-col gap-5 animate-pulse"
+      className="mx-auto flex max-w-[1360px] animate-pulse flex-col px-[clamp(14px,3vw,28px)] pb-10 pt-5"
     >
-      <div className="h-16 w-[320px] rounded-xl bg-surface-2" />
-      <div className="h-[420px] rounded-xl bg-surface-2" />
-      <div className="h-[300px] rounded-xl bg-surface-2" />
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="h-[200px] rounded-xl bg-surface-2" />
-        <div className="h-[200px] rounded-xl bg-surface-2" />
-        <div className="h-[200px] rounded-xl bg-surface-2" />
+      <div className="mb-[18px] h-16 w-[320px] border border-border bg-surface-2" />
+      <div className="mb-px grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
+        {Array.from({ length: 6 }, (_, i) => (
+          <div key={i} className="h-[72px] bg-surface-2" />
+        ))}
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <div className="h-[280px] rounded-xl bg-surface-2" />
-        <div className="h-[280px] rounded-xl bg-surface-2" />
+      <div className="mb-px h-[420px] border border-border bg-surface-2" />
+      <div className="mb-px h-[300px] border border-border bg-surface-2" />
+      <div className="mb-px grid grid-cols-1 gap-px bg-border lg:grid-cols-3">
+        <div className="h-[200px] bg-surface-2" />
+        <div className="h-[200px] bg-surface-2" />
+        <div className="h-[200px] bg-surface-2" />
+      </div>
+      <div className="grid grid-cols-1 gap-px bg-border lg:grid-cols-2">
+        <div className="h-[280px] bg-surface-2" />
+        <div className="h-[280px] bg-surface-2" />
       </div>
     </div>
   );

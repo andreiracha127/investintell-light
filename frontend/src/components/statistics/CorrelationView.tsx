@@ -18,7 +18,7 @@ import { buildRollingOption } from "@/lib/charts/rolling";
 import { chartColors, type ChartColors } from "@/lib/charts/theme";
 import { formatNumber } from "@/lib/format";
 import { EChart } from "@/components/charts/EChart";
-import { Card, StatRow } from "@/components/ui/panels";
+import { Card, KpiTile } from "@/components/ui/panels";
 import {
   AssetRefPicker,
   toAssetRef,
@@ -28,7 +28,7 @@ import {
 import { DateRangeInputs, defaultDateRange } from "@/components/statistics/DateRangeInputs";
 import { StatisticsShell } from "@/components/statistics/StatisticsShell";
 import { WindowInput, parseWindow } from "@/components/statistics/WindowInput";
-import { ErrorPanel, RunButton } from "@/components/statistics/ui";
+import { ErrorPanel, ParamsPanel, RunButton } from "@/components/statistics/ui";
 
 export function CorrelationView() {
   const [colors, setColors] = useState<ChartColors | null>(null);
@@ -72,28 +72,22 @@ export function CorrelationView() {
 
   return (
     <StatisticsShell>
-      <h1 className="text-2xl font-bold tracking-tight text-text-primary">
-        Correlation
-      </h1>
-
-      <Card title="Parameters">
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-          <AssetRefPicker label="X" value={draftX} onChange={setDraftX} />
-          <AssetRefPicker label="Y" value={draftY} onChange={setDraftY} />
-          <DateRangeInputs
-            start={startDate}
-            end={endDate}
-            onStartChange={setStartDate}
-            onEndChange={setEndDate}
-          />
-          <WindowInput value={windowText} onChange={setWindowText} />
-          <RunButton
-            pending={mutation.isPending}
-            disabled={!canRun}
-            onClick={onRun}
-          />
-        </div>
-      </Card>
+      <ParamsPanel>
+        <AssetRefPicker label="X" value={draftX} onChange={setDraftX} />
+        <AssetRefPicker label="Y" value={draftY} onChange={setDraftY} />
+        <DateRangeInputs
+          start={startDate}
+          end={endDate}
+          onStartChange={setStartDate}
+          onEndChange={setEndDate}
+        />
+        <WindowInput value={windowText} onChange={setWindowText} />
+        <RunButton
+          pending={mutation.isPending}
+          disabled={!canRun}
+          onClick={onRun}
+        />
+      </ParamsPanel>
 
       {mutation.isPending ? (
         <CorrelationSkeleton />
@@ -105,7 +99,7 @@ export function CorrelationView() {
       ) : mutation.data && colors ? (
         <Results data={mutation.data} colors={colors} />
       ) : (
-        <p className="text-[13px] text-text-muted">
+        <p className="ix-pad ix-fs border border-border bg-surface-2 text-text-muted">
           Pick the two assets, a date window and a rolling window, then press
           Run to chart their rolling correlation.
         </p>
@@ -136,20 +130,20 @@ function Results({
   );
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-[280px_1fr] gap-5 items-start">
-      <Card title="Current Correlation" subtitle={pairLabel}>
-        <p className="mt-1 mb-3">
-          <span className="tabular-nums text-3xl font-bold text-accent">
-            {formatNumber(data.current, 3)}
-          </span>
-        </p>
-        <dl>
-          <StatRow
-            label="Rolling window"
-            value={`${formatNumber(data.window, 0)} trading days`}
-          />
-        </dl>
-      </Card>
+    <div className="flex flex-col gap-px">
+      <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
+        <KpiTile
+          label="Current correlation"
+          value={formatNumber(data.current, 3)}
+          tone="text-accent"
+          detail={pairLabel}
+        />
+        <KpiTile
+          label="Rolling window"
+          value={formatNumber(data.window, 0)}
+          detail="trading days"
+        />
+      </div>
 
       <Card title="Rolling Correlation" subtitle={pairLabel}>
         <EChart option={rollingOption} className="h-[400px] w-full" />
@@ -163,10 +157,10 @@ function CorrelationSkeleton() {
     <div
       aria-busy="true"
       aria-label="Loading correlation"
-      className="grid grid-cols-1 xl:grid-cols-[280px_1fr] gap-5 animate-pulse"
+      className="flex animate-pulse flex-col gap-px"
     >
-      <div className="h-[200px] rounded-xl bg-surface-2" />
-      <div className="h-[460px] rounded-xl bg-surface-2" />
+      <div className="h-[84px] bg-surface-2" />
+      <div className="h-[460px] bg-surface-2" />
     </div>
   );
 }

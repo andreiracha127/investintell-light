@@ -1,0 +1,54 @@
+/* ===========================================================================
+   TYPOGRAPHY — Investintell-Light Design System
+   ---------------------------------------------------------------------------
+   Serif on the title, sans on the data.
+     Cambria (PT Serif fallback)  -> titles, headings, names. Gravity.
+     Arial   (Arimo fallback)     -> data, body, labels. Bold + tabular numbers.
+   Scale is rem-based (root 16px), tuned for dense, numeric financial UI.
+   =========================================================================== */
+
+:root {
+  /* --- Families --- */
+  --font-serif:  'Cambria', 'PT Serif', 'Georgia', serif;          /* titles, names */
+  --font-sans:   'Arial', 'Arimo', 'Helvetica Neue', sans-serif;    /* data, body, labels */
+  --font-display:var(--font-serif);
+  --font-body:   var(--font-sans);
+  --font-mono:   'Arial', 'Arimo', monospace;  /* numbers use sans + tabular, not a mono face */
+
+  /* --- Weights --- */
+  --weight-regular: 400;
+  --weight-medium:  500;
+  --weight-semibold:600;
+  --weight-bold:    700;
+
+  /* --- Type scale (rem) --- */
+  --text-hero:    2.625rem; /* 42px — hero numbers */
+  --text-title:   1.8125rem;/* 29px — section / page title */
+  --text-kpi:     1.75rem;  /* 28px — KPI value */
+  --text-h2:      1.375rem; /* 22px — panel / card titles */
+  --text-h3:      1.125rem; /* 18px — sub-headers */
+  --text-body:    1rem;     /* 16px — body */
+  --text-small:   0.875rem; /* 14px — secondary body */
+  --text-label:   0.75rem;  /* 12px — uppercase tracked labels */
+  --text-footer:  0.8125rem;/* 13px — footnotes / meta */
+
+  /* --- Line heights --- */
+  --leading-tight:  1.1;
+  --leading-snug:   1.25;
+  --leading-normal: 1.5;
+
+  /* --- Letter spacing --- */
+  --tracking-label:  0.08em;  /* uppercase labels */
+  --tracking-tight: -0.01em;  /* large serif titles */
+  --tracking-normal: 0;
+
+  /* --- Tabular numerals (precision in all data) --- */
+  --num-tabular: "tnum" 1, "lnum" 1; /* @kind other */
+}
+
+/* Utility helpers (optional — tokens are the contract) */
+.ix-title   { font-family: var(--font-serif); font-size: var(--text-title); font-weight: var(--weight-bold); color: var(--text-title); line-height: var(--leading-tight); letter-spacing: var(--tracking-tight); }
+.ix-kpi     { font-family: var(--font-sans); font-size: var(--text-kpi); font-weight: var(--weight-bold); font-variant-numeric: tabular-nums lining-nums; color: var(--ink); }
+.ix-body    { font-family: var(--font-sans); font-size: var(--text-body); font-weight: var(--weight-regular); color: var(--text-body); line-height: var(--leading-normal); }
+.ix-label   { font-family: var(--font-sans); font-size: var(--text-label); font-weight: var(--weight-bold); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-label); }
+.ix-num     { font-variant-numeric: tabular-nums lining-nums; }

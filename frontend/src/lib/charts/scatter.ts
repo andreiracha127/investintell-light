@@ -56,7 +56,7 @@ export function buildScatterOption(
         type: "scatter",
         data: scatter,
         symbolSize: 6,
-        itemStyle: { color: colors.accentMuted, opacity: 0.8 },
+        itemStyle: { color: colors.accent, opacity: 0.65 },
       },
       {
         name: "Regression",
@@ -64,8 +64,8 @@ export function buildScatterOption(
         data: regressionLine,
         showSymbol: false,
         silent: true,
-        lineStyle: { color: colors.accent, width: 2 },
-        itemStyle: { color: colors.accent },
+        lineStyle: { color: colors.bar, width: 1.5 },
+        itemStyle: { color: colors.bar },
       },
     ],
   };

@@ -43,7 +43,7 @@ export function DateRangeInputs({
           value={start}
           onChange={(e) => onStartChange(e.target.value)}
           aria-label="Start date"
-          className={`tabular-nums ${INPUT_CLASS}`}
+          className={`w-[140px] tabular-nums ${INPUT_CLASS}`}
         />
       </label>
       <label className={LABEL_CLASS}>
@@ -53,7 +53,7 @@ export function DateRangeInputs({
           value={end}
           onChange={(e) => onEndChange(e.target.value)}
           aria-label="End date"
-          className={`tabular-nums ${INPUT_CLASS}`}
+          className={`w-[140px] tabular-nums ${INPUT_CLASS}`}
         />
       </label>
     </>

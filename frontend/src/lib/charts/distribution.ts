@@ -3,9 +3,9 @@
  *
  * Bars come pre-normalized from the backend (`counts_normalized` in 0..1);
  * the chart computes NO statistics. Bins overlapping the selected [min, max]
- * band are accent-colored, the rest stay muted — the explore-before-cut
- * visual behind the Build inputs. Bin midpoints (display position only) label
- * the x axis via the shared metric formatter.
+ * band are accent-colored (oxblood), the rest stay neutral graphite — the
+ * explore-before-cut visual behind the Build inputs. Bin midpoints (display
+ * position only) label the x axis via the shared metric formatter.
  */
 import type { EChartsOption } from "echarts";
 
@@ -31,7 +31,7 @@ export function buildDistributionOption(
     itemStyle: {
       color: inBand(bin_edges[i], bin_edges[i + 1])
         ? colors.accent
-        : colors.textMuted,
+        : colors.bar,
     },
   }));
   const labels = counts.map((_, i) =>

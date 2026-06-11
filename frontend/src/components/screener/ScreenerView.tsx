@@ -23,10 +23,11 @@ import {
 } from "@/components/screener/ScreenStrip";
 import { SelectMetricsTab } from "@/components/screener/SelectMetricsTab";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
+import { PageTitle } from "@/components/ui/panels";
 
 const TABS = [
-  { id: "metrics", label: "Select Metrics" },
-  { id: "build", label: "Build" },
+  { id: "metrics", label: "Select metrics" },
+  { id: "build", label: "Build criteria" },
   { id: "results", label: "Results" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
@@ -70,19 +71,33 @@ export function ScreenerView() {
   const selected = screens?.find((s) => s.id === selectedId) ?? null;
 
   return (
-    <div className="px-6 py-5 max-w-[1400px] mx-auto flex flex-col gap-5">
-      <h1 className="text-2xl font-bold tracking-tight text-text-primary">
-        Screener
-      </h1>
+    <div
+      className="mx-auto flex max-w-[1360px] flex-col"
+      style={{ padding: "20px clamp(14px,3vw,28px) 40px" }}
+    >
+      <PageTitle
+        title="Screener"
+        meta={
+          selected ? (
+            <>
+              {selected.name} ·{" "}
+              <span className="tabular-nums">{selected.filter_count}</span>{" "}
+              active filters
+            </>
+          ) : (
+            "Build a metric-driven screen of the stock universe"
+          )
+        }
+      />
 
       {screensQuery.isPending ? (
         <div
           aria-busy="true"
           aria-label="Loading screens"
-          className="flex flex-col gap-5 animate-pulse"
+          className="flex flex-col gap-px animate-pulse"
         >
-          <div className="h-[44px] rounded-xl bg-surface-2" />
-          <div className="h-[320px] rounded-xl bg-surface-2" />
+          <div className="h-[44px] bg-surface-2" />
+          <div className="h-[320px] bg-surface-2" />
         </div>
       ) : screensQuery.isError ? (
         <ErrorPanel
@@ -99,14 +114,18 @@ export function ScreenerView() {
             selected={selected}
             onSelect={setSelectedId}
           />
-          <WizardTabs tab={tab} onTab={setTab} hasScreen={selected !== null} />
+          <div className="mt-4">
+            <WizardTabs tab={tab} onTab={setTab} hasScreen={selected !== null} />
+          </div>
           {selected && (
-            <ScreenWizardBody
-              key={selected.id}
-              screenId={selected.id}
-              screenName={selected.name}
-              tab={tab}
-            />
+            <div className="mt-px">
+              <ScreenWizardBody
+                key={selected.id}
+                screenId={selected.id}
+                screenName={selected.name}
+                tab={tab}
+              />
+            </div>
           )}
         </>
       )}
@@ -116,7 +135,7 @@ export function ScreenerView() {
 
 function EmptyState({ onCreated }: { onCreated: (id: number) => void }) {
   return (
-    <div className="bg-surface-2 border border-border rounded-xl px-6 py-12 flex flex-col items-center gap-3">
+    <div className="bg-surface-2 border border-border px-6 py-12 flex flex-col items-center gap-3">
       <h2 className="text-sm font-semibold text-text-primary">No screens yet</h2>
       <p className="text-[13px] text-text-secondary">
         Create your first screen to filter the stock universe by metrics.
@@ -136,8 +155,8 @@ function WizardTabs({
   hasScreen: boolean;
 }) {
   return (
-    <div role="tablist" aria-label="Screener wizard steps" className="flex gap-1 border-b border-border">
-      {TABS.map((t) => {
+    <div role="tablist" aria-label="Screener wizard steps" className="flex">
+      {TABS.map((t, i) => {
         const disabled = t.id !== "metrics" && !hasScreen;
         const active = tab === t.id;
         return (
@@ -148,12 +167,22 @@ function WizardTabs({
             aria-selected={active}
             disabled={disabled}
             onClick={() => onTab(t.id)}
-            className={`px-4 py-2 -mb-px border-b-2 text-[13px] font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`flex h-[38px] flex-1 items-center justify-center gap-2 px-3.5 text-[12.5px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+              i > 0 ? "border-l-0" : ""
+            } ${
               active
-                ? "border-accent text-accent"
-                : "border-transparent text-text-secondary hover:text-text-primary"
+                ? "relative z-[1] border border-accent bg-accent font-bold text-on-accent"
+                : "border border-border-strong bg-field text-text-secondary hover:bg-layer-hover"
             }`}
           >
+            <span
+              aria-hidden="true"
+              className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-bold ${
+                active ? "bg-[rgba(255,255,255,0.22)]" : "bg-layer-active"
+              }`}
+            >
+              {i + 1}
+            </span>
             {t.label}
           </button>
         );
@@ -190,7 +219,7 @@ function ScreenWizardBody({
       <div
         aria-busy="true"
         aria-label="Loading screen"
-        className="h-[320px] rounded-xl bg-surface-2 animate-pulse"
+        className="h-[320px] bg-surface-2 animate-pulse"
       />
     );
   }

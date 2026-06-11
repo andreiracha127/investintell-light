@@ -1,0 +1,46 @@
+/* ===========================================================================
+   SPACING, LINES, RADII — Investintell-Light Design System
+   ---------------------------------------------------------------------------
+   Flat shapes. Square corners (radius 0). No shadow, no gradient.
+   Disciplined whitespace; the accent spine + hairline rules do the framing.
+   =========================================================================== */
+
+:root {
+  /* --- Spacing scale (4px base) --- */
+  --space-0:  0;
+  --space-1:  0.25rem;  /*  4px */
+  --space-2:  0.5rem;   /*  8px */
+  --space-3:  0.75rem;  /* 12px */
+  --space-4:  1rem;     /* 16px */
+  --space-5:  1.5rem;   /* 24px */
+  --space-6:  2rem;     /* 32px */
+  --space-7:  3rem;     /* 48px */
+  --space-8:  4rem;     /* 64px */
+
+  /* --- Layout --- */
+  --margin-page:   3.5rem;   /* generous left margin */
+  --spine-width:   4px;      /* accent spine on a surface's left edge */
+  --rule-accent-w: 2.5rem;   /* short accent rule under a title */
+  --rule-accent-h: 3px;
+  --content-max:   72rem;
+
+  /* --- Borders --- */
+  --border-width:    1px;
+  --border-hairline-w: 1px;
+  --border-strong-w: 2px;
+  --border-style:    solid; /* @kind other */
+
+  /* --- Radii — square by system rule --- */
+  --radius-none: 0;
+  --radius-sm:   0;     /* flat/square corners throughout */
+  --radius-md:   0;
+  --radius-pill: 0;     /* even chips are square-cut */
+
+  /* --- Elevation — NONE by system rule. Tokens exist only to enforce flatness. */
+  --shadow-none: none;
+  --shadow-card: none;
+
+  /* --- Ticks & marks --- */
+  --tick-width:  3px;   /* accent tick (e.g. on a KPI) */
+  --tick-height: 1.25rem;
+}

@@ -35,9 +35,9 @@ function baseAxes(dates: string[], colors: ChartColors) {
       top: 0,
       right: 8,
       textStyle: { color: colors.textSecondary },
-      icon: "roundRect",
-      itemWidth: 12,
-      itemHeight: 3,
+      icon: "rect",
+      itemWidth: 10,
+      itemHeight: 2,
     },
   } satisfies Partial<EChartsOption>;
 }
