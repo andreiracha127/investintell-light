@@ -1,0 +1,331 @@
+"""Assembly of the render-ready payload for GET /stocks/{ticker}/analysis.
+
+Pure pandas adapter between DB price rows and the response schema — no
+database access, no FastAPI, no I/O. The route loads padded price frames and
+calls :func:`assemble_analysis`.
+
+Padding contract: the input frames cover ``[start - lookback_pad, end]``.
+The pad exists ONLY to warm up rolling windows so rolling series cover the
+visible range from (approximately) its first trading day. It never leaks
+into point statistics:
+
+- header / candles / max_drawdown use PRICES with ``date >= start``;
+- stats / histogram / cumulative returns use ONLY RETURNS dated strictly
+  AFTER ``start``;
+- rolling series are computed on the full padded returns, then SLICED to
+  ``date > start`` with NaN rows dropped.
+
+Scale contract (project-wide): all fractional quantities are decimal
+fractions (0.05 = 5%), never 0-100.
+"""
+
+import datetime as dt
+import math
+from collections.abc import Hashable, Iterable, Mapping
+
+import pandas as pd
+
+from app.analytics import (
+    align_returns,
+    annualized_volatility,
+    best_worst_day,
+    beta,
+    correlation,
+    cumulative_return_series,
+    historical_cvar,
+    historical_var,
+    max_drawdown,
+    return_histogram,
+    rolling_beta,
+    rolling_correlation,
+    rolling_volatility,
+    simple_returns,
+    total_return,
+)
+from app.schemas.analysis import (
+    AnalysisHeader,
+    AnalysisParams,
+    AnalysisStats,
+    Candle,
+    CumulativeReturns,
+    DatedValue,
+    DrawdownOut,
+    HistogramOut,
+    RangeKey,
+    StockAnalysisResponse,
+)
+
+# Minimum in-range daily returns required to compute the stats block
+# (matches the analytics tail-statistics floor for VaR/CVaR/beta/correlation).
+_MIN_IN_RANGE_RETURNS = 10
+
+_HISTOGRAM_BINS = 20
+
+_PRICE_COLUMNS = ["open", "high", "low", "close", "volume", "adj_close"]
+
+# Aggregation rules for weekly (W-FRI) candle resampling on range MAX.
+_WEEKLY_AGG: Mapping[Hashable, str] = {
+    "open": "first",
+    "high": "max",
+    "low": "min",
+    "close": "last",
+    "volume": "sum",
+}
+
+
+class StockAnalysisError(Exception):
+    """Base for assembly failures the route maps to HTTP 422 (fail loud)."""
+
+
+class InsufficientDataError(StockAnalysisError):
+    """Not enough price history to compute the full stats block — never partial stats."""
+
+
+class PayloadTooLargeError(StockAnalysisError):
+    """The candle list would exceed the configured maximum point count."""
+
+
+def lookback_pad_days(window: int) -> int:
+    """CALENDAR days that safely cover *window* TRADING days before the range start.
+
+    ``ceil(window * 7/5)`` converts trading days to calendar days; +15 absorbs
+    holidays so rolling series are warm from the first visible day.
+    """
+    return math.ceil(window * 7 / 5) + 15
+
+
+def build_price_frame(
+    records: Iterable[tuple[dt.date, float, float, float, float, int, float]],
+) -> pd.DataFrame:
+    """Build a date-indexed OHLCV+adj_close frame from DB row tuples.
+
+    ``records`` are ``(date, open, high, low, close, volume, adj_close)``
+    tuples; the result is sorted by its DatetimeIndex.
+    """
+    frame = pd.DataFrame(list(records), columns=["date", *_PRICE_COLUMNS])
+    frame["date"] = pd.to_datetime(frame["date"])
+    return frame.set_index("date").sort_index()
+
+
+def build_adj_close_series(records: Iterable[tuple[dt.date, float]]) -> pd.Series:
+    """Build a date-indexed adjusted-close series from DB row tuples."""
+    frame = pd.DataFrame(list(records), columns=["date", "adj_close"])
+    frame["date"] = pd.to_datetime(frame["date"])
+    return frame.set_index("date")["adj_close"].sort_index()
+
+
+def _to_date(value: object) -> dt.date:
+    """Coerce an index label (Timestamp, datetime or date) to a ``date``."""
+    if isinstance(value, pd.Timestamp):
+        return value.date()
+    if isinstance(value, dt.date):
+        return value
+    return pd.Timestamp(value).date()  # type: ignore[arg-type]
+
+
+def _series_points(series: pd.Series) -> list[tuple[dt.date, float]]:
+    """Convert a date-indexed float series to ``[(date, value), ...]`` points."""
+    return [
+        (_to_date(label), float(value))
+        for label, value in zip(series.index, series.to_numpy(dtype=float), strict=True)
+    ]
+
+
+def _weekly_candles(frame: pd.DataFrame) -> pd.DataFrame:
+    """Resample daily candles to weekly W-FRI buckets (bounded payload for MAX).
+
+    open=first, high=max, low=min, close=last, volume=sum; weeks with no
+    trading days are dropped. The emitted date is the bucket's Friday label.
+    """
+    weekly = frame.resample("W-FRI").agg(_WEEKLY_AGG)
+    return weekly.dropna(subset=["open"])
+
+
+def _candles(frame: pd.DataFrame) -> list[Candle]:
+    return [
+        Candle(
+            date=_to_date(label),
+            open=float(row["open"]),
+            high=float(row["high"]),
+            low=float(row["low"]),
+            close=float(row["close"]),
+            volume=int(row["volume"]),
+        )
+        for label, row in frame.iterrows()
+    ]
+
+
+def _rebased_cumulative(returns: pd.Series) -> list[tuple[dt.date, float]]:
+    """Cumulative-return points rebased to 0.0 at the first date of *returns*.
+
+    The first in-range date is the rebase point (its close is the base NAV),
+    so the chart starts at exactly 0; growth compounds from the second return
+    onward.
+    """
+    points: list[tuple[dt.date, float]] = [(_to_date(returns.index[0]), 0.0)]
+    if len(returns) > 1:
+        points.extend(_series_points(cumulative_return_series(returns.iloc[1:])))
+    return points
+
+
+def assemble_analysis(
+    asset: pd.DataFrame,
+    benchmark_adj_close: pd.Series,
+    *,
+    ticker: str,
+    name: str | None,
+    benchmark: str,
+    range_key: RangeKey,
+    window: int,
+    start: dt.date,
+    end: dt.date,
+    max_candles: int,
+) -> StockAnalysisResponse:
+    """Assemble the full analysis payload from padded price data.
+
+    Args:
+        asset: Date-indexed frame with open/high/low/close/volume/adj_close
+            covering ``[start - lookback_pad, end]`` (pad = rolling warm-up only).
+        benchmark_adj_close: Date-indexed adjusted closes for the benchmark
+            over the same padded window.
+        ticker / name / benchmark / range_key / window / start / end: resolved
+            request parameters (echoed in ``params``).
+        max_candles: hard cap on the emitted candle count (fail loud).
+
+    Raises:
+        InsufficientDataError: too little history for the full stats block.
+        PayloadTooLargeError: candle list would exceed ``max_candles``.
+    """
+    if len(asset) < 2:
+        raise InsufficientDataError(
+            f"Only {len(asset)} price rows available for {ticker} — "
+            "not enough history to compute returns."
+        )
+    if len(benchmark_adj_close) < 2:
+        raise InsufficientDataError(
+            f"Only {len(benchmark_adj_close)} price rows available for benchmark "
+            f"{benchmark} — not enough history to compute returns."
+        )
+
+    start_ts = pd.Timestamp(start)
+
+    # Returns from ADJUSTED closes over the padded window.
+    asset_returns = simple_returns(asset["adj_close"])
+    bench_returns = simple_returns(benchmark_adj_close)
+
+    # In-range slice: ONLY returns dated strictly after `start` feed the
+    # stats/histogram/cumulative blocks (the pad is rolling warm-up only).
+    in_range_returns = asset_returns[asset_returns.index > start_ts]
+    if len(in_range_returns) < _MIN_IN_RANGE_RETURNS:
+        raise InsufficientDataError(
+            f"Only {len(in_range_returns)} in-range daily returns for {ticker} over range "
+            f"{range_key} — at least {_MIN_IN_RANGE_RETURNS} are required for the stats "
+            "block. Use a wider range or a ticker with more history."
+        )
+
+    try:
+        aligned_asset, aligned_bench = align_returns(asset_returns, bench_returns)
+    except ValueError as exc:
+        raise InsufficientDataError(
+            f"{ticker} and benchmark {benchmark} share too few trading days: {exc}"
+        ) from exc
+
+    in_mask = aligned_asset.index > start_ts
+    aligned_in_asset = aligned_asset[in_mask]
+    aligned_in_bench = aligned_bench[in_mask]
+    if len(aligned_in_asset) < _MIN_IN_RANGE_RETURNS:
+        raise InsufficientDataError(
+            f"Only {len(aligned_in_asset)} in-range trading days shared by {ticker} and "
+            f"benchmark {benchmark} — at least {_MIN_IN_RANGE_RETURNS} are required for "
+            "beta/correlation."
+        )
+    if len(asset_returns) < window or len(aligned_asset) < window:
+        raise InsufficientDataError(
+            f"Rolling window of {window} trading days exceeds the available padded history "
+            f"({len(asset_returns)} asset returns, {len(aligned_asset)} aligned with "
+            f"{benchmark}). Reduce the window or use a ticker/benchmark with more history."
+        )
+
+    # Header: RAW closes of the last two trading days (end == last DB date,
+    # so the padded tail and the visible tail coincide).
+    last_close = float(asset["close"].iloc[-1])
+    prev_close = float(asset["close"].iloc[-2])
+    change = last_close - prev_close
+    header = AnalysisHeader(
+        ticker=ticker,
+        name=name,
+        last_close=last_close,
+        prev_close=prev_close,
+        change=change,
+        change_pct=change / prev_close,
+        as_of=_to_date(asset.index[-1]),
+    )
+
+    # Candles: RAW in-range prices; weekly resample bounds the MAX payload.
+    visible = asset[asset.index >= start_ts]
+    candle_frame = _weekly_candles(visible) if range_key == "MAX" else visible
+    if len(candle_frame) > max_candles:
+        raise PayloadTooLargeError(
+            f"Range {range_key} for {ticker} would emit {len(candle_frame)} candles, "
+            f"exceeding the maximum of {max_candles}."
+        )
+
+    # Cumulative returns: aligned grid, sliced in-range, both rebased to 0
+    # on the same first in-range date.
+    cumulative = CumulativeReturns(
+        asset=_rebased_cumulative(aligned_in_asset),
+        benchmark=_rebased_cumulative(aligned_in_bench),
+    )
+
+    # Rolling series: warm up on the padded returns, then slice to the
+    # visible range and drop NaN rows (leading min_periods warm-up and any
+    # undefined windows).
+    def _sliced(series: pd.Series) -> list[tuple[dt.date, float]]:
+        return _series_points(series[series.index > start_ts].dropna())
+
+    rolling_vol_points = _sliced(rolling_volatility(asset_returns, window))
+    rolling_beta_points = _sliced(rolling_beta(asset_returns, bench_returns, window))
+    rolling_corr_points = _sliced(rolling_correlation(asset_returns, bench_returns, window))
+
+    histogram = return_histogram(in_range_returns, bins=_HISTOGRAM_BINS)
+
+    drawdown = max_drawdown(visible["adj_close"])
+    best_worst = best_worst_day(in_range_returns)
+    stats = AnalysisStats(
+        annualized_volatility=annualized_volatility(in_range_returns),
+        var_95=historical_var(in_range_returns, confidence=0.95),
+        var_99=historical_var(in_range_returns, confidence=0.99),
+        cvar_95=historical_cvar(in_range_returns, confidence=0.95),
+        total_return=total_return(in_range_returns),
+        beta=beta(aligned_in_asset, aligned_in_bench),
+        correlation=correlation(aligned_in_asset, aligned_in_bench),
+        max_drawdown=DrawdownOut(
+            depth=drawdown.depth,
+            peak_date=drawdown.peak_date,
+            trough_date=drawdown.trough_date,
+        ),
+        best_day=DatedValue(date=best_worst.best_date, value=best_worst.best_return),
+        worst_day=DatedValue(date=best_worst.worst_date, value=best_worst.worst_return),
+    )
+
+    return StockAnalysisResponse(
+        params=AnalysisParams(
+            range=range_key,
+            benchmark=benchmark,
+            window=window,
+            start_date=start,
+            end_date=end,
+        ),
+        header=header,
+        candles=_candles(candle_frame),
+        cumulative_returns=cumulative,
+        rolling_volatility=rolling_vol_points,
+        rolling_beta=rolling_beta_points,
+        rolling_correlation=rolling_corr_points,
+        histogram=HistogramOut(
+            bin_edges=histogram.bin_edges,
+            counts=histogram.counts,
+            counts_normalized=histogram.counts_normalized,
+        ),
+        stats=stats,
+    )

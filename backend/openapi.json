@@ -104,10 +104,404 @@
           }
         }
       }
+    },
+    "/stocks/{ticker}/analysis": {
+      "get": {
+        "tags": [
+          "stocks"
+        ],
+        "summary": "Get Stock Analysis",
+        "description": "Render-ready analysis payload for one ticker \u2014 single call, no frontend finance.\n\nThe visible range ends at the last trading day available for the ticker;\nrolling series are warmed up on a pre-range pad and sliced back to the\nvisible range. All fractional fields are decimal fractions (0.05 = 5%).",
+        "operationId": "get_stock_analysis_stocks__ticker__analysis_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1M",
+                "6M",
+                "1Y",
+                "5Y",
+                "MAX"
+              ],
+              "type": "string",
+              "description": "Visible-range preset; MAX = full available history.",
+              "default": "1Y",
+              "title": "Range"
+            },
+            "description": "Visible-range preset; MAX = full available history."
+          },
+          {
+            "name": "benchmark",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Benchmark ticker for beta/correlation/relative series.",
+              "default": "SPY",
+              "title": "Benchmark"
+            },
+            "description": "Benchmark ticker for beta/correlation/relative series."
+          },
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 252,
+              "minimum": 10,
+              "description": "Rolling window in TRADING days (10..252).",
+              "default": 63,
+              "title": "Window"
+            },
+            "description": "Rolling window in TRADING days (10..252)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockAnalysisResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AnalysisHeader": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Instrument name from Tiingo metadata, if known."
+          },
+          "last_close": {
+            "type": "number",
+            "title": "Last Close",
+            "description": "Most recent RAW close price (currency units)."
+          },
+          "prev_close": {
+            "type": "number",
+            "title": "Prev Close",
+            "description": "Previous trading day's RAW close price (currency units)."
+          },
+          "change": {
+            "type": "number",
+            "title": "Change",
+            "description": "last_close - prev_close, in currency units (not a fraction)."
+          },
+          "change_pct": {
+            "type": "number",
+            "title": "Change Pct",
+            "description": "One-day change as a decimal fraction (0.05 = 5%), never 0-100."
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date",
+            "title": "As Of",
+            "description": "Date of last_close."
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "name",
+          "last_close",
+          "prev_close",
+          "change",
+          "change_pct",
+          "as_of"
+        ],
+        "title": "AnalysisHeader",
+        "description": "Render-ready header strip values (RAW, un-adjusted prices)."
+      },
+      "AnalysisParams": {
+        "properties": {
+          "range": {
+            "type": "string",
+            "enum": [
+              "1M",
+              "6M",
+              "1Y",
+              "5Y",
+              "MAX"
+            ],
+            "title": "Range",
+            "description": "Requested range preset."
+          },
+          "benchmark": {
+            "type": "string",
+            "title": "Benchmark",
+            "description": "Benchmark ticker used for beta/correlation/relative series."
+          },
+          "window": {
+            "type": "integer",
+            "title": "Window",
+            "description": "Rolling window length in TRADING days."
+          },
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date",
+            "description": "Resolved visible-range start (inclusive for prices/candles)."
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date",
+            "description": "Resolved visible-range end \u2014 the last trading day available for the ticker."
+          }
+        },
+        "type": "object",
+        "required": [
+          "range",
+          "benchmark",
+          "window",
+          "start_date",
+          "end_date"
+        ],
+        "title": "AnalysisParams",
+        "description": "Echo of the resolved request parameters."
+      },
+      "AnalysisStats": {
+        "properties": {
+          "annualized_volatility": {
+            "type": "number",
+            "title": "Annualized Volatility",
+            "description": "Annualized volatility as a decimal fraction (0.25 = 25%), never 0-100."
+          },
+          "var_95": {
+            "type": "number",
+            "title": "Var 95",
+            "description": "Historical 1-day VaR at 95% as a POSITIVE decimal fraction (0.02 = 5% of days lose more than 2%), never 0-100."
+          },
+          "var_99": {
+            "type": "number",
+            "title": "Var 99",
+            "description": "Historical 1-day VaR at 99% as a POSITIVE decimal fraction, never 0-100."
+          },
+          "cvar_95": {
+            "type": "number",
+            "title": "Cvar 95",
+            "description": "Historical 1-day CVaR (expected shortfall) at 95% as a POSITIVE decimal fraction, never 0-100."
+          },
+          "total_return": {
+            "type": "number",
+            "title": "Total Return",
+            "description": "Compounded in-range total return as a decimal fraction (0.5 = +50%), never 0-100."
+          },
+          "beta": {
+            "type": "number",
+            "title": "Beta",
+            "description": "Beta vs benchmark over in-range aligned returns (unitless)."
+          },
+          "correlation": {
+            "type": "number",
+            "title": "Correlation",
+            "description": "Pearson correlation vs benchmark over in-range aligned returns (-1..1)."
+          },
+          "max_drawdown": {
+            "$ref": "#/components/schemas/DrawdownOut"
+          },
+          "best_day": {
+            "$ref": "#/components/schemas/DatedValue"
+          },
+          "worst_day": {
+            "$ref": "#/components/schemas/DatedValue"
+          }
+        },
+        "type": "object",
+        "required": [
+          "annualized_volatility",
+          "var_95",
+          "var_99",
+          "cvar_95",
+          "total_return",
+          "beta",
+          "correlation",
+          "max_drawdown",
+          "best_day",
+          "worst_day"
+        ],
+        "title": "AnalysisStats",
+        "description": "Point statistics over IN-RANGE returns only (the rolling warm-up pad\nis never included). Beta/correlation are versus the benchmark on the\naligned in-range date grid."
+      },
+      "Candle": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "open": {
+            "type": "number",
+            "title": "Open"
+          },
+          "high": {
+            "type": "number",
+            "title": "High"
+          },
+          "low": {
+            "type": "number",
+            "title": "Low"
+          },
+          "close": {
+            "type": "number",
+            "title": "Close"
+          },
+          "volume": {
+            "type": "integer",
+            "title": "Volume"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume"
+        ],
+        "title": "Candle",
+        "description": "One OHLCV candle built from RAW (un-adjusted) prices.\n\nDaily for ranges up to 5Y; weekly (W-FRI buckets: open=first, high=max,\nlow=min, close=last, volume=sum) for range MAX."
+      },
+      "CumulativeReturns": {
+        "properties": {
+          "asset": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Asset",
+            "description": "[date, cumulative return] points; decimal fractions (0.05 = 5%)."
+          },
+          "benchmark": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Benchmark",
+            "description": "[date, cumulative return] points; decimal fractions (0.05 = 5%)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "asset",
+          "benchmark"
+        ],
+        "title": "CumulativeReturns",
+        "description": "Cumulative return series rebased to 0 at the first in-range date.\n\nAsset and benchmark share the same date grid (aligned on common trading\ndays before slicing). Values are decimal fractions (0.05 = 5%), never\n0-100; both series start at exactly 0.0 on the same first date."
+      },
+      "DatedValue": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value",
+            "description": "Daily return as a decimal fraction (0.05 = 5%), never 0-100."
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "value"
+        ],
+        "title": "DatedValue",
+        "description": "A single dated return observation."
+      },
+      "DrawdownOut": {
+        "properties": {
+          "depth": {
+            "type": "number",
+            "title": "Depth",
+            "description": "NEGATIVE decimal fraction (-0.35 = 35% peak-to-trough loss), never 0-100."
+          },
+          "peak_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Peak Date"
+          },
+          "trough_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Trough Date"
+          }
+        },
+        "type": "object",
+        "required": [
+          "depth",
+          "peak_date",
+          "trough_date"
+        ],
+        "title": "DrawdownOut",
+        "description": "Maximum drawdown of the in-range ADJUSTED close series."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -138,6 +532,42 @@
           "database"
         ],
         "title": "HealthResponse"
+      },
+      "HistogramOut": {
+        "properties": {
+          "bin_edges": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Bin Edges",
+            "description": "len(counts)+1 edges in daily-return units, decimal fractions (0.05 = 5%)."
+          },
+          "counts": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Counts",
+            "description": "Observations per bin."
+          },
+          "counts_normalized": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Counts Normalized",
+            "description": "Each count divided by the maximum count (0-1), for direct bar heights."
+          }
+        },
+        "type": "object",
+        "required": [
+          "bin_edges",
+          "counts",
+          "counts_normalized"
+        ],
+        "title": "HistogramOut",
+        "description": "Histogram of in-range daily returns."
       },
       "PricePoint": {
         "properties": {
@@ -232,6 +662,103 @@
         ],
         "title": "PriceSeriesResponse",
         "description": "EOD price series for one ticker over [start_date, end_date]."
+      },
+      "StockAnalysisResponse": {
+        "properties": {
+          "params": {
+            "$ref": "#/components/schemas/AnalysisParams"
+          },
+          "header": {
+            "$ref": "#/components/schemas/AnalysisHeader"
+          },
+          "candles": {
+            "items": {
+              "$ref": "#/components/schemas/Candle"
+            },
+            "type": "array",
+            "title": "Candles"
+          },
+          "cumulative_returns": {
+            "$ref": "#/components/schemas/CumulativeReturns"
+          },
+          "rolling_volatility": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Rolling Volatility",
+            "description": "[date, annualized volatility] points, decimal fractions (0.25 = 25%); in-range dates only, NaN warm-up rows dropped."
+          },
+          "rolling_beta": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Rolling Beta",
+            "description": "[date, beta vs benchmark] points (unitless); in-range, NaN rows dropped."
+          },
+          "rolling_correlation": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Rolling Correlation",
+            "description": "[date, correlation vs benchmark] points (-1..1); in-range, NaN rows dropped."
+          },
+          "histogram": {
+            "$ref": "#/components/schemas/HistogramOut"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/AnalysisStats"
+          }
+        },
+        "type": "object",
+        "required": [
+          "params",
+          "header",
+          "candles",
+          "cumulative_returns",
+          "rolling_volatility",
+          "rolling_beta",
+          "rolling_correlation",
+          "histogram",
+          "stats"
+        ],
+        "title": "StockAnalysisResponse",
+        "description": "Render-ready single-call payload for the stock analysis page.\n\nThe backend computes ALL finance; the frontend only draws. Every\nfractional field is a decimal fraction (0.05 = 5%), never 0-100.\nRolling series are warmed up on a pre-range pad and then sliced to the\nvisible range with NaN rows dropped, so they cover the visible range\nfrom (approximately) its first trading day."
       },
       "ValidationError": {
         "properties": {

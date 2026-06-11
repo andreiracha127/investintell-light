@@ -47,10 +47,240 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/stocks/{ticker}/analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stock Analysis
+         * @description Render-ready analysis payload for one ticker — single call, no frontend finance.
+         *
+         *     The visible range ends at the last trading day available for the ticker;
+         *     rolling series are warmed up on a pre-range pad and sliced back to the
+         *     visible range. All fractional fields are decimal fractions (0.05 = 5%).
+         */
+        get: operations["get_stock_analysis_stocks__ticker__analysis_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AnalysisHeader
+         * @description Render-ready header strip values (RAW, un-adjusted prices).
+         */
+        AnalysisHeader: {
+            /** Ticker */
+            ticker: string;
+            /**
+             * Name
+             * @description Instrument name from Tiingo metadata, if known.
+             */
+            name: string | null;
+            /**
+             * Last Close
+             * @description Most recent RAW close price (currency units).
+             */
+            last_close: number;
+            /**
+             * Prev Close
+             * @description Previous trading day's RAW close price (currency units).
+             */
+            prev_close: number;
+            /**
+             * Change
+             * @description last_close - prev_close, in currency units (not a fraction).
+             */
+            change: number;
+            /**
+             * Change Pct
+             * @description One-day change as a decimal fraction (0.05 = 5%), never 0-100.
+             */
+            change_pct: number;
+            /**
+             * As Of
+             * Format: date
+             * @description Date of last_close.
+             */
+            as_of: string;
+        };
+        /**
+         * AnalysisParams
+         * @description Echo of the resolved request parameters.
+         */
+        AnalysisParams: {
+            /**
+             * Range
+             * @description Requested range preset.
+             * @enum {string}
+             */
+            range: "1M" | "6M" | "1Y" | "5Y" | "MAX";
+            /**
+             * Benchmark
+             * @description Benchmark ticker used for beta/correlation/relative series.
+             */
+            benchmark: string;
+            /**
+             * Window
+             * @description Rolling window length in TRADING days.
+             */
+            window: number;
+            /**
+             * Start Date
+             * Format: date
+             * @description Resolved visible-range start (inclusive for prices/candles).
+             */
+            start_date: string;
+            /**
+             * End Date
+             * Format: date
+             * @description Resolved visible-range end — the last trading day available for the ticker.
+             */
+            end_date: string;
+        };
+        /**
+         * AnalysisStats
+         * @description Point statistics over IN-RANGE returns only (the rolling warm-up pad
+         *     is never included). Beta/correlation are versus the benchmark on the
+         *     aligned in-range date grid.
+         */
+        AnalysisStats: {
+            /**
+             * Annualized Volatility
+             * @description Annualized volatility as a decimal fraction (0.25 = 25%), never 0-100.
+             */
+            annualized_volatility: number;
+            /**
+             * Var 95
+             * @description Historical 1-day VaR at 95% as a POSITIVE decimal fraction (0.02 = 5% of days lose more than 2%), never 0-100.
+             */
+            var_95: number;
+            /**
+             * Var 99
+             * @description Historical 1-day VaR at 99% as a POSITIVE decimal fraction, never 0-100.
+             */
+            var_99: number;
+            /**
+             * Cvar 95
+             * @description Historical 1-day CVaR (expected shortfall) at 95% as a POSITIVE decimal fraction, never 0-100.
+             */
+            cvar_95: number;
+            /**
+             * Total Return
+             * @description Compounded in-range total return as a decimal fraction (0.5 = +50%), never 0-100.
+             */
+            total_return: number;
+            /**
+             * Beta
+             * @description Beta vs benchmark over in-range aligned returns (unitless).
+             */
+            beta: number;
+            /**
+             * Correlation
+             * @description Pearson correlation vs benchmark over in-range aligned returns (-1..1).
+             */
+            correlation: number;
+            max_drawdown: components["schemas"]["DrawdownOut"];
+            best_day: components["schemas"]["DatedValue"];
+            worst_day: components["schemas"]["DatedValue"];
+        };
+        /**
+         * Candle
+         * @description One OHLCV candle built from RAW (un-adjusted) prices.
+         *
+         *     Daily for ranges up to 5Y; weekly (W-FRI buckets: open=first, high=max,
+         *     low=min, close=last, volume=sum) for range MAX.
+         */
+        Candle: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Open */
+            open: number;
+            /** High */
+            high: number;
+            /** Low */
+            low: number;
+            /** Close */
+            close: number;
+            /** Volume */
+            volume: number;
+        };
+        /**
+         * CumulativeReturns
+         * @description Cumulative return series rebased to 0 at the first in-range date.
+         *
+         *     Asset and benchmark share the same date grid (aligned on common trading
+         *     days before slicing). Values are decimal fractions (0.05 = 5%), never
+         *     0-100; both series start at exactly 0.0 on the same first date.
+         */
+        CumulativeReturns: {
+            /**
+             * Asset
+             * @description [date, cumulative return] points; decimal fractions (0.05 = 5%).
+             */
+            asset: [
+                string,
+                number
+            ][];
+            /**
+             * Benchmark
+             * @description [date, cumulative return] points; decimal fractions (0.05 = 5%).
+             */
+            benchmark: [
+                string,
+                number
+            ][];
+        };
+        /**
+         * DatedValue
+         * @description A single dated return observation.
+         */
+        DatedValue: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /**
+             * Value
+             * @description Daily return as a decimal fraction (0.05 = 5%), never 0-100.
+             */
+            value: number;
+        };
+        /**
+         * DrawdownOut
+         * @description Maximum drawdown of the in-range ADJUSTED close series.
+         */
+        DrawdownOut: {
+            /**
+             * Depth
+             * @description NEGATIVE decimal fraction (-0.35 = 35% peak-to-trough loss), never 0-100.
+             */
+            depth: number;
+            /**
+             * Peak Date
+             * Format: date
+             */
+            peak_date: string;
+            /**
+             * Trough Date
+             * Format: date
+             */
+            trough_date: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -62,6 +292,27 @@ export interface components {
             status: string;
             /** Database */
             database: string;
+        };
+        /**
+         * HistogramOut
+         * @description Histogram of in-range daily returns.
+         */
+        HistogramOut: {
+            /**
+             * Bin Edges
+             * @description len(counts)+1 edges in daily-return units, decimal fractions (0.05 = 5%).
+             */
+            bin_edges: number[];
+            /**
+             * Counts
+             * @description Observations per bin.
+             */
+            counts: number[];
+            /**
+             * Counts Normalized
+             * @description Each count divided by the maximum count (0-1), for direct bar heights.
+             */
+            counts_normalized: number[];
         };
         /**
          * PricePoint
@@ -111,6 +362,49 @@ export interface components {
             count: number;
             /** Prices */
             prices: components["schemas"]["PricePoint"][];
+        };
+        /**
+         * StockAnalysisResponse
+         * @description Render-ready single-call payload for the stock analysis page.
+         *
+         *     The backend computes ALL finance; the frontend only draws. Every
+         *     fractional field is a decimal fraction (0.05 = 5%), never 0-100.
+         *     Rolling series are warmed up on a pre-range pad and then sliced to the
+         *     visible range with NaN rows dropped, so they cover the visible range
+         *     from (approximately) its first trading day.
+         */
+        StockAnalysisResponse: {
+            params: components["schemas"]["AnalysisParams"];
+            header: components["schemas"]["AnalysisHeader"];
+            /** Candles */
+            candles: components["schemas"]["Candle"][];
+            cumulative_returns: components["schemas"]["CumulativeReturns"];
+            /**
+             * Rolling Volatility
+             * @description [date, annualized volatility] points, decimal fractions (0.25 = 25%); in-range dates only, NaN warm-up rows dropped.
+             */
+            rolling_volatility: [
+                string,
+                number
+            ][];
+            /**
+             * Rolling Beta
+             * @description [date, beta vs benchmark] points (unitless); in-range, NaN rows dropped.
+             */
+            rolling_beta: [
+                string,
+                number
+            ][];
+            /**
+             * Rolling Correlation
+             * @description [date, correlation vs benchmark] points (-1..1); in-range, NaN rows dropped.
+             */
+            rolling_correlation: [
+                string,
+                number
+            ][];
+            histogram: components["schemas"]["HistogramOut"];
+            stats: components["schemas"]["AnalysisStats"];
         };
         /** ValidationError */
         ValidationError: {
@@ -177,6 +471,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PriceSeriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_stock_analysis_stocks__ticker__analysis_get: {
+        parameters: {
+            query?: {
+                /** @description Visible-range preset; MAX = full available history. */
+                range?: "1M" | "6M" | "1Y" | "5Y" | "MAX";
+                /** @description Benchmark ticker for beta/correlation/relative series. */
+                benchmark?: string;
+                /** @description Rolling window in TRADING days (10..252). */
+                window?: number;
+            };
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockAnalysisResponse"];
                 };
             };
             /** @description Validation Error */
