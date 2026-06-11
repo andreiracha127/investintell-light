@@ -105,6 +105,19 @@ const NAV_ITEMS: { href: string; match: (p: string) => boolean; label: string; i
       </svg>
     ),
   },
+  {
+    href: "/builder",
+    match: (p) => p.startsWith("/builder"),
+    label: "Builder",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+        <path d="M3.5 1.5v13M8 1.5v13M12.5 1.5v13" stroke="currentColor" strokeWidth="1.3" />
+        <rect x="2" y="9" width="3" height="3" fill="var(--color-accent)" />
+        <rect x="6.5" y="4" width="3" height="3" fill="currentColor" />
+        <rect x="11" y="7" width="3" height="3" fill="currentColor" />
+      </svg>
+    ),
+  },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {

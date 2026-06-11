@@ -572,10 +572,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/builder/optimize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Optimize
+         * @description Optimize weights over a mixed fund/equity universe.
+         *
+         *     Default objective is ``min_cvar`` (Rockafellar–Uryasev, α=0.95) on raw
+         *     historical scenarios. With Black-Litterman ``views``, scenarios are
+         *     re-centered on the posterior μ_BL and floored at the equilibrium return;
+         *     ``bl_utility`` selects the explicit max-utility objective instead.
+         *     All fractional fields are decimal fractions (0.05 = 5%).
+         */
+        post: operations["optimize_builder_optimize_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AbsoluteViewIn
+         * @description 'Asset returns q per year' (e.g. q=0.12 → 12% a.a.).
+         */
+        AbsoluteViewIn: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "absolute";
+            /** Asset */
+            asset: components["schemas"]["FundRefIn"] | components["schemas"]["EquityRefIn"];
+            /** Q */
+            q: number;
+            /**
+             * Confidence
+             * @default 0.5
+             */
+            confidence: number;
+        };
         /**
          * AllocationOut
          * @description Resolved allocation at the first analyzed date (the replay strike point).
@@ -742,6 +788,19 @@ export interface components {
              */
             y: string;
         };
+        /** BLParamsIn */
+        BLParamsIn: {
+            /**
+             * Delta
+             * @default 2.5
+             */
+            delta: number;
+            /**
+             * Tau
+             * @default 0.05
+             */
+            tau: number;
+        };
         /**
          * BenchmarkComparison
          * @description Cumulative return of the portfolio vs the benchmark, rebased to 0.
@@ -859,6 +918,19 @@ export interface components {
             close: number;
             /** Volume */
             volume: number;
+        };
+        /**
+         * ConstraintsIn
+         * @description Long-only and sum(w)=1 are always enforced; these are the knobs.
+         */
+        ConstraintsIn: {
+            /**
+             * Cap
+             * @default 0.25
+             */
+            cap: number | null;
+            /** Min Weight */
+            min_weight?: number | null;
         };
         /**
          * CorrelationMatrixOut
@@ -997,6 +1069,17 @@ export interface components {
              */
             value: number;
         };
+        /** DiagnosticsOut */
+        DiagnosticsOut: {
+            /** N Obs */
+            n_obs: number;
+            /** Status */
+            status: string;
+            /** Mu Equilibrium */
+            mu_equilibrium?: number[] | null;
+            /** Mu Posterior */
+            mu_posterior?: number[] | null;
+        };
         /**
          * DistributionOut
          * @description Histogram over the active universe; counts_normalized in 0..1, never pixels.
@@ -1035,6 +1118,25 @@ export interface components {
              * Format: date
              */
             trough_date: string;
+        };
+        /** EquityRefIn */
+        EquityRefIn: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "equity";
+            /** Ticker */
+            ticker: string;
+        };
+        /** ExpectedOut */
+        ExpectedOut: {
+            /** Vol Ann */
+            vol_ann: number;
+            /** Cvar 95 In Sample */
+            cvar_95_in_sample: number;
+            /** Return Ann Bl */
+            return_ann_bl: number | null;
         };
         /**
          * FilterBody
@@ -1233,6 +1335,19 @@ export interface components {
              */
             classification_note: string;
         };
+        /** FundRefIn */
+        FundRefIn: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "fund";
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+        };
         /**
          * FundRiskOut
          * @description The full precomputed risk snapshot (latest calc_date in the source).
@@ -1430,6 +1545,44 @@ export interface components {
             stale: boolean;
             /** Items */
             items: components["schemas"]["NewsArticle"][];
+        };
+        /** OptimizeRequest */
+        OptimizeRequest: {
+            /** Assets */
+            assets: (components["schemas"]["FundRefIn"] | components["schemas"]["EquityRefIn"])[];
+            /**
+             * Objective
+             * @default min_cvar
+             * @enum {string}
+             */
+            objective: "equal_weight" | "min_vol" | "erc" | "max_diversification" | "min_cvar" | "bl_utility";
+            /**
+             * @default {
+             *       "cap": 0.25
+             *     }
+             */
+            constraints: components["schemas"]["ConstraintsIn"];
+            /**
+             * Window Days
+             * @default 730
+             */
+            window_days: number;
+            /** Views */
+            views?: (components["schemas"]["AbsoluteViewIn"] | components["schemas"]["RelativeViewIn"])[] | null;
+            /**
+             * @default {
+             *       "delta": 2.5,
+             *       "tau": 0.05
+             *     }
+             */
+            bl: components["schemas"]["BLParamsIn"];
+        };
+        /** OptimizeResponse */
+        OptimizeResponse: {
+            /** Weights */
+            weights: components["schemas"]["WeightOut"][];
+            expected: components["schemas"]["ExpectedOut"];
+            diagnostics: components["schemas"]["DiagnosticsOut"];
         };
         /**
          * OverviewAggregates
@@ -1996,6 +2149,28 @@ export interface components {
             n_points: number;
         };
         /**
+         * RelativeViewIn
+         * @description '`long` outperforms `short` by q per year'.
+         */
+        RelativeViewIn: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "relative";
+            /** Long */
+            long: components["schemas"]["FundRefIn"] | components["schemas"]["EquityRefIn"];
+            /** Short */
+            short: components["schemas"]["FundRefIn"] | components["schemas"]["EquityRefIn"];
+            /** Q */
+            q: number;
+            /**
+             * Confidence
+             * @default 0.5
+             */
+            confidence: number;
+        };
+        /**
          * ResultsColumnOut
          * @description One results-table column (ticker/name are data_type 'string').
          */
@@ -2401,6 +2576,13 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WeightOut */
+        WeightOut: {
+            /** Asset */
+            asset: components["schemas"]["FundRefIn"] | components["schemas"]["EquityRefIn"];
+            /** Weight */
+            weight: number;
         };
     };
     responses: never;
@@ -3437,6 +3619,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FundProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    optimize_builder_optimize_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OptimizeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptimizeResponse"];
                 };
             };
             /** @description Validation Error */

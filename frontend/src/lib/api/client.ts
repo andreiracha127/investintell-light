@@ -30,6 +30,7 @@ type ScreenResultsOperation = paths["/screener/screens/{screen_id}/results"]["ge
 type ScreenResultsCsvOperation =
   paths["/screener/screens/{screen_id}/results.csv"]["get"];
 type FundsOperation = paths["/funds"]["get"];
+type BuilderOptimizeOperation = paths["/builder/optimize"]["post"];
 type FundsCsvOperation = paths["/funds.csv"]["get"];
 type FundProfileOperation = paths["/funds/{instrument_id}"]["get"];
 
@@ -133,6 +134,17 @@ export type FundProfile =
 export type FundRisk = NonNullable<FundProfile["risk"]>;
 export type FundNavPoint = FundProfile["nav"][number];
 export type FundHolding = FundProfile["holdings"]["items"][number];
+
+export type OptimizeRequest =
+  BuilderOptimizeOperation["requestBody"]["content"]["application/json"];
+export type OptimizeResponse =
+  BuilderOptimizeOperation["responses"]["200"]["content"]["application/json"];
+/** Discriminated asset reference: a synced fund (uuid) or an equity ticker. */
+export type BuilderAssetRef = OptimizeRequest["assets"][number];
+export type BuilderObjective = OptimizeRequest["objective"];
+export type BuilderViewIn = NonNullable<OptimizeRequest["views"]>[number];
+export type WeightOut = OptimizeResponse["weights"][number];
+export type BuilderDiagnostics = OptimizeResponse["diagnostics"];
 
 export type Candle = StockAnalysis["candles"][number];
 export type CumulativeReturns = StockAnalysis["cumulative_returns"];
@@ -610,6 +622,18 @@ export async function fetchFundsCsv(
     throw new ApiError(res.status, detail);
   }
   return res.blob();
+}
+
+/* ── Portfolio Builder (F8.5) ─────────────────────────────────────────────── */
+
+export function postBuilderOptimize(
+  body: OptimizeRequest,
+  signal?: AbortSignal,
+): Promise<OptimizeResponse> {
+  return request<OptimizeResponse>("/builder/optimize", signal, {
+    method: "POST",
+    json: body,
+  });
 }
 
 export function fetchPriceSeries(
