@@ -34,6 +34,21 @@ re-escopar o F8 (Portfolio Builder) de equity-only para fundos como cidadãos de
 `model_portfolios` (10). Os DADOS são ricos; a camada de construção/uso em cima deles é que
 nunca funcionou — exatamente o que o Light pode reconstruir do zero.
 
+## Status F8.1 (commit 4f14780)
+
+Sync implementado e executado: 4.558 fundos elegíveis (series_id + risk calc 2026 + NAV 2y
+fresco), 2,35M NAVs, 175k holdings; gate G1 5/5 contra a fonte. Cascata de classificação
+precisou ser estendida na prática: só 730/4.558 séries elegíveis aparecem nas tabelas
+N-CEN/N-MFP — a cobertura real veio do `strategy_reclassification_stage` keyed por
+instrument_id (`source_table='instruments_universe'`, 4.502/4.558) + peer label específico;
+restam 52 'Unclassified' (1,1%). `asset_class` 100% via instruments_universe.
+
+⚠️ **Ressalva de qualidade DA FONTE:** o classificador por descrição do DB-mãe erra em casos
+visíveis (ex.: "WesMark Government Bond Fund" rotulado 'High Yield Bond' por
+`matched_pattern desc:high_yield`, confidence high, e o current_strategy_label da fonte diz o
+mesmo). O sync espelha a fonte fielmente; a F8.2 deve exibir a origem da classificação e o
+F8/builder não deve usar strategy_label como constraint rígida sem revisão humana.
+
 ## Lacunas conhecidas
 - `strategy_label` NULL em 1.947/3.112 registered funds; `peer_*`/`elite_*` NULL para parte dos
   instrumentos no último calc_date (3.215 "None" de label no último snapshot do risk metrics).
