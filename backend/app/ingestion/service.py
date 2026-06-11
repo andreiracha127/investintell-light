@@ -242,6 +242,70 @@ def build_mark_fetched(ticker: str) -> Update:
 
 
 # ---------------------------------------------------------------------------
+# Single-ticker ingest (shared by the request path and the batch backfill)
+# ---------------------------------------------------------------------------
+
+
+async def ingest_one_ticker(
+    session: AsyncSession,
+    client: TiingoClient,
+    ticker: str,
+    end: dt.date,
+) -> TickerOutcome:
+    """Ingest one ticker: meta upsert, window decision, price upsert, mark fetched.
+
+    Commits on success; on failure rolls back THIS ticker's work and re-raises
+    (earlier tickers committed by the caller's loop are untouched).
+
+    Deliberately NOT subject to the cold-ticker cap: admission policy belongs
+    to the caller (``ensure_eod_data`` caps cold tickers per request; the F6
+    batch backfill iterates the whole universe under the Tiingo rate limiter).
+
+    The fetch window start is decided here (incremental overlap if rows exist,
+    full available history otherwise) — see the module docstring's
+    fetch-window policy.  *end* is the upper bound of the fetch (today for all
+    current callers).
+    """
+    try:
+        # 1. Validate the ticker exists on Tiingo (404 propagates as
+        #    TiingoNotFoundError) and upsert instrument metadata.
+        meta = await client.get_ticker_meta(ticker)
+        await session.execute(build_instrument_upsert(meta))
+
+        # 2. Decide the fetch window: incremental if we already hold rows,
+        #    full available history otherwise.
+        max_date = await session.scalar(
+            select(func.max(EodPrice.date)).where(EodPrice.ticker == ticker)
+        )
+        action: TickerAction
+        if max_date is not None:
+            fetch_start = incremental_start(max_date)
+            action = "fetched_incremental"
+        else:
+            fetch_start = full_history_start(meta.start_date)
+            action = "fetched_full"
+
+        # 3. Fetch and bulk-upsert prices, then mark the instrument fetched.
+        #    asyncpg caps query parameters at 32 767; chunk the rows so each
+        #    execute call stays well under that limit (_EOD_UPSERT_CHUNK rows
+        #    × 14 params/row = 28 000 params, safely below the ceiling).
+        #    All chunks are executed within the same transaction; the single
+        #    commit below atomically finalises the whole ticker.
+        rows = await client.get_eod_prices(ticker, fetch_start, end)
+        for chunk_start in range(0, len(rows), _EOD_UPSERT_CHUNK):
+            chunk = rows[chunk_start : chunk_start + _EOD_UPSERT_CHUNK]
+            await session.execute(build_eod_upsert(chunk))
+        await session.execute(build_mark_fetched(ticker))
+        await session.commit()
+    except Exception:
+        # Roll back only this ticker's work; earlier tickers stay committed.
+        await session.rollback()
+        raise
+
+    return TickerOutcome(ticker=ticker, action=action, rows_upserted=len(rows))
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -308,44 +372,8 @@ async def ensure_eod_data(
             report.outcomes.append(TickerOutcome(ticker=ticker, action="fresh"))
             continue
 
-        try:
-            # 1. Validate the ticker exists on Tiingo (404 propagates as
-            #    TiingoNotFoundError) and upsert instrument metadata.
-            meta = await client.get_ticker_meta(ticker)
-            await session.execute(build_instrument_upsert(meta))
-
-            # 2. Decide the fetch window: incremental if we already hold rows,
-            #    full available history otherwise.
-            max_date = await session.scalar(
-                select(func.max(EodPrice.date)).where(EodPrice.ticker == ticker)
-            )
-            action: TickerAction
-            if max_date is not None:
-                fetch_start = incremental_start(max_date)
-                action = "fetched_incremental"
-            else:
-                fetch_start = full_history_start(meta.start_date)
-                action = "fetched_full"
-
-            # 3. Fetch and bulk-upsert prices, then mark the instrument fetched.
-            #    asyncpg caps query parameters at 32 767; chunk the rows so each
-            #    execute call stays well under that limit (_EOD_UPSERT_CHUNK rows
-            #    × 14 params/row = 28 000 params, safely below the ceiling).
-            #    All chunks are executed within the same transaction; the single
-            #    commit below atomically finalises the whole ticker.
-            rows = await client.get_eod_prices(ticker, fetch_start, today)
-            for chunk_start in range(0, len(rows), _EOD_UPSERT_CHUNK):
-                chunk = rows[chunk_start : chunk_start + _EOD_UPSERT_CHUNK]
-                await session.execute(build_eod_upsert(chunk))
-            await session.execute(build_mark_fetched(ticker))
-            await session.commit()
-        except Exception:
-            # Roll back only this ticker's work; earlier tickers stay committed.
-            await session.rollback()
-            raise
-
-        report.outcomes.append(
-            TickerOutcome(ticker=ticker, action=action, rows_upserted=len(rows))
-        )
+        # ingest_one_ticker commits on success and rolls back + re-raises on
+        # failure — earlier tickers in this loop stay committed (fail loud).
+        report.outcomes.append(await ingest_one_ticker(session, client, ticker, today))
 
     return report
