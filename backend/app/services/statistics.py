@@ -183,6 +183,36 @@ def _require_positions(portfolio: Portfolio) -> dict[str, float]:
     return {p.ticker: float(p.quantity) for p in portfolio.positions}
 
 
+async def _load_portfolio_prices(
+    session: AsyncSession,
+    client: TiingoClient,
+    portfolio_id: int,
+    start: dt.date,
+    end: dt.date,
+) -> tuple[Portfolio, dict[str, float], dict[str, pd.Series]]:
+    """Load, validate and read prices for a portfolio in one call.
+
+    Sequence: _load_portfolio_or_404 → _require_positions → build tickers list
+    → ensure_eod_or_http_error → _load_series_map.
+
+    Returns:
+        portfolio: the ORM object (for name, cash, id, etc.)
+        quantities: ``{ticker: float(quantity)}`` map of current holdings.
+        series_by_ticker: per-ticker adjusted-close series over [start, end].
+
+    Raises:
+        HTTPException 404: unknown portfolio_id.
+        HTTPException 4xx: provider failure / unknown ticker (from ensure).
+        InsufficientDataError: portfolio has no positions.
+    """
+    portfolio = await _load_portfolio_or_404(session, portfolio_id)
+    quantities = _require_positions(portfolio)
+    tickers = list(quantities)
+    await ensure_eod_or_http_error(session, client, tickers, start, end)
+    series_by_ticker = await _load_series_map(session, tickers, start, end)
+    return portfolio, quantities, series_by_ticker
+
+
 # ---------------------------------------------------------------------------
 # Pseudo-asset resolution (the ONE resolver used by beta and correlation)
 # ---------------------------------------------------------------------------
@@ -222,11 +252,9 @@ async def resolve_asset_returns(
             )
         return ref.ticker, simple_returns(series)
 
-    portfolio = await _load_portfolio_or_404(session, ref.id)
-    quantities = _require_positions(portfolio)
-    tickers = list(quantities)
-    await ensure_eod_or_http_error(session, client, tickers, start, end)
-    series_by_ticker = await _load_series_map(session, tickers, start, end)
+    portfolio, quantities, series_by_ticker = await _load_portfolio_prices(
+        session, client, ref.id, start, end
+    )
     prices = _join_prices(series_by_ticker)
     _require_common_rows(
         series_by_ticker,
@@ -343,23 +371,34 @@ def assemble_scenario(
 
     # Statistics rail + histogram: DAILY returns of the cash-inclusive total
     # (>= MIN_IN_RANGE_RETURNS returns guaranteed by the join guard above).
-    histogram = return_histogram(total_returns, bins=_HISTOGRAM_BINS)
-    best_worst = best_worst_day(total_returns)
-    max_label = total.idxmax()
-    min_label = total.idxmin()
-    statistics = ScenarioStatistics(
-        start_date=_to_date(prices.index[0]),
-        end_date=_to_date(prices.index[-1]),
-        start_nav=float(total.iloc[0]),
-        end_nav=float(total.iloc[-1]),
-        max_nav=DatedNav(date=_to_date(max_label), value=float(total.loc[max_label])),
-        min_nav=DatedNav(date=_to_date(min_label), value=float(total.loc[min_label])),
-        max_return=DatedValue(date=best_worst.best_date, value=best_worst.best_return),
-        min_return=DatedValue(date=best_worst.worst_date, value=best_worst.worst_return),
-        annualized_volatility=annualized_volatility(total_returns),
-        var_95=historical_var(total_returns, confidence=0.95),
-        var_99=historical_var(total_returns, confidence=0.99),
-    )
+    # _engine wraps the block so any engine-layer ValueError (e.g. zero-variance
+    # total caused by an all-cash window) surfaces as a 422 InsufficientDataError
+    # rather than an unhandled 500 (422-parity with the beta/correlation paths).
+    def _build_stats() -> tuple[HistogramOut, ScenarioStatistics]:
+        histogram = return_histogram(total_returns, bins=_HISTOGRAM_BINS)
+        best_worst = best_worst_day(total_returns)
+        max_label = total.idxmax()
+        min_label = total.idxmin()
+        stats = ScenarioStatistics(
+            start_date=_to_date(prices.index[0]),
+            end_date=_to_date(prices.index[-1]),
+            start_nav=float(total.iloc[0]),
+            end_nav=float(total.iloc[-1]),
+            max_nav=DatedNav(date=_to_date(max_label), value=float(total.loc[max_label])),
+            min_nav=DatedNav(date=_to_date(min_label), value=float(total.loc[min_label])),
+            max_return=DatedValue(date=best_worst.best_date, value=best_worst.best_return),
+            min_return=DatedValue(date=best_worst.worst_date, value=best_worst.worst_return),
+            annualized_volatility=annualized_volatility(total_returns),
+            var_95=historical_var(total_returns, confidence=0.95),
+            var_99=historical_var(total_returns, confidence=0.99),
+        )
+        return HistogramOut(
+            bin_edges=histogram.bin_edges,
+            counts=histogram.counts,
+            counts_normalized=histogram.counts_normalized,
+        ), stats
+
+    histogram_out, statistics = _engine(_build_stats)
 
     return ScenarioResponse(
         params=ScenarioParams(
@@ -373,11 +412,7 @@ def assemble_scenario(
         nav_cash=nav_cash,
         weights_percent=weights_percent,
         asset_performance=asset_performance,
-        histogram=HistogramOut(
-            bin_edges=histogram.bin_edges,
-            counts=histogram.counts,
-            counts_normalized=histogram.counts_normalized,
-        ),
+        histogram=histogram_out,
         statistics=statistics,
     )
 
@@ -390,14 +425,8 @@ async def run_scenario(
     max_points: int,
 ) -> ScenarioResponse:
     """Orchestrate the scenario: load portfolio, ensure EOD, read, assemble."""
-    portfolio = await _load_portfolio_or_404(session, payload.portfolio_id)
-    quantities = _require_positions(portfolio)
-    tickers = list(quantities)
-    await ensure_eod_or_http_error(
-        session, client, tickers, payload.start_date, payload.end_date
-    )
-    series_by_ticker = await _load_series_map(
-        session, tickers, payload.start_date, payload.end_date
+    portfolio, quantities, series_by_ticker = await _load_portfolio_prices(
+        session, client, payload.portfolio_id, payload.start_date, payload.end_date
     )
     return assemble_scenario(
         series_by_ticker,
@@ -617,11 +646,9 @@ async def run_stock_correlation(
     read from ``end - lookback_pad(window + 1)`` so the trailing window is
     covered with calendar slack for weekends/holidays.
     """
-    portfolio = await _load_portfolio_or_404(session, payload.portfolio_id)
-    quantities = _require_positions(portfolio)
-    tickers = list(quantities)
     end = payload.end_date or dt.date.today()
     pad_start = end - dt.timedelta(days=lookback_pad_days(payload.window + 1))
-    await ensure_eod_or_http_error(session, client, tickers, pad_start, end)
-    series_by_ticker = await _load_series_map(session, tickers, pad_start, end)
+    _, _, series_by_ticker = await _load_portfolio_prices(
+        session, client, payload.portfolio_id, pad_start, end
+    )
     return assemble_stock_correlation(series_by_ticker, window=payload.window)

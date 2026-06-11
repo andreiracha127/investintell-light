@@ -259,6 +259,25 @@ async def test_beta_malformed_asset_ref_returns_422(stub_client: AsyncClient) ->
     assert response.status_code == 422
 
 
+async def test_beta_unknown_portfolio_asset_y_returns_404(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """asset_y pointing to a non-existent portfolio id → 404 end-to-end."""
+    _install_stubs(monkeypatch)
+    transport = ASGITransport(app=_app_with_overrides())
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        response = await ac.post(
+            "/statistics/beta",
+            json={
+                "asset_x": {"kind": "ticker", "ticker": "SPY"},
+                "asset_y": {"kind": "portfolio", "id": 9999},
+                "start_date": START,
+                "end_date": END,
+            },
+        )
+    assert response.status_code == 404
+
+
 # ---------------------------------------------------------------------------
 # /statistics/correlation
 # ---------------------------------------------------------------------------

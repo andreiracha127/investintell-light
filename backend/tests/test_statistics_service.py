@@ -459,3 +459,43 @@ def test_stock_correlation_insufficient_history_names_ticker() -> None:
     series_by_ticker = {"AAPL": _price_series(1), "MSFT": _price_series(2, n_days=30)}
     with pytest.raises(InsufficientDataError, match="MSFT"):
         assemble_stock_correlation(series_by_ticker, window=63)
+
+
+# ---------------------------------------------------------------------------
+# Scenario: cash + weekly bounding combined
+# ---------------------------------------------------------------------------
+
+
+def test_scenario_cash_and_weekly_bounding() -> None:
+    """cash>0 AND ≥1400 trading days: CASH series present, all points Fridays,
+    weekly weight rows still sum to 1 (1e-9 tolerance)."""
+    n_days = 1400
+    series_by_ticker = _series_map(n_days=n_days)
+    response = _scenario(series_by_ticker, cash=5000.0)
+
+    # Weekly bounding must have kicked in.
+    assert response.params.frequency == "weekly"
+    assert response.params.cash == pytest.approx(5000.0)
+
+    # CASH series is present in nav_cash and weights_percent.
+    nav_tickers = [s.ticker for s in response.nav_cash]
+    assert "CASH" in nav_tickers
+    assert "TOTAL" in nav_tickers
+
+    weight_tickers = [s.ticker for s in response.weights_percent]
+    assert "CASH" in weight_tickers
+
+    # Every emitted date across ALL series must be a Friday (weekday == 4).
+    all_series = response.nav_cash + response.weights_percent + response.asset_performance
+    for series in all_series:
+        for date, _ in series.points:
+            assert date.weekday() == 4, (
+                f"{series.ticker} weekly point {date} is not a Friday"
+            )
+
+    # Weights sum to 1 on every row (cash column included → same invariant as daily).
+    weight_points = {s.ticker: s.points for s in response.weights_percent}
+    n_points = len(weight_points["AAPL"])
+    for i in range(n_points):
+        row_sum = sum(weight_points[t][i][1] for t in weight_points)
+        assert row_sum == pytest.approx(1.0, abs=1e-9)
