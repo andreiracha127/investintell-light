@@ -1,0 +1,276 @@
+"""Black-Litterman layer (F8.4) — the ONLY place expected returns exist.
+
+Pipeline (validated numerically in
+docs/research/2026-06-11-f8-optimizer-black-litterman.md):
+
+    Σ (Ledoit-Wolf, annualized) → w_mkt (real AUM) → π = δ·Σ·w_mkt
+    → views (P, Q) + Ω (Idzorek-style confidence scaling)
+    → posterior (μ_BL, Σ_BL) via the master formula
+    → either re-centered scenarios for min-CVaR (product default)
+      or BL max-utility weights (optional ``bl_utility`` objective).
+
+Gate G5 note: ``historical_mean_ann`` (sample mean of daily returns) lives
+HERE, and is used exclusively to re-center scenarios around μ_BL — never as an
+optimization objective on its own.
+"""
+
+from dataclasses import dataclass
+
+import cvxpy as cp
+import numpy as np
+
+from app.optimizer.engine import (
+    TRADING_DAYS,
+    OptimizerError,
+    _check_constraint_params,
+    _finalize,
+    _validate_sigma,
+    base_constraints,
+)
+
+DEFAULT_DELTA = 2.5
+DEFAULT_TAU = 0.05
+
+# Ω scaling factor at confidence = 1 (see omega_idzorek): a strictly positive
+# epsilon keeps Ω invertible while making the view ~certain.
+_FULL_CONFIDENCE_EPS = 1e-6
+
+
+@dataclass(frozen=True)
+class AbsoluteView:
+    """'Asset i returns q per year' — indices refer to the problem universe."""
+
+    asset: int
+    q: float
+    confidence: float
+
+
+@dataclass(frozen=True)
+class RelativeView:
+    """'Asset `long` outperforms asset `short` by q per year'."""
+
+    long: int
+    short: int
+    q: float
+    confidence: float
+
+
+View = AbsoluteView | RelativeView
+
+
+def market_weights(aums: list[float | None], labels: list[str]) -> np.ndarray:
+    """Normalize the universe's AUM into market weights.
+
+    Fail-loud (dispatch F8.4): assets with unknown AUM raise a ValueError
+    listing them — the caller decides whether to exclude assets, we never
+    silently fall back to equal weight.
+    """
+    if len(aums) != len(labels):
+        raise ValueError(f"aums ({len(aums)}) and labels ({len(labels)}) length mismatch")
+    if not aums:
+        raise ValueError("market_weights requires at least one asset")
+    missing = [
+        label for label, aum in zip(labels, aums, strict=True) if aum is None or aum <= 0
+    ]
+    if missing:
+        raise ValueError(
+            "market weights require a known positive AUM for every asset; missing/invalid "
+            f"for: {', '.join(missing)}"
+        )
+    arr = np.asarray([float(a) for a in aums if a is not None], dtype=float)
+    return np.asarray(arr / arr.sum())
+
+
+def equilibrium(
+    sigma_ann: np.ndarray, w_mkt: np.ndarray, delta: float = DEFAULT_DELTA
+) -> np.ndarray:
+    """Reverse optimization: π = δ·Σ·w_mkt (annualized implied excess returns)."""
+    sigma_ann = _validate_sigma(sigma_ann, "equilibrium")
+    w_mkt = np.asarray(w_mkt, dtype=float).ravel()
+    if w_mkt.shape[0] != sigma_ann.shape[0]:
+        raise ValueError(
+            f"w_mkt has {w_mkt.shape[0]} assets but sigma is {sigma_ann.shape[0]}×"
+            f"{sigma_ann.shape[1]}"
+        )
+    if delta <= 0:
+        raise ValueError(f"delta must be > 0, got {delta}")
+    return np.asarray(delta * sigma_ann @ w_mkt)
+
+
+def build_view_matrices(views: list[View], n_assets: int) -> tuple[np.ndarray, np.ndarray]:
+    """Assemble the k×n pick matrix P and the k-vector Q from typed views.
+
+    Validates indices and the rank of P: linearly dependent views make Ω/the
+    posterior ill-defined and are rejected fail-loud.
+    """
+    if not views:
+        raise ValueError("at least one view is required")
+    k = len(views)
+    p = np.zeros((k, n_assets), dtype=float)
+    q = np.zeros(k, dtype=float)
+    for i, view in enumerate(views):
+        if isinstance(view, AbsoluteView):
+            indices = [view.asset]
+        else:
+            if view.long == view.short:
+                raise ValueError(f"view {i}: relative view long and short are the same asset")
+            indices = [view.long, view.short]
+        for idx in indices:
+            if not 0 <= idx < n_assets:
+                raise ValueError(f"view {i}: asset index {idx} out of range (n={n_assets})")
+        if isinstance(view, AbsoluteView):
+            p[i, view.asset] = 1.0
+        else:
+            p[i, view.long] = 1.0
+            p[i, view.short] = -1.0
+        q[i] = float(view.q)
+    if np.linalg.matrix_rank(p) < k:
+        raise ValueError(
+            "views linearmente dependentes: a matriz P tem posto deficiente — "
+            "remova ou combine views redundantes"
+        )
+    return p, q
+
+
+def omega_idzorek(
+    p: np.ndarray,
+    sigma_ann: np.ndarray,
+    confidences: list[float],
+    tau: float = DEFAULT_TAU,
+) -> np.ndarray:
+    """View-uncertainty matrix Ω with Idzorek-style confidence scaling.
+
+    Base uncertainty (He–Litterman): ω_base,i = [P·τΣ·Pᵀ]ᵢᵢ. Each view's
+    confidence cᵢ ∈ (0, 1] scales it as
+
+        ωᵢ = ω_base,i · (1 − cᵢ)/cᵢ        (cᵢ < 1)
+        ωᵢ = ω_base,i · ε  (ε = 1e-6)      (cᵢ = 1, keeps Ω invertible)
+
+    Monotonic by construction: cᵢ → 0 ⇒ ωᵢ → ∞ (view ignored);
+    higher confidence ⇒ smaller ωᵢ ⇒ stronger tilt toward the view.
+    """
+    sigma_ann = _validate_sigma(sigma_ann, "omega_idzorek")
+    p = np.asarray(p, dtype=float)
+    if p.ndim != 2 or p.shape[1] != sigma_ann.shape[0]:
+        raise ValueError(f"P shape {p.shape} incompatible with sigma {sigma_ann.shape}")
+    if len(confidences) != p.shape[0]:
+        raise ValueError(
+            f"{len(confidences)} confidences for {p.shape[0]} views — must match"
+        )
+    if tau <= 0:
+        raise ValueError(f"tau must be > 0, got {tau}")
+    base = np.diag(p @ (tau * sigma_ann) @ p.T).copy()
+    if (base <= 0).any():
+        raise ValueError("Ω base diagonal has non-positive entries — degenerate view/sigma")
+    omega = np.empty_like(base)
+    for i, c in enumerate(confidences):
+        if not 0 < c <= 1:
+            raise ValueError(f"view {i}: confidence must be in (0, 1], got {c}")
+        factor = _FULL_CONFIDENCE_EPS if c >= 1.0 else (1.0 - c) / c
+        omega[i] = base[i] * factor
+    return np.diag(omega)
+
+
+def posterior(
+    sigma_ann: np.ndarray,
+    pi: np.ndarray,
+    p: np.ndarray,
+    q: np.ndarray,
+    omega: np.ndarray,
+    tau: float = DEFAULT_TAU,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Black-Litterman master formula.
+
+        M     = inv( inv(τΣ) + Pᵀ·Ω⁻¹·P )
+        μ_BL  = M · ( inv(τΣ)·π + Pᵀ·Ω⁻¹·Q )
+        Σ_BL  = Σ + M
+
+    All inputs annualized. Raises on singular τΣ or Ω (fail-loud → 422).
+    """
+    sigma_ann = _validate_sigma(sigma_ann, "posterior")
+    pi = np.asarray(pi, dtype=float).ravel()
+    p = np.asarray(p, dtype=float)
+    q = np.asarray(q, dtype=float).ravel()
+    omega = np.asarray(omega, dtype=float)
+    n = sigma_ann.shape[0]
+    if pi.shape != (n,):
+        raise ValueError(f"pi has shape {pi.shape}, expected ({n},)")
+    if p.shape != (q.shape[0], n):
+        raise ValueError(f"P shape {p.shape} inconsistent with Q ({q.shape[0]}) / n ({n})")
+    if tau <= 0:
+        raise ValueError(f"tau must be > 0, got {tau}")
+    try:
+        tau_sigma_inv = np.linalg.inv(tau * sigma_ann)
+        omega_inv = np.linalg.inv(omega)
+    except np.linalg.LinAlgError as exc:
+        raise ValueError(f"singular matrix in BL posterior (τΣ or Ω): {exc}") from exc
+    m = np.linalg.inv(tau_sigma_inv + p.T @ omega_inv @ p)
+    mu_bl: np.ndarray = m @ (tau_sigma_inv @ pi + p.T @ omega_inv @ q)
+    sigma_bl: np.ndarray = sigma_ann + m
+    return mu_bl, (sigma_bl + sigma_bl.T) / 2.0
+
+
+def historical_mean_ann(scenarios_daily: np.ndarray) -> np.ndarray:
+    """Annualized sample mean of daily scenarios — BL re-centering ONLY.
+
+    Gate G5: this is the single sanctioned historical-mean estimator in the
+    optimizer package, and its sole consumer is ``recenter_scenarios`` (the
+    shift μ_BL − μ_hist). It must never feed an optimization objective.
+    """
+    scenarios_daily = np.asarray(scenarios_daily, dtype=float)
+    if scenarios_daily.ndim != 2:
+        raise ValueError(f"scenarios must be T×n, got ndim={scenarios_daily.ndim}")
+    return np.asarray(scenarios_daily.mean(axis=0) * TRADING_DAYS)
+
+
+def recenter_scenarios(
+    scenarios_daily: np.ndarray,
+    mu_hist_ann: np.ndarray,
+    mu_bl_ann: np.ndarray,
+) -> np.ndarray:
+    """Shift daily scenarios by (μ_BL − μ_hist)/252 (per asset).
+
+    Preserves the historical co-movement/tail shape while moving the center of
+    the distribution to the BL posterior — the product-default way views enter
+    the min-CVaR objective.
+    """
+    scenarios_daily = np.asarray(scenarios_daily, dtype=float)
+    mu_hist_ann = np.asarray(mu_hist_ann, dtype=float).ravel()
+    mu_bl_ann = np.asarray(mu_bl_ann, dtype=float).ravel()
+    if scenarios_daily.ndim != 2:
+        raise ValueError(f"scenarios must be T×n, got ndim={scenarios_daily.ndim}")
+    n = scenarios_daily.shape[1]
+    if mu_hist_ann.shape != (n,) or mu_bl_ann.shape != (n,):
+        raise ValueError(
+            f"mu vectors must have shape ({n},), got {mu_hist_ann.shape} / {mu_bl_ann.shape}"
+        )
+    shift_daily = (mu_bl_ann - mu_hist_ann) / TRADING_DAYS
+    return np.asarray(scenarios_daily + shift_daily[np.newaxis, :])
+
+
+def solve_bl_utility(
+    mu_ann: np.ndarray,
+    sigma_ann: np.ndarray,
+    delta: float = DEFAULT_DELTA,
+    cap: float | None = None,
+    min_weight: float | None = None,
+) -> tuple[np.ndarray, str]:
+    """Max-utility weights: max μᵀw − (δ/2)·wᵀΣw, long-only, sum=1.
+
+    Lives here (not in ``engine``) because it is the one objective that
+    consumes expected returns — by contract μ is the BL posterior (or π for
+    the zero-views sanity case, where the unconstrained optimum recovers
+    w_mkt exactly).
+    """
+    sigma_ann = _validate_sigma(sigma_ann, "bl_utility")
+    mu_arr = np.asarray(mu_ann, dtype=float).ravel()
+    n = sigma_ann.shape[0]
+    if mu_arr.shape != (n,):
+        raise OptimizerError(f"bl_utility: mu has shape {mu_arr.shape}, expected ({n},)")
+    if delta <= 0:
+        raise OptimizerError(f"bl_utility: delta must be > 0, got {delta}")
+    _check_constraint_params(n, cap, min_weight)
+    w = cp.Variable(n)
+    objective = cp.Maximize(mu_arr @ w - (delta / 2.0) * cp.quad_form(w, cp.psd_wrap(sigma_ann)))
+    problem = cp.Problem(objective, base_constraints(w, cap, min_weight))
+    return _finalize(problem, w, "bl_utility")

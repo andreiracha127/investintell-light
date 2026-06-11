@@ -1980,10 +1980,98 @@
           }
         }
       }
+    },
+    "/builder/optimize": {
+      "post": {
+        "tags": [
+          "builder"
+        ],
+        "summary": "Optimize",
+        "description": "Optimize weights over a mixed fund/equity universe.\n\nDefault objective is ``min_cvar`` (Rockafellar\u2013Uryasev, \u03b1=0.95) on raw\nhistorical scenarios. With Black-Litterman ``views``, scenarios are\nre-centered on the posterior \u03bc_BL and floored at the equilibrium return;\n``bl_utility`` selects the explicit max-utility objective instead.\nAll fractional fields are decimal fractions (0.05 = 5%).",
+        "operationId": "optimize_builder_optimize_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptimizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AbsoluteViewIn": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "absolute",
+            "title": "Type"
+          },
+          "asset": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FundRefIn"
+              },
+              {
+                "$ref": "#/components/schemas/EquityRefIn"
+              }
+            ],
+            "title": "Asset",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "equity": "#/components/schemas/EquityRefIn",
+                "fund": "#/components/schemas/FundRefIn"
+              }
+            }
+          },
+          "q": {
+            "type": "number",
+            "title": "Q"
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Confidence",
+            "default": 0.5
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "asset",
+          "q"
+        ],
+        "title": "AbsoluteViewIn",
+        "description": "'Asset returns q per year' (e.g. q=0.12 \u2192 12% a.a.)."
+      },
       "AllocationOut": {
         "properties": {
           "positions": {
@@ -2223,6 +2311,24 @@
         "title": "AxisLabels",
         "description": "Display labels for the two compared pseudo-assets."
       },
+      "BLParamsIn": {
+        "properties": {
+          "delta": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Delta",
+            "default": 2.5
+          },
+          "tau": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Tau",
+            "default": 0.05
+          }
+        },
+        "type": "object",
+        "title": "BLParamsIn"
+      },
       "BenchmarkComparison": {
         "properties": {
           "portfolio": {
@@ -2454,6 +2560,40 @@
         ],
         "title": "Candle",
         "description": "One OHLCV candle built from RAW (un-adjusted) prices.\n\nDaily for ranges up to 5Y; weekly (W-FRI buckets: open=first, high=max,\nlow=min, close=last, volume=sum) for range MAX."
+      },
+      "ConstraintsIn": {
+        "properties": {
+          "cap": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cap",
+            "default": 0.25
+          },
+          "min_weight": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Weight"
+          }
+        },
+        "type": "object",
+        "title": "ConstraintsIn",
+        "description": "Long-only and sum(w)=1 are always enforced; these are the knobs."
       },
       "CorrelationMatrixOut": {
         "properties": {
@@ -2692,6 +2832,52 @@
         "title": "DatedValue",
         "description": "A single dated return observation."
       },
+      "DiagnosticsOut": {
+        "properties": {
+          "n_obs": {
+            "type": "integer",
+            "title": "N Obs"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "mu_equilibrium": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mu Equilibrium"
+          },
+          "mu_posterior": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mu Posterior"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n_obs",
+          "status"
+        ],
+        "title": "DiagnosticsOut"
+      },
       "DistributionOut": {
         "properties": {
           "bin_edges": {
@@ -2753,6 +2939,57 @@
         ],
         "title": "DrawdownOut",
         "description": "Maximum drawdown of the in-range ADJUSTED close series."
+      },
+      "EquityRefIn": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "equity",
+            "title": "Kind"
+          },
+          "ticker": {
+            "type": "string",
+            "maxLength": 12,
+            "minLength": 1,
+            "title": "Ticker"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "ticker"
+        ],
+        "title": "EquityRefIn"
+      },
+      "ExpectedOut": {
+        "properties": {
+          "vol_ann": {
+            "type": "number",
+            "title": "Vol Ann"
+          },
+          "cvar_95_in_sample": {
+            "type": "number",
+            "title": "Cvar 95 In Sample"
+          },
+          "return_ann_bl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Ann Bl"
+          }
+        },
+        "type": "object",
+        "required": [
+          "vol_ann",
+          "cvar_95_in_sample",
+          "return_ann_bl"
+        ],
+        "title": "ExpectedOut"
       },
       "FilterBody": {
         "properties": {
@@ -3384,6 +3621,26 @@
         ],
         "title": "FundProfileResponse",
         "description": "Full fund profile: identity + all risk metrics + NAV series + holdings."
+      },
+      "FundRefIn": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "fund",
+            "title": "Kind"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "FundRefIn"
       },
       "FundRiskOut": {
         "properties": {
@@ -4064,6 +4321,123 @@
         ],
         "title": "NewsResponse",
         "description": "News articles for one ticker, newest first.\n\n``stale`` is True when the Tiingo refresh failed but cached articles were\nserved \u2014 a declared degradation, never a silent fallback."
+      },
+      "OptimizeRequest": {
+        "properties": {
+          "assets": {
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/FundRefIn"
+                },
+                {
+                  "$ref": "#/components/schemas/EquityRefIn"
+                }
+              ],
+              "discriminator": {
+                "propertyName": "kind",
+                "mapping": {
+                  "equity": "#/components/schemas/EquityRefIn",
+                  "fund": "#/components/schemas/FundRefIn"
+                }
+              }
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 2,
+            "title": "Assets"
+          },
+          "objective": {
+            "type": "string",
+            "enum": [
+              "equal_weight",
+              "min_vol",
+              "erc",
+              "max_diversification",
+              "min_cvar",
+              "bl_utility"
+            ],
+            "title": "Objective",
+            "default": "min_cvar"
+          },
+          "constraints": {
+            "$ref": "#/components/schemas/ConstraintsIn",
+            "default": {
+              "cap": 0.25
+            }
+          },
+          "window_days": {
+            "type": "integer",
+            "maximum": 3650.0,
+            "minimum": 30.0,
+            "title": "Window Days",
+            "default": 730
+          },
+          "views": {
+            "anyOf": [
+              {
+                "items": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AbsoluteViewIn"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RelativeViewIn"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "type",
+                    "mapping": {
+                      "absolute": "#/components/schemas/AbsoluteViewIn",
+                      "relative": "#/components/schemas/RelativeViewIn"
+                    }
+                  }
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Views"
+          },
+          "bl": {
+            "$ref": "#/components/schemas/BLParamsIn",
+            "default": {
+              "delta": 2.5,
+              "tau": 0.05
+            }
+          }
+        },
+        "type": "object",
+        "required": [
+          "assets"
+        ],
+        "title": "OptimizeRequest"
+      },
+      "OptimizeResponse": {
+        "properties": {
+          "weights": {
+            "items": {
+              "$ref": "#/components/schemas/WeightOut"
+            },
+            "type": "array",
+            "title": "Weights"
+          },
+          "expected": {
+            "$ref": "#/components/schemas/ExpectedOut"
+          },
+          "diagnostics": {
+            "$ref": "#/components/schemas/DiagnosticsOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "weights",
+          "expected",
+          "diagnostics"
+        ],
+        "title": "OptimizeResponse"
       },
       "OverviewAggregates": {
         "properties": {
@@ -5057,6 +5431,71 @@
         "title": "RegressionOut",
         "description": "OLS regression of y on x over the aligned daily returns."
       },
+      "RelativeViewIn": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "relative",
+            "title": "Type"
+          },
+          "long": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FundRefIn"
+              },
+              {
+                "$ref": "#/components/schemas/EquityRefIn"
+              }
+            ],
+            "title": "Long",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "equity": "#/components/schemas/EquityRefIn",
+                "fund": "#/components/schemas/FundRefIn"
+              }
+            }
+          },
+          "short": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FundRefIn"
+              },
+              {
+                "$ref": "#/components/schemas/EquityRefIn"
+              }
+            ],
+            "title": "Short",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "equity": "#/components/schemas/EquityRefIn",
+                "fund": "#/components/schemas/FundRefIn"
+              }
+            }
+          },
+          "q": {
+            "type": "number",
+            "title": "Q"
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Confidence",
+            "default": 0.5
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "long",
+          "short",
+          "q"
+        ],
+        "title": "RelativeViewIn",
+        "description": "'`long` outperforms `short` by q per year'."
+      },
       "ResultsColumnOut": {
         "properties": {
           "code": {
@@ -5774,6 +6213,38 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WeightOut": {
+        "properties": {
+          "asset": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FundRefIn"
+              },
+              {
+                "$ref": "#/components/schemas/EquityRefIn"
+              }
+            ],
+            "title": "Asset",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "equity": "#/components/schemas/EquityRefIn",
+                "fund": "#/components/schemas/FundRefIn"
+              }
+            }
+          },
+          "weight": {
+            "type": "number",
+            "title": "Weight"
+          }
+        },
+        "type": "object",
+        "required": [
+          "asset",
+          "weight"
+        ],
+        "title": "WeightOut"
       }
     }
   }
