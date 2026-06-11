@@ -19,6 +19,7 @@ import {
   type PortfolioMode,
   type RangePreset,
 } from "@/lib/api/client";
+import { parseDecimal } from "@/lib/parse";
 import { buildAllocationOption } from "@/lib/charts/allocation";
 import { buildRiskContributionsOption } from "@/lib/charts/contributions";
 import { buildCumulativeOption } from "@/lib/charts/cumulative";
@@ -99,9 +100,13 @@ export function StaticPortfolioView() {
   };
 
   const validation = useMemo(() => {
-    const values = rows.map((row) => Number(row.value));
+    const values = rows.map((row) => parseDecimal(row.value));
     const tickersOk = rows.every((row) => row.ticker.trim().length > 0);
     const valuesOk = values.every((v) => Number.isFinite(v) && v > 0);
+    // A row has an invalid value when the input is non-empty but parses NaN.
+    const invalidValueIds = rows
+      .filter((row) => row.value.trim() !== "" && !Number.isFinite(parseDecimal(row.value)))
+      .map((row) => row.id);
     const weightSumPct = values.reduce(
       (sum, v) => sum + (Number.isFinite(v) ? v : 0),
       0,
@@ -114,17 +119,18 @@ export function StaticPortfolioView() {
       valuesOk &&
       benchmark.trim().length > 0 &&
       (mode !== "weights" || weightSumOk);
-    return { weightSumPct, weightSumOk, canSubmit };
+    return { weightSumPct, weightSumOk, canSubmit, invalidValueIds };
   }, [rows, mode, benchmark]);
 
   /**
    * The ONE place form values become API units: weight percent inputs
    * (40 = 40%) divide by 100 into decimal fractions; quantities pass through.
+   * Uses parseDecimal so that comma-separated decimals (e.g. "40,5") work.
    */
   const buildRequest = (): PortfolioAnalysisRequest => ({
     positions: rows.map((row) => {
       const ticker = row.ticker.trim().toUpperCase();
-      const value = Number(row.value);
+      const value = parseDecimal(row.value);
       return mode === "weights"
         ? { ticker, weight: value / 100 }
         : { ticker, quantity: value };
@@ -148,43 +154,55 @@ export function StaticPortfolioView() {
       {/* ── Position form ── */}
       <Card title="Positions">
         <div className="flex flex-col gap-2">
-          {rows.map((row, index) => (
-            <div key={row.id} className="flex items-center gap-2">
-              <input
-                value={row.ticker}
-                onChange={(e) =>
-                  updateRow(row.id, { ticker: e.target.value.toUpperCase() })
-                }
-                placeholder="TICKER"
-                aria-label={`Position ${index + 1} ticker`}
-                className={`w-[130px] uppercase ${INPUT_CLASS}`}
-              />
-              <input
-                value={row.value}
-                onChange={(e) => updateRow(row.id, { value: e.target.value })}
-                type="number"
-                min="0"
-                step="any"
-                placeholder={mode === "weights" ? "Weight %" : "Quantity"}
-                aria-label={
-                  mode === "weights"
-                    ? `Position ${index + 1} weight in percent`
-                    : `Position ${index + 1} quantity`
-                }
-                className={`w-[130px] tabular-nums ${INPUT_CLASS}`}
-              />
-              <button
-                type="button"
-                onClick={() => removeRow(row.id)}
-                disabled={rows.length <= MIN_POSITIONS}
-                aria-label={`Remove position ${index + 1}`}
-                className="px-2 py-1 rounded-[6px] text-text-muted hover:text-loss hover:bg-surface-1 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                ×
-              </button>
-            </div>
-          ))}
+          {rows.map((row, index) => {
+            const isInvalid = validation.invalidValueIds.includes(row.id);
+            return (
+              <div key={row.id} className="flex items-center gap-2">
+                <input
+                  value={row.ticker}
+                  onChange={(e) =>
+                    updateRow(row.id, { ticker: e.target.value.toUpperCase() })
+                  }
+                  placeholder="TICKER"
+                  aria-label={`Position ${index + 1} ticker`}
+                  className={`w-[130px] uppercase ${INPUT_CLASS}`}
+                />
+                <input
+                  value={row.value}
+                  onChange={(e) => updateRow(row.id, { value: e.target.value })}
+                  placeholder={mode === "weights" ? "Weight %" : "Quantity"}
+                  aria-label={
+                    mode === "weights"
+                      ? `Position ${index + 1} weight in percent`
+                      : `Position ${index + 1} quantity`
+                  }
+                  aria-invalid={isInvalid}
+                  className={`w-[130px] tabular-nums ${INPUT_CLASS} ${
+                    isInvalid ? "border-[var(--color-loss)]" : ""
+                  }`}
+                />
+                <button
+                  type="button"
+                  onClick={() => removeRow(row.id)}
+                  disabled={rows.length <= MIN_POSITIONS}
+                  aria-label={`Remove position ${index + 1}`}
+                  className="px-2 py-1 rounded-[6px] text-text-muted hover:text-loss hover:bg-surface-1 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
         </div>
+
+        {validation.invalidValueIds.length > 0 && (
+          <p
+            role="alert"
+            className="mt-2 text-[12px] text-loss"
+          >
+            Invalid number in highlighted field — use . or , as decimal separator
+          </p>
+        )}
 
         <button
           type="button"

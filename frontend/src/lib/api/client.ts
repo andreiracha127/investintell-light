@@ -63,11 +63,39 @@ export class ApiError extends Error {
   }
 }
 
-/** Extract the backend `detail` from an error body, else a status fallback. */
+/**
+ * Extract the backend `detail` from an error body, else a status fallback.
+ *
+ * Pydantic 422 bodies send `detail` as an array of `{msg, loc, ...}` objects.
+ * Stringifying those raw arrays produces unreadable JSON; instead we map each
+ * entry to "<field>: <message>" and join with newlines for readable UI output.
+ */
 function extractDetail(body: unknown, fallback: string): string {
   if (body !== null && typeof body === "object" && "detail" in body) {
     const detail = (body as { detail: unknown }).detail;
     if (typeof detail === "string") return detail;
+    if (Array.isArray(detail) && detail.length > 0) {
+      // Pydantic-style: [{msg: string, loc: string[], ...}, ...]
+      const isPydanticEntry = (e: unknown): e is { msg: string; loc: string[] } =>
+        e !== null &&
+        typeof e === "object" &&
+        "msg" in e &&
+        typeof (e as Record<string, unknown>).msg === "string" &&
+        "loc" in e &&
+        Array.isArray((e as Record<string, unknown>).loc);
+
+      if (detail.every(isPydanticEntry)) {
+        return detail
+          .map((e) => {
+            // loc[0] is always "body"; drop it for a cleaner field path.
+            const field = e.loc.slice(1).join(".");
+            return field ? `${field}: ${e.msg}` : e.msg;
+          })
+          .join("\n");
+      }
+      // Non-Pydantic array — fall back to JSON so nothing is silently lost.
+      return JSON.stringify(detail);
+    }
     if (detail !== undefined) return JSON.stringify(detail);
   }
   return fallback;
