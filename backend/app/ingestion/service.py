@@ -73,7 +73,12 @@ TickerAction = Literal["fresh", "fetched_full", "fetched_incremental"]
 
 
 class ColdTickerCapExceededError(Exception):
-    """Raised when a request would ingest more cold/stale tickers than allowed.
+    """Raised when a request would ingest more truly-cold tickers than allowed.
+
+    "Cold" means no instrument row exists in the DB — a full-history fetch
+    against Tiingo is required.  Stale tickers (instrument row exists but
+    eod_last_fetched_at is outside the freshness window) need only one
+    incremental request each and are never capped.
 
     Fail loud: the service never silently ingests a subset.  Routes map this
     to HTTP 422.
@@ -129,22 +134,37 @@ def classify_tickers(
     instruments: dict[str, Instrument],
     now: dt.datetime,
     staleness_hours: float,
-) -> tuple[list[str], list[str]]:
-    """Split *tickers* into (fresh, cold_or_stale), preserving order.
+) -> tuple[list[str], list[str], list[str]]:
+    """Split *tickers* into (fresh, stale, cold), preserving order.
 
-    Fresh = instrument row exists AND eod_last_fetched_at is within the window.
+    - fresh: instrument row exists AND eod_last_fetched_at is within the window.
+             No Tiingo call needed.
+    - stale: instrument row exists BUT eod_last_fetched_at is outside the window
+             (or None).  Needs one incremental Tiingo fetch.
+    - cold:  no instrument row at all — needs a full-history Tiingo fetch.
+
+    Proxy safety: the per-ticker commit that finalises each ingest (instrument
+    upsert + EOD rows + mark-fetched) is atomic, so "instrument row exists" is a
+    reliable proxy for "a prior full ingest completed successfully".  A partial
+    failure on a previous request rolls back before writing the instrument row,
+    so such tickers remain in the cold bucket on retry.
+
+    Only the cold bucket is subject to ``max_cold_tickers_per_request``.
+    Stale tickers always refresh (bounded by upstream position-count caps and
+    the Tiingo rate limiter — no additional cap required).
     """
     fresh: list[str] = []
+    stale: list[str] = []
     cold: list[str] = []
     for ticker in tickers:
         instrument = instruments.get(ticker)
-        if instrument is not None and is_fresh(
-            instrument.eod_last_fetched_at, now, staleness_hours
-        ):
+        if instrument is None:
+            cold.append(ticker)
+        elif is_fresh(instrument.eod_last_fetched_at, now, staleness_hours):
             fresh.append(ticker)
         else:
-            cold.append(ticker)
-    return fresh, cold
+            stale.append(ticker)
+    return fresh, stale, cold
 
 
 def incremental_start(max_date_in_db: dt.date) -> dt.date:
@@ -249,7 +269,10 @@ async def ensure_eod_data(
         max_cold_tickers: Override for tests; defaults to settings.
 
     Raises:
-        ColdTickerCapExceededError: More cold/stale tickers than the cap.
+        ColdTickerCapExceededError: More than ``max_cold_tickers`` new tickers
+            (no instrument row) in a single request.  Previously-ingested
+            tickers that are merely stale always refresh incrementally without
+            cap.
         TiingoError subclasses: Propagated from the client (fail loud).
     """
     settings = get_settings()
@@ -266,20 +289,22 @@ async def ensure_eod_data(
     instruments = {inst.ticker: inst for inst in result.scalars().all()}
 
     now = dt.datetime.now(dt.UTC)
-    _fresh, cold = classify_tickers(ordered, instruments, now, staleness_hours)
+    _fresh, _stale, cold = classify_tickers(ordered, instruments, now, staleness_hours)
     if len(cold) > max_cold_tickers:
         raise ColdTickerCapExceededError(
-            f"Request needs a cold/stale fetch for {len(cold)} tickers "
-            f"({', '.join(cold)}) but at most {max_cold_tickers} are allowed per "
-            "request. Request fewer new tickers at once."
+            f"Request needs a full-history fetch for {len(cold)} new tickers "
+            f"({', '.join(cold)}) but at most {max_cold_tickers} new tickers per "
+            "request are allowed. Previously-ingested tickers refresh without cap."
         )
 
-    cold_set = set(cold)
+    # Tickers that need a Tiingo fetch: cold (full history) + stale (incremental).
+    # Fresh tickers are skipped entirely.
+    needs_fetch: set[str] = set(cold) | set(_stale)
     today = dt.date.today()
     report = EnsureReport()
 
     for ticker in ordered:
-        if ticker not in cold_set:
+        if ticker not in needs_fetch:
             report.outcomes.append(TickerOutcome(ticker=ticker, action="fresh"))
             continue
 
