@@ -61,36 +61,20 @@ from app.schemas.portfolio_analysis import (
     RiskContributionOut,
 )
 from app.services._series import (
+    join_prices as _join_prices,
+)
+from app.services._series import (
     rebased_cumulative,
     rebased_cumulative_weekly,
     resample_weekly,
     series_points,
 )
+from app.services._series import (
+    shortest_history_ticker as _shortest_history_ticker,
+)
 from app.services.stock_analysis import InsufficientDataError, PayloadTooLargeError
 
 _HISTOGRAM_BINS = 20
-
-
-def _join_prices(series_by_ticker: Mapping[str, pd.Series]) -> pd.DataFrame:
-    """Inner-join per-ticker adjusted-close series on their common dates.
-
-    The result has one column per ticker (insertion order preserved) and only
-    the dates where ALL tickers have data.
-    """
-    columns = [series.rename(ticker) for ticker, series in series_by_ticker.items()]
-    return pd.concat(columns, axis=1, join="inner")
-
-
-def _shortest_history_ticker(series_by_ticker: Mapping[str, pd.Series]) -> str:
-    """Ticker whose history starts LATEST (the one squeezing the common window)."""
-    return max(
-        series_by_ticker,
-        key=lambda t: (
-            series_by_ticker[t].index[0]
-            if len(series_by_ticker[t])
-            else pd.Timestamp.max
-        ),
-    )
 
 
 def _resolve_allocation(

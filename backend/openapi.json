@@ -690,6 +690,174 @@
           }
         }
       }
+    },
+    "/statistics/scenario": {
+      "post": {
+        "tags": [
+          "statistics"
+        ],
+        "summary": "Scenario",
+        "description": "Historical replay of a persisted portfolio over an explicit window.\n\nStacked value/weight/performance series plus a typed statistics rail \u2014\nrender-ready in one call. All fractional fields are decimal fractions\n(0.05 = 5%).",
+        "operationId": "scenario_statistics_scenario_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScenarioRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScenarioResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/statistics/beta": {
+      "post": {
+        "tags": [
+          "statistics"
+        ],
+        "summary": "Beta Scatter",
+        "description": "Daily-return scatter + OLS regression of two pseudo-assets (y on x).",
+        "operationId": "beta_scatter_statistics_beta_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BetaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BetaResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/statistics/correlation": {
+      "post": {
+        "tags": [
+          "statistics"
+        ],
+        "summary": "Rolling Correlation",
+        "description": "Rolling correlation of two pseudo-assets, warm from the window start.",
+        "operationId": "rolling_correlation_statistics_correlation_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrelationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorrelationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/statistics/stock-correlation": {
+      "post": {
+        "tags": [
+          "statistics"
+        ],
+        "summary": "Stock Correlation",
+        "description": "Pairwise correlation matrix of a portfolio's holdings (trailing window).",
+        "operationId": "stock_correlation_statistics_stock_correlation_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StockCorrelationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockCorrelationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -912,6 +1080,27 @@
         "title": "AnalysisStats",
         "description": "Point statistics over IN-RANGE returns only (the rolling warm-up pad\nis never included). Beta/correlation are versus the benchmark on the\naligned in-range date grid."
       },
+      "AxisLabels": {
+        "properties": {
+          "x": {
+            "type": "string",
+            "title": "X",
+            "description": "Label of asset_x: the ticker, or the portfolio name."
+          },
+          "y": {
+            "type": "string",
+            "title": "Y",
+            "description": "Label of asset_y: the ticker, or the portfolio name."
+          }
+        },
+        "type": "object",
+        "required": [
+          "x",
+          "y"
+        ],
+        "title": "AxisLabels",
+        "description": "Display labels for the two compared pseudo-assets."
+      },
       "BenchmarkComparison": {
         "properties": {
           "portfolio": {
@@ -960,6 +1149,124 @@
         ],
         "title": "BenchmarkComparison",
         "description": "Cumulative return of the portfolio vs the benchmark, rebased to 0.\n\nBoth series share the same aligned date grid and start at exactly 0.0 on\nthe same first date. Values are decimal fractions (0.05 = 5%), never 0-100."
+      },
+      "BetaRequest": {
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date",
+            "description": "Window start (inclusive)."
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date",
+            "description": "Window end (inclusive)."
+          },
+          "asset_x": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TickerRef"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioRef"
+              }
+            ],
+            "title": "Asset X",
+            "description": "X-axis / independent pseudo-asset.",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "portfolio": "#/components/schemas/PortfolioRef",
+                "ticker": "#/components/schemas/TickerRef"
+              }
+            }
+          },
+          "asset_y": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TickerRef"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioRef"
+              }
+            ],
+            "title": "Asset Y",
+            "description": "Y-axis / dependent pseudo-asset.",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "portfolio": "#/components/schemas/PortfolioRef",
+                "ticker": "#/components/schemas/TickerRef"
+              }
+            }
+          }
+        },
+        "type": "object",
+        "required": [
+          "start_date",
+          "end_date",
+          "asset_x",
+          "asset_y"
+        ],
+        "title": "BetaRequest",
+        "description": "Regression of asset_y's daily returns on asset_x's over the window."
+      },
+      "BetaResponse": {
+        "properties": {
+          "labels": {
+            "$ref": "#/components/schemas/AxisLabels"
+          },
+          "scatter": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Scatter",
+            "description": "[ret_x, ret_y] aligned daily return pairs, decimal fractions."
+          },
+          "regression": {
+            "$ref": "#/components/schemas/RegressionOut"
+          },
+          "regression_line": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Regression Line",
+            "description": "Two endpoints of the fitted line, y = alpha + beta * x evaluated at min(ret_x) and max(ret_x) \u2014 render-ready."
+          }
+        },
+        "type": "object",
+        "required": [
+          "labels",
+          "scatter",
+          "regression",
+          "regression_line"
+        ],
+        "title": "BetaResponse",
+        "description": "Scatter + regression of two pseudo-assets' daily returns."
       },
       "Candle": {
         "properties": {
@@ -1031,6 +1338,122 @@
         "title": "CorrelationMatrixOut",
         "description": "Pairwise Pearson correlation of per-asset daily returns."
       },
+      "CorrelationRequest": {
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date",
+            "description": "Window start (inclusive)."
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date",
+            "description": "Window end (inclusive)."
+          },
+          "asset_x": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TickerRef"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioRef"
+              }
+            ],
+            "title": "Asset X",
+            "description": "X-axis / independent pseudo-asset.",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "portfolio": "#/components/schemas/PortfolioRef",
+                "ticker": "#/components/schemas/TickerRef"
+              }
+            }
+          },
+          "asset_y": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TickerRef"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioRef"
+              }
+            ],
+            "title": "Asset Y",
+            "description": "Y-axis / dependent pseudo-asset.",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "portfolio": "#/components/schemas/PortfolioRef",
+                "ticker": "#/components/schemas/TickerRef"
+              }
+            }
+          },
+          "window": {
+            "type": "integer",
+            "maximum": 252.0,
+            "minimum": 10.0,
+            "title": "Window",
+            "description": "Rolling window length in TRADING days.",
+            "default": 63
+          }
+        },
+        "type": "object",
+        "required": [
+          "start_date",
+          "end_date",
+          "asset_x",
+          "asset_y"
+        ],
+        "title": "CorrelationRequest",
+        "description": "Rolling correlation of two pseudo-assets' daily returns."
+      },
+      "CorrelationResponse": {
+        "properties": {
+          "labels": {
+            "$ref": "#/components/schemas/AxisLabels"
+          },
+          "window": {
+            "type": "integer",
+            "title": "Window",
+            "description": "Rolling window length in TRADING days."
+          },
+          "series": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Series",
+            "description": "[date, correlation] points (-1..1); in-range dates only."
+          },
+          "current": {
+            "type": "number",
+            "title": "Current",
+            "description": "Most recent rolling correlation (last point)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "labels",
+          "window",
+          "series",
+          "current"
+        ],
+        "title": "CorrelationResponse",
+        "description": "Rolling-correlation series of two pseudo-assets.\n\nReturns are warmed up on a pre-start lookback pad (the F2.2 pattern) so the\nseries covers the requested window from (approximately) its first trading\nday; NaN warm-up rows are dropped."
+      },
       "CumulativeReturns": {
         "properties": {
           "asset": {
@@ -1079,6 +1502,27 @@
         ],
         "title": "CumulativeReturns",
         "description": "Cumulative return series rebased to 0 at the first in-range date.\n\nAsset and benchmark share the same date grid (aligned on common trading\ndays before slicing). Values are decimal fractions (0.05 = 5%), never\n0-100; both series start at exactly 0.0 on the same first date."
+      },
+      "DatedNav": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value",
+            "description": "Portfolio value in currency units (not a fraction)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "value"
+        ],
+        "title": "DatedNav",
+        "description": "A single dated NAV observation, in currency units."
       },
       "DatedValue": {
         "properties": {
@@ -1741,6 +2185,28 @@
         "title": "PortfolioPatch",
         "description": "Body for PATCH /portfolios/{id} \u2014 at least one field must be present."
       },
+      "PortfolioRef": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "portfolio",
+            "title": "Kind"
+          },
+          "id": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Id",
+            "description": "Persisted portfolio id."
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "PortfolioRef",
+        "description": "Pseudo-asset reference: a persisted portfolio.\n\nResolved by replaying the portfolio's CURRENT quantities over the request\nwindow (buy-and-hold historical replay \u2014 see ``app.analytics.portfolio``).\nThe pseudo-asset's daily returns are the engine's ``portfolio_returns``\nover the inner-joined holdings (uninvested cash is NOT part of the\npseudo-asset \u2014 it is constant and would only dilute beta/correlation)."
+      },
       "PortfolioStats": {
         "properties": {
           "annualized_volatility": {
@@ -2180,6 +2646,39 @@
         "title": "PriceSeriesResponse",
         "description": "EOD price series for one ticker over [start_date, end_date]."
       },
+      "RegressionOut": {
+        "properties": {
+          "beta": {
+            "type": "number",
+            "title": "Beta",
+            "description": "Slope: cov(x, y) / var(x) over aligned daily returns (engine beta)."
+          },
+          "alpha": {
+            "type": "number",
+            "title": "Alpha",
+            "description": "Intercept in DAILY decimal-return units: mean_y - beta * mean_x, derived from the engine beta (NOT annualized)."
+          },
+          "r": {
+            "type": "number",
+            "title": "R",
+            "description": "Pearson correlation of the aligned returns (-1..1)."
+          },
+          "n_points": {
+            "type": "integer",
+            "title": "N Points",
+            "description": "Number of aligned daily return pairs."
+          }
+        },
+        "type": "object",
+        "required": [
+          "beta",
+          "alpha",
+          "r",
+          "n_points"
+        ],
+        "title": "RegressionOut",
+        "description": "OLS regression of y on x over the aligned daily returns."
+      },
       "RiskContributionOut": {
         "properties": {
           "ticker": {
@@ -2199,6 +2698,241 @@
         ],
         "title": "RiskContributionOut",
         "description": "One asset's share of total portfolio risk (CTR convention)."
+      },
+      "ScenarioParams": {
+        "properties": {
+          "portfolio_id": {
+            "type": "integer",
+            "title": "Portfolio Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Portfolio display name."
+          },
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date",
+            "description": "First analyzed trading day (first date where ALL holdings have data within the requested window)."
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date",
+            "description": "Last analyzed trading day."
+          },
+          "cash": {
+            "type": "number",
+            "title": "Cash",
+            "description": "Uninvested cash balance, in currency units."
+          },
+          "frequency": {
+            "type": "string",
+            "enum": [
+              "daily",
+              "weekly"
+            ],
+            "title": "Frequency",
+            "description": "Grid of ALL emitted line series: daily, or weekly (W-FRI last-of-week) when the window exceeds the daily bounding threshold. Statistics stay daily."
+          }
+        },
+        "type": "object",
+        "required": [
+          "portfolio_id",
+          "name",
+          "start_date",
+          "end_date",
+          "cash",
+          "frequency"
+        ],
+        "title": "ScenarioParams",
+        "description": "Echo of the resolved scenario parameters."
+      },
+      "ScenarioRequest": {
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date",
+            "description": "Window start (inclusive)."
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date",
+            "description": "Window end (inclusive)."
+          },
+          "portfolio_id": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Portfolio Id",
+            "description": "Persisted portfolio id."
+          }
+        },
+        "type": "object",
+        "required": [
+          "start_date",
+          "end_date",
+          "portfolio_id"
+        ],
+        "title": "ScenarioRequest",
+        "description": "Historical replay of a persisted portfolio over [start_date, end_date].\n\nReplay semantics: the portfolio's CURRENT quantities (and current cash)\nare held fixed over the whole window \u2014 \"what would this portfolio have\ndone over that period?\", not a reconstruction of past trades."
+      },
+      "ScenarioResponse": {
+        "properties": {
+          "params": {
+            "$ref": "#/components/schemas/ScenarioParams"
+          },
+          "nav_cash": {
+            "items": {
+              "$ref": "#/components/schemas/StackedSeries"
+            },
+            "type": "array",
+            "title": "Nav Cash",
+            "description": "Stacked value series in currency units: one per position, plus a constant \"CASH\" series when cash > 0, plus \"TOTAL\" (positions + cash)."
+          },
+          "weights_percent": {
+            "items": {
+              "$ref": "#/components/schemas/StackedSeries"
+            },
+            "type": "array",
+            "title": "Weights Percent",
+            "description": "Weight evolution as decimal fractions (0.5 = 50%, the frontend formats to 0-100): one per position, plus \"CASH\" when cash > 0. Rows sum to 1 across series per date. No \"TOTAL\" series (it would be constant 1)."
+          },
+          "asset_performance": {
+            "items": {
+              "$ref": "#/components/schemas/StackedSeries"
+            },
+            "type": "array",
+            "title": "Asset Performance",
+            "description": "Cumulative return rebased to 0.0 at the window start, decimal fractions: one per position, plus \"TOTAL\" (cash-inclusive portfolio)."
+          },
+          "histogram": {
+            "$ref": "#/components/schemas/HistogramOut",
+            "description": "Histogram of the portfolio's DAILY returns (cash-inclusive total)."
+          },
+          "statistics": {
+            "$ref": "#/components/schemas/ScenarioStatistics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "params",
+          "nav_cash",
+          "weights_percent",
+          "asset_performance",
+          "histogram",
+          "statistics"
+        ],
+        "title": "ScenarioResponse",
+        "description": "Render-ready scenario payload \u2014 historical replay of a persisted portfolio.\n\nThe portfolio's CURRENT quantities are held fixed (buy-and-hold) over the\nwindow; uninvested cash is a constant. All series share the same date grid\n(daily, or W-FRI weekly when bounded \u2014 see ``params.frequency``). The\nbackend computes ALL finance; the frontend only draws."
+      },
+      "ScenarioStatistics": {
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date",
+            "description": "First analyzed trading day."
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date",
+            "description": "Last analyzed trading day."
+          },
+          "start_nav": {
+            "type": "number",
+            "title": "Start Nav",
+            "description": "Total value (positions + cash) at start_date."
+          },
+          "end_nav": {
+            "type": "number",
+            "title": "End Nav",
+            "description": "Total value (positions + cash) at end_date."
+          },
+          "max_nav": {
+            "$ref": "#/components/schemas/DatedNav"
+          },
+          "min_nav": {
+            "$ref": "#/components/schemas/DatedNav"
+          },
+          "max_return": {
+            "$ref": "#/components/schemas/DatedValue",
+            "description": "Best daily return and its date."
+          },
+          "min_return": {
+            "$ref": "#/components/schemas/DatedValue",
+            "description": "Worst daily return and its date."
+          },
+          "annualized_volatility": {
+            "type": "number",
+            "title": "Annualized Volatility",
+            "description": "Annualized volatility of daily returns, decimal fraction (0.25 = 25%)."
+          },
+          "var_95": {
+            "type": "number",
+            "title": "Var 95",
+            "description": "Historical 1-day VaR at 95% as a POSITIVE decimal fraction."
+          },
+          "var_99": {
+            "type": "number",
+            "title": "Var 99",
+            "description": "Historical 1-day VaR at 99% as a POSITIVE decimal fraction."
+          }
+        },
+        "type": "object",
+        "required": [
+          "start_date",
+          "end_date",
+          "start_nav",
+          "end_nav",
+          "max_nav",
+          "min_nav",
+          "max_return",
+          "min_return",
+          "annualized_volatility",
+          "var_95",
+          "var_99"
+        ],
+        "title": "ScenarioStatistics",
+        "description": "Typed statistics rail of the scenario \u2014 computed on DAILY data even when\nthe line series are weekly-bounded. NAV figures include cash; returns are\ndaily simple returns of the cash-inclusive total value."
+      },
+      "StackedSeries": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker",
+            "description": "Position ticker, \"CASH\" (constant cash balance), or \"TOTAL\"."
+          },
+          "points": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Points",
+            "description": "[date, value] points; the value scale is documented on the field that carries the series list."
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "points"
+        ],
+        "title": "StackedSeries",
+        "description": "One series of a stacked chart: a position ticker, \"CASH\", or \"TOTAL\"."
       },
       "StockAnalysisResponse": {
         "properties": {
@@ -2296,6 +3030,107 @@
         ],
         "title": "StockAnalysisResponse",
         "description": "Render-ready single-call payload for the stock analysis page.\n\nThe backend computes ALL finance; the frontend only draws. Every\nfractional field is a decimal fraction (0.05 = 5%), never 0-100.\nRolling series are warmed up on a pre-range pad and then sliced to the\nvisible range with NaN rows dropped, so they cover the visible range\nfrom (approximately) its first trading day."
+      },
+      "StockCorrelationRequest": {
+        "properties": {
+          "portfolio_id": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Portfolio Id",
+            "description": "Persisted portfolio id."
+          },
+          "window": {
+            "type": "integer",
+            "maximum": 252.0,
+            "minimum": 10.0,
+            "title": "Window",
+            "description": "Trailing window length in TRADING days of returns (window + 1 closes are required).",
+            "default": 63
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Date",
+            "description": "Window end; defaults to the latest available trading day."
+          }
+        },
+        "type": "object",
+        "required": [
+          "portfolio_id"
+        ],
+        "title": "StockCorrelationRequest",
+        "description": "Pairwise correlation of a portfolio's holdings over a trailing window."
+      },
+      "StockCorrelationResponse": {
+        "properties": {
+          "tickers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tickers",
+            "description": "Row/column order of the matrix."
+          },
+          "matrix": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Matrix",
+            "description": "Row-major square matrix (-1..1); symmetric with unit diagonal."
+          },
+          "window": {
+            "type": "integer",
+            "title": "Window",
+            "description": "Number of TRADING-day returns used (exactly)."
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date",
+            "title": "As Of",
+            "description": "Last trading day of the window (the latest date COMMON to all holdings, capped at the requested end_date)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "tickers",
+          "matrix",
+          "window",
+          "as_of"
+        ],
+        "title": "StockCorrelationResponse",
+        "description": "Pairwise Pearson correlation matrix of the holdings' daily returns."
+      },
+      "TickerRef": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "ticker",
+            "title": "Kind"
+          },
+          "ticker": {
+            "type": "string",
+            "title": "Ticker",
+            "description": "Instrument ticker (normalized to uppercase)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "ticker"
+        ],
+        "title": "TickerRef",
+        "description": "Pseudo-asset reference: a plain instrument ticker."
       },
       "ValidationError": {
         "properties": {

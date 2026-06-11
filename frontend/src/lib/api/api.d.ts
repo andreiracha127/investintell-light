@@ -260,6 +260,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/statistics/scenario": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Scenario
+         * @description Historical replay of a persisted portfolio over an explicit window.
+         *
+         *     Stacked value/weight/performance series plus a typed statistics rail —
+         *     render-ready in one call. All fractional fields are decimal fractions
+         *     (0.05 = 5%).
+         */
+        post: operations["scenario_statistics_scenario_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/statistics/beta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Beta Scatter
+         * @description Daily-return scatter + OLS regression of two pseudo-assets (y on x).
+         */
+        post: operations["beta_scatter_statistics_beta_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/statistics/correlation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rolling Correlation
+         * @description Rolling correlation of two pseudo-assets, warm from the window start.
+         */
+        post: operations["rolling_correlation_statistics_correlation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/statistics/stock-correlation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stock Correlation
+         * @description Pairwise correlation matrix of a portfolio's holdings (trailing window).
+         */
+        post: operations["stock_correlation_statistics_stock_correlation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -415,6 +499,22 @@ export interface components {
             worst_day: components["schemas"]["DatedValue"];
         };
         /**
+         * AxisLabels
+         * @description Display labels for the two compared pseudo-assets.
+         */
+        AxisLabels: {
+            /**
+             * X
+             * @description Label of asset_x: the ticker, or the portfolio name.
+             */
+            x: string;
+            /**
+             * Y
+             * @description Label of asset_y: the ticker, or the portfolio name.
+             */
+            y: string;
+        };
+        /**
          * BenchmarkComparison
          * @description Cumulative return of the portfolio vs the benchmark, rebased to 0.
          *
@@ -436,6 +536,58 @@ export interface components {
              */
             benchmark: [
                 string,
+                number
+            ][];
+        };
+        /**
+         * BetaRequest
+         * @description Regression of asset_y's daily returns on asset_x's over the window.
+         */
+        BetaRequest: {
+            /**
+             * Start Date
+             * Format: date
+             * @description Window start (inclusive).
+             */
+            start_date: string;
+            /**
+             * End Date
+             * Format: date
+             * @description Window end (inclusive).
+             */
+            end_date: string;
+            /**
+             * Asset X
+             * @description X-axis / independent pseudo-asset.
+             */
+            asset_x: components["schemas"]["TickerRef"] | components["schemas"]["PortfolioRef"];
+            /**
+             * Asset Y
+             * @description Y-axis / dependent pseudo-asset.
+             */
+            asset_y: components["schemas"]["TickerRef"] | components["schemas"]["PortfolioRef"];
+        };
+        /**
+         * BetaResponse
+         * @description Scatter + regression of two pseudo-assets' daily returns.
+         */
+        BetaResponse: {
+            labels: components["schemas"]["AxisLabels"];
+            /**
+             * Scatter
+             * @description [ret_x, ret_y] aligned daily return pairs, decimal fractions.
+             */
+            scatter: [
+                number,
+                number
+            ][];
+            regression: components["schemas"]["RegressionOut"];
+            /**
+             * Regression Line
+             * @description Two endpoints of the fitted line, y = alpha + beta * x evaluated at min(ret_x) and max(ret_x) — render-ready.
+             */
+            regression_line: [
+                number,
                 number
             ][];
         };
@@ -480,6 +632,69 @@ export interface components {
             matrix: number[][];
         };
         /**
+         * CorrelationRequest
+         * @description Rolling correlation of two pseudo-assets' daily returns.
+         */
+        CorrelationRequest: {
+            /**
+             * Start Date
+             * Format: date
+             * @description Window start (inclusive).
+             */
+            start_date: string;
+            /**
+             * End Date
+             * Format: date
+             * @description Window end (inclusive).
+             */
+            end_date: string;
+            /**
+             * Asset X
+             * @description X-axis / independent pseudo-asset.
+             */
+            asset_x: components["schemas"]["TickerRef"] | components["schemas"]["PortfolioRef"];
+            /**
+             * Asset Y
+             * @description Y-axis / dependent pseudo-asset.
+             */
+            asset_y: components["schemas"]["TickerRef"] | components["schemas"]["PortfolioRef"];
+            /**
+             * Window
+             * @description Rolling window length in TRADING days.
+             * @default 63
+             */
+            window: number;
+        };
+        /**
+         * CorrelationResponse
+         * @description Rolling-correlation series of two pseudo-assets.
+         *
+         *     Returns are warmed up on a pre-start lookback pad (the F2.2 pattern) so the
+         *     series covers the requested window from (approximately) its first trading
+         *     day; NaN warm-up rows are dropped.
+         */
+        CorrelationResponse: {
+            labels: components["schemas"]["AxisLabels"];
+            /**
+             * Window
+             * @description Rolling window length in TRADING days.
+             */
+            window: number;
+            /**
+             * Series
+             * @description [date, correlation] points (-1..1); in-range dates only.
+             */
+            series: [
+                string,
+                number
+            ][];
+            /**
+             * Current
+             * @description Most recent rolling correlation (last point).
+             */
+            current: number;
+        };
+        /**
          * CumulativeReturns
          * @description Cumulative return series rebased to 0 at the first in-range date.
          *
@@ -504,6 +719,22 @@ export interface components {
                 string,
                 number
             ][];
+        };
+        /**
+         * DatedNav
+         * @description A single dated NAV observation, in currency units.
+         */
+        DatedNav: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /**
+             * Value
+             * @description Portfolio value in currency units (not a fraction).
+             */
+            value: number;
         };
         /**
          * DatedValue
@@ -880,6 +1111,28 @@ export interface components {
             cash?: number | null;
         };
         /**
+         * PortfolioRef
+         * @description Pseudo-asset reference: a persisted portfolio.
+         *
+         *     Resolved by replaying the portfolio's CURRENT quantities over the request
+         *     window (buy-and-hold historical replay — see ``app.analytics.portfolio``).
+         *     The pseudo-asset's daily returns are the engine's ``portfolio_returns``
+         *     over the inner-joined holdings (uninvested cash is NOT part of the
+         *     pseudo-asset — it is constant and would only dilute beta/correlation).
+         */
+        PortfolioRef: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "portfolio";
+            /**
+             * Id
+             * @description Persisted portfolio id.
+             */
+            id: number;
+        };
+        /**
          * PortfolioStats
          * @description Point statistics over the portfolio's daily returns in the analyzed
          *     window. Beta/correlation are versus the benchmark on the aligned date
@@ -1121,6 +1374,32 @@ export interface components {
             prices: components["schemas"]["PricePoint"][];
         };
         /**
+         * RegressionOut
+         * @description OLS regression of y on x over the aligned daily returns.
+         */
+        RegressionOut: {
+            /**
+             * Beta
+             * @description Slope: cov(x, y) / var(x) over aligned daily returns (engine beta).
+             */
+            beta: number;
+            /**
+             * Alpha
+             * @description Intercept in DAILY decimal-return units: mean_y - beta * mean_x, derived from the engine beta (NOT annualized).
+             */
+            alpha: number;
+            /**
+             * R
+             * @description Pearson correlation of the aligned returns (-1..1).
+             */
+            r: number;
+            /**
+             * N Points
+             * @description Number of aligned daily return pairs.
+             */
+            n_points: number;
+        };
+        /**
          * RiskContributionOut
          * @description One asset's share of total portfolio risk (CTR convention).
          */
@@ -1132,6 +1411,169 @@ export interface components {
              * @description Fraction of TOTAL portfolio risk (decimal fraction; all contributions sum to 1), evaluated at the effective initial weights.
              */
             contribution: number;
+        };
+        /**
+         * ScenarioParams
+         * @description Echo of the resolved scenario parameters.
+         */
+        ScenarioParams: {
+            /** Portfolio Id */
+            portfolio_id: number;
+            /**
+             * Name
+             * @description Portfolio display name.
+             */
+            name: string;
+            /**
+             * Start Date
+             * Format: date
+             * @description First analyzed trading day (first date where ALL holdings have data within the requested window).
+             */
+            start_date: string;
+            /**
+             * End Date
+             * Format: date
+             * @description Last analyzed trading day.
+             */
+            end_date: string;
+            /**
+             * Cash
+             * @description Uninvested cash balance, in currency units.
+             */
+            cash: number;
+            /**
+             * Frequency
+             * @description Grid of ALL emitted line series: daily, or weekly (W-FRI last-of-week) when the window exceeds the daily bounding threshold. Statistics stay daily.
+             * @enum {string}
+             */
+            frequency: "daily" | "weekly";
+        };
+        /**
+         * ScenarioRequest
+         * @description Historical replay of a persisted portfolio over [start_date, end_date].
+         *
+         *     Replay semantics: the portfolio's CURRENT quantities (and current cash)
+         *     are held fixed over the whole window — "what would this portfolio have
+         *     done over that period?", not a reconstruction of past trades.
+         */
+        ScenarioRequest: {
+            /**
+             * Start Date
+             * Format: date
+             * @description Window start (inclusive).
+             */
+            start_date: string;
+            /**
+             * End Date
+             * Format: date
+             * @description Window end (inclusive).
+             */
+            end_date: string;
+            /**
+             * Portfolio Id
+             * @description Persisted portfolio id.
+             */
+            portfolio_id: number;
+        };
+        /**
+         * ScenarioResponse
+         * @description Render-ready scenario payload — historical replay of a persisted portfolio.
+         *
+         *     The portfolio's CURRENT quantities are held fixed (buy-and-hold) over the
+         *     window; uninvested cash is a constant. All series share the same date grid
+         *     (daily, or W-FRI weekly when bounded — see ``params.frequency``). The
+         *     backend computes ALL finance; the frontend only draws.
+         */
+        ScenarioResponse: {
+            params: components["schemas"]["ScenarioParams"];
+            /**
+             * Nav Cash
+             * @description Stacked value series in currency units: one per position, plus a constant "CASH" series when cash > 0, plus "TOTAL" (positions + cash).
+             */
+            nav_cash: components["schemas"]["StackedSeries"][];
+            /**
+             * Weights Percent
+             * @description Weight evolution as decimal fractions (0.5 = 50%, the frontend formats to 0-100): one per position, plus "CASH" when cash > 0. Rows sum to 1 across series per date. No "TOTAL" series (it would be constant 1).
+             */
+            weights_percent: components["schemas"]["StackedSeries"][];
+            /**
+             * Asset Performance
+             * @description Cumulative return rebased to 0.0 at the window start, decimal fractions: one per position, plus "TOTAL" (cash-inclusive portfolio).
+             */
+            asset_performance: components["schemas"]["StackedSeries"][];
+            /** @description Histogram of the portfolio's DAILY returns (cash-inclusive total). */
+            histogram: components["schemas"]["HistogramOut"];
+            statistics: components["schemas"]["ScenarioStatistics"];
+        };
+        /**
+         * ScenarioStatistics
+         * @description Typed statistics rail of the scenario — computed on DAILY data even when
+         *     the line series are weekly-bounded. NAV figures include cash; returns are
+         *     daily simple returns of the cash-inclusive total value.
+         */
+        ScenarioStatistics: {
+            /**
+             * Start Date
+             * Format: date
+             * @description First analyzed trading day.
+             */
+            start_date: string;
+            /**
+             * End Date
+             * Format: date
+             * @description Last analyzed trading day.
+             */
+            end_date: string;
+            /**
+             * Start Nav
+             * @description Total value (positions + cash) at start_date.
+             */
+            start_nav: number;
+            /**
+             * End Nav
+             * @description Total value (positions + cash) at end_date.
+             */
+            end_nav: number;
+            max_nav: components["schemas"]["DatedNav"];
+            min_nav: components["schemas"]["DatedNav"];
+            /** @description Best daily return and its date. */
+            max_return: components["schemas"]["DatedValue"];
+            /** @description Worst daily return and its date. */
+            min_return: components["schemas"]["DatedValue"];
+            /**
+             * Annualized Volatility
+             * @description Annualized volatility of daily returns, decimal fraction (0.25 = 25%).
+             */
+            annualized_volatility: number;
+            /**
+             * Var 95
+             * @description Historical 1-day VaR at 95% as a POSITIVE decimal fraction.
+             */
+            var_95: number;
+            /**
+             * Var 99
+             * @description Historical 1-day VaR at 99% as a POSITIVE decimal fraction.
+             */
+            var_99: number;
+        };
+        /**
+         * StackedSeries
+         * @description One series of a stacked chart: a position ticker, "CASH", or "TOTAL".
+         */
+        StackedSeries: {
+            /**
+             * Ticker
+             * @description Position ticker, "CASH" (constant cash balance), or "TOTAL".
+             */
+            ticker: string;
+            /**
+             * Points
+             * @description [date, value] points; the value scale is documented on the field that carries the series list.
+             */
+            points: [
+                string,
+                number
+            ][];
         };
         /**
          * StockAnalysisResponse
@@ -1175,6 +1617,71 @@ export interface components {
             ][];
             histogram: components["schemas"]["HistogramOut"];
             stats: components["schemas"]["AnalysisStats"];
+        };
+        /**
+         * StockCorrelationRequest
+         * @description Pairwise correlation of a portfolio's holdings over a trailing window.
+         */
+        StockCorrelationRequest: {
+            /**
+             * Portfolio Id
+             * @description Persisted portfolio id.
+             */
+            portfolio_id: number;
+            /**
+             * Window
+             * @description Trailing window length in TRADING days of returns (window + 1 closes are required).
+             * @default 63
+             */
+            window: number;
+            /**
+             * End Date
+             * @description Window end; defaults to the latest available trading day.
+             */
+            end_date?: string | null;
+        };
+        /**
+         * StockCorrelationResponse
+         * @description Pairwise Pearson correlation matrix of the holdings' daily returns.
+         */
+        StockCorrelationResponse: {
+            /**
+             * Tickers
+             * @description Row/column order of the matrix.
+             */
+            tickers: string[];
+            /**
+             * Matrix
+             * @description Row-major square matrix (-1..1); symmetric with unit diagonal.
+             */
+            matrix: number[][];
+            /**
+             * Window
+             * @description Number of TRADING-day returns used (exactly).
+             */
+            window: number;
+            /**
+             * As Of
+             * Format: date
+             * @description Last trading day of the window (the latest date COMMON to all holdings, capped at the requested end_date).
+             */
+            as_of: string;
+        };
+        /**
+         * TickerRef
+         * @description Pseudo-asset reference: a plain instrument ticker.
+         */
+        TickerRef: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "ticker";
+            /**
+             * Ticker
+             * @description Instrument ticker (normalized to uppercase).
+             */
+            ticker: string;
         };
         /** ValidationError */
         ValidationError: {
@@ -1625,6 +2132,138 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PortfolioNewsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    scenario_statistics_scenario_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScenarioRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    beta_scatter_statistics_beta_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BetaRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BetaResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rolling_correlation_statistics_correlation_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CorrelationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CorrelationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stock_correlation_statistics_stock_correlation_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StockCorrelationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockCorrelationResponse"];
                 };
             };
             /** @description Validation Error */

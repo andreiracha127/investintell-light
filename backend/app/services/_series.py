@@ -13,6 +13,7 @@ fractions (0.05 = 5%), never 0-100.
 """
 
 import datetime as dt
+from collections.abc import Mapping
 
 import pandas as pd
 from sqlalchemy import func, select
@@ -50,6 +51,29 @@ async def select_adj_close_rows(
         .order_by(EodPrice.date)
     )
     return list(result.tuples().all())
+
+
+def join_prices(series_by_ticker: Mapping[str, pd.Series]) -> pd.DataFrame:
+    """Inner-join per-ticker adjusted-close series on their common dates.
+
+    The result has one column per ticker (insertion order preserved) and only
+    the dates where ALL tickers have data. Extracted from the F3.2 portfolio
+    service so the statistics service (F5) reuses the same join semantics.
+    """
+    columns = [series.rename(ticker) for ticker, series in series_by_ticker.items()]
+    return pd.concat(columns, axis=1, join="inner")
+
+
+def shortest_history_ticker(series_by_ticker: Mapping[str, pd.Series]) -> str:
+    """Ticker whose history starts LATEST (the one squeezing the common window)."""
+    return max(
+        series_by_ticker,
+        key=lambda t: (
+            series_by_ticker[t].index[0]
+            if len(series_by_ticker[t])
+            else pd.Timestamp.max
+        ),
+    )
 
 
 def series_points(series: pd.Series) -> list[tuple[dt.date, float]]:
