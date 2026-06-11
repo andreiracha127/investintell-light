@@ -16,6 +16,10 @@ type PortfolioPath = paths["/portfolios/{portfolio_id}"];
 type PositionPath = paths["/portfolios/{portfolio_id}/positions/{ticker}"];
 type OverviewOperation = paths["/portfolios/{portfolio_id}/overview"]["get"];
 type PortfolioNewsOperation = paths["/portfolios/{portfolio_id}/news"]["get"];
+type ScenarioOperation = paths["/statistics/scenario"]["post"];
+type BetaOperation = paths["/statistics/beta"]["post"];
+type CorrelationOperation = paths["/statistics/correlation"]["post"];
+type StockCorrelationOperation = paths["/statistics/stock-correlation"]["post"];
 
 export type StockAnalysis =
   AnalysisOperation["responses"]["200"]["content"]["application/json"];
@@ -55,6 +59,26 @@ export type OverviewPosition = PortfolioOverview["positions"][number];
 export type OverviewAggregates = PortfolioOverview["aggregates"];
 export type PortfolioNews =
   PortfolioNewsOperation["responses"]["200"]["content"]["application/json"];
+
+export type ScenarioRequest =
+  ScenarioOperation["requestBody"]["content"]["application/json"];
+export type ScenarioResponse =
+  ScenarioOperation["responses"]["200"]["content"]["application/json"];
+export type StackedSeries = ScenarioResponse["nav_cash"][number];
+export type BetaRequest =
+  BetaOperation["requestBody"]["content"]["application/json"];
+export type BetaResponse =
+  BetaOperation["responses"]["200"]["content"]["application/json"];
+/** Discriminated pseudo-asset reference: a ticker or a persisted portfolio. */
+export type AssetRef = BetaRequest["asset_x"];
+export type CorrelationRequest =
+  CorrelationOperation["requestBody"]["content"]["application/json"];
+export type CorrelationResponse =
+  CorrelationOperation["responses"]["200"]["content"]["application/json"];
+export type StockCorrelationRequest =
+  StockCorrelationOperation["requestBody"]["content"]["application/json"];
+export type StockCorrelationResponse =
+  StockCorrelationOperation["responses"]["200"]["content"]["application/json"];
 
 export type Candle = StockAnalysis["candles"][number];
 export type CumulativeReturns = StockAnalysis["cumulative_returns"];
@@ -299,6 +323,49 @@ export function fetchPortfolioNews(
   return request<PortfolioNews>(
     `/portfolios/${portfolioId}/news${qs ? `?${qs}` : ""}`,
     signal,
+  );
+}
+
+/* ── Statistics tools (F5) ────────────────────────────────────────────────── */
+
+export function postScenario(
+  body: ScenarioRequest,
+  signal?: AbortSignal,
+): Promise<ScenarioResponse> {
+  return request<ScenarioResponse>("/statistics/scenario", signal, {
+    method: "POST",
+    json: body,
+  });
+}
+
+export function postBeta(
+  body: BetaRequest,
+  signal?: AbortSignal,
+): Promise<BetaResponse> {
+  return request<BetaResponse>("/statistics/beta", signal, {
+    method: "POST",
+    json: body,
+  });
+}
+
+export function postCorrelation(
+  body: CorrelationRequest,
+  signal?: AbortSignal,
+): Promise<CorrelationResponse> {
+  return request<CorrelationResponse>("/statistics/correlation", signal, {
+    method: "POST",
+    json: body,
+  });
+}
+
+export function postStockCorrelation(
+  body: StockCorrelationRequest,
+  signal?: AbortSignal,
+): Promise<StockCorrelationResponse> {
+  return request<StockCorrelationResponse>(
+    "/statistics/stock-correlation",
+    signal,
+    { method: "POST", json: body },
   );
 }
 
