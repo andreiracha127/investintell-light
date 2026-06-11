@@ -9,6 +9,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from app.analytics._validation import reject_nan
+
 _MIN_RETURNS = 10
 _MAX_BINS = 100
 
@@ -44,9 +46,8 @@ def return_histogram(returns: pd.Series, bins: int = 20) -> Histogram:
         raise ValueError(
             f"return_histogram requires at least {_MIN_RETURNS} returns, got {len(returns)}"
         )
+    reject_nan(returns, "return_histogram")
     values = returns.to_numpy(dtype=float)
-    if np.isnan(values).any():
-        raise ValueError("return_histogram input contains NaN values")
     counts, edges = np.histogram(values, bins=bins)
     max_count = int(counts.max())
     if max_count == 0:  # unreachable with >= 10 finite returns, guard anyway

@@ -6,6 +6,8 @@ cumulative returns, totals) are decimal fractions (0.05 = 5%), never 0-100.
 
 import pandas as pd
 
+from app.analytics._validation import reject_nan
+
 
 def simple_returns(prices: pd.Series) -> pd.Series:
     """Compute simple (arithmetic) period returns from a price series.
@@ -38,10 +40,7 @@ def cumulative_return_series(returns: pd.Series) -> pd.Series:
     """
     if len(returns) < 1:
         raise ValueError("cumulative_return_series requires at least 1 return, got 0")
-    if returns.isna().any():
-        raise ValueError(
-            "cumulative_return_series received NaN values in input; clean the series first"
-        )
+    reject_nan(returns, "cumulative_return_series")
     return (1 + returns).cumprod() - 1
 
 
@@ -57,8 +56,7 @@ def total_return(returns: pd.Series) -> float:
     """
     if len(returns) < 1:
         raise ValueError("total_return requires at least 1 return, got 0")
-    if returns.isna().any():
-        raise ValueError("total_return received NaN values in input; clean the series first")
+    reject_nan(returns, "total_return")
     return float((1 + returns).to_numpy(dtype=float).prod()) - 1.0
 
 

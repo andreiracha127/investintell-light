@@ -1,5 +1,7 @@
 """Tests for app.analytics.risk."""
 
+import math
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -114,6 +116,17 @@ def test_max_drawdown_short_input_raises() -> None:
         max_drawdown(_dated([100.0]))
 
 
+def test_max_drawdown_mid_series_nan_raises() -> None:
+    """NaN in the middle of the price series must be rejected before cummax/idxmin.
+
+    Without an up-front guard, cummax() and idxmin() skip NaN silently and
+    [100, 120, NaN, 90, 95] would return -0.25 instead of raising.
+    """
+    prices = _dated([100.0, 120.0, float("nan"), 90.0, 95.0])
+    with pytest.raises(ValueError, match="NaN"):
+        max_drawdown(prices)
+
+
 # --- best/worst day -----------------------------------------------------------
 
 
@@ -129,6 +142,13 @@ def test_best_worst_day() -> None:
 def test_best_worst_day_empty_raises() -> None:
     with pytest.raises(ValueError, match="at least 1"):
         best_worst_day(pd.Series([], dtype=float))
+
+
+def test_best_worst_day_nan_raises() -> None:
+    """NaN in the series must be rejected up-front (idxmax/idxmin skip NaN silently)."""
+    returns = _dated([0.01, float("nan"), -0.02])
+    with pytest.raises(ValueError, match="NaN"):
+        best_worst_day(returns)
 
 
 # --- beta / correlation -------------------------------------------------------
@@ -178,3 +198,29 @@ def test_correlation_too_few_common_points_raises() -> None:
     a = _random_returns(5)
     with pytest.raises(ValueError, match="at least 10"):
         correlation(a, a)
+
+
+# --- property tests -----------------------------------------------------------
+
+
+def test_annualized_volatility_scale_invariance() -> None:
+    """vol(r, ppy=k) == vol(r, ppy=1) * sqrt(k) to within floating-point tolerance.
+
+    The annualisation factor is sqrt(ppy), so scaling ppy by k must scale the
+    result by sqrt(k) exactly (up to floating-point rounding).
+    """
+    r = _random_returns(250, seed=42)
+    k = 252
+    vol_k = annualized_volatility(r, periods_per_year=k)
+    vol_1 = annualized_volatility(r, periods_per_year=1)
+    assert vol_k == pytest.approx(vol_1 * math.sqrt(k), abs=1e-12)
+
+
+def test_cvar_monotonicity() -> None:
+    """CVaR(99%) >= CVaR(95%) on a seeded return series.
+
+    A higher confidence level looks deeper into the loss tail, so the
+    conditional expected loss must be at least as large.
+    """
+    r = _random_returns(500, seed=17)
+    assert historical_cvar(r, 0.99) >= historical_cvar(r, 0.95)

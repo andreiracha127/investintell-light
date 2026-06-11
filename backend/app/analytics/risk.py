@@ -14,6 +14,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
+from app.analytics._validation import reject_nan
 from app.analytics.returns import align_returns
 
 _MIN_TAIL_POINTS = 10
@@ -57,29 +58,30 @@ def annualized_volatility(returns: pd.Series, periods_per_year: int = 252) -> fl
     Input returns and the result are decimal fractions (0.05 = 5%), never 0-100.
 
     Raises:
-        ValueError: if fewer than 2 returns are supplied or the result is NaN.
+        ValueError: if fewer than 2 returns are supplied or the input contains
+            NaN values.
     """
     if len(returns) < 2:
         raise ValueError(
             f"annualized_volatility requires at least 2 returns, got {len(returns)}"
         )
+    reject_nan(returns, "annualized_volatility")
     vol = float(returns.std(ddof=1, skipna=False)) * math.sqrt(periods_per_year)
-    if math.isnan(vol):
-        raise ValueError("annualized_volatility is NaN; input contains NaN values")
     return vol
 
 
 def historical_var(returns: pd.Series, confidence: float = 0.95) -> float:
     """Historical Value-at-Risk as a POSITIVE decimal fraction.
 
-    Computed as ``-quantile(returns, 1 - confidence)`` with numpy's default
-    linear interpolation. Sign convention: VaR 95 = 0.02 means "5% of days
-    lose more than 2%". Inputs and result are decimal fractions (0.05 = 5%),
-    never 0-100.
+    Computed as ``-quantile(returns, 1 - confidence)`` using numpy's default
+    linear interpolation (``method='linear'``, type-7), i.e. interpolation at
+    position ``(n-1) * p`` in the sorted array. Sign convention: VaR 95 = 0.02
+    means "5% of days lose more than 2%". Inputs and result are decimal
+    fractions (0.05 = 5%), never 0-100.
 
     Raises:
         ValueError: if ``confidence`` is not in (0, 1), fewer than 10 returns
-            are supplied, or the result is NaN.
+            are supplied, or the input contains NaN values.
     """
     if not 0 < confidence < 1:
         raise ValueError(f"confidence must be in (0, 1), got {confidence}")
@@ -87,9 +89,8 @@ def historical_var(returns: pd.Series, confidence: float = 0.95) -> float:
         raise ValueError(
             f"historical_var requires at least {_MIN_TAIL_POINTS} returns, got {len(returns)}"
         )
+    reject_nan(returns, "historical_var")
     var = -float(np.quantile(returns.to_numpy(dtype=float), 1 - confidence))
-    if math.isnan(var):
-        raise ValueError("historical_var is NaN; input contains NaN values")
     return var
 
 
@@ -103,7 +104,8 @@ def historical_cvar(returns: pd.Series, confidence: float = 0.95) -> float:
 
     Raises:
         ValueError: if ``confidence`` is not in (0, 1), fewer than 10 returns
-            are supplied, the tail selection is empty, or the result is NaN.
+            are supplied, the tail selection is empty, or the input contains
+            NaN values.
     """
     if not 0 < confidence < 1:
         raise ValueError(f"confidence must be in (0, 1), got {confidence}")
@@ -111,14 +113,13 @@ def historical_cvar(returns: pd.Series, confidence: float = 0.95) -> float:
         raise ValueError(
             f"historical_cvar requires at least {_MIN_TAIL_POINTS} returns, got {len(returns)}"
         )
+    reject_nan(returns, "historical_cvar")
     values = returns.to_numpy(dtype=float)
     cutoff = float(np.quantile(values, 1 - confidence))
     tail = values[values <= cutoff]
     if tail.size == 0:
         raise ValueError("historical_cvar tail selection is empty")
     cvar = -float(tail.mean())
-    if math.isnan(cvar):
-        raise ValueError("historical_cvar is NaN; input contains NaN values")
     return cvar
 
 
@@ -132,16 +133,16 @@ def max_drawdown(prices: pd.Series) -> DrawdownResult:
     coincide.
 
     Raises:
-        ValueError: if fewer than 2 prices are supplied or the result is NaN.
+        ValueError: if fewer than 2 prices are supplied or the input contains
+            NaN values.
     """
     if len(prices) < 2:
         raise ValueError(f"max_drawdown requires at least 2 prices, got {len(prices)}")
+    reject_nan(prices, "max_drawdown")
     running_max = prices.cummax()
     drawdowns = prices / running_max - 1
     trough_label = drawdowns.idxmin()
     depth = float(drawdowns.loc[trough_label])
-    if math.isnan(depth):
-        raise ValueError("max_drawdown is NaN; input contains NaN values")
     peak_label = prices.loc[:trough_label].idxmax()
     return DrawdownResult(
         depth=depth,
@@ -153,19 +154,20 @@ def max_drawdown(prices: pd.Series) -> DrawdownResult:
 def best_worst_day(returns: pd.Series) -> BestWorst:
     """Best and worst single-period returns with their dates.
 
-    Returns are decimal fractions (0.05 = 5%), never 0-100.
+    Returns are decimal fractions (0.05 = 5%), never 0-100. ``idxmax`` and
+    ``idxmin`` skip NaN by default, so the guard is applied up-front to ensure
+    the returned dates and values are not influenced by NaN entries.
 
     Raises:
-        ValueError: if ``returns`` is empty or contains NaN extremes.
+        ValueError: if ``returns`` is empty or contains NaN values.
     """
     if len(returns) < 1:
         raise ValueError("best_worst_day requires at least 1 return, got 0")
+    reject_nan(returns, "best_worst_day")
     best_label = returns.idxmax()
     worst_label = returns.idxmin()
     best = float(returns.loc[best_label])
     worst = float(returns.loc[worst_label])
-    if math.isnan(best) or math.isnan(worst):
-        raise ValueError("best_worst_day is NaN; input contains NaN values")
     return BestWorst(
         best_return=best,
         best_date=_to_date(best_label),
