@@ -4,10 +4,10 @@
 numérica local (CVXPY) com dados reais do DB do Light · **Resultado: VIÁVEL — todos os checks
 passaram; BL entra como camada de views sobre o otimizador já planejado, sem trocar o motor.**
 
-> ⚠️ O MCP do QuantConnect está sem credenciais (`UserID not valid (None)`) — backtest na
-> plataforma fica pendente de o dono configurar `QUANTCONNECT_USER_ID`/`API_TOKEN` no MCP.
-> A pesquisa usou a documentação e o código-fonte públicos do LEAN; a validação do otimizador
-> foi feita localmente com os mesmos dados que o F8 usará.
+> Nota de infra: o MCP do QuantConnect está sem credenciais (`UserID not valid (None)`), mas o
+> Lean CLI está logado — o backtest de confirmação foi rodado **na plataforma** via API v2 com
+> as credenciais do CLI (seção 2-bis). Para usar as ferramentas MCP no futuro, configurar
+> `QUANTCONNECT_USER_ID`/`API_TOKEN` no MCP Docker.
 
 ## 1. O que o QuantConnect/LEAN faz (referência de arquitetura)
 
@@ -47,6 +47,27 @@ Views de teste: "GLD retorna 12% a.a." (absoluta) e "AAPL supera MSFT em 5% a.a.
 cenários re-centrados tilta de forma muito mais conservadora**, que é o comportamento desejável
 para o cliente. Recomendação: min-CVaR/BL-recentered como default, max-utility como opção.
 
+## 2-bis. Backtest de confirmação NA PLATAFORMA QuantConnect (executado)
+
+Projeto `investintell-f8-bl-validation-1781204310` (projectId **32779505**, backtestId
+`84943536d5a7d1f695b32c9c40262f84`), LEAN cloud, mesmos ativos e janela da validação local
+(SPY/AGG/GLD/TLT/AAPL/MSFT, 2023-06-01 → 2026-06-01, $1M):
+`ManualUniverseSelection → ConstantAlphaModel (insights com magnitude, como views) →
+BlackLittermanOptimizationPortfolioConstructionModel (default) → ImmediateExecution`.
+
+| Métrica | Valor |
+|---|---|
+| Net Profit / CAR | +53,20% / 15,25% a.a. |
+| Sharpe / Sortino / PSR | 0,587 / 0,743 / 61,9% |
+| Max Drawdown / Vol anual | 10,8% / 9,0% |
+| Beta / Alpha vs SPY | 0,58 / −0,01 |
+| Ordens / Erros | 902 / **nenhum** |
+
+Leitura: o BL PCM rodou fim-a-fim sem erros por 3 anos, rebalanceando e mantendo carteira
+diversificada de baixo beta (0,58) com DD contido — comportamento consistente com o esperado
+do modelo (equilíbrio + views moderadas ⇒ tilts, não concentração). Confirma na plataforma o
+que a validação numérica local mostrou em forma fechada.
+
 ## 3. Desenho proposto para o F8 (builder fund-aware + forward-looking)
 
 1. **Equilíbrio melhor que o do LEAN:** w_mkt por **AUM real** dos fundos
@@ -78,7 +99,8 @@ para o cliente. Recomendação: min-CVaR/BL-recentered como default, max-utility
 
 ## 5. Pendências
 
-- Credenciais do QuantConnect no MCP (dono) → opcional: backtest de confirmação na plataforma
-  (BL PCM do LEAN vs nosso pipeline, mesmos ativos/período) como evidência extra para o cliente.
+- ~~Backtest de confirmação na plataforma~~ ✅ executado (seção 2-bis).
+- Credenciais no MCP Docker (opcional, para as ferramentas MCP; a API v2 com credenciais do
+  Lean CLI já cobre o fluxo).
 - Decidir defaults de produto: δ (2.5), τ (0.05), cap (25% no plano original vs 35% usado no
   teste), piso de retorno no min-CVaR.
