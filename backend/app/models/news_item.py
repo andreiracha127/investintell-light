@@ -9,7 +9,8 @@ per-ticker lookups fast.
 
 from datetime import datetime
 
-from sqlalchemy import ARRAY, BigInteger, DateTime, Index, String, Text, func
+from sqlalchemy import BigInteger, DateTime, Index, String, Text, func
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -32,7 +33,8 @@ class NewsItem(Base):
         DateTime(timezone=True), nullable=False, index=True
     )
 
-    # Postgres ARRAY of ticker symbols linked to this article.
+    # Postgres ARRAY of ticker symbols linked to this article (dialect-specific
+    # ARRAY so `.contains()` compiles to the @> containment operator).
     # Default is an empty array; a GIN index enables containment lookups (@>).
     tickers: Mapped[list[str]] = mapped_column(
         ARRAY(String),

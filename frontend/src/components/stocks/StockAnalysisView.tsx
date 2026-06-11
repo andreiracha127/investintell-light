@@ -29,6 +29,7 @@ import {
   formatPercent,
 } from "@/lib/format";
 import { EChart } from "@/components/charts/EChart";
+import { NewsPanel } from "@/components/stocks/NewsPanel";
 
 /** Rolling window in trading days — fixed at the backend default for now (F7 may add a control). */
 const ROLLING_WINDOW = 63;
@@ -284,6 +285,9 @@ function AnalysisContent({
           </dl>
         </Card>
       </div>
+
+      {/* ── News (decorative — hides itself on error or when empty) ── */}
+      <NewsPanel ticker={header.ticker} />
     </div>
   );
 }

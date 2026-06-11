@@ -15,6 +15,8 @@ Error mapping (fail loud, never silently empty):
 """
 
 import datetime as dt
+import logging
+import re
 from collections.abc import Sequence
 from typing import Annotated
 
@@ -25,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
+from app.ingestion.news import ensure_news
 from app.ingestion.service import (
     HISTORY_FLOOR,
     ColdTickerCapExceededError,
@@ -32,7 +35,9 @@ from app.ingestion.service import (
 )
 from app.models.eod_price import EodPrice
 from app.models.instrument import Instrument
+from app.models.news_item import NewsItem
 from app.schemas.analysis import RangeKey, StockAnalysisResponse
+from app.schemas.news import NewsArticle, NewsResponse
 from app.schemas.prices import PricePoint, PriceSeriesResponse
 from app.services.stock_analysis import (
     StockAnalysisError,
@@ -45,12 +50,19 @@ from app.tiingo.client import TiingoClient
 from app.tiingo.exceptions import (
     TiingoAuthError,
     TiingoBadResponseError,
+    TiingoError,
     TiingoNotFoundError,
     TiingoRateLimitError,
     TiingoServerError,
 )
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_WINDOW_DAYS = 365
+
+# Sanity bound for ticker path segments on endpoints that do not 404 on
+# unknown tickers (news): alphanumeric plus "." and "-", at most 10 chars.
+_TICKER_PATTERN = re.compile(r"^[A-Z0-9.\-]{1,10}$")
 
 # Visible-range presets: calendar days subtracted from the last available
 # trading day. "MAX" is resolved to the first available date instead.
@@ -268,3 +280,97 @@ async def get_stock_analysis(
         )
     except StockAnalysisError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# News endpoint
+# ---------------------------------------------------------------------------
+
+
+async def _select_news_rows(
+    session: AsyncSession, ticker: str, limit: int
+) -> Sequence[NewsItem]:
+    """Read news rows tagged with *ticker*, newest first, bounded by *limit*."""
+    result = await session.execute(
+        select(NewsItem)
+        .where(NewsItem.tickers.contains([ticker]))
+        .order_by(NewsItem.published_at.desc())
+        .limit(limit)
+    )
+    return result.scalars().all()
+
+
+def _raise_news_fetch_error(exc: TiingoError) -> None:
+    """Map a Tiingo news-fetch failure to HTTP, mirroring the other endpoints."""
+    if isinstance(exc, TiingoRateLimitError):
+        raise HTTPException(
+            status_code=503,
+            detail="News provider rate limit reached — retry later.",
+        ) from exc
+    if isinstance(exc, TiingoAuthError):
+        # Server misconfiguration — do NOT leak token/auth details to the caller.
+        raise HTTPException(
+            status_code=502,
+            detail="News provider is not configured on the server.",
+        ) from exc
+    raise HTTPException(
+        status_code=502,
+        detail=f"News provider error: {exc}",
+    ) from exc
+
+
+@router.get("/{ticker}/news", response_model=NewsResponse)
+async def get_ticker_news(
+    ticker: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    client: Annotated[TiingoClient, Depends(get_tiingo_client)],
+    limit: Annotated[int, Query(ge=1, le=50, description="Max articles returned.")] = 20,
+) -> NewsResponse:
+    """Per-ticker news, newest first — DB-first with a declared degrade path.
+
+    Degrade decision (deliberate, documented): news is a SECONDARY panel.  If
+    the Tiingo refresh fails but the DB holds cached articles, serve them with
+    ``stale=true`` and log the error — a declared degradation, NOT a silent
+    fallback.  If the refresh fails and the cache is empty, fail loud with the
+    usual 503/502 mapping.
+
+    Unknown tickers do not 404 here: Tiingo's news feed has no per-ticker
+    existence check, and "no news" is a legitimate ``count=0`` response.  The
+    ticker format is sanity-checked (alphanumeric + ".-", at most 10 chars)
+    to reject absurd path segments with 422.
+    """
+    symbol = ticker.strip().upper()
+    if not _TICKER_PATTERN.fullmatch(symbol):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Invalid ticker {ticker!r}: expected 1-10 characters from "
+                "A-Z, 0-9, '.', '-'."
+            ),
+        )
+
+    stale = False
+    try:
+        await ensure_news(session, client, symbol, limit=get_settings().news_fetch_limit)
+    except TiingoError as exc:
+        rows = await _select_news_rows(session, symbol, limit)
+        if not rows:
+            _raise_news_fetch_error(exc)
+        logger.warning(
+            "News refresh for %s failed (%s: %s) — serving %d cached articles "
+            "with stale=true.",
+            symbol,
+            type(exc).__name__,
+            exc,
+            len(rows),
+        )
+        stale = True
+    else:
+        rows = await _select_news_rows(session, symbol, limit)
+
+    return NewsResponse(
+        ticker=symbol,
+        count=len(rows),
+        stale=stale,
+        items=[NewsArticle.model_validate(row) for row in rows],
+    )

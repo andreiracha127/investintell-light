@@ -71,6 +71,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/stocks/{ticker}/news": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ticker News
+         * @description Per-ticker news, newest first — DB-first with a declared degrade path.
+         *
+         *     Degrade decision (deliberate, documented): news is a SECONDARY panel.  If
+         *     the Tiingo refresh fails but the DB holds cached articles, serve them with
+         *     ``stale=true`` and log the error — a declared degradation, NOT a silent
+         *     fallback.  If the refresh fails and the cache is empty, fail loud with the
+         *     usual 503/502 mapping.
+         *
+         *     Unknown tickers do not 404 here: Tiingo's news feed has no per-ticker
+         *     existence check, and "no news" is a legitimate ``count=0`` response.  The
+         *     ticker format is sanity-checked (alphanumeric + ".-", at most 10 chars)
+         *     to reject absurd path segments with 422.
+         */
+        get: operations["get_ticker_news_stocks__ticker__news_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -315,6 +346,47 @@ export interface components {
             counts_normalized: number[];
         };
         /**
+         * NewsArticle
+         * @description One news article linked to the requested ticker.
+         */
+        NewsArticle: {
+            /** Id */
+            id: number;
+            /** Title */
+            title: string;
+            /** Url */
+            url: string;
+            /** Source */
+            source: string | null;
+            /** Description */
+            description: string | null;
+            /**
+             * Published At
+             * Format: date-time
+             */
+            published_at: string;
+        };
+        /**
+         * NewsResponse
+         * @description News articles for one ticker, newest first.
+         *
+         *     ``stale`` is True when the Tiingo refresh failed but cached articles were
+         *     served — a declared degradation, never a silent fallback.
+         */
+        NewsResponse: {
+            /** Ticker */
+            ticker: string;
+            /** Count */
+            count: number;
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
+            /** Items */
+            items: components["schemas"]["NewsArticle"][];
+        };
+        /**
          * PricePoint
          * @description One EOD bar in a price series response.
          */
@@ -509,6 +581,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StockAnalysisResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ticker_news_stocks__ticker__news_get: {
+        parameters: {
+            query?: {
+                /** @description Max articles returned. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewsResponse"];
                 };
             };
             /** @description Validation Error */

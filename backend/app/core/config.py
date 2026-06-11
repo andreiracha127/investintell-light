@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     # Hard cap on data points returned by the price-series endpoint.
     price_series_max_points: int = 7000
 
+    # --- News ingestion settings (F2.4) ---
+    # Per-ticker news is "fresh" when max(fetched_at) over the ticker's rows
+    # is within this window.
+    news_staleness_minutes: float = 30.0
+    # How many articles to request from Tiingo per refresh (Tiingo caps at 100).
+    news_fetch_limit: int = 50
+
 
 @functools.lru_cache
 def get_settings() -> Settings:

@@ -9,6 +9,7 @@ import type { paths } from "@/lib/api/api";
 
 type AnalysisOperation = paths["/stocks/{ticker}/analysis"]["get"];
 type PricesOperation = paths["/stocks/{ticker}/prices"]["get"];
+type NewsOperation = paths["/stocks/{ticker}/news"]["get"];
 
 export type StockAnalysis =
   AnalysisOperation["responses"]["200"]["content"]["application/json"];
@@ -16,6 +17,9 @@ export type AnalysisQuery = NonNullable<AnalysisOperation["parameters"]["query"]
 export type RangePreset = NonNullable<AnalysisQuery["range"]>;
 export type PriceSeries =
   PricesOperation["responses"]["200"]["content"]["application/json"];
+export type TickerNews =
+  NewsOperation["responses"]["200"]["content"]["application/json"];
+export type NewsArticle = TickerNews["items"][number];
 
 export type Candle = StockAnalysis["candles"][number];
 export type CumulativeReturns = StockAnalysis["cumulative_returns"];
@@ -103,6 +107,20 @@ export function fetchStockAnalysis(
   const qs = params.toString();
   return request<StockAnalysis>(
     `/stocks/${encodeURIComponent(ticker)}/analysis${qs ? `?${qs}` : ""}`,
+    signal,
+  );
+}
+
+export function fetchTickerNews(
+  ticker: string,
+  query: NonNullable<NewsOperation["parameters"]["query"]> = {},
+  signal?: AbortSignal,
+): Promise<TickerNews> {
+  const params = new URLSearchParams();
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  const qs = params.toString();
+  return request<TickerNews>(
+    `/stocks/${encodeURIComponent(ticker)}/news${qs ? `?${qs}` : ""}`,
     signal,
   );
 }

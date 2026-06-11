@@ -192,6 +192,63 @@
           }
         }
       }
+    },
+    "/stocks/{ticker}/news": {
+      "get": {
+        "tags": [
+          "stocks"
+        ],
+        "summary": "Get Ticker News",
+        "description": "Per-ticker news, newest first \u2014 DB-first with a declared degrade path.\n\nDegrade decision (deliberate, documented): news is a SECONDARY panel.  If\nthe Tiingo refresh fails but the DB holds cached articles, serve them with\n``stale=true`` and log the error \u2014 a declared degradation, NOT a silent\nfallback.  If the refresh fails and the cache is empty, fail loud with the\nusual 503/502 mapping.\n\nUnknown tickers do not 404 here: Tiingo's news feed has no per-ticker\nexistence check, and \"no news\" is a legitimate ``count=0`` response.  The\nticker format is sanity-checked (alphanumeric + \".-\", at most 10 chars)\nto reject absurd path segments with 422.",
+        "operationId": "get_ticker_news_stocks__ticker__news_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "description": "Max articles returned.",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "Max articles returned."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -568,6 +625,92 @@
         ],
         "title": "HistogramOut",
         "description": "Histogram of in-range daily returns."
+      },
+      "NewsArticle": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Published At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "url",
+          "source",
+          "description",
+          "published_at"
+        ],
+        "title": "NewsArticle",
+        "description": "One news article linked to the requested ticker."
+      },
+      "NewsResponse": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale",
+            "default": false
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NewsArticle"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "count",
+          "items"
+        ],
+        "title": "NewsResponse",
+        "description": "News articles for one ticker, newest first.\n\n``stale`` is True when the Tiingo refresh failed but cached articles were\nserved \u2014 a declared degradation, never a silent fallback."
       },
       "PricePoint": {
         "properties": {
