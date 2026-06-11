@@ -99,6 +99,8 @@ async def ensure_news(
 
     now = dt.datetime.now(dt.UTC)
     stale_symbols: list[str] = []
+    # N+1 by design — 50 indexed scalar reads vs one Tiingo round-trip;
+    # don't replicate at higher cardinality.
     for symbol in symbols:
         last_fetched = await session.scalar(
             select(func.max(NewsItem.fetched_at)).where(

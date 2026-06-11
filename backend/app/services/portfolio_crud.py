@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from typing import Any, Protocol, cast
 
 from sqlalchemy import CursorResult, Row, delete, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -170,16 +171,38 @@ async def insert_position(
     quantity: float,
     acq_price: float | None,
 ) -> Position:
-    """Insert a new position (caller has already ensured the ticker exists)."""
-    position = Position(
-        portfolio_id=portfolio_id,
-        ticker=ticker,
-        quantity=quantity,
-        acq_price=acq_price,
+    """Upsert a position via INSERT ... ON CONFLICT (portfolio_id, ticker) DO UPDATE.
+
+    The route checks existence FIRST (get_position) to gate the Tiingo ensure
+    call on the INSERT path only.  After ensure, this upsert collapses any
+    concurrent INSERT race to last-write-wins instead of an unhandled
+    IntegrityError → 500.
+
+    NOTE: Core-level upserts bypass the ORM onupdate hook, so updated_at is
+    set explicitly here (same rule documented on the model).
+    """
+    stmt = (
+        pg_insert(Position)
+        .values(
+            portfolio_id=portfolio_id,
+            ticker=ticker,
+            quantity=quantity,
+            acq_price=acq_price,
+        )
+        .on_conflict_do_update(
+            index_elements=["portfolio_id", "ticker"],
+            set_={
+                "quantity": quantity,
+                "acq_price": acq_price,
+                "updated_at": func.now(),
+            },
+        )
+        .returning(Position)
     )
-    session.add(position)
+    result = await session.execute(stmt)
     await session.commit()
-    return position
+    row = result.scalar_one()
+    return row
 
 
 async def update_position(
@@ -293,6 +316,8 @@ def build_overview(
             raise MissingPriceDataError(
                 f"No price data available for {position.ticker}."
             )
+        # closes[0] = newest, closes[1] = second-newest — guaranteed by
+        # select_last_two_closes ordering (date DESC within each ticker).
         as_of, last_close = closes[0]
         prev_close = closes[1][1] if len(closes) > 1 else None
         change = last_close - prev_close if prev_close is not None else None
@@ -323,7 +348,7 @@ def build_overview(
             )
         )
 
-    total_market_value = sum(row.market_value for row in rows)
+    total_market_value = sum((row.market_value for row in rows), 0.0)
     cost_values = [row.cost_basis for row in rows if row.cost_basis is not None]
     pnl_values = [row.pnl for row in rows if row.pnl is not None]
     total_cost_basis = sum(cost_values) if cost_values else None

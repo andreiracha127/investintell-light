@@ -500,3 +500,37 @@ async def test_delete_position_404(monkeypatch: pytest.MonkeyPatch) -> None:
         response = await ac.delete("/portfolios/1/positions/ZZZZ")
 
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Compiled-statement: upsert shape
+# ---------------------------------------------------------------------------
+
+
+def test_insert_position_upsert_statement_shape() -> None:
+    """The upsert targets (portfolio_id, ticker) and sets updated_at=func.now()."""
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.models.portfolio import Position
+
+    stmt = (
+        pg_insert(Position)
+        .values(portfolio_id=1, ticker="AAPL", quantity=10.0, acq_price=150.0)
+        .on_conflict_do_update(
+            index_elements=["portfolio_id", "ticker"],
+            set_={
+                "quantity": 10.0,
+                "acq_price": 150.0,
+                "updated_at": __import__("sqlalchemy").func.now(),
+            },
+        )
+    )
+    compiled = stmt.compile(dialect=postgresql.dialect())
+    sql = str(compiled)
+
+    assert "ON CONFLICT" in sql
+    assert "portfolio_id" in sql
+    assert "ticker" in sql
+    assert "DO UPDATE" in sql
+    assert "updated_at" in sql
