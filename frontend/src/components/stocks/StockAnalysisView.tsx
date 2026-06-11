@@ -53,8 +53,9 @@ export function StockAnalysisView({
 
   const { data, error, isPending, refetch } = useQuery({
     queryKey: ["analysis", ticker, range, ROLLING_WINDOW],
-    queryFn: () =>
-      fetchStockAnalysis(ticker, { range, window: ROLLING_WINDOW }),
+    queryFn: ({ signal }) =>
+      fetchStockAnalysis(ticker, { range, window: ROLLING_WINDOW }, signal),
+    staleTime: 60 * 60 * 1000, // EOD data updates once per day; 1h prevents pointless refetches on range toggling
     retry: (failureCount, err) =>
       !(err instanceof ApiError && err.status >= 400 && err.status < 500) &&
       failureCount < 2,

@@ -1,0 +1,11 @@
+# F7 Backlog
+
+Deferred items from F2 code reviews, ordered roughly by impact.
+
+- **ECharts tree-shaken imports** (`frontend/src/components/charts/EChart.tsx`) — replace the full `echarts` barrel with `echarts/core` + explicit chart/component registrations (`BarChart`, `LineChart`, `CandlestickChart`, `GridComponent`, `TooltipComponent`, `LegendComponent`, etc.); biggest perf lever at ~475 kB saved on first load today.
+- **Range/URL sync on ticker navigation** (`frontend/src/components/stocks/StockAnalysisView.tsx`) — when navigating to a new ticker the selected range survives in React state but the URL loses `?range`; on mount, `router.replace` should write the initial range into the URL unconditionally.
+- **Chart builder boilerplate dedup** (`frontend/src/lib/charts/price.ts`, `cumulative.ts`, `rolling.ts`, `histogram.ts`) — extract `baseTooltip(colors)` and `baseAxis(colors)` helpers into `frontend/src/lib/charts/theme.ts` to remove repeated axis/tooltip config across all four option builders.
+- **Tooltip HTML formatter comment** (`frontend/src/lib/charts/price.ts`, `cumulative.ts`) — add a code comment to every `tooltip.formatter` that uses string concatenation explaining why HTML-string formatters are intentionally avoided here (ECharts `rich` text is the preferred alternative; HTML formatters are XSS-risky and bypass ECharts layout).
+- **Server-side prefetch / hydration** (`frontend/src/app/stocks/[ticker]/page.tsx`) — prefetch the analysis payload in the RSC layer with `dehydrate`/`HydrationBoundary` so the first paint shows data, not a skeleton; requires promoting `QueryClient` creation to the server component.
+- **Vitest for option builders** (`frontend/src/lib/charts/`) — add unit tests for `buildPriceOption`, `buildCumulativeOption`, `buildRollingOption`, `buildHistogramOption`; assert structural shape (series count, axis count) so regressions in chart config are caught before visual inspection.
+- **Light theme** (`frontend/src/lib/charts/theme.ts`, `frontend/src/app/globals.css`) — `chartColors()` reads a fixed dark-token set from the DOM; add a `[data-theme="light"]` CSS block and a conditional branch in `chartColors()` so charts adapt when a light theme toggle (F7 UI work) is added.

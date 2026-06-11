@@ -58,8 +58,26 @@ function extractDetail(body: unknown, fallback: string): string {
   return fallback;
 }
 
-async function request<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`);
+async function request<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const timeoutSignal = AbortSignal.timeout(15_000);
+  const combinedSignal = signal
+    ? AbortSignal.any([signal, timeoutSignal])
+    : timeoutSignal;
+
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, { signal: combinedSignal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      // Distinguish a timeout from a caller-triggered abort (e.g. unmount).
+      if (timeoutSignal.aborted) {
+        throw new Error("Request timed out — is the backend running?");
+      }
+      throw new Error("Request cancelled");
+    }
+    throw err;
+  }
+
   if (!res.ok) {
     const fallback = `HTTP ${res.status} ${res.statusText}`.trim();
     let detail = fallback;
@@ -76,6 +94,7 @@ async function request<T>(path: string): Promise<T> {
 export function fetchStockAnalysis(
   ticker: string,
   query: AnalysisQuery = {},
+  signal?: AbortSignal,
 ): Promise<StockAnalysis> {
   const params = new URLSearchParams();
   if (query.range !== undefined) params.set("range", query.range);
@@ -84,12 +103,14 @@ export function fetchStockAnalysis(
   const qs = params.toString();
   return request<StockAnalysis>(
     `/stocks/${encodeURIComponent(ticker)}/analysis${qs ? `?${qs}` : ""}`,
+    signal,
   );
 }
 
 export function fetchPriceSeries(
   ticker: string,
   query: NonNullable<PricesOperation["parameters"]["query"]> = {},
+  signal?: AbortSignal,
 ): Promise<PriceSeries> {
   const params = new URLSearchParams();
   if (query.start_date != null) params.set("start_date", query.start_date);
@@ -97,5 +118,6 @@ export function fetchPriceSeries(
   const qs = params.toString();
   return request<PriceSeries>(
     `/stocks/${encodeURIComponent(ticker)}/prices${qs ? `?${qs}` : ""}`,
+    signal,
   );
 }
