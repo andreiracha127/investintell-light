@@ -45,6 +45,28 @@ export function formatNumber(value: number, dp = 2): string {
   }).format(value);
 }
 
+/**
+ * Format a screener metric value by its catalog `data_type`.
+ *
+ * - "percent": API decimal fractions (0.05 = 5%) via formatPercent.
+ * - "currency": compact USD ("$3.4B") — screener currency metrics are
+ *   market-cap-scale, where full Intl currency output is unreadable.
+ * - "int": compact count.
+ * - anything else (float / unknown): plain 2dp number.
+ */
+export function formatMetricValue(value: number, dataType: string): string {
+  switch (dataType) {
+    case "percent":
+      return formatPercent(value, 2);
+    case "currency":
+      return value < 0 ? `-$${formatCompact(-value)}` : `$${formatCompact(value)}`;
+    case "int":
+      return formatCompact(value);
+    default:
+      return formatNumber(value, 2);
+  }
+}
+
 /** Format an ISO date string (YYYY-MM-DD) as "Jun 10, 2026" (UTC-safe). */
 export function formatDate(isoDate: string): string {
   return new Intl.DateTimeFormat("en-US", {

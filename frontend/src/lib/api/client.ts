@@ -20,6 +20,15 @@ type ScenarioOperation = paths["/statistics/scenario"]["post"];
 type BetaOperation = paths["/statistics/beta"]["post"];
 type CorrelationOperation = paths["/statistics/correlation"]["post"];
 type StockCorrelationOperation = paths["/statistics/stock-correlation"]["post"];
+type MetricCatalogOperation = paths["/screener/metrics"]["get"];
+type ScreensPath = paths["/screener/screens"];
+type ScreenPath = paths["/screener/screens/{screen_id}"];
+type ScreenFilterPath = paths["/screener/screens/{screen_id}/filters/{metric_code}"];
+type ScreenBuildOperation =
+  paths["/screener/screens/{screen_id}/build/{metric_code}"]["get"];
+type ScreenResultsOperation = paths["/screener/screens/{screen_id}/results"]["get"];
+type ScreenResultsCsvOperation =
+  paths["/screener/screens/{screen_id}/results.csv"]["get"];
 
 export type StockAnalysis =
   AnalysisOperation["responses"]["200"]["content"]["application/json"];
@@ -79,6 +88,36 @@ export type StockCorrelationRequest =
   StockCorrelationOperation["requestBody"]["content"]["application/json"];
 export type StockCorrelationResponse =
   StockCorrelationOperation["responses"]["200"]["content"]["application/json"];
+
+export type MetricDef =
+  MetricCatalogOperation["responses"]["200"]["content"]["application/json"][number];
+export type PresetBand = MetricDef["presets"][number];
+export type ScreenListItem =
+  ScreensPath["get"]["responses"]["200"]["content"]["application/json"][number];
+export type ScreenCreateRequest =
+  ScreensPath["post"]["requestBody"]["content"]["application/json"];
+export type Screen =
+  ScreensPath["post"]["responses"]["201"]["content"]["application/json"];
+export type ScreenFilter = Screen["filters"][number];
+export type ScreenPatchRequest =
+  ScreenPath["patch"]["requestBody"]["content"]["application/json"];
+export type FilterBody =
+  ScreenFilterPath["put"]["requestBody"]["content"]["application/json"];
+export type FilterUpdateResponse =
+  ScreenFilterPath["put"]["responses"]["200"]["content"]["application/json"];
+export type Distribution = NonNullable<FilterUpdateResponse["distribution"]>;
+export type BuildResponse =
+  ScreenBuildOperation["responses"]["200"]["content"]["application/json"];
+export type ScreenResults =
+  ScreenResultsOperation["responses"]["200"]["content"]["application/json"];
+export type ResultsColumn = ScreenResults["columns"][number];
+export type ResultsRow = ScreenResults["rows"][number];
+export type ResultsQuery = NonNullable<
+  ScreenResultsOperation["parameters"]["query"]
+>;
+export type ResultsCsvQuery = NonNullable<
+  ScreenResultsCsvOperation["parameters"]["query"]
+>;
 
 export type Candle = StockAnalysis["candles"][number];
 export type CumulativeReturns = StockAnalysis["cumulative_returns"];
@@ -367,6 +406,144 @@ export function postStockCorrelation(
     signal,
     { method: "POST", json: body },
   );
+}
+
+/* ── Screener (F6) ────────────────────────────────────────────────────────── */
+
+export function fetchMetricCatalog(signal?: AbortSignal): Promise<MetricDef[]> {
+  return request<MetricDef[]>("/screener/metrics", signal);
+}
+
+export function fetchScreens(signal?: AbortSignal): Promise<ScreenListItem[]> {
+  return request<ScreenListItem[]>("/screener/screens", signal);
+}
+
+export function createScreen(
+  body: ScreenCreateRequest,
+  signal?: AbortSignal,
+): Promise<Screen> {
+  return request<Screen>("/screener/screens", signal, {
+    method: "POST",
+    json: body,
+  });
+}
+
+export function fetchScreen(
+  screenId: number,
+  signal?: AbortSignal,
+): Promise<Screen> {
+  return request<Screen>(`/screener/screens/${screenId}`, signal);
+}
+
+export function patchScreen(
+  screenId: number,
+  body: ScreenPatchRequest,
+  signal?: AbortSignal,
+): Promise<Screen> {
+  return request<Screen>(`/screener/screens/${screenId}`, signal, {
+    method: "PATCH",
+    json: body,
+  });
+}
+
+export function deleteScreen(
+  screenId: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request<void>(`/screener/screens/${screenId}`, signal, {
+    method: "DELETE",
+  });
+}
+
+export function putScreenFilter(
+  screenId: number,
+  metricCode: string,
+  body: FilterBody,
+  signal?: AbortSignal,
+): Promise<FilterUpdateResponse> {
+  return request<FilterUpdateResponse>(
+    `/screener/screens/${screenId}/filters/${encodeURIComponent(metricCode)}`,
+    signal,
+    { method: "PUT", json: body },
+  );
+}
+
+export function deleteScreenFilter(
+  screenId: number,
+  metricCode: string,
+  signal?: AbortSignal,
+): Promise<FilterUpdateResponse> {
+  return request<FilterUpdateResponse>(
+    `/screener/screens/${screenId}/filters/${encodeURIComponent(metricCode)}`,
+    signal,
+    { method: "DELETE" },
+  );
+}
+
+export function fetchBuildMetric(
+  screenId: number,
+  metricCode: string,
+  signal?: AbortSignal,
+): Promise<BuildResponse> {
+  return request<BuildResponse>(
+    `/screener/screens/${screenId}/build/${encodeURIComponent(metricCode)}`,
+    signal,
+  );
+}
+
+function resultsParams(query: ResultsQuery | ResultsCsvQuery): string {
+  const params = new URLSearchParams();
+  if (query.sort !== undefined) params.set("sort", query.sort);
+  if (query.dir !== undefined) params.set("dir", query.dir);
+  if (query.search != null && query.search !== "") {
+    params.set("search", query.search);
+  }
+  if ("page" in query && query.page !== undefined) {
+    params.set("page", String(query.page));
+  }
+  if ("page_size" in query && query.page_size !== undefined) {
+    params.set("page_size", String(query.page_size));
+  }
+  return params.toString();
+}
+
+export function fetchScreenResults(
+  screenId: number,
+  query: ResultsQuery = {},
+  signal?: AbortSignal,
+): Promise<ScreenResults> {
+  const qs = resultsParams(query);
+  return request<ScreenResults>(
+    `/screener/screens/${screenId}/results${qs ? `?${qs}` : ""}`,
+    signal,
+  );
+}
+
+/**
+ * CSV export — raw fetch (the typed `request` helper parses JSON). Same base
+ * URL and fail-loud `ApiError` semantics; resolves to a Blob for download.
+ */
+export async function fetchScreenResultsCsv(
+  screenId: number,
+  query: ResultsCsvQuery = {},
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const qs = resultsParams(query);
+  const res = await fetch(
+    `${BASE_URL}/screener/screens/${screenId}/results.csv${qs ? `?${qs}` : ""}`,
+    { signal: signal ?? AbortSignal.timeout(30_000) },
+  );
+  if (!res.ok) {
+    const fallback = `HTTP ${res.status} ${res.statusText}`.trim();
+    let detail = fallback;
+    try {
+      detail = extractDetail(await res.json(), fallback);
+    } catch {
+      // Non-JSON error body — keep the HTTP status as the message.
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return res.blob();
 }
 
 export function fetchPriceSeries(
