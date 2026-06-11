@@ -93,6 +93,18 @@ const NAV_ITEMS: { href: string; match: (p: string) => boolean; label: string; i
       </svg>
     ),
   },
+  {
+    href: "/funds",
+    match: (p) => p.startsWith("/funds"),
+    label: "Funds",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+        <rect x="2" y="10" width="12" height="3.6" stroke="currentColor" strokeWidth="1.3" fill="none" />
+        <rect x="3.6" y="6.2" width="8.8" height="3.6" stroke="currentColor" strokeWidth="1.3" fill="none" />
+        <rect x="5.2" y="2.4" width="5.6" height="3.6" stroke="var(--color-accent)" strokeWidth="1.3" fill="none" />
+      </svg>
+    ),
+  },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {

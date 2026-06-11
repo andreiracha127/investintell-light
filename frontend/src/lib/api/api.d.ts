@@ -509,6 +509,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/funds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Funds
+         * @description One page of the fund universe with headline risk metrics.
+         *
+         *     Risk-metric bounds drop funds lacking that metric by definition.
+         */
+        get: operations["list_funds_funds_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/funds.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Funds Csv
+         * @description The same result set as /funds, unpaginated, hard-capped at 5 000 rows.
+         */
+        get: operations["list_funds_csv_funds_csv_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/funds/{instrument_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fund Profile
+         * @description Full profile: identity + all risk metrics + 2y NAV (~260 points,
+         *     decimated server-side) + latest top holdings (top-50-truncated source).
+         */
+        get: operations["get_fund_profile_funds__instrument_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1011,6 +1074,266 @@ export interface components {
              * @description Non-NULL rows for this metric over the active universe. 0 implies the snapshot has not been computed yet.
              */
             available_count: number;
+        };
+        /**
+         * FundHoldingItem
+         * @description One N-PORT holding row. ⚠️ ``pct_of_nav`` is in PERCENT units in the
+         *     source (11.62 = 11.62%) — unlike the risk metrics, which are fractions.
+         */
+        FundHoldingItem: {
+            /** Rank */
+            rank: number;
+            /** Issuer Name */
+            issuer_name: string | null;
+            /** Cusip */
+            cusip: string | null;
+            /** Isin */
+            isin: string | null;
+            /** Asset Class */
+            asset_class: string | null;
+            /** Sector */
+            sector: string | null;
+            /** Market Value */
+            market_value: number | null;
+            /** Pct Of Nav */
+            pct_of_nav: number | null;
+        };
+        /**
+         * FundHoldingsOut
+         * @description Latest N-PORT report for the fund's series (top-50 truncated source).
+         */
+        FundHoldingsOut: {
+            /** Report Date */
+            report_date: string | null;
+            /** Items */
+            items: components["schemas"]["FundHoldingItem"][];
+            /** Pct Of Nav Total */
+            pct_of_nav_total: number | null;
+            /** Is Top50 Truncated */
+            is_top50_truncated: boolean;
+        };
+        /**
+         * FundListItem
+         * @description One row of the funds table: identity + headline risk metrics.
+         */
+        FundListItem: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Series Id */
+            series_id: string;
+            /** Ticker */
+            ticker: string | null;
+            /** Name */
+            name: string;
+            /** Fund Type */
+            fund_type: string;
+            /** Strategy Label */
+            strategy_label: string;
+            /** Asset Class */
+            asset_class: string | null;
+            /** Is Index */
+            is_index: boolean | null;
+            /** Expense Ratio */
+            expense_ratio: number | null;
+            /** Aum Usd */
+            aum_usd: number | null;
+            /** Return 1Y */
+            return_1y: number | null;
+            /** Volatility 1Y */
+            volatility_1y: number | null;
+            /** Sharpe 1Y */
+            sharpe_1y: number | null;
+            /** Max Drawdown 1Y */
+            max_drawdown_1y: number | null;
+            /** Peer Sharpe Pctl */
+            peer_sharpe_pctl: number | null;
+            /** Elite Flag */
+            elite_flag: boolean | null;
+        };
+        /**
+         * FundNavPoint
+         * @description One decimated NAV observation (last 2 years, ~260 points).
+         */
+        FundNavPoint: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Nav */
+            nav: number | null;
+        };
+        /**
+         * FundProfileResponse
+         * @description Full fund profile: identity + all risk metrics + NAV series + holdings.
+         */
+        FundProfileResponse: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Series Id */
+            series_id: string;
+            /** Ticker */
+            ticker: string | null;
+            /** Isin */
+            isin: string | null;
+            /** Cusip */
+            cusip: string | null;
+            /** Lei */
+            lei: string | null;
+            /** Name */
+            name: string;
+            /** Fund Type */
+            fund_type: string;
+            /** Strategy Label */
+            strategy_label: string;
+            /** Asset Class */
+            asset_class: string | null;
+            /** Is Index */
+            is_index: boolean | null;
+            /** Expense Ratio */
+            expense_ratio: number | null;
+            /** Aum Usd */
+            aum_usd: number | null;
+            /** Primary Benchmark */
+            primary_benchmark: string | null;
+            /** Inception Date */
+            inception_date: string | null;
+            /** Domicile */
+            domicile: string | null;
+            /** Currency */
+            currency: string | null;
+            /**
+             * Synced At
+             * Format: date-time
+             */
+            synced_at: string;
+            /**
+             * Source Calc Date
+             * Format: date
+             */
+            source_calc_date: string;
+            /**
+             * Source Nav Max Date
+             * Format: date
+             */
+            source_nav_max_date: string;
+            risk: components["schemas"]["FundRiskOut"] | null;
+            /** Nav */
+            nav: components["schemas"]["FundNavPoint"][];
+            holdings: components["schemas"]["FundHoldingsOut"];
+            /**
+             * Classification Note
+             * @default Labels da fonte podem conter erros do classificador automático
+             */
+            classification_note: string;
+        };
+        /**
+         * FundRiskOut
+         * @description The full precomputed risk snapshot (latest calc_date in the source).
+         */
+        FundRiskOut: {
+            /**
+             * Calc Date
+             * Format: date
+             */
+            calc_date: string;
+            /** Return 1M */
+            return_1m: number | null;
+            /** Return 3M */
+            return_3m: number | null;
+            /** Return 1Y */
+            return_1y: number | null;
+            /** Return 3Y Ann */
+            return_3y_ann: number | null;
+            /** Return 5Y Ann */
+            return_5y_ann: number | null;
+            /** Volatility 1Y */
+            volatility_1y: number | null;
+            /** Max Drawdown 1Y */
+            max_drawdown_1y: number | null;
+            /** Max Drawdown 3Y */
+            max_drawdown_3y: number | null;
+            /** Sharpe 1Y */
+            sharpe_1y: number | null;
+            /** Sharpe 3Y */
+            sharpe_3y: number | null;
+            /** Sortino 1Y */
+            sortino_1y: number | null;
+            /** Calmar Ratio 3Y */
+            calmar_ratio_3y: number | null;
+            /** Alpha 1Y */
+            alpha_1y: number | null;
+            /** Beta 1Y */
+            beta_1y: number | null;
+            /** Information Ratio 1Y */
+            information_ratio_1y: number | null;
+            /** Tracking Error 1Y */
+            tracking_error_1y: number | null;
+            /** Var 95 1M */
+            var_95_1m: number | null;
+            /** Cvar 95 1M */
+            cvar_95_1m: number | null;
+            /** Cvar 95 12M */
+            cvar_95_12m: number | null;
+            /** Cvar 99 Evt */
+            cvar_99_evt: number | null;
+            /** Peer Strategy Label */
+            peer_strategy_label: string | null;
+            /** Peer Sharpe Pctl */
+            peer_sharpe_pctl: number | null;
+            /** Peer Sortino Pctl */
+            peer_sortino_pctl: number | null;
+            /** Peer Return Pctl */
+            peer_return_pctl: number | null;
+            /** Peer Drawdown Pctl */
+            peer_drawdown_pctl: number | null;
+            /** Peer Count */
+            peer_count: number | null;
+            /** Manager Score */
+            manager_score: number | null;
+            /** Elite Flag */
+            elite_flag: boolean | null;
+            /** Downside Capture 1Y */
+            downside_capture_1y: number | null;
+            /** Upside Capture 1Y */
+            upside_capture_1y: number | null;
+            /** Equity Correlation 252D */
+            equity_correlation_252d: number | null;
+        };
+        /** FundsListResponse */
+        FundsListResponse: {
+            /** Items */
+            items: components["schemas"]["FundListItem"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            staleness: components["schemas"]["FundsStaleness"];
+            /**
+             * Classification Note
+             * @default Labels da fonte podem conter erros do classificador automático
+             */
+            classification_note: string;
+        };
+        /**
+         * FundsStaleness
+         * @description Global data-freshness markers (max over the synced universe).
+         */
+        FundsStaleness: {
+            /** Synced At */
+            synced_at: string | null;
+            /** Source Calc Date */
+            source_calc_date: string | null;
+            /** Source Nav Max Date */
+            source_nav_max_date: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -2991,6 +3314,129 @@ export interface operations {
                 };
                 content: {
                     "text/csv": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_funds_funds_get: {
+        parameters: {
+            query?: {
+                /** @description Ticker/name substring match. */
+                search?: string | null;
+                fund_type?: ("etf" | "mmf" | "mutual_fund") | null;
+                /** @description Strategy label substring match (free text). */
+                strategy_label?: string | null;
+                asset_class?: ("equity" | "fixed_income" | "cash" | "alternatives") | null;
+                expense_ratio_max?: number | null;
+                aum_min?: number | null;
+                sharpe_1y_min?: number | null;
+                volatility_1y_max?: number | null;
+                return_1y_min?: number | null;
+                max_drawdown_1y_min?: number | null;
+                /** @description Whitelisted column of funds or fund_risk_latest. */
+                sort?: string;
+                dir?: "asc" | "desc";
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundsListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_funds_csv_funds_csv_get: {
+        parameters: {
+            query?: {
+                /** @description Ticker/name substring match. */
+                search?: string | null;
+                fund_type?: ("etf" | "mmf" | "mutual_fund") | null;
+                /** @description Strategy label substring match (free text). */
+                strategy_label?: string | null;
+                asset_class?: ("equity" | "fixed_income" | "cash" | "alternatives") | null;
+                expense_ratio_max?: number | null;
+                aum_min?: number | null;
+                sharpe_1y_min?: number | null;
+                volatility_1y_max?: number | null;
+                return_1y_min?: number | null;
+                max_drawdown_1y_min?: number | null;
+                /** @description Whitelisted column of funds or fund_risk_latest. */
+                sort?: string;
+                dir?: "asc" | "desc";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_profile_funds__instrument_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundProfileResponse"];
                 };
             };
             /** @description Validation Error */

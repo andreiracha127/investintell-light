@@ -157,6 +157,46 @@ FROM sec_money_market_funds
 WHERE series_id = ANY($1::text[])
 """
 
+# Expense ratio from the latest prospectus filing per series — the N-CEN
+# profile tables only cover ~730 eligible series, while prospectus stats
+# cover 4,532/4,558 (verified).  Within the latest filing the MINIMUM across
+# share classes is kept (cheapest class; values are fractions, 0.0069=0.69%).
+PROSPECTUS_FEES_SQL = """
+WITH latest AS (
+    SELECT series_id, max(filing_date) AS filing_date
+    FROM sec_fund_prospectus_stats
+    WHERE series_id = ANY($1::text[])
+    GROUP BY series_id
+)
+SELECT s.series_id,
+       min(coalesce(s.net_expense_ratio_pct, s.expense_ratio_pct,
+                    s.management_fee_pct)) AS expense_ratio
+FROM sec_fund_prospectus_stats s
+JOIN latest l ON l.series_id = s.series_id AND l.filing_date = s.filing_date
+WHERE coalesce(s.net_expense_ratio_pct, s.expense_ratio_pct,
+               s.management_fee_pct) IS NOT NULL
+GROUP BY s.series_id
+"""
+
+# AUM fallback from sec_fund_classes (covers 1,980/4,558 eligible series vs
+# 729 with monthly_avg_net_assets).  net_assets is SERIES-level, repeated on
+# every share-class row (verified: AGTHX shows $329B on all 22 classes), so
+# take max at the latest reported period — never sum across classes.
+CLASSES_AUM_SQL = """
+WITH latest AS (
+    SELECT series_id, max(xbrl_period_end) AS period_end
+    FROM sec_fund_classes
+    WHERE series_id = ANY($1::text[]) AND net_assets IS NOT NULL
+    GROUP BY series_id
+)
+SELECT c.series_id, max(c.net_assets) AS aum_usd
+FROM sec_fund_classes c
+JOIN latest l ON l.series_id = c.series_id
+            AND c.xbrl_period_end IS NOT DISTINCT FROM l.period_end
+WHERE c.net_assets IS NOT NULL
+GROUP BY c.series_id
+"""
+
 # Metric columns copied verbatim into fund_risk_latest (model order; the
 # tests keep the model, migration and this tuple in lockstep).
 RISK_METRIC_COLUMNS: tuple[str, ...] = (
@@ -333,13 +373,17 @@ def derive_fund_type(*, in_registered: bool, in_etf: bool, in_mmf: bool) -> str:
 
 
 def derive_expense_ratio(
-    registered: Mapping[str, Any] | None, etf: Mapping[str, Any] | None
+    registered: Mapping[str, Any] | None,
+    etf: Mapping[str, Any] | None,
+    prospectus_fee: Decimal | None = None,
 ) -> Decimal | None:
-    """net_operating_expenses preferred (registered → etf), fallback
-    management_fee (registered → etf)."""
+    """net_operating_expenses preferred (registered → etf), then the latest
+    prospectus net expense ratio (cheapest share class — the wide-coverage
+    source), fallback management_fee (registered → etf)."""
     value = _first(
         _get(registered, "net_operating_expenses"),
         _get(etf, "net_operating_expenses"),
+        prospectus_fee,
         _get(registered, "management_fee"),
         _get(etf, "management_fee"),
     )
@@ -355,6 +399,8 @@ def build_fund_row(
     synced_at: dt.datetime,
     stage_label: str | None = None,
     peer_label: str | None = None,
+    prospectus_fee: Decimal | None = None,
+    classes_aum: Decimal | None = None,
 ) -> dict[str, Any]:
     """Assemble one `funds` row from the mother-DB source rows.
 
@@ -388,10 +434,11 @@ def build_fund_row(
         ),
         "asset_class": _get(universe, "asset_class"),
         "is_index": _first(_get(registered, "is_index"), _get(etf, "is_index")),
-        "expense_ratio": derive_expense_ratio(registered, etf),
+        "expense_ratio": derive_expense_ratio(registered, etf, prospectus_fee),
         "aum_usd": _first(
             _get(registered, "monthly_avg_net_assets"),
             _get(etf, "monthly_avg_net_assets"),
+            classes_aum,
         ),
         # ETFs without an N-CEN benchmark fall back to the tracked index.
         "primary_benchmark": _first(
@@ -665,6 +712,14 @@ async def run_sync(
                 STAGE_LABELS_SQL, [str(i) for i in instrument_ids]
             )
         }
+        prospectus_fees = {
+            str(r["series_id"]): r["expense_ratio"]
+            for r in await conn.fetch(PROSPECTUS_FEES_SQL, series_ids)
+        }
+        classes_aum = {
+            str(r["series_id"]): r["aum_usd"]
+            for r in await conn.fetch(CLASSES_AUM_SQL, series_ids)
+        }
         logger.info(
             "Profiles: %d registered, %d etfs, %d mmfs, %d stage labels for %d series",
             len(registered), len(etfs), len(mmfs), len(stage_labels), len(series_ids),
@@ -701,6 +756,8 @@ async def run_sync(
                 now,
                 stage_label=stage_labels.get(str(instrument_id)),
                 peer_label=peer_labels.get(instrument_id),
+                prospectus_fee=prospectus_fees.get(series_id),
+                classes_aum=classes_aum.get(series_id),
             )
             fund_rows[row["instrument_id"]] = row
             ft = row["fund_type"]

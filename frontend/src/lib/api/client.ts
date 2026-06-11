@@ -29,6 +29,9 @@ type ScreenBuildOperation =
 type ScreenResultsOperation = paths["/screener/screens/{screen_id}/results"]["get"];
 type ScreenResultsCsvOperation =
   paths["/screener/screens/{screen_id}/results.csv"]["get"];
+type FundsOperation = paths["/funds"]["get"];
+type FundsCsvOperation = paths["/funds.csv"]["get"];
+type FundProfileOperation = paths["/funds/{instrument_id}"]["get"];
 
 export type StockAnalysis =
   AnalysisOperation["responses"]["200"]["content"]["application/json"];
@@ -118,6 +121,18 @@ export type ResultsQuery = NonNullable<
 export type ResultsCsvQuery = NonNullable<
   ScreenResultsCsvOperation["parameters"]["query"]
 >;
+
+export type FundsList =
+  FundsOperation["responses"]["200"]["content"]["application/json"];
+export type FundListItem = FundsList["items"][number];
+export type FundsStaleness = FundsList["staleness"];
+export type FundsQuery = NonNullable<FundsOperation["parameters"]["query"]>;
+export type FundsCsvQuery = NonNullable<FundsCsvOperation["parameters"]["query"]>;
+export type FundProfile =
+  FundProfileOperation["responses"]["200"]["content"]["application/json"];
+export type FundRisk = NonNullable<FundProfile["risk"]>;
+export type FundNavPoint = FundProfile["nav"][number];
+export type FundHolding = FundProfile["holdings"]["items"][number];
 
 export type Candle = StockAnalysis["candles"][number];
 export type CumulativeReturns = StockAnalysis["cumulative_returns"];
@@ -533,6 +548,57 @@ export async function fetchScreenResultsCsv(
     `${BASE_URL}/screener/screens/${screenId}/results.csv${qs ? `?${qs}` : ""}`,
     { signal: signal ?? AbortSignal.timeout(30_000) },
   );
+  if (!res.ok) {
+    const fallback = `HTTP ${res.status} ${res.statusText}`.trim();
+    let detail = fallback;
+    try {
+      detail = extractDetail(await res.json(), fallback);
+    } catch {
+      // Non-JSON error body — keep the HTTP status as the message.
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return res.blob();
+}
+
+/* ── Funds (F8.2) ─────────────────────────────────────────────────────────── */
+
+function fundsParams(query: FundsQuery | FundsCsvQuery): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === "") continue;
+    params.set(key, String(value));
+  }
+  return params.toString();
+}
+
+export function fetchFunds(
+  query: FundsQuery = {},
+  signal?: AbortSignal,
+): Promise<FundsList> {
+  const qs = fundsParams(query);
+  return request<FundsList>(`/funds${qs ? `?${qs}` : ""}`, signal);
+}
+
+export function fetchFundProfile(
+  instrumentId: string,
+  signal?: AbortSignal,
+): Promise<FundProfile> {
+  return request<FundProfile>(
+    `/funds/${encodeURIComponent(instrumentId)}`,
+    signal,
+  );
+}
+
+/** Funds CSV export — raw fetch (same fail-loud semantics as the screener CSV). */
+export async function fetchFundsCsv(
+  query: FundsCsvQuery = {},
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const qs = fundsParams(query);
+  const res = await fetch(`${BASE_URL}/funds.csv${qs ? `?${qs}` : ""}`, {
+    signal: signal ?? AbortSignal.timeout(30_000),
+  });
   if (!res.ok) {
     const fallback = `HTTP ${res.status} ${res.statusText}`.trim();
     let detail = fallback;

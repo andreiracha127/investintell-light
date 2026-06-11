@@ -161,6 +161,19 @@ def test_expense_ratio_falls_back_to_management_fee() -> None:
     assert derive_expense_ratio(None, None) is None
 
 
+def test_expense_ratio_prospectus_beats_management_fee_but_not_ncen_net() -> None:
+    registered = {"net_operating_expenses": None, "management_fee": Decimal("0.75")}
+    assert (
+        derive_expense_ratio(registered, None, prospectus_fee=Decimal("0.0069"))
+        == Decimal("0.0069")
+    )
+    registered_net = {"net_operating_expenses": Decimal("0.0050"), "management_fee": None}
+    assert (
+        derive_expense_ratio(registered_net, None, prospectus_fee=Decimal("0.0069"))
+        == Decimal("0.0050")
+    )
+
+
 def test_build_fund_row_full_cascade() -> None:
     registered = {
         "fund_name": "Reg Fund",

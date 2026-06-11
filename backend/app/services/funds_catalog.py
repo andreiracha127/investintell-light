@@ -1,0 +1,423 @@
+"""Funds catalog service (F8.2): list/profile/CSV reads over the local
+fund-universe snapshot (synced read-only from the mother DB by F8.1).
+
+Routes own HTTP mapping; this module owns SQL plus the pure helpers
+(filter predicates, sort whitelist, NAV decimation, CSV columns). Fail-loud
+contract:
+
+- a sort column outside the whitelist raises ``UnknownSortColumnError``
+  (routes -> 422) — user input NEVER reaches SQL text;
+- "fund not found" is signalled by ``None`` (routes -> 404).
+
+The Light NEVER recomputes metrics: every numeric in the responses is the
+mother-DB value copied by the sync, served with the global staleness markers.
+"""
+
+import datetime as dt
+import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass, fields
+from typing import Any, cast
+
+from sqlalchemy import ColumnElement, Select, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
+
+from app.models.fund import Fund, FundHolding, FundNav, FundRiskLatest
+
+# Hard cap on the CSV export — bounded output, no pagination (screener parity).
+CSV_HARD_CAP = 5000
+
+# NAV series window and decimation target for the profile chart.
+NAV_WINDOW_DAYS = 365 * 2
+NAV_TARGET_POINTS = 260
+
+# Top-50 cap of the N-PORT source (defense in depth — the sync stores <= 50).
+HOLDINGS_CAP = 50
+
+
+class UnknownSortColumnError(Exception):
+    """Raised when a sort column is outside the whitelist (routes -> 422)."""
+
+
+# ---------------------------------------------------------------------------
+# Sort whitelist (pure — unit-tested)
+# ---------------------------------------------------------------------------
+
+_FUND_SORT_FIELDS = (
+    "ticker",
+    "name",
+    "fund_type",
+    "strategy_label",
+    "asset_class",
+    "expense_ratio",
+    "aum_usd",
+    "inception_date",
+)
+
+# Every fund_risk_latest column except the PK join key is sortable — the
+# mapping is built from the model so it can never drift from the table.
+_RISK_SORT_FIELDS = tuple(
+    column.key
+    for column in FundRiskLatest.__table__.columns
+    if column.key != "instrument_id"
+)
+
+SORT_WHITELIST: dict[str, InstrumentedAttribute[Any]] = {
+    **{name: getattr(Fund, name) for name in _FUND_SORT_FIELDS},
+    **{name: getattr(FundRiskLatest, name) for name in _RISK_SORT_FIELDS},
+}
+
+DEFAULT_SORT = "aum_usd"
+DEFAULT_DIRECTION = "desc"
+
+
+def sort_column(code: str) -> InstrumentedAttribute[Any]:
+    """Resolve a sort code through the whitelist — THE injection gate."""
+    column = SORT_WHITELIST.get(code)
+    if column is None:
+        raise UnknownSortColumnError(
+            f"Cannot sort by {code!r}: not a whitelisted funds column."
+        )
+    return column
+
+
+# ---------------------------------------------------------------------------
+# Filters (pure — unit-tested)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class FundFilters:
+    """The /funds query filters; None = not applied."""
+
+    search: str | None = None
+    fund_type: str | None = None
+    strategy_label: str | None = None
+    asset_class: str | None = None
+    expense_ratio_max: float | None = None
+    aum_min: float | None = None
+    sharpe_1y_min: float | None = None
+    volatility_1y_max: float | None = None
+    return_1y_min: float | None = None
+    # Drawdowns are negative fractions: "min" keeps funds whose worst 1y
+    # drawdown is no deeper than the bound (e.g. -0.2 keeps dd >= -20%).
+    max_drawdown_1y_min: float | None = None
+
+
+def _escape_like(value: str) -> str:
+    """Escape LIKE wildcards in user search input (backslash escape char)."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def filter_conditions(filters: FundFilters) -> list[ColumnElement[bool]]:
+    """SQL predicates for ALL active filters.
+
+    Risk-metric bounds compare against fund_risk_latest columns — SQL NULL
+    comparisons are falsy, so funds without that metric drop out by
+    definition (a fund that cannot be ranked never matches a bound on it).
+    """
+    conditions: list[ColumnElement[bool]] = []
+    if filters.search:
+        pattern = f"%{_escape_like(filters.search)}%"
+        conditions.append(
+            or_(
+                Fund.ticker.ilike(pattern, escape="\\"),
+                Fund.name.ilike(pattern, escape="\\"),
+            )
+        )
+    if filters.fund_type is not None:
+        conditions.append(Fund.fund_type == filters.fund_type)
+    if filters.strategy_label is not None:
+        # Free-text strategy filter (the UI offers no canonical select):
+        # case-insensitive substring match.
+        strategy_pattern = f"%{_escape_like(filters.strategy_label)}%"
+        conditions.append(Fund.strategy_label.ilike(strategy_pattern, escape="\\"))
+    if filters.asset_class is not None:
+        conditions.append(Fund.asset_class == filters.asset_class)
+    if filters.expense_ratio_max is not None:
+        conditions.append(Fund.expense_ratio <= filters.expense_ratio_max)
+    if filters.aum_min is not None:
+        conditions.append(Fund.aum_usd >= filters.aum_min)
+    if filters.sharpe_1y_min is not None:
+        conditions.append(FundRiskLatest.sharpe_1y >= filters.sharpe_1y_min)
+    if filters.volatility_1y_max is not None:
+        conditions.append(FundRiskLatest.volatility_1y <= filters.volatility_1y_max)
+    if filters.return_1y_min is not None:
+        conditions.append(FundRiskLatest.return_1y >= filters.return_1y_min)
+    if filters.max_drawdown_1y_min is not None:
+        conditions.append(
+            FundRiskLatest.max_drawdown_1y >= filters.max_drawdown_1y_min
+        )
+    return conditions
+
+
+# Item columns served on every list row (funds identity + headline metrics).
+_ITEM_COLUMNS: tuple[tuple[str, InstrumentedAttribute[Any]], ...] = (
+    ("instrument_id", Fund.instrument_id),
+    ("series_id", Fund.series_id),
+    ("ticker", Fund.ticker),
+    ("name", Fund.name),
+    ("fund_type", Fund.fund_type),
+    ("strategy_label", Fund.strategy_label),
+    ("asset_class", Fund.asset_class),
+    ("is_index", Fund.is_index),
+    ("expense_ratio", Fund.expense_ratio),
+    ("aum_usd", Fund.aum_usd),
+    ("return_1y", FundRiskLatest.return_1y),
+    ("volatility_1y", FundRiskLatest.volatility_1y),
+    ("sharpe_1y", FundRiskLatest.sharpe_1y),
+    ("max_drawdown_1y", FundRiskLatest.max_drawdown_1y),
+    ("peer_sharpe_pctl", FundRiskLatest.peer_sharpe_pctl),
+    ("elite_flag", FundRiskLatest.elite_flag),
+)
+
+
+def _base_select(*columns: Any) -> Select[Any]:
+    """SELECT *columns* over funds LEFT JOIN fund_risk_latest."""
+    return (
+        select(*columns)
+        .select_from(Fund)
+        .outerjoin(FundRiskLatest, FundRiskLatest.instrument_id == Fund.instrument_id)
+    )
+
+
+def build_funds_select(
+    filters: FundFilters,
+    *,
+    sort: str,
+    direction: str,
+    limit: int,
+    offset: int,
+) -> Select[Any]:
+    """The dynamic-but-whitelisted funds list SELECT (pure — unit-tested)."""
+    column = sort_column(sort)
+    order = column.desc() if direction == "desc" else column.asc()
+    return (
+        _base_select(*(col for _name, col in _ITEM_COLUMNS))
+        .where(*filter_conditions(filters))
+        .order_by(order.nulls_last(), Fund.ticker.nulls_last(), Fund.instrument_id)
+        .limit(limit)
+        .offset(offset)
+    )
+
+
+def build_count_select(filters: FundFilters) -> Select[Any]:
+    """COUNT over the same filtered set as the list SELECT."""
+    return _base_select(func.count()).where(*filter_conditions(filters))
+
+
+# ---------------------------------------------------------------------------
+# List + staleness reads
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Staleness:
+    """Global max of the per-fund staleness markers (None on an empty table)."""
+
+    synced_at: dt.datetime | None
+    source_calc_date: dt.date | None
+    source_nav_max_date: dt.date | None
+
+
+async def fetch_funds(
+    session: AsyncSession,
+    filters: FundFilters,
+    *,
+    sort: str,
+    direction: str,
+    limit: int,
+    offset: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """One list page as row dicts (keyed by item column name) + total count."""
+    result = await session.execute(
+        build_funds_select(
+            filters, sort=sort, direction=direction, limit=limit, offset=offset
+        )
+    )
+    names = [name for name, _col in _ITEM_COLUMNS]
+    rows = [dict(zip(names, row, strict=True)) for row in result.all()]
+    total = int(await session.scalar(build_count_select(filters)) or 0)
+    return rows, total
+
+
+async def fetch_staleness(session: AsyncSession) -> Staleness:
+    """MAX(synced_at), MAX(source_calc_date), MAX(source_nav_max_date)."""
+    row = (
+        await session.execute(
+            select(
+                func.max(Fund.synced_at),
+                func.max(Fund.source_calc_date),
+                func.max(Fund.source_nav_max_date),
+            )
+        )
+    ).one()
+    return Staleness(
+        synced_at=row[0], source_calc_date=row[1], source_nav_max_date=row[2]
+    )
+
+
+# ---------------------------------------------------------------------------
+# CSV (reuses the screener's stable cell formatting)
+# ---------------------------------------------------------------------------
+
+# (code, header, data_type) — data_type drives the stable numeric formatting
+# of app.services.screener._csv_cell via render_csv.
+CSV_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("ticker", "Ticker", "string"),
+    ("name", "Name", "string"),
+    ("fund_type", "Type", "string"),
+    ("strategy_label", "Strategy", "string"),
+    ("asset_class", "Asset class", "string"),
+    ("aum_usd", "AUM (USD)", "currency"),
+    ("expense_ratio", "Expense ratio", "percent"),
+    ("return_1y", "Return 1Y", "percent"),
+    ("volatility_1y", "Volatility 1Y", "percent"),
+    ("sharpe_1y", "Sharpe 1Y", "float"),
+    ("max_drawdown_1y", "Max drawdown 1Y", "percent"),
+    ("peer_sharpe_pctl", "Peer Sharpe pctl", "float"),
+    ("elite_flag", "Elite", "string"),
+)
+
+
+def csv_rows(rows: Sequence[dict[str, Any]]) -> list[dict[str, str | float | None]]:
+    """Project list-row dicts onto the CSV columns (pure — unit-tested).
+
+    Decimals become floats; elite_flag becomes "true"/"false"; None stays
+    None (rendered as an empty cell).
+    """
+    out: list[dict[str, str | float | None]] = []
+    for row in rows:
+        record: dict[str, str | float | None] = {}
+        for code, _header, data_type in CSV_COLUMNS:
+            value = row.get(code)
+            if value is None:
+                record[code] = None
+            elif code == "elite_flag":
+                record[code] = "true" if value else "false"
+            elif data_type == "string":
+                record[code] = str(value)
+            else:
+                record[code] = float(value)
+        out.append(record)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# NAV decimation (pure — unit-tested)
+# ---------------------------------------------------------------------------
+
+
+def decimate_nav(
+    points: Sequence[tuple[dt.date, float | None]],
+    target: int = NAV_TARGET_POINTS,
+) -> list[tuple[dt.date, float | None]]:
+    """Evenly subsample a date-sorted NAV series down to ~``target`` points.
+
+    Always keeps the first and the last observation; a series at or under
+    the target is returned unchanged. Pure index arithmetic — no value
+    interpolation (the chart shows real NAV prints only).
+    """
+    if target < 2:
+        raise ValueError(f"decimation target must be >= 2, got {target}.")
+    n = len(points)
+    if n <= target:
+        return list(points)
+    step = (n - 1) / (target - 1)
+    indices = sorted({round(i * step) for i in range(target)} | {n - 1})
+    return [points[i] for i in indices]
+
+
+# ---------------------------------------------------------------------------
+# Profile read
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class FundProfile:
+    """Everything the profile endpoint needs, fetched in one service call."""
+
+    fund: Fund
+    risk: FundRiskLatest | None
+    nav: list[tuple[dt.date, float | None]]
+    holdings: list[FundHolding]
+    holdings_report_date: dt.date | None
+    holdings_pct_of_nav_total: float | None
+    is_top50_truncated: bool
+
+
+async def fetch_fund_profile(
+    session: AsyncSession, instrument_id: uuid.UUID
+) -> FundProfile | None:
+    """Fund + full risk snapshot + decimated 2y NAV + latest holdings.
+
+    Returns None when the instrument is not in the local universe.
+    """
+    fund = await session.get(Fund, instrument_id)
+    if fund is None:
+        return None
+    risk = await session.get(FundRiskLatest, instrument_id)
+
+    max_nav_date = await session.scalar(
+        select(func.max(FundNav.nav_date)).where(
+            FundNav.instrument_id == instrument_id
+        )
+    )
+    nav: list[tuple[dt.date, float | None]] = []
+    if max_nav_date is not None:
+        window_start = max_nav_date - dt.timedelta(days=NAV_WINDOW_DAYS)
+        result = await session.execute(
+            select(FundNav.nav_date, FundNav.nav)
+            .where(
+                FundNav.instrument_id == instrument_id,
+                FundNav.nav_date >= window_start,
+            )
+            .order_by(FundNav.nav_date)
+        )
+        raw = [
+            (cast("dt.date", nav_date), float(value) if value is not None else None)
+            for nav_date, value in result.all()
+        ]
+        nav = decimate_nav(raw)
+
+    latest_report = await session.scalar(
+        select(func.max(FundHolding.report_date)).where(
+            FundHolding.series_id == fund.series_id
+        )
+    )
+    holdings: list[FundHolding] = []
+    truncated = False
+    pct_total: float | None = None
+    if latest_report is not None:
+        holdings = list(
+            (
+                await session.execute(
+                    select(FundHolding)
+                    .where(
+                        FundHolding.series_id == fund.series_id,
+                        FundHolding.report_date == latest_report,
+                    )
+                    .order_by(FundHolding.rank)
+                    .limit(HOLDINGS_CAP)
+                )
+            ).scalars()
+        )
+        truncated = any(h.is_top50_truncated for h in holdings)
+        reported = [float(h.pct_of_nav) for h in holdings if h.pct_of_nav is not None]
+        pct_total = sum(reported) if reported else None
+
+    return FundProfile(
+        fund=fund,
+        risk=risk,
+        nav=nav,
+        holdings=holdings,
+        holdings_report_date=latest_report,
+        holdings_pct_of_nav_total=pct_total,
+        is_top50_truncated=truncated,
+    )
+
+
+# Defense in depth: the FundFilters fields ARE the route's query params —
+# keep them in sync (test asserts this) so a new filter cannot be forgotten.
+FILTER_FIELD_NAMES = tuple(field.name for field in fields(FundFilters))

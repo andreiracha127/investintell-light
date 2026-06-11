@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routes import funds as funds_router
 from app.api.routes import health as health_router
 from app.api.routes import portfolio as portfolio_router
 from app.api.routes import portfolios as portfolios_router
@@ -44,6 +45,7 @@ def create_app() -> FastAPI:
     application.include_router(portfolios_router.router)
     application.include_router(statistics_router.router)
     application.include_router(screener_router.router)
+    application.include_router(funds_router.router)
     return application
 
 
