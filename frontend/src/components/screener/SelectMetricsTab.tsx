@@ -45,6 +45,7 @@ export function SelectMetricsTab({
       queryClient.setQueryData(["screen-build", screen.id, code], {
         distribution: resp.distribution,
         headline_count: resp.headline_count,
+        available_count: resp.available_count,
       });
     },
   });

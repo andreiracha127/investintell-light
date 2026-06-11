@@ -51,6 +51,7 @@ import { parseDecimal } from "@/lib/parse";
 interface BuildCardData {
   distribution: Distribution | null;
   headline_count: number;
+  available_count: number;
 }
 
 export function BuildTab({
@@ -166,7 +167,7 @@ function FilterCard({
       applyFilterResponse(queryClient, screenId, resp);
       queryClient.setQueryData<BuildCardData>(
         ["screen-build", screenId, filter.metric_code],
-        { distribution: resp.distribution, headline_count: resp.headline_count },
+        { distribution: resp.distribution, headline_count: resp.headline_count, available_count: resp.available_count },
       );
       onHeadline(resp.headline_count);
     },
@@ -219,6 +220,7 @@ function FilterCard({
   const customActive = !presets.some(matchesPreset);
 
   const distribution = buildQuery.data?.distribution ?? null;
+  const availableCount = buildQuery.data?.available_count;
   const option = useMemo(
     () =>
       distribution && colors
@@ -277,11 +279,15 @@ function FilterCard({
             onRetry={() => buildQuery.refetch()}
           />
         )
+      ) : availableCount === 0 ? (
+        <p className="h-[140px] flex items-center justify-center rounded-[8px] bg-surface-1 text-[13px] text-text-muted">
+          {NO_DATA_NOTE}
+        </p>
       ) : option ? (
         <EChart option={option} className="h-[140px]" />
       ) : (
         <p className="h-[140px] flex items-center justify-center rounded-[8px] bg-surface-1 text-[13px] text-text-muted">
-          {NO_DATA_NOTE}
+          No companies in this band.
         </p>
       )}
 
