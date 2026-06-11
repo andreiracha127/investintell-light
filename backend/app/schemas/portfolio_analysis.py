@@ -160,7 +160,10 @@ class PortfolioParams(BaseModel):
         "position tickers have data)."
     )
     end_date: dt.date = Field(
-        description="Last trading day of the analyzed window (the common last date)."
+        description="Last trading day of the analyzed window — the most recent date "
+        "COMMON to all requested symbols (positions + benchmark). One stale symbol "
+        "(a ticker whose last available EOD row lags the others) moves this date "
+        "back for everyone; end = min(last_available_date per symbol)."
     )
     initial_nav: float = Field(
         description="Portfolio value at start_date, in currency units. 10000 for "
@@ -284,7 +287,12 @@ class PortfolioAnalysisResponse(BaseModel):
     allocation: AllocationOut
     nav: list[SeriesPoint] = Field(
         description="[date, NAV] points in currency units; starts at initial_nav. "
-        "Daily up to 5Y; weekly (W-FRI, last-of-week) for range MAX."
+        "Daily up to 5Y; weekly (W-FRI, last-of-week) for range MAX. "
+        "Shares the same date grid as benchmark_comparison (sliced to the "
+        "portfolio–benchmark aligned index) so all line series can be plotted "
+        "on a single x-axis. Stats are computed on the full position-grid NAV "
+        "(before the benchmark alignment slice) — they describe the portfolio, "
+        "not the comparison chart."
     )
     benchmark_comparison: BenchmarkComparison
     stats: PortfolioStats

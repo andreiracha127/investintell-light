@@ -14,6 +14,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from app.api import _shared as api_shared
 from app.api.routes import stocks
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
@@ -58,7 +59,9 @@ async def stub_client(monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[AsyncCl
     async def fake_select(*args: Any, **kwargs: Any) -> list[SimpleNamespace]:
         return [_row(dt.date(2026, 6, 8)), _row(dt.date(2026, 6, 9))]
 
-    monkeypatch.setattr(stocks, "ensure_eod_data", fake_ensure)
+    # ensure_eod_data is called from app.api._shared (the canonical location);
+    # patch it there so both the stocks and portfolio routes see the stub.
+    monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
     monkeypatch.setattr(stocks, "_select_price_rows", fake_select)
     transport = ASGITransport(app=_app_with_overrides())
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -71,7 +74,7 @@ async def _client_with_failing_service(
     async def fake_ensure(*args: Any, **kwargs: Any) -> EnsureReport:
         raise exc
 
-    monkeypatch.setattr(stocks, "ensure_eod_data", fake_ensure)
+    monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
     transport = ASGITransport(app=_app_with_overrides())
     return AsyncClient(transport=transport, base_url="http://test")
 
@@ -190,7 +193,7 @@ async def test_window_exceeding_max_points_returns_422(
     async def fake_select(*args: Any, **kwargs: Any) -> list[SimpleNamespace]:
         return [_row(dt.date(2026, 1, 1))] * (max_points + 1)
 
-    monkeypatch.setattr(stocks, "ensure_eod_data", fake_ensure)
+    monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
     monkeypatch.setattr(stocks, "_select_price_rows", fake_select)
     transport = ASGITransport(app=_app_with_overrides())
     async with AsyncClient(transport=transport, base_url="http://test") as ac:

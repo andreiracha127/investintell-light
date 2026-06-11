@@ -132,6 +132,58 @@ def _resolve_allocation(
     return effective, {t: float(q) for t, q in quantities.items()}, initial_nav
 
 
+def _benchmark_comparison(
+    nav: pd.Series,
+    aligned_port: pd.Series,
+    aligned_bench: pd.Series,
+    range_key: RangeKey,
+) -> BenchmarkComparison:
+    """Build the benchmark comparison series aligned to the same grid as nav.
+
+    Single-grid contract: all three line series (nav, comparison.portfolio,
+    comparison.benchmark) share identical first/last dates.
+
+    ``aligned_port`` and ``aligned_bench`` are *return* series — their first
+    index entry is the second price date of the aligned grid.  To achieve the
+    single-grid contract we need the rebase point (first price date, 0.0) to
+    coincide with nav's first date.  We identify that date as the nav index
+    entry that immediately precedes ``aligned_port.index[0]``, prepend it as
+    a synthetic 0-return entry, and pass the extended series to the rebasing
+    helpers.  This leaves nav[0] == initial_nav intact.
+
+    Stats (beta, correlation, drawdown, …) are computed by the caller on the
+    original ``aligned_port``/``aligned_bench`` — unmodified.
+    """
+    # Find the nav date that is one step before aligned_port.index[0].
+    # When the benchmark and positions share the same start, this is
+    # prices.index[0] (the initial NAV day).  When the benchmark starts later,
+    # this is the benchmark's first price date (within the nav index).
+    first_return_date = aligned_port.index[0]
+    nav_dates_before = nav.index[nav.index < first_return_date]
+    if len(nav_dates_before):
+        rebase_date = nav_dates_before[-1]
+        # Prepend a zero-return at the rebase date so rebased_cumulative emits
+        # (rebase_date, 0.0) as its first point — matching nav[0]'s date.
+        zero_return = pd.Series([0.0], index=[rebase_date])
+        port_ext = pd.concat([zero_return, aligned_port])
+        bench_ext = pd.concat([zero_return, aligned_bench])
+    else:
+        # No nav date precedes the first return — fall back to the standard
+        # rebasing (rebased_cumulative already emits the first return date).
+        port_ext = aligned_port
+        bench_ext = aligned_bench
+
+    if range_key == "MAX":
+        return BenchmarkComparison(
+            portfolio=rebased_cumulative_weekly(port_ext),
+            benchmark=rebased_cumulative_weekly(bench_ext),
+        )
+    return BenchmarkComparison(
+        portfolio=rebased_cumulative(port_ext),
+        benchmark=rebased_cumulative(bench_ext),
+    )
+
+
 def assemble_portfolio_analysis(
     series_by_ticker: Mapping[str, pd.Series],
     benchmark_adj_close: pd.Series,
@@ -220,20 +272,49 @@ def assemble_portfolio_analysis(
             "for beta/correlation."
         )
 
-    # For range MAX the line series are bounded to the W-FRI weekly grid,
-    # exactly like the F2.2 single-asset payload.
+    # Single-grid contract: all three line series (nav, comparison.portfolio,
+    # comparison.benchmark) MUST share the same date grid so the frontend can
+    # align them on a single x-axis without a join step.
+    #
+    # Grid choice: the nav's full position-price grid, trimmed to the dates
+    # that the benchmark also covers.  Concretely:
+    #   - `nav` starts at prices.index[0] (the first position price date).
+    #   - `aligned_port/bench` are *return* series; their index starts at the
+    #     second date of the aligned price grid.
+    #   - We prepend the first aligned-price date (one step before
+    #     aligned_port.index[0]) to the return series so that
+    #     `rebased_cumulative` emits a (first_price_date, 0.0) rebase point.
+    #   - `nav` is then sliced to the dates in the extended return + rebase
+    #     point set — i.e. the aligned price dates.
+    #
+    # This preserves nav[0] == initial_nav (the initial buy-in value) AND
+    # ensures all three series share identical first/last dates.
+    #
+    # Stats and drawdown stay computed on the FULL position-grid nav (before
+    # any benchmark-alignment slice) — they describe the portfolio, not the
+    # comparison chart.
+    comparison = _benchmark_comparison(nav, aligned_port, aligned_bench, range_key)
+
+    # Emit nav sliced to the same date grid as comparison (the aligned price
+    # dates, starting at the rebase date).  comparison.portfolio is already
+    # on this grid (daily or weekly); we build nav_aligned from the same
+    # underlying aligned index so all three series share first/last dates.
+    #
+    # Reconstruct the aligned price-level index: rebase_date + aligned_port.index.
+    first_return_date = aligned_port.index[0]
+    nav_dates_before = nav.index[nav.index < first_return_date]
+    aligned_price_dates = (
+        nav.index[nav.index >= nav_dates_before[-1]]
+        if len(nav_dates_before)
+        else nav.index[nav.index >= first_return_date]
+    )
+    nav_aligned = nav.loc[nav.index.isin(aligned_price_dates)]
+
+    # For range MAX the line series are bounded to the W-FRI weekly grid.
     if range_key == "MAX":
-        nav_points = series_points(resample_weekly(nav))
-        comparison = BenchmarkComparison(
-            portfolio=rebased_cumulative_weekly(aligned_port),
-            benchmark=rebased_cumulative_weekly(aligned_bench),
-        )
+        nav_points = series_points(resample_weekly(nav_aligned))
     else:
-        nav_points = series_points(nav)
-        comparison = BenchmarkComparison(
-            portfolio=rebased_cumulative(aligned_port),
-            benchmark=rebased_cumulative(aligned_bench),
-        )
+        nav_points = series_points(nav_aligned)
 
     longest = max(len(nav_points), len(comparison.portfolio), len(comparison.benchmark))
     if longest > max_points:

@@ -1,8 +1,12 @@
-"""Shared line-series helpers for analysis payload assembly (F2 + F3).
+"""Shared line-series helpers and DB read helpers for analysis payload assembly (F2 + F3).
 
 Extracted from ``app.services.stock_analysis`` so the portfolio service can
 reuse the exact same point emission, weekly bounding and cumulative-return
 rebasing — same semantics, one implementation.
+
+The DB read helpers (``select_date_bounds``, ``select_adj_close_rows``) and
+the visible-range calendar constant (``RANGE_DAYS``) live here so both the
+stocks and portfolio routes can import from a single canonical location.
 
 Scale contract (project-wide): all fractional quantities are decimal
 fractions (0.05 = 5%), never 0-100.
@@ -11,9 +15,41 @@ fractions (0.05 = 5%), never 0-100.
 import datetime as dt
 
 import pandas as pd
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics import cumulative_return_series
 from app.analytics._validation import to_date
+from app.models.eod_price import EodPrice
+
+# Visible-range presets: calendar days subtracted from the last available
+# trading day.  "MAX" is resolved to the first available date instead.
+RANGE_DAYS: dict[str, int] = {"1M": 30, "6M": 182, "1Y": 365, "5Y": 1826}
+
+
+async def select_date_bounds(
+    session: AsyncSession, ticker: str
+) -> tuple[dt.date | None, dt.date | None]:
+    """Return (min_date, max_date) available for *ticker* in eod_prices."""
+    result = await session.execute(
+        select(func.min(EodPrice.date), func.max(EodPrice.date)).where(
+            EodPrice.ticker == ticker
+        )
+    )
+    first, last = result.one()
+    return first, last
+
+
+async def select_adj_close_rows(
+    session: AsyncSession, ticker: str, start: dt.date, end: dt.date
+) -> list[tuple[dt.date, float]]:
+    """Read (date, adj_close) tuples for [start, end]."""
+    result = await session.execute(
+        select(EodPrice.date, EodPrice.adj_close)
+        .where(EodPrice.ticker == ticker, EodPrice.date >= start, EodPrice.date <= end)
+        .order_by(EodPrice.date)
+    )
+    return list(result.tuples().all())
 
 
 def series_points(series: pd.Series) -> list[tuple[dt.date, float]]:

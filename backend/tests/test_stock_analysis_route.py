@@ -15,6 +15,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from app.api import _shared as api_shared
 from app.api.routes import stocks
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
@@ -78,7 +79,8 @@ def _install_stubs(
     async def fake_name(session: Any, ticker: str) -> str | None:
         return "Apple Inc"
 
-    monkeypatch.setattr(stocks, "ensure_eod_data", fake_ensure)
+    # ensure_eod_data is called from app.api._shared — patch the canonical location.
+    monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
     monkeypatch.setattr(stocks, "_select_date_bounds", fake_bounds)
     monkeypatch.setattr(stocks, "_select_ohlcv_rows", fake_ohlcv)
     monkeypatch.setattr(stocks, "_select_adj_close_rows", fake_adj_close)
@@ -155,7 +157,7 @@ async def test_unknown_ticker_returns_404(monkeypatch: pytest.MonkeyPatch) -> No
     async def fake_ensure(*args: Any, **kwargs: Any) -> EnsureReport:
         raise TiingoNotFoundError("nope")
 
-    monkeypatch.setattr(stocks, "ensure_eod_data", fake_ensure)
+    monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
     transport = ASGITransport(app=_app_with_overrides())
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         response = await ac.get("/stocks/ZZZZZZ/analysis")

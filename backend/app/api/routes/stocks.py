@@ -21,24 +21,30 @@ from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api._shared import ensure_eod_or_http_error
 from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
 from app.ingestion.news import ensure_news
-from app.ingestion.service import (
-    HISTORY_FLOOR,
-    ColdTickerCapExceededError,
-    ensure_eod_data,
-)
+from app.ingestion.service import HISTORY_FLOOR
 from app.models.eod_price import EodPrice
 from app.models.instrument import Instrument
 from app.models.news_item import NewsItem
 from app.schemas.analysis import RangeKey, StockAnalysisResponse
 from app.schemas.news import NewsArticle, NewsResponse
 from app.schemas.prices import PricePoint, PriceSeriesResponse
+from app.services._series import (
+    RANGE_DAYS,
+)
+from app.services._series import (
+    select_adj_close_rows as _select_adj_close_rows,
+)
+from app.services._series import (
+    select_date_bounds as _select_date_bounds,
+)
 from app.services.stock_analysis import (
     StockAnalysisError,
     assemble_analysis,
@@ -49,11 +55,8 @@ from app.services.stock_analysis import (
 from app.tiingo.client import TiingoClient
 from app.tiingo.exceptions import (
     TiingoAuthError,
-    TiingoBadResponseError,
     TiingoError,
-    TiingoNotFoundError,
     TiingoRateLimitError,
-    TiingoServerError,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,10 +66,6 @@ DEFAULT_WINDOW_DAYS = 365
 # Sanity bound for ticker path segments on endpoints that do not 404 on
 # unknown tickers (news): alphanumeric plus "." and "-", at most 10 chars.
 _TICKER_PATTERN = re.compile(r"^[A-Z0-9.\-]{1,10}$")
-
-# Visible-range presets: calendar days subtracted from the last available
-# trading day. "MAX" is resolved to the first available date instead.
-RANGE_DAYS: dict[str, int] = {"1M": 30, "6M": 182, "1Y": 365, "5Y": 1826}
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
@@ -78,30 +77,8 @@ async def _ensure_eod_or_http_error(
     start: dt.date,
     end: dt.date,
 ) -> None:
-    """Run ``ensure_eod_data`` and map service/Tiingo errors to HTTP errors."""
-    label = ", ".join(symbols)
-    try:
-        await ensure_eod_data(session, client, symbols, start, end)
-    except ColdTickerCapExceededError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except TiingoNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=f"Unknown ticker: {label}") from exc
-    except TiingoRateLimitError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="Market data provider rate limit reached — retry later.",
-        ) from exc
-    except TiingoAuthError as exc:
-        # Server misconfiguration — do NOT leak token/auth details to the caller.
-        raise HTTPException(
-            status_code=502,
-            detail="Market data provider is not configured on the server.",
-        ) from exc
-    except (TiingoServerError, TiingoBadResponseError) as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Market data provider error while fetching {label}: {exc}",
-        ) from exc
+    """Thin wrapper — delegates to the shared canonical implementation in app.api._shared."""
+    await ensure_eod_or_http_error(session, client, symbols, start, end)
 
 
 async def _select_price_rows(
@@ -167,19 +144,6 @@ async def get_price_series(
 # ---------------------------------------------------------------------------
 
 
-async def _select_date_bounds(
-    session: AsyncSession, ticker: str
-) -> tuple[dt.date | None, dt.date | None]:
-    """Return (min_date, max_date) available for *ticker* in eod_prices."""
-    result = await session.execute(
-        select(func.min(EodPrice.date), func.max(EodPrice.date)).where(
-            EodPrice.ticker == ticker
-        )
-    )
-    first, last = result.one()
-    return first, last
-
-
 async def _select_ohlcv_rows(
     session: AsyncSession, ticker: str, start: dt.date, end: dt.date
 ) -> list[tuple[dt.date, float, float, float, float, int, float]]:
@@ -194,18 +158,6 @@ async def _select_ohlcv_rows(
             EodPrice.volume,
             EodPrice.adj_close,
         )
-        .where(EodPrice.ticker == ticker, EodPrice.date >= start, EodPrice.date <= end)
-        .order_by(EodPrice.date)
-    )
-    return list(result.tuples().all())
-
-
-async def _select_adj_close_rows(
-    session: AsyncSession, ticker: str, start: dt.date, end: dt.date
-) -> list[tuple[dt.date, float]]:
-    """Read (date, adj_close) tuples for [start, end]."""
-    result = await session.execute(
-        select(EodPrice.date, EodPrice.adj_close)
         .where(EodPrice.ticker == ticker, EodPrice.date >= start, EodPrice.date <= end)
         .order_by(EodPrice.date)
     )

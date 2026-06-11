@@ -27,12 +27,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.routes.stocks import (
-    RANGE_DAYS,
-    _ensure_eod_or_http_error,
-    _select_adj_close_rows,
-    _select_date_bounds,
-)
+from app.api._shared import ensure_eod_or_http_error
 from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
@@ -40,6 +35,15 @@ from app.ingestion.service import HISTORY_FLOOR
 from app.schemas.portfolio_analysis import (
     PortfolioAnalysisRequest,
     PortfolioAnalysisResponse,
+)
+from app.services._series import (
+    RANGE_DAYS,
+)
+from app.services._series import (
+    select_adj_close_rows as _select_adj_close_rows,
+)
+from app.services._series import (
+    select_date_bounds as _select_date_bounds,
 )
 from app.services.portfolio_analysis import assemble_portfolio_analysis
 from app.services.stock_analysis import StockAnalysisError, build_adj_close_series
@@ -73,7 +77,7 @@ async def analyze_portfolio(
         if payload.range == "MAX"
         else today - dt.timedelta(days=RANGE_DAYS[payload.range])
     )
-    await _ensure_eod_or_http_error(session, client, symbols, ensure_start, today)
+    await ensure_eod_or_http_error(session, client, symbols, ensure_start, today)
 
     # Resolve the common window across positions AND benchmark.
     first_dates: dict[str, dt.date] = {}

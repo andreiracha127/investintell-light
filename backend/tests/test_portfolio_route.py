@@ -15,7 +15,8 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.api.routes import portfolio, stocks
+from app.api import _shared as api_shared
+from app.api.routes import portfolio
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
 from app.ingestion.service import EnsureReport
@@ -80,10 +81,11 @@ def _install_stubs(
     ) -> list[AdjCloseRow]:
         return [r for r in rows_map.get(ticker, []) if start <= r[0] <= end]
 
-    # _ensure_eod_or_http_error lives in the stocks module and calls the
-    # stocks-module global ensure_eod_data; the read helpers are looked up as
-    # portfolio-module globals.
-    monkeypatch.setattr(stocks, "ensure_eod_data", fake_ensure)
+    # ensure_eod_or_http_error lives in app.api._shared and calls ensure_eod_data
+    # from that module's namespace — patch the one canonical location.
+    # The read helpers are looked up as portfolio-module globals (aliases to the
+    # canonical implementations in app.services._series).
+    monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
     monkeypatch.setattr(portfolio, "_select_date_bounds", fake_bounds)
     monkeypatch.setattr(portfolio, "_select_adj_close_rows", fake_adj_close)
 
@@ -197,6 +199,107 @@ async def test_tickers_are_uppercase_normalized(stub_client: AsyncClient) -> Non
     assert tickers == ["AAPL", "MSFT"]
 
 
+async def test_max_range_weekly_bounding_applies_to_both_comparison_series(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MAX range: comparison.portfolio AND comparison.benchmark are weekly (W-FRI).
+
+    Both series must contain only Friday dates and have the same length —
+    the weekly bounding must be applied symmetrically to both.
+    """
+    _install_stubs(monkeypatch)
+    transport = ASGITransport(app=_app_with_overrides())
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        response = await ac.post(
+            "/portfolio/analysis",
+            json={
+                "positions": [
+                    {"ticker": "AAPL", "weight": 0.6},
+                    {"ticker": "MSFT", "weight": 0.4},
+                ],
+                "mode": "weights",
+                "range": "MAX",
+            },
+        )
+    assert response.status_code == 200
+    body = response.json()
+    port_series = body["benchmark_comparison"]["portfolio"]
+    bench_series = body["benchmark_comparison"]["benchmark"]
+
+    # Both series must be weekly: every date must be a Friday (weekday == 4).
+    for point in port_series:
+        d = dt.date.fromisoformat(point[0])
+        assert d.weekday() == 4, f"portfolio comparison point {d} is not a Friday"
+    for point in bench_series:
+        d = dt.date.fromisoformat(point[0])
+        assert d.weekday() == 4, f"benchmark comparison point {d} is not a Friday"
+
+    # Both comparison series must share the same length (symmetric bounding).
+    assert len(port_series) == len(bench_series), (
+        f"comparison.portfolio has {len(port_series)} points but "
+        f"comparison.benchmark has {len(bench_series)}"
+    )
+
+
+async def test_single_chart_grid_when_benchmark_is_shortest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Single-grid contract: nav, comparison.portfolio, comparison.benchmark share first/last dates.
+
+    When the benchmark starts LATER than the position tickers (younger
+    inception), the aligned grid is shorter than the full NAV grid.  After
+    fix #2, nav must be sliced to the aligned grid so all three line series
+    share the same first and last date — the frontend can plot them on one
+    x-axis without a join step.
+    """
+    # Build a benchmark that starts 60 business days LATER than the positions.
+    n_full = N_DAYS
+    n_bench_short = n_full - 60  # benchmark is younger
+
+    short_bench_rows = _synthetic_rows(seed=99, n_days=n_bench_short)
+
+    rows_map: dict[str, list[AdjCloseRow]] = {
+        "AAPL": _synthetic_rows(seed=1, n_days=n_full),
+        "MSFT": _synthetic_rows(seed=2, n_days=n_full),
+        "SPY": short_bench_rows,
+    }
+    _install_stubs(monkeypatch, rows_by_ticker=rows_map)
+    transport = ASGITransport(app=_app_with_overrides())
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        response = await ac.post(
+            "/portfolio/analysis",
+            json={
+                "positions": [
+                    {"ticker": "AAPL", "weight": 0.6},
+                    {"ticker": "MSFT", "weight": 0.4},
+                ],
+                "mode": "weights",
+                "range": "1Y",
+                "benchmark": "SPY",
+            },
+        )
+    assert response.status_code == 200
+    body = response.json()
+
+    nav_dates = [pt[0] for pt in body["nav"]]
+    port_dates = [pt[0] for pt in body["benchmark_comparison"]["portfolio"]]
+    bench_dates = [pt[0] for pt in body["benchmark_comparison"]["benchmark"]]
+
+    # All three series must share the same first and last date.
+    assert nav_dates[0] == port_dates[0] == bench_dates[0], (
+        f"First dates differ: nav={nav_dates[0]}, "
+        f"portfolio={port_dates[0]}, benchmark={bench_dates[0]}"
+    )
+    assert nav_dates[-1] == port_dates[-1] == bench_dates[-1], (
+        f"Last dates differ: nav={nav_dates[-1]}, "
+        f"portfolio={port_dates[-1]}, benchmark={bench_dates[-1]}"
+    )
+    assert len(nav_dates) == len(port_dates) == len(bench_dates), (
+        f"Series lengths differ: nav={len(nav_dates)}, "
+        f"portfolio={len(port_dates)}, benchmark={len(bench_dates)}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Validation (422) paths
 # ---------------------------------------------------------------------------
@@ -305,7 +408,7 @@ async def test_unknown_ticker_returns_404(monkeypatch: pytest.MonkeyPatch) -> No
     async def fake_ensure(*args: Any, **kwargs: Any) -> EnsureReport:
         raise TiingoNotFoundError("nope")
 
-    monkeypatch.setattr(stocks, "ensure_eod_data", fake_ensure)
+    monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
     transport = ASGITransport(app=_app_with_overrides())
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         response = await ac.post("/portfolio/analysis", json=WEIGHTS_BODY)
