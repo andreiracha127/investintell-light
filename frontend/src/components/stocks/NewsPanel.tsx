@@ -8,7 +8,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 
-import { ApiError, fetchTickerNews, type NewsArticle } from "@/lib/api/client";
+import { fetchTickerNews, type NewsArticle } from "@/lib/api/client";
 import { formatDate } from "@/lib/format";
 
 export function NewsPanel({ ticker }: { ticker: string }) {
@@ -16,9 +16,8 @@ export function NewsPanel({ ticker }: { ticker: string }) {
     queryKey: ["news", ticker],
     queryFn: ({ signal }) => fetchTickerNews(ticker, {}, signal),
     staleTime: 5 * 60 * 1000, // matches the backend's per-ticker staleness order of magnitude
-    retry: (failureCount, err) =>
-      !(err instanceof ApiError && err.status >= 400 && err.status < 500) &&
-      failureCount < 2,
+    // Decorative panel: a failure just hides it, so retries only add latency/noise.
+    retry: false,
   });
 
   // INTENTIONAL swallow — allowed ONLY here because this panel is decorative:

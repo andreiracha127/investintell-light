@@ -8,7 +8,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 
-import { ApiError, fetchPortfolioNews } from "@/lib/api/client";
+import { fetchPortfolioNews } from "@/lib/api/client";
 import { NewsSection } from "@/components/stocks/NewsPanel";
 
 export function PortfolioNewsPanel({ portfolioId }: { portfolioId: number }) {
@@ -16,9 +16,8 @@ export function PortfolioNewsPanel({ portfolioId }: { portfolioId: number }) {
     queryKey: ["portfolio-news", portfolioId],
     queryFn: ({ signal }) => fetchPortfolioNews(portfolioId, {}, signal),
     staleTime: 5 * 60 * 1000, // matches the backend's per-ticker staleness order of magnitude
-    retry: (failureCount, err) =>
-      !(err instanceof ApiError && err.status >= 400 && err.status < 500) &&
-      failureCount < 2,
+    // Decorative panel: a failure just hides it, so retries only add latency/noise.
+    retry: false,
   });
 
   // INTENTIONAL swallow — allowed ONLY here because this panel is decorative:
