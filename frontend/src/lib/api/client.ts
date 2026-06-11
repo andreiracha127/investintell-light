@@ -27,7 +27,6 @@ export type PortfolioAnalysisRequest =
 export type PortfolioAnalysis =
   PortfolioAnalysisOperation["responses"]["200"]["content"]["application/json"];
 export type PortfolioMode = PortfolioAnalysisRequest["mode"];
-export type PositionIn = PortfolioAnalysisRequest["positions"][number];
 export type AllocationPosition =
   PortfolioAnalysis["allocation"]["positions"][number];
 export type CorrelationMatrix = PortfolioAnalysis["correlation_matrix"];

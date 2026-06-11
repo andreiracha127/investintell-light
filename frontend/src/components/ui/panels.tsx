@@ -17,9 +17,12 @@ export function Card({
       <h2 className="text-[11px] font-semibold tracking-[0.06em] uppercase text-text-muted mb-3">
         {title}
         {subtitle && (
-          <span className="ml-2 normal-case tracking-normal font-normal text-text-muted">
-            {subtitle}
-          </span>
+          <>
+            {" "}
+            <span className="ml-1.5 normal-case tracking-normal font-normal text-text-muted">
+              {subtitle}
+            </span>
+          </>
         )}
       </h2>
       {children}

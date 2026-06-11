@@ -80,11 +80,9 @@ export function StaticPortfolioView() {
   };
 
   const addRow = () => {
-    setRows((prev) =>
-      prev.length >= MAX_POSITIONS
-        ? prev
-        : [...prev, { id: nextRowId.current++, ticker: "", value: "" }],
-    );
+    if (rows.length >= MAX_POSITIONS) return;
+    const id = nextRowId.current++;
+    setRows((prev) => [...prev, { id, ticker: "", value: "" }]);
   };
 
   const removeRow = (id: number) => {
