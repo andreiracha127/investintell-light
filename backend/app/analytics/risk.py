@@ -14,7 +14,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from app.analytics._validation import reject_nan
+from app.analytics._validation import reject_nan, to_date
 from app.analytics.returns import align_returns
 
 _MIN_TAIL_POINTS = 10
@@ -40,15 +40,6 @@ class BestWorst:
     best_date: date
     worst_return: float
     worst_date: date
-
-
-def _to_date(value: object) -> date:
-    """Coerce an index label (Timestamp, datetime or date) to a ``date``."""
-    if isinstance(value, pd.Timestamp):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    return pd.Timestamp(value).date()  # type: ignore[arg-type]
 
 
 def annualized_volatility(returns: pd.Series, periods_per_year: int = 252) -> float:
@@ -146,8 +137,8 @@ def max_drawdown(prices: pd.Series) -> DrawdownResult:
     peak_label = prices.loc[:trough_label].idxmax()
     return DrawdownResult(
         depth=depth,
-        peak_date=_to_date(peak_label),
-        trough_date=_to_date(trough_label),
+        peak_date=to_date(peak_label),
+        trough_date=to_date(trough_label),
     )
 
 
@@ -170,9 +161,9 @@ def best_worst_day(returns: pd.Series) -> BestWorst:
     worst = float(returns.loc[worst_label])
     return BestWorst(
         best_return=best,
-        best_date=_to_date(best_label),
+        best_date=to_date(best_label),
         worst_return=worst,
-        worst_date=_to_date(worst_label),
+        worst_date=to_date(worst_label),
     )
 
 

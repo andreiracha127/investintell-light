@@ -13,6 +13,9 @@ from app.analytics.returns import (
     total_return,
 )
 from app.analytics.risk import (
+    _MIN_TAIL_POINTS as MIN_IN_RANGE_RETURNS,
+)
+from app.analytics.risk import (
     BestWorst,
     DrawdownResult,
     annualized_volatility,
@@ -33,6 +36,7 @@ __all__ = [
     "BestWorst",
     "DrawdownResult",
     "Histogram",
+    "MIN_IN_RANGE_RETURNS",
     "align_returns",
     "annualized_volatility",
     "best_worst_day",

@@ -6,9 +6,19 @@ that NaN propagation is caught up-front rather than silently in the middle of
 a computation.
 """
 
+import datetime as dt
 import math
 
 import pandas as pd
+
+
+def to_date(value: object) -> dt.date:
+    """Coerce an index label (Timestamp, datetime or date) to a ``date``."""
+    if isinstance(value, pd.Timestamp):
+        return value.date()
+    if isinstance(value, dt.date):
+        return value
+    return pd.Timestamp(value).date()  # type: ignore[arg-type]
 
 
 def reject_nan(series: pd.Series, func_name: str) -> None:

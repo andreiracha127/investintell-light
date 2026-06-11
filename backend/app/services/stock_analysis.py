@@ -26,6 +26,7 @@ from collections.abc import Hashable, Iterable, Mapping
 import pandas as pd
 
 from app.analytics import (
+    MIN_IN_RANGE_RETURNS,
     align_returns,
     annualized_volatility,
     best_worst_day,
@@ -42,6 +43,7 @@ from app.analytics import (
     simple_returns,
     total_return,
 )
+from app.analytics._validation import to_date as _to_date
 from app.schemas.analysis import (
     AnalysisHeader,
     AnalysisParams,
@@ -54,10 +56,6 @@ from app.schemas.analysis import (
     RangeKey,
     StockAnalysisResponse,
 )
-
-# Minimum in-range daily returns required to compute the stats block
-# (matches the analytics tail-statistics floor for VaR/CVaR/beta/correlation).
-_MIN_IN_RANGE_RETURNS = 10
 
 _HISTOGRAM_BINS = 20
 
@@ -114,15 +112,6 @@ def build_adj_close_series(records: Iterable[tuple[dt.date, float]]) -> pd.Serie
     return frame.set_index("date")["adj_close"].sort_index()
 
 
-def _to_date(value: object) -> dt.date:
-    """Coerce an index label (Timestamp, datetime or date) to a ``date``."""
-    if isinstance(value, pd.Timestamp):
-        return value.date()
-    if isinstance(value, dt.date):
-        return value
-    return pd.Timestamp(value).date()  # type: ignore[arg-type]
-
-
 def _series_points(series: pd.Series) -> list[tuple[dt.date, float]]:
     """Convert a date-indexed float series to ``[(date, value), ...]`` points."""
     return [
@@ -166,6 +155,32 @@ def _rebased_cumulative(returns: pd.Series) -> list[tuple[dt.date, float]]:
     if len(returns) > 1:
         points.extend(_series_points(cumulative_return_series(returns.iloc[1:])))
     return points
+
+
+def _resample_weekly(series: pd.Series) -> pd.Series:
+    """Resample a daily date-indexed float series to W-FRI taking last-of-week.
+
+    Empty weeks (all NaN) are dropped. Used for MAX-range line series so the
+    x-axis aligns with the weekly candle grid.
+    """
+    return series.resample("W-FRI").last().dropna()
+
+
+def _rebased_cumulative_weekly(returns: pd.Series) -> list[tuple[dt.date, float]]:
+    """Weekly cumulative-return points for MAX range, rebased to 0.0.
+
+    Builds the full daily cumulative series (first point = 0.0, rest compound),
+    then resamples to W-FRI taking last-of-week so the x-axis aligns with the
+    MAX candle grid. The first emitted point is the first in-range Friday.
+    """
+    # Build a daily cumulative series indexed from the first in-range date.
+    daily_cum = pd.Series(
+        [0.0] + list(cumulative_return_series(returns.iloc[1:]).to_numpy(dtype=float))
+        if len(returns) > 1
+        else [0.0],
+        index=returns.index[: (len(returns))],
+    )
+    return _series_points(_resample_weekly(daily_cum))
 
 
 def assemble_analysis(
@@ -216,10 +231,10 @@ def assemble_analysis(
     # In-range slice: ONLY returns dated strictly after `start` feed the
     # stats/histogram/cumulative blocks (the pad is rolling warm-up only).
     in_range_returns = asset_returns[asset_returns.index > start_ts]
-    if len(in_range_returns) < _MIN_IN_RANGE_RETURNS:
+    if len(in_range_returns) < MIN_IN_RANGE_RETURNS:
         raise InsufficientDataError(
             f"Only {len(in_range_returns)} in-range daily returns for {ticker} over range "
-            f"{range_key} — at least {_MIN_IN_RANGE_RETURNS} are required for the stats "
+            f"{range_key} — at least {MIN_IN_RANGE_RETURNS} are required for the stats "
             "block. Use a wider range or a ticker with more history."
         )
 
@@ -233,10 +248,10 @@ def assemble_analysis(
     in_mask = aligned_asset.index > start_ts
     aligned_in_asset = aligned_asset[in_mask]
     aligned_in_bench = aligned_bench[in_mask]
-    if len(aligned_in_asset) < _MIN_IN_RANGE_RETURNS:
+    if len(aligned_in_asset) < MIN_IN_RANGE_RETURNS:
         raise InsufficientDataError(
             f"Only {len(aligned_in_asset)} in-range trading days shared by {ticker} and "
-            f"benchmark {benchmark} — at least {_MIN_IN_RANGE_RETURNS} are required for "
+            f"benchmark {benchmark} — at least {MIN_IN_RANGE_RETURNS} are required for "
             "beta/correlation."
         )
     if len(asset_returns) < window or len(aligned_asset) < window:
@@ -272,20 +287,45 @@ def assemble_analysis(
 
     # Cumulative returns: aligned grid, sliced in-range, both rebased to 0
     # on the same first in-range date.
-    cumulative = CumulativeReturns(
-        asset=_rebased_cumulative(aligned_in_asset),
-        benchmark=_rebased_cumulative(aligned_in_bench),
-    )
+    # For MAX, resample to W-FRI so the x-axis aligns with the weekly candles.
+    if range_key == "MAX":
+        cumulative = CumulativeReturns(
+            asset=_rebased_cumulative_weekly(aligned_in_asset),
+            benchmark=_rebased_cumulative_weekly(aligned_in_bench),
+        )
+    else:
+        cumulative = CumulativeReturns(
+            asset=_rebased_cumulative(aligned_in_asset),
+            benchmark=_rebased_cumulative(aligned_in_bench),
+        )
 
     # Rolling series: warm up on the padded returns, then slice to the
     # visible range and drop NaN rows (leading min_periods warm-up and any
-    # undefined windows).
+    # undefined windows). For MAX, resample to W-FRI to bound the payload and
+    # align the x-axis with the candle grid.
     def _sliced(series: pd.Series) -> list[tuple[dt.date, float]]:
-        return _series_points(series[series.index > start_ts].dropna())
+        daily = series[series.index > start_ts].dropna()
+        return _series_points(_resample_weekly(daily) if range_key == "MAX" else daily)
 
     rolling_vol_points = _sliced(rolling_volatility(asset_returns, window))
     rolling_beta_points = _sliced(rolling_beta(asset_returns, bench_returns, window))
     rolling_corr_points = _sliced(rolling_correlation(asset_returns, bench_returns, window))
+
+    # Bound assertion: "bounded everything" — the longest line series must not
+    # exceed the candle budget (same price_series_max_points cap).
+    _all_line_series = [
+        cumulative.asset,
+        cumulative.benchmark,
+        rolling_vol_points,
+        rolling_beta_points,
+        rolling_corr_points,
+    ]
+    longest = max(len(s) for s in _all_line_series)
+    if longest > max_candles:
+        raise PayloadTooLargeError(
+            f"Range {range_key} for {ticker}: longest line series has {longest} points, "
+            f"exceeding the maximum of {max_candles}."
+        )
 
     histogram = return_histogram(in_range_returns, bins=_HISTOGRAM_BINS)
 
