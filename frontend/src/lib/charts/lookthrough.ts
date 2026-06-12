@@ -225,6 +225,9 @@ export function buildResidualWaterfallOption(
     };
   });
 
+  // y-axis max: at least 100, or round the total up to the next 10.
+  const yMax = Math.ceil(Math.max(100, total) / 10) * 10;
+
   return {
     animation: false,
     backgroundColor: "transparent",
@@ -247,25 +250,34 @@ export function buildResidualWaterfallOption(
         return `<span style="font-size:12px">${visible.name}: <b>${formatNumber(visible.value, 2)}%</b></span>`;
       },
     },
-    grid: { left: 168, right: 72, top: 16, bottom: 8 },
+    // Vertical layout: generous bottom margin for two-line wrapped labels,
+    // slim left for the % axis, slim right for breathing room.
+    grid: { left: 48, right: 16, top: 24, bottom: 64 },
     xAxis: {
+      type: "category",
+      data: categories,
+      axisLine: { lineStyle: { color: colors.grid } },
+      axisTick: { show: false },
+      axisLabel: {
+        color: colors.textSecondary,
+        interval: 0,
+        width: 72,
+        overflow: "break",
+      },
+    },
+    yAxis: {
       type: "value",
+      min: 0,
+      max: yMax,
       splitLine: { lineStyle: { color: colors.grid } },
       axisLabel: {
         color: colors.textMuted,
         formatter: (value: number) => formatNumber(value, 0) + "%",
       },
     },
-    yAxis: {
-      type: "category",
-      data: categories,
-      axisLine: { lineStyle: { color: colors.grid } },
-      axisTick: { show: false },
-      axisLabel: { color: colors.textSecondary },
-    },
     series: [
       {
-        // Invisible offset (placeholder stack).
+        // Invisible offset (placeholder stack — now vertical bottom-offset).
         name: "_offset",
         type: "bar",
         stack: "waterfall",
@@ -283,7 +295,7 @@ export function buildResidualWaterfallOption(
         data: barData,
         label: {
           show: true,
-          position: "right",
+          position: "top",
           color: colors.textSecondary,
           formatter: (params) =>
             formatNumber(params.value as number, 1) + "%",
