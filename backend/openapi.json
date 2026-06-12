@@ -2169,6 +2169,64 @@
         }
       }
     },
+    "/funds/{instrument_id}/history": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Fund History",
+        "description": "S\u00e9rie do fundo no contrato do chart interativo ({t,o,h,l,c,v} + mode).\n\nETF com ticker \u2192 OHLCV ajustado de eod_prices (mesmo caminho dos stocks,\ncom warm on-demand); demais fundos (ou ETF sem cobertura/Tiingo fora) \u2192\nNAV de fund_nav com o=h=l=c=nav, v=0.",
+        "operationId": "get_fund_history_funds__instrument_id__history_get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instrument Id"
+            }
+          },
+          {
+            "name": "bars",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 5000,
+              "minimum": 30,
+              "description": "N\u00ba de barras di\u00e1rias mais recentes.",
+              "default": 2520,
+              "title": "Bars"
+            },
+            "description": "N\u00ba de barras di\u00e1rias mais recentes."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundHistoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/builder/optimize": {
       "post": {
         "tags": [
@@ -2395,6 +2453,67 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RebalancePreviewResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/search/symbols": {
+      "get": {
+        "tags": [
+          "search"
+        ],
+        "summary": "Search Symbols",
+        "description": "Sugest\u00f5es para o Compare: a\u00e7\u00f5es (universe) e fundos com ticker.",
+        "operationId": "search_symbols_search_symbols_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40,
+              "title": "Q"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 25,
+              "minimum": 1,
+              "default": 10,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SymbolSearchResult"
+                  },
+                  "title": "Response Search Symbols Search Symbols Get"
                 }
               }
             }
@@ -3528,6 +3647,54 @@
         ],
         "title": "FundClassOut",
         "description": "One share class of the fund's series (F8.6b).\n\nNOTE: only the series' representative class has a NAV in the source \u2014\nany class ticker is priced/analyzed with the SERIES NAV as a proxy.\n``expense_ratio`` is a fraction (0.0069 = 0.69%)."
+      },
+      "FundHistoryResponse": {
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instrument Id"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "ohlcv",
+              "nav"
+            ],
+            "title": "Mode"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "bars": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryBar"
+            },
+            "type": "array",
+            "title": "Bars"
+          }
+        },
+        "type": "object",
+        "required": [
+          "instrument_id",
+          "ticker",
+          "mode",
+          "count",
+          "bars"
+        ],
+        "title": "FundHistoryResponse"
       },
       "FundHoldingItem": {
         "properties": {
@@ -7901,6 +8068,49 @@
         ],
         "title": "StockCorrelationResponse",
         "description": "Pairwise Pearson correlation matrix of the holdings' daily returns."
+      },
+      "SymbolSearchResult": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "instrument_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "name",
+          "kind",
+          "instrument_id"
+        ],
+        "title": "SymbolSearchResult"
       },
       "TickerRef": {
         "properties": {

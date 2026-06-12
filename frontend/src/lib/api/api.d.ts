@@ -675,6 +675,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/funds/{instrument_id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fund History
+         * @description Série do fundo no contrato do chart interativo ({t,o,h,l,c,v} + mode).
+         *
+         *     ETF com ticker → OHLCV ajustado de eod_prices (mesmo caminho dos stocks,
+         *     com warm on-demand); demais fundos (ou ETF sem cobertura/Tiingo fora) →
+         *     NAV de fund_nav com o=h=l=c=nav, v=0.
+         */
+        get: operations["get_fund_history_funds__instrument_id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/builder/optimize": {
         parameters: {
             query?: never;
@@ -787,6 +811,26 @@ export interface paths {
          * @description Avaliação on-demand: decisão + drifts + proposta + turnover (advisory).
          */
         get: operations["get_rebalance_preview_portfolios__portfolio_id__rebalance_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/search/symbols": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Symbols
+         * @description Sugestões para o Compare: ações (universe) e fundos com ticker.
+         */
+        get: operations["search_symbols_search_symbols_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1404,6 +1448,25 @@ export interface components {
             ticker: string;
             /** Expense Ratio */
             expense_ratio: number | null;
+        };
+        /** FundHistoryResponse */
+        FundHistoryResponse: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Ticker */
+            ticker: string | null;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "ohlcv" | "nav";
+            /** Count */
+            count: number;
+            /** Bars */
+            bars: components["schemas"]["HistoryBar"][];
         };
         /**
          * FundHoldingItem
@@ -3259,6 +3322,17 @@ export interface components {
              */
             as_of: string;
         };
+        /** SymbolSearchResult */
+        SymbolSearchResult: {
+            /** Symbol */
+            symbol: string;
+            /** Name */
+            name: string | null;
+            /** Kind */
+            kind: string;
+            /** Instrument Id */
+            instrument_id: string | null;
+        };
         /**
          * TickerRef
          * @description Pseudo-asset reference: a plain instrument ticker.
@@ -4473,6 +4547,40 @@ export interface operations {
             };
         };
     };
+    get_fund_history_funds__instrument_id__history_get: {
+        parameters: {
+            query?: {
+                /** @description Nº de barras diárias mais recentes. */
+                bars?: number;
+            };
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     optimize_builder_optimize_post: {
         parameters: {
             query?: never;
@@ -4643,6 +4751,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RebalancePreviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_symbols_search_symbols_get: {
+        parameters: {
+            query: {
+                q: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SymbolSearchResult"][];
                 };
             };
             /** @description Validation Error */
