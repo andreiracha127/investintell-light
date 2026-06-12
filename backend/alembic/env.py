@@ -1,4 +1,5 @@
 import asyncio
+import os
 from logging.config import fileConfig
 
 from sqlalchemy.engine import Connection
@@ -6,6 +7,12 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import context
 from app.core.config import get_settings  # noqa: E402
+
+# In shared-database deployments (e.g. Timescale Cloud, where the Light app
+# lives in its own schema next to other tenants' public schema) the version
+# table must be pinned to the app schema or search_path resolution finds a
+# foreign alembic_version. Unset locally (dedicated database).
+VERSION_TABLE_SCHEMA = os.environ.get("ALEMBIC_VERSION_SCHEMA") or None
 
 # Alembic Config object, which provides access to values within the .ini file.
 config = context.config
@@ -29,13 +36,18 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        version_table_schema=VERSION_TABLE_SCHEMA,
     )
     with context.begin_transaction():
         context.run_migrations()
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        version_table_schema=VERSION_TABLE_SCHEMA,
+    )
     with context.begin_transaction():
         context.run_migrations()
 
