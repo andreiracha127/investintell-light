@@ -292,14 +292,9 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
       </div>
 
       {/* ── Consolidated exposure (look-through) ──────────────────────── */}
-      {colors && (
-        <div className="mt-4">
-          <FundLookthroughSection
-            instrumentId={fund.instrument_id}
-            colors={colors}
-          />
-        </div>
-      )}
+      <div className="mt-4">
+        <FundLookthroughSection instrumentId={fund.instrument_id} />
+      </div>
 
       <p className="mt-4 text-[11px] text-text-muted">{fund.classification_note}</p>
     </div>

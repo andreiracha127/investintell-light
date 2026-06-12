@@ -118,6 +118,19 @@ const NAV_ITEMS: { href: string; match: (p: string) => boolean; label: string; i
       </svg>
     ),
   },
+  {
+    href: "/macro",
+    match: (p) => p.startsWith("/macro"),
+    label: "Macro",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+        <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.3" />
+        <path d="M2.5 8h11" stroke="currentColor" strokeWidth="1.1" />
+        <path d="M8 2.5v11" stroke="currentColor" strokeWidth="1.1" />
+        <path d="M4.5 11.5C5.5 9 6.5 7 8 7s2.5 2 3.5 4.5" stroke="var(--color-accent)" strokeWidth="1.4" fill="none" />
+      </svg>
+    ),
+  },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
