@@ -2,7 +2,7 @@
 
 import uuid
 
-from app.services.symbol_search import SymbolHit, rank_hits
+from app.services.symbol_search import SymbolHit, _escape_like, rank_hits
 
 FID = uuid.uuid4()
 
@@ -36,3 +36,32 @@ def test_limit_applied_after_ranking() -> None:
 def test_case_insensitive_query() -> None:
     out = rank_hits([_stock("MSFT")], "msft", 10)
     assert out[0].symbol == "MSFT"
+
+
+# ---------------------------------------------------------------------------
+# _escape_like — pure unit tests (no DB)
+# ---------------------------------------------------------------------------
+
+
+def test_escape_like_percent() -> None:
+    assert _escape_like("100%") == "100\\%"
+
+
+def test_escape_like_underscore() -> None:
+    assert _escape_like("A_B") == "A\\_B"
+
+
+def test_escape_like_backslash() -> None:
+    assert _escape_like("C:\\path") == "C:\\\\path"
+
+
+def test_escape_like_combined() -> None:
+    assert _escape_like("50%_off\\") == "50\\%\\_off\\\\"
+
+
+def test_escape_like_no_special_chars() -> None:
+    assert _escape_like("AAPL") == "AAPL"
+
+
+def test_escape_like_empty_string() -> None:
+    assert _escape_like("") == ""

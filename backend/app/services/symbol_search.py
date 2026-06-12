@@ -16,6 +16,11 @@ from app.models.universe import UniverseConstituent
 FETCH_CAP = 50  # por tabela, antes do ranking
 
 
+def _escape_like(value: str) -> str:
+    """Escape LIKE wildcards in user search input (backslash escape char)."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 @dataclass(frozen=True)
 class SymbolHit:
     symbol: str
@@ -25,29 +30,40 @@ class SymbolHit:
 
 
 async def fetch_stock_hits(session: AsyncSession, q: str) -> list[SymbolHit]:
-    prefix = f"{q.upper()}%"
-    sub = f"%{q}%"
+    q_upper = q.upper()
+    q_esc = _escape_like(q_upper)
+    prefix = f"{q_esc}%"
+    sub = f"%{_escape_like(q)}%"
+    exact_match = (UniverseConstituent.ticker == q_upper).desc()
+    prefix_match = UniverseConstituent.ticker.like(prefix, escape="\\").desc()
     result = await session.execute(
         select(UniverseConstituent.ticker, UniverseConstituent.name)
         .where(
             UniverseConstituent.status == "active",
-            (UniverseConstituent.ticker.like(prefix))
-            | (UniverseConstituent.name.ilike(sub)),
+            (UniverseConstituent.ticker.like(prefix, escape="\\"))
+            | (UniverseConstituent.name.ilike(sub, escape="\\")),
         )
+        .order_by(exact_match, prefix_match, UniverseConstituent.ticker.asc())
         .limit(FETCH_CAP)
     )
     return [SymbolHit(symbol=t, name=n, kind="stock", instrument_id=None) for t, n in result.all()]
 
 
 async def fetch_fund_hits(session: AsyncSession, q: str) -> list[SymbolHit]:
-    prefix = f"{q.upper()}%"
-    sub = f"%{q}%"
+    q_upper = q.upper()
+    q_esc = _escape_like(q_upper)
+    prefix = f"{q_esc}%"
+    sub = f"%{_escape_like(q)}%"
+    ticker_upper = func.upper(Fund.ticker)
+    exact_match = (ticker_upper == q_upper).desc()
+    prefix_match = ticker_upper.like(prefix, escape="\\").desc()
     result = await session.execute(
         select(Fund.ticker, Fund.name, Fund.fund_type, Fund.instrument_id)
         .where(
             Fund.ticker.is_not(None),
-            (func.upper(Fund.ticker).like(prefix)) | (Fund.name.ilike(sub)),
+            (ticker_upper.like(prefix, escape="\\")) | (Fund.name.ilike(sub, escape="\\")),
         )
+        .order_by(exact_match, prefix_match, ticker_upper.asc())
         .limit(FETCH_CAP)
     )
     return [
