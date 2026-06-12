@@ -53,6 +53,12 @@ const TYPE_TAG: Record<string, string> = {
   mmf: "MMF",
 };
 
+// Backend stores the raw enum (equity/fixed_income/...); the table must show
+// the same labels the filter dropdown uses.
+const ASSET_CLASS_LABEL: Record<string, string> = Object.fromEntries(
+  ASSET_CLASSES.map((a) => [a.value, a.label]),
+);
+
 /** Sortable table columns — code is the backend whitelist column. */
 const COLUMNS: { code: string; label: string; numeric: boolean }[] = [
   { code: "ticker", label: "Ticker", numeric: false },
@@ -514,7 +520,9 @@ function FundRow({ fund, zebra }: { fund: FundListItem; zebra: boolean }) {
         <span className="block max-w-[200px] truncate">{fund.strategy_label}</span>
       </td>
       <td className={`${CELL_CLASS} text-left text-text-secondary`}>
-        {fund.asset_class ?? "—"}
+        {fund.asset_class
+          ? (ASSET_CLASS_LABEL[fund.asset_class] ?? fund.asset_class)
+          : "—"}
       </td>
       <td className={`${CELL_CLASS} text-right`}>
         {fund.aum_usd !== null ? `$${formatCompact(fund.aum_usd)}` : "—"}
