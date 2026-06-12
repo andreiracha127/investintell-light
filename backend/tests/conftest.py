@@ -10,3 +10,13 @@ async def client() -> "AsyncClient":
     transport = ASGITransport(app=create_app())
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+
+
+@pytest.fixture(autouse=True)
+def _reset_catalog_cache() -> None:
+    """O cache de catálogo é um singleton de processo — sem esta limpeza, a
+    resposta cacheada de um teste vazaria para o seguinte (mocks diferentes,
+    mesma rota)."""
+    from app.core.cache import MemoryCache, catalog_cache
+
+    catalog_cache._memory = MemoryCache()
