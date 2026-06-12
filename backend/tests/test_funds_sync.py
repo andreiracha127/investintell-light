@@ -221,6 +221,31 @@ def test_build_fund_row_full_cascade() -> None:
     assert row["source_nav_max_date"] == dt.date(2026, 6, 5)
 
 
+def test_build_fund_row_nport_aum_is_last_resort() -> None:
+    """nport_aum só vence quando monthly_avg_net_assets (registered/etf) e
+    classes_aum estão ausentes — e nunca sobrepõe uma fonte primária."""
+    row = build_fund_row(
+        _identity(), None, None, None, None, _NOW,
+        nport_aum=Decimal("19550772563"),
+    )
+    assert row["aum_usd"] == Decimal("19550772563")
+
+    registered = {"fund_name": "Reg Fund", "monthly_avg_net_assets": Decimal(5)}
+    row = build_fund_row(
+        _identity(), None, registered, None, None, _NOW,
+        classes_aum=Decimal(7),
+        nport_aum=Decimal(9),
+    )
+    assert row["aum_usd"] == Decimal(5)  # fonte primária vence
+
+    row = build_fund_row(
+        _identity(), None, None, None, None, _NOW,
+        classes_aum=Decimal(7),
+        nport_aum=Decimal(9),
+    )
+    assert row["aum_usd"] == Decimal(7)  # classes antes do N-PORT
+
+
 def test_build_fund_row_unknown_series_never_null_name() -> None:
     row = build_fund_row(
         _identity(ticker=None, isin=None, lei=None), None, None, None, None, _NOW

@@ -205,6 +205,21 @@ WHERE c.net_assets IS NOT NULL
 GROUP BY c.series_id
 """
 
+# AUM fallback de ÚLTIMA instância (antes do NAV fallback do orchestrator):
+# total de mercado dos holdings no último N-PORT (CAGG do data-lake).
+# Validado 2026-06-12 contra o AUM oficial: VIGRX 99,94% / ANCFX 99,8% de
+# aderência; recupera ~1.890 das 1.895 séries sem nenhuma das outras fontes.
+# Guard: coverage_pct em [80,120] — fora disso a soma dos holdings não
+# representa o NAV (ex.: cobertura 68% subestimaria o fundo em um terço).
+NPORT_AUM_SQL = """
+SELECT DISTINCT ON (series_id) series_id, total_market_value AS aum_usd
+FROM cagg_nport_series_profile
+WHERE series_id = ANY($1::text[])
+  AND total_market_value > 0
+  AND coverage_pct BETWEEN 80 AND 120
+ORDER BY series_id, report_day DESC
+"""
+
 # Share-class catalog (F8.6b): one row per class_id, taken from the LATEST
 # filing (max xbrl_period_end, NULLs last) and restricted to classes with a
 # ticker for series in the synced universe. expense_ratio_pct is already a
@@ -427,6 +442,7 @@ def build_fund_row(
     peer_label: str | None = None,
     prospectus_fee: Decimal | None = None,
     classes_aum: Decimal | None = None,
+    nport_aum: Decimal | None = None,
 ) -> dict[str, Any]:
     """Assemble one `funds` row from the mother-DB source rows.
 
@@ -465,6 +481,7 @@ def build_fund_row(
             _get(registered, "monthly_avg_net_assets"),
             _get(etf, "monthly_avg_net_assets"),
             classes_aum,
+            nport_aum,
         ),
         # ETFs without an N-CEN benchmark fall back to the tracked index.
         "primary_benchmark": _first(
@@ -814,6 +831,22 @@ async def run_sync(
             str(r["series_id"]): r["aum_usd"]
             for r in await conn.fetch(CLASSES_AUM_SQL, series_ids)
         }
+        # A CAGG é objeto do data-lake: existe na fonte de produção (Tiger),
+        # mas não no Postgres local de dev — enriquecimento opcional, nunca
+        # derruba o sync (as 4 fontes primárias de AUM continuam acima).
+        nport_aum: dict[str, Any] = {}
+        if await conn.fetchval(
+            "SELECT to_regclass('public.cagg_nport_series_profile')"
+        ):
+            nport_aum = {
+                str(r["series_id"]): r["aum_usd"]
+                for r in await conn.fetch(NPORT_AUM_SQL, series_ids)
+            }
+        else:
+            logger.warning(
+                "cagg_nport_series_profile ausente na fonte — fallback de "
+                "AUM via N-PORT pulado (fonte local de dev?)"
+            )
         logger.info(
             "Profiles: %d registered, %d etfs, %d mmfs, %d stage labels for %d series",
             len(registered), len(etfs), len(mmfs), len(stage_labels), len(series_ids),
@@ -852,6 +885,7 @@ async def run_sync(
                 peer_label=peer_labels.get(instrument_id),
                 prospectus_fee=prospectus_fees.get(series_id),
                 classes_aum=classes_aum.get(series_id),
+                nport_aum=nport_aum.get(series_id),
             )
             fund_rows[row["instrument_id"]] = row
             ft = row["fund_type"]
