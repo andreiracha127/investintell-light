@@ -3,25 +3,32 @@
 import datetime as dt
 import uuid
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+import app.api.routes.funds as funds_routes
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
 from app.main import create_app
 from app.tiingo.exceptions import TiingoError
 
-import app.api.routes.funds as funds_routes
-
 FUND_ID = uuid.uuid4()
 
 
-def _client() -> AsyncClient:
+def _client(session_factory=None) -> AsyncClient:
     app = create_app()
-    app.dependency_overrides[get_session] = lambda: None
+    app.dependency_overrides[get_session] = session_factory or (lambda: None)
     app.dependency_overrides[get_tiingo_client] = lambda: None
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+def _async_session_stub() -> AsyncMock:
+    """Return a lightweight async session stub with a no-op rollback()."""
+    stub = AsyncMock()
+    stub.rollback = AsyncMock(return_value=None)
+    return stub
 
 
 def _etf() -> SimpleNamespace:
@@ -68,8 +75,10 @@ async def test_etf_uses_ohlcv_path() -> None:
     body = resp.json()
     assert body["mode"] == "ohlcv" and body["ticker"] == "SPY" and body["count"] == 2
     bar = body["bars"][-1]
-    assert bar["t"] == int(dt.datetime(2026, 6, 11, tzinfo=dt.timezone.utc).timestamp() * 1000)
-    assert (bar["o"], bar["h"], bar["l"], bar["c"], bar["v"]) == (104.0, 106.0, 103.0, 105.5, 1_200_000)
+    assert bar["t"] == int(dt.datetime(2026, 6, 11, tzinfo=dt.UTC).timestamp() * 1000)
+    assert (bar["o"], bar["h"], bar["l"], bar["c"], bar["v"]) == (
+        104.0, 106.0, 103.0, 105.5, 1_200_000
+    )
 
 
 @pytest.mark.anyio
@@ -93,11 +102,13 @@ async def test_etf_degrades_to_nav_when_tiingo_fails(monkeypatch: pytest.MonkeyP
     async def ensure(session, client, symbols, start, end):
         raise TiingoError("down")
 
+    session_stub = _async_session_stub()
     monkeypatch.setattr(funds_routes, "_ensure_eod_or_http_error", ensure)
-    async with _client() as client:
+    async with _client(session_factory=lambda: session_stub) as client:
         resp = await client.get(f"/funds/{FUND_ID}/history")
     assert resp.status_code == 200
     assert resp.json()["mode"] == "nav"
+    session_stub.rollback.assert_awaited_once()
 
 
 @pytest.mark.anyio

@@ -37,6 +37,7 @@ from app.schemas.analysis import RangeKey, StockAnalysisResponse
 from app.schemas.market import HistoryBar, HistoryResponse, MarketOverviewResponse
 from app.schemas.news import NewsArticle, NewsResponse
 from app.schemas.prices import PricePoint, PriceSeriesResponse
+from app.services import market_overview
 from app.services._series import (
     RANGE_DAYS,
 )
@@ -44,9 +45,11 @@ from app.services._series import (
     select_adj_close_rows as _select_adj_close_rows,
 )
 from app.services._series import (
+    select_adj_ohlcv_rows as _select_adj_ohlcv_rows,
+)
+from app.services._series import (
     select_date_bounds as _select_date_bounds,
 )
-from app.services import market_overview
 from app.services.stock_analysis import (
     StockAnalysisError,
     assemble_analysis,
@@ -195,28 +198,6 @@ async def _select_ohlcv_rows(
     return list(result.tuples().all())
 
 
-async def _select_adj_ohlcv_rows(
-    session: AsyncSession, ticker: str, start: dt.date, end: dt.date
-) -> list[tuple[dt.date, float, float, float, float, int]]:
-    """(date, adj_open, adj_high, adj_low, adj_close, adj_volume) em [start, end].
-
-    Ajustado, não cru: contínuo em splits/dividendos E coincide com os ticks
-    ao vivo na barra corrente (a Tiingo ancora o ajuste no presente).
-    """
-    result = await session.execute(
-        select(
-            EodPrice.date,
-            EodPrice.adj_open,
-            EodPrice.adj_high,
-            EodPrice.adj_low,
-            EodPrice.adj_close,
-            EodPrice.adj_volume,
-        )
-        .where(EodPrice.ticker == ticker, EodPrice.date >= start, EodPrice.date <= end)
-        .order_by(EodPrice.date)
-    )
-    return list(result.tuples().all())
-
 
 @router.get("/{ticker}/history", response_model=HistoryResponse)
 async def get_stock_history(
@@ -243,7 +224,7 @@ async def get_stock_history(
     rows = rows[-bars:]
 
     def _ms(d: dt.date) -> int:
-        return int(dt.datetime(d.year, d.month, d.day, tzinfo=dt.timezone.utc).timestamp() * 1000)
+        return int(dt.datetime(d.year, d.month, d.day, tzinfo=dt.UTC).timestamp() * 1000)
 
     return HistoryResponse(
         ticker=symbol,

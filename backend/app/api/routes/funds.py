@@ -32,15 +32,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._shared import ensure_eod_or_http_error
-from app.api.routes.stocks import _select_adj_ohlcv_rows
-from app.core.tiingo_provider import get_tiingo_client
-from app.tiingo.client import TiingoClient
-from app.tiingo.exceptions import TiingoError
-
 from app.core.datalake import get_datalake_session
 from app.core.db import get_session
+from app.core.tiingo_provider import get_tiingo_client
 from app.models.fund import Fund, FundNav
-from app.schemas.market import FundHistoryResponse, HistoryBar
 from app.schemas.funds import (
     FundClassOut,
     FundHoldingItem,
@@ -57,16 +52,21 @@ from app.schemas.lookthrough import (
     LookthroughSummaryOut,
     build_dimensions,
 )
+from app.schemas.market import FundHistoryResponse, HistoryBar
 from app.services import funds_catalog as catalog
 from app.services import lookthrough
+from app.services._series import select_adj_ohlcv_rows as _select_adj_ohlcv_rows_impl
 from app.services.screener import render_csv
+from app.tiingo.client import TiingoClient
+from app.tiingo.exceptions import TiingoError
 
 router = APIRouter(tags=["funds"])
 
 logger = logging.getLogger(__name__)
 
-# Module-level alias so tests can monkeypatch it directly on this module.
+# Module-level aliases so tests can monkeypatch them directly on this module.
 _ensure_eod_or_http_error = ensure_eod_or_http_error
+_select_adj_ohlcv_rows = _select_adj_ohlcv_rows_impl
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 DatalakeDep = Annotated[AsyncSession, Depends(get_datalake_session)]
@@ -370,7 +370,7 @@ async def _select_nav_rows(
 
 
 def _ms(d: dt.date) -> int:
-    return int(dt.datetime(d.year, d.month, d.day, tzinfo=dt.timezone.utc).timestamp() * 1000)
+    return int(dt.datetime(d.year, d.month, d.day, tzinfo=dt.UTC).timestamp() * 1000)
 
 
 @router.get("/funds/{instrument_id}/history", response_model=FundHistoryResponse)
@@ -402,6 +402,7 @@ async def get_fund_history(
             rows = await _select_adj_ohlcv_rows(session, symbol, start, today)
         except (HTTPException, TiingoError) as exc:
             logger.warning("Fund %s ETF history degraded to NAV: %s", instrument_id, exc)
+            await session.rollback()
             rows = []
         if rows:
             rows = rows[-bars:]
