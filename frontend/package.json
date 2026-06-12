@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "types": "openapi-typescript ../backend/openapi.json -o src/lib/api/api.d.ts"
+    "types": "openapi-typescript ../backend/openapi.json -o src/lib/api/api.d.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.0",
@@ -27,6 +28,7 @@
     "eslint-config-next": "15.5.19",
     "openapi-typescript": "^7",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.8"
   }
 }
