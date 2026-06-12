@@ -24,6 +24,28 @@
         }
       }
     },
+    "/stocks/overview": {
+      "get": {
+        "tags": [
+          "stocks"
+        ],
+        "summary": "Get Market Overview",
+        "description": "Payload \u00fanico da landing /stocks \u2014 leaders/setores das tabelas locais.\n\nLeaders e setores leem eod_prices \u22c8 universe_constituents (pipeline batch\nF6.2); ficam t\u00e3o frescos quanto o \u00faltimo backfill. Os 4 ETFs de \u00edndice s\u00e3o\npainel SECUND\u00c1RIO: warm on-demand via ensure_eod, e falha da Tiingo degrada\npara indices=[] com warning (degrada\u00e7\u00e3o declarada, como o news stale).",
+        "operationId": "get_market_overview_stocks_overview_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketOverviewResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/stocks/{ticker}/prices": {
       "get": {
         "tags": [
@@ -88,6 +110,63 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PriceSeriesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/stocks/{ticker}/history": {
+      "get": {
+        "tags": [
+          "stocks"
+        ],
+        "summary": "Get Stock History",
+        "description": "OHLCV di\u00e1rio ajustado no contrato do chart interativo ({t,o,h,l,c,v}).\n\nResample semanal/mensal \u00e9 client-side (engine). t = epoch ms UTC do preg\u00e3o.",
+        "operationId": "get_stock_history_stocks__ticker__history_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "bars",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 5000,
+              "minimum": 30,
+              "description": "N\u00ba de barras di\u00e1rias mais recentes.",
+              "default": 760,
+              "title": "Bars"
+            },
+            "description": "N\u00ba de barras di\u00e1rias mais recentes."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryResponse"
                 }
               }
             }
@@ -4587,6 +4666,11 @@
           "database": {
             "type": "string",
             "title": "Database"
+          },
+          "cache": {
+            "type": "string",
+            "title": "Cache",
+            "default": "memory"
           }
         },
         "type": "object",
@@ -4631,6 +4715,173 @@
         ],
         "title": "HistogramOut",
         "description": "Histogram of in-range daily returns."
+      },
+      "HistoryBar": {
+        "properties": {
+          "t": {
+            "type": "integer",
+            "title": "T"
+          },
+          "o": {
+            "type": "number",
+            "title": "O"
+          },
+          "h": {
+            "type": "number",
+            "title": "H"
+          },
+          "l": {
+            "type": "number",
+            "title": "L"
+          },
+          "c": {
+            "type": "number",
+            "title": "C"
+          },
+          "v": {
+            "type": "integer",
+            "title": "V"
+          }
+        },
+        "type": "object",
+        "required": [
+          "t",
+          "o",
+          "h",
+          "l",
+          "c",
+          "v"
+        ],
+        "title": "HistoryBar"
+      },
+      "HistoryResponse": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "bars": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryBar"
+            },
+            "type": "array",
+            "title": "Bars"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "count",
+          "bars"
+        ],
+        "title": "HistoryResponse"
+      },
+      "IndexCard": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "last": {
+            "type": "number",
+            "title": "Last"
+          },
+          "change_pct": {
+            "type": "number",
+            "title": "Change Pct"
+          },
+          "spark": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Spark"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "name",
+          "last",
+          "change_pct",
+          "spark"
+        ],
+        "title": "IndexCard"
+      },
+      "LeaderRow": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          },
+          "last": {
+            "type": "number",
+            "title": "Last"
+          },
+          "change": {
+            "type": "number",
+            "title": "Change"
+          },
+          "change_pct": {
+            "type": "number",
+            "title": "Change Pct"
+          },
+          "volume": {
+            "type": "integer",
+            "title": "Volume"
+          },
+          "high_52w": {
+            "type": "number",
+            "title": "High 52W"
+          },
+          "low_52w": {
+            "type": "number",
+            "title": "Low 52W"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "name",
+          "sector",
+          "last",
+          "change",
+          "change_pct",
+          "volume",
+          "high_52w",
+          "low_52w"
+        ],
+        "title": "LeaderRow"
       },
       "LookthroughSummaryOut": {
         "properties": {
@@ -4840,6 +5091,88 @@
         ],
         "title": "MacroRegimeResponse",
         "description": "Estado do detector bin\u00e1rio de stress de cr\u00e9dito (worker credit_regime).\n\nO composite legado (macro_regime_snapshot) foi refutado pelo backtest e\nn\u00e3o alimenta esta resposta nem qualquer gatilho de rebalanceamento."
+      },
+      "MarketOverviewResponse": {
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "universe_size": {
+            "type": "integer",
+            "title": "Universe Size"
+          },
+          "indices": {
+            "items": {
+              "$ref": "#/components/schemas/IndexCard"
+            },
+            "type": "array",
+            "title": "Indices"
+          },
+          "most_active": {
+            "items": {
+              "$ref": "#/components/schemas/LeaderRow"
+            },
+            "type": "array",
+            "title": "Most Active"
+          },
+          "gainers": {
+            "items": {
+              "$ref": "#/components/schemas/LeaderRow"
+            },
+            "type": "array",
+            "title": "Gainers"
+          },
+          "losers": {
+            "items": {
+              "$ref": "#/components/schemas/LeaderRow"
+            },
+            "type": "array",
+            "title": "Losers"
+          },
+          "highs_52w": {
+            "items": {
+              "$ref": "#/components/schemas/LeaderRow"
+            },
+            "type": "array",
+            "title": "Highs 52W"
+          },
+          "lows_52w": {
+            "items": {
+              "$ref": "#/components/schemas/LeaderRow"
+            },
+            "type": "array",
+            "title": "Lows 52W"
+          },
+          "sectors": {
+            "items": {
+              "$ref": "#/components/schemas/SectorPerf"
+            },
+            "type": "array",
+            "title": "Sectors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "as_of",
+          "universe_size",
+          "indices",
+          "most_active",
+          "gainers",
+          "losers",
+          "highs_52w",
+          "lows_52w",
+          "sectors"
+        ],
+        "title": "MarketOverviewResponse"
       },
       "MetricDefOut": {
         "properties": {
@@ -7333,6 +7666,29 @@
         ],
         "title": "ScreenResultsResponse",
         "description": "GET /screener/screens/{id}/results \u2014 dynamic, whitelisted columns."
+      },
+      "SectorPerf": {
+        "properties": {
+          "sector": {
+            "type": "string",
+            "title": "Sector"
+          },
+          "change_pct_median": {
+            "type": "number",
+            "title": "Change Pct Median"
+          },
+          "n": {
+            "type": "integer",
+            "title": "N"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sector",
+          "change_pct_median",
+          "n"
+        ],
+        "title": "SectorPerf"
       },
       "StackedSeries": {
         "properties": {

@@ -27,6 +27,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/stocks/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Market Overview
+         * @description Payload único da landing /stocks — leaders/setores das tabelas locais.
+         *
+         *     Leaders e setores leem eod_prices ⋈ universe_constituents (pipeline batch
+         *     F6.2); ficam tão frescos quanto o último backfill. Os 4 ETFs de índice são
+         *     painel SECUNDÁRIO: warm on-demand via ensure_eod, e falha da Tiingo degrada
+         *     para indices=[] com warning (degradação declarada, como o news stale).
+         */
+        get: operations["get_market_overview_stocks_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/stocks/{ticker}/prices": {
         parameters: {
             query?: never;
@@ -39,6 +64,28 @@ export interface paths {
          * @description Return the EOD price series for *ticker*, ingesting on demand if cold/stale.
          */
         get: operations["get_price_series_stocks__ticker__prices_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/stocks/{ticker}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stock History
+         * @description OHLCV diário ajustado no contrato do chart interativo ({t,o,h,l,c,v}).
+         *
+         *     Resample semanal/mensal é client-side (engine). t = epoch ms UTC do pregão.
+         */
+        get: operations["get_stock_history_stocks__ticker__history_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1667,6 +1714,11 @@ export interface components {
             status: string;
             /** Database */
             database: string;
+            /**
+             * Cache
+             * @default memory
+             */
+            cache: string;
         };
         /**
          * HistogramOut
@@ -1688,6 +1740,64 @@ export interface components {
              * @description Each count divided by the maximum count (0-1), for direct bar heights.
              */
             counts_normalized: number[];
+        };
+        /** HistoryBar */
+        HistoryBar: {
+            /** T */
+            t: number;
+            /** O */
+            o: number;
+            /** H */
+            h: number;
+            /** L */
+            l: number;
+            /** C */
+            c: number;
+            /** V */
+            v: number;
+        };
+        /** HistoryResponse */
+        HistoryResponse: {
+            /** Ticker */
+            ticker: string;
+            /** Count */
+            count: number;
+            /** Bars */
+            bars: components["schemas"]["HistoryBar"][];
+        };
+        /** IndexCard */
+        IndexCard: {
+            /** Ticker */
+            ticker: string;
+            /** Name */
+            name: string;
+            /** Last */
+            last: number;
+            /** Change Pct */
+            change_pct: number;
+            /** Spark */
+            spark: number[];
+        };
+        /** LeaderRow */
+        LeaderRow: {
+            /** Ticker */
+            ticker: string;
+            /** Name */
+            name: string | null;
+            /** Sector */
+            sector: string | null;
+            /** Last */
+            last: number;
+            /** Change */
+            change: number;
+            /** Change Pct */
+            change_pct: number;
+            /** Volume */
+            volume: number;
+            /** High 52W */
+            high_52w: number;
+            /** Low 52W */
+            low_52w: number;
         };
         /**
          * LookthroughSummaryOut
@@ -1743,6 +1853,27 @@ export interface components {
             signal: components["schemas"]["RegimeSignalOut"];
             /** Recent Flips */
             recent_flips: components["schemas"]["RegimeFlipOut"][];
+        };
+        /** MarketOverviewResponse */
+        MarketOverviewResponse: {
+            /** As Of */
+            as_of: string | null;
+            /** Universe Size */
+            universe_size: number;
+            /** Indices */
+            indices: components["schemas"]["IndexCard"][];
+            /** Most Active */
+            most_active: components["schemas"]["LeaderRow"][];
+            /** Gainers */
+            gainers: components["schemas"]["LeaderRow"][];
+            /** Losers */
+            losers: components["schemas"]["LeaderRow"][];
+            /** Highs 52W */
+            highs_52w: components["schemas"]["LeaderRow"][];
+            /** Lows 52W */
+            lows_52w: components["schemas"]["LeaderRow"][];
+            /** Sectors */
+            sectors: components["schemas"]["SectorPerf"][];
         };
         /**
          * MetricDefOut
@@ -3008,6 +3139,15 @@ export interface components {
             /** Page Size */
             page_size: number;
         };
+        /** SectorPerf */
+        SectorPerf: {
+            /** Sector */
+            sector: string;
+            /** Change Pct Median */
+            change_pct_median: number;
+            /** N */
+            n: number;
+        };
         /**
          * StackedSeries
          * @description One series of a stacked chart: a position ticker, "CASH", or "TOTAL".
@@ -3196,6 +3336,26 @@ export interface operations {
             };
         };
     };
+    get_market_overview_stocks_overview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketOverviewResponse"];
+                };
+            };
+        };
+    };
     get_price_series_stocks__ticker__prices_get: {
         parameters: {
             query?: {
@@ -3219,6 +3379,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PriceSeriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_stock_history_stocks__ticker__history_get: {
+        parameters: {
+            query?: {
+                /** @description Nº de barras diárias mais recentes. */
+                bars?: number;
+            };
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryResponse"];
                 };
             };
             /** @description Validation Error */
