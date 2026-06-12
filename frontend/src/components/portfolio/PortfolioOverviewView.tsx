@@ -43,6 +43,7 @@ import { EChart } from "@/components/charts/EChart";
 import { Card, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
 import { PortfolioNewsPanel } from "@/components/portfolio/PortfolioNewsPanel";
 import { PortfolioLookthroughSection } from "@/components/portfolio/PortfolioLookthroughSection";
+import { PortfolioRebalanceSection } from "@/components/portfolio/PortfolioRebalanceSection";
 
 /** Carbon text field: flat, square, bottom rule only; accent rule on focus. */
 const INPUT_CLASS =
@@ -127,6 +128,7 @@ export function PortfolioOverviewView() {
               <PortfolioManageBar selected={selected} onSelect={setSelectedId} />
               <OverviewSection key={selected.id} portfolioId={selected.id} />
               <PortfolioLookthroughSection portfolioId={selected.id} />
+              <PortfolioRebalanceSection portfolioId={selected.id} />
               <PortfolioNewsPanel portfolioId={selected.id} />
             </>
           )}
