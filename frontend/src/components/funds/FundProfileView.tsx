@@ -8,15 +8,13 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 
-import { fetchFundProfile, type FundRisk } from "@/lib/api/client";
-import { EChart } from "@/components/charts/EChart";
+import { fetchFundHistory, fetchFundProfile, type FundRisk, type RangePreset } from "@/lib/api/client";
+import { InteractiveChart } from "@/components/charts/InteractiveChart";
 import { FundLookthroughSection } from "@/components/funds/FundLookthroughSection";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
 import { Card, KpiTile, StatRow } from "@/components/ui/panels";
-import { buildFundNavOption } from "@/lib/charts/fundnav";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
 import {
   formatCompact,
   formatDate,
@@ -67,19 +65,13 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     retry: retryPolicy,
   });
 
-  // chartColors() reads CSS custom properties — client-only, after mount.
-  const [colors, setColors] = useState<ChartColors | null>(null);
-  useEffect(() => {
-    setColors(chartColors());
-  }, []);
-
-  const navOption = useMemo(
-    () =>
-      profileQuery.data && colors
-        ? buildFundNavOption(profileQuery.data.nav, colors)
-        : null,
-    [profileQuery.data, colors],
-  );
+  const [range, setRange] = useState<RangePreset>("1Y");
+  const historyQuery = useQuery({
+    queryKey: ["fund-history", instrumentId],
+    queryFn: ({ signal }) => fetchFundHistory(instrumentId, 2520, signal),
+    staleTime: 60 * 60 * 1000,
+    retry: retryPolicy,
+  });
 
   if (profileQuery.isPending) {
     return (
@@ -171,15 +163,24 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
       {/* ── NAV chart + risk metrics ────────────────────────────────────── */}
       <div className="grid gap-4 lg:[grid-template-columns:2fr_1fr]">
         <div className="flex flex-col gap-4">
-          <Card title="NAV" subtitle="2y window, decimated server-side">
-            {fund.nav.length > 0 && navOption ? (
-              <EChart option={navOption} className="h-[300px] w-full" />
-            ) : (
+          {historyQuery.data && historyQuery.data.bars.length > 0 ? (
+            <InteractiveChart
+              key={historyQuery.data.mode}
+              symbol={historyQuery.data.ticker ?? ""}
+              bars={historyQuery.data.bars}
+              mode={historyQuery.data.mode}
+              range={range}
+              onRangeChange={setRange}
+            />
+          ) : (
+            <Card title={historyQuery.isPending ? "Loading chart…" : "NAV"}>
               <p className="py-8 text-center text-[13px] text-text-muted">
-                No NAV history in the synced window.
+                {historyQuery.isPending
+                  ? "Loading price history…"
+                  : "No price or NAV history in the synced window."}
               </p>
-            )}
-          </Card>
+            </Card>
+          )}
 
           <Card
             title="Top holdings"
