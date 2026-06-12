@@ -16,6 +16,10 @@ import { FundLookthroughSection } from "@/components/funds/FundLookthroughSectio
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
 import { Card, KpiTile, StatRow } from "@/components/ui/panels";
 import { buildFundNavOption } from "@/lib/charts/fundnav";
+import {
+  buildDrawdownOption,
+  buildMonthlyReturnsOption,
+} from "@/lib/charts/performance";
 import { chartColors, type ChartColors } from "@/lib/charts/theme";
 import {
   formatCompact,
@@ -23,6 +27,7 @@ import {
   formatNumber,
   formatPercent,
 } from "@/lib/format";
+import { drawdownSeries, monthlyReturns } from "@/lib/perf";
 
 const TYPE_TAG: Record<string, string> = {
   etf: "ETF",
@@ -80,6 +85,43 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
         : null,
     [profileQuery.data, colors],
   );
+
+  // Monthly returns heatmap — only shown when the nav spans ≥ 13 months
+  // (the first month is always excluded as a baseline; ≥13 months guarantees
+  // at least one full-month return to display).
+  const monthlyReturnsOption = useMemo(() => {
+    if (!profileQuery.data || !colors) return null;
+    const nav = profileQuery.data.nav;
+    // Check span: compare first and last valid-date's year×month.
+    const dates = nav
+      .filter((p) => p.nav !== null)
+      .map((p) => p.date)
+      .sort();
+    if (dates.length < 2) return null;
+    const [fy, fm] = dates[0].split("-").map(Number);
+    const [ly, lm] = dates[dates.length - 1].split("-").map(Number);
+    const spanMonths = (ly - fy) * 12 + (lm - fm);
+    if (spanMonths < 13) return null;
+    const cells = monthlyReturns(nav);
+    return buildMonthlyReturnsOption(cells, colors);
+  }, [profileQuery.data, colors]);
+
+  // Drawdown chart — only shown when nav spans ≥ 13 months (same gate).
+  const drawdownOption = useMemo(() => {
+    if (!profileQuery.data || !colors) return null;
+    const nav = profileQuery.data.nav;
+    const dates = nav
+      .filter((p) => p.nav !== null)
+      .map((p) => p.date)
+      .sort();
+    if (dates.length < 2) return null;
+    const [fy, fm] = dates[0].split("-").map(Number);
+    const [ly, lm] = dates[dates.length - 1].split("-").map(Number);
+    const spanMonths = (ly - fy) * 12 + (lm - fm);
+    if (spanMonths < 13) return null;
+    const dd = drawdownSeries(nav);
+    return buildDrawdownOption(dd, colors);
+  }, [profileQuery.data, colors]);
 
   if (profileQuery.isPending) {
     return (
@@ -180,6 +222,18 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
               </p>
             )}
           </Card>
+
+          {monthlyReturnsOption && (
+            <Card title="Monthly returns" subtitle="month-end over month-end, 2y window">
+              <EChart option={monthlyReturnsOption} className="h-[220px] w-full" />
+            </Card>
+          )}
+
+          {drawdownOption && (
+            <Card title="Drawdown" subtitle="running peak-to-trough, 2y window">
+              <EChart option={drawdownOption} className="h-[180px] w-full" />
+            </Card>
+          )}
 
           <Card
             title="Top holdings"
