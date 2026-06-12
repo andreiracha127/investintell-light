@@ -13,6 +13,7 @@ from app.models.fund import Fund, FundClass, FundHolding, FundNav, FundRiskLates
 from app.models.instrument import Instrument
 from app.models.news_item import NewsItem
 from app.models.portfolio import Portfolio, Position
+from app.models.rebalance import RebalancePolicy
 from app.models.screen import Screen, ScreenFilter
 from app.models.screener_metrics import ScreenerMetrics
 from app.models.universe import FundamentalsSnapshot, UniverseConstituent
@@ -29,6 +30,7 @@ __all__ = [
     "Instrument",
     "NewsItem",
     "Portfolio",
+    "RebalancePolicy",
     "Position",
     "Screen",
     "ScreenFilter",

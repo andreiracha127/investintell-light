@@ -66,3 +66,18 @@ async def get_datalake_session() -> AsyncGenerator[AsyncSession, None]:
     maker = _get_sessionmaker()
     async with maker() as session:
         yield session
+
+
+async def get_optional_datalake_session() -> AsyncGenerator[AsyncSession | None, None]:
+    """Like get_datalake_session, but yields None when the DSN is unset.
+
+    For routes where the data-lake is only needed conditionally (e.g. the
+    rebalance preview only touches it when macro_trigger_enabled) — the
+    consumer must fail loudly itself when it needs the session and got None.
+    """
+    if not get_settings().datalake_db_url:
+        yield None
+        return
+    maker = _get_sessionmaker()
+    async with maker() as session:
+        yield session
