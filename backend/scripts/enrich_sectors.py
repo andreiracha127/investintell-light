@@ -22,8 +22,8 @@ if str(_BACKEND_ROOT) not in sys.path:
 
 from sqlalchemy import text  # noqa: E402
 
-from app.core.db import AsyncSessionLocal  # noqa: E402
 from app.core.datalake import get_datalake_session  # noqa: E402
+from app.core.db import AsyncSessionLocal  # noqa: E402
 
 logger = logging.getLogger("enrich_sectors")
 
