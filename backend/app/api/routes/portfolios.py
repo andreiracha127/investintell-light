@@ -27,18 +27,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._shared import ensure_eod_or_http_error, raise_news_fetch_error
 from app.core.config import get_settings
+from app.core.datalake import get_datalake_session
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
 from app.ingestion.news import ensure_news
 from app.models.news_item import NewsItem
 from app.schemas._tickers import normalize_ticker
-from app.schemas.news import NewsArticle
-from app.core.datalake import get_datalake_session
 from app.schemas.lookthrough import (
     PortfolioLookthroughResponse,
     UnexpandedPosition,
     build_dimensions,
 )
+from app.schemas.news import NewsArticle
 from app.schemas.portfolios import (
     PortfolioCreate,
     PortfolioListItem,

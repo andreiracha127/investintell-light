@@ -5,7 +5,7 @@
  * Errors fail loud: a non-OK response throws `ApiError` carrying the backend
  * `detail`, which the UI renders verbatim. No silent fallbacks.
  */
-import type { paths } from "@/lib/api/api";
+import type { components, paths } from "@/lib/api/api";
 
 type AnalysisOperation = paths["/stocks/{ticker}/analysis"]["get"];
 type PricesOperation = paths["/stocks/{ticker}/prices"]["get"];
@@ -34,6 +34,35 @@ type BuilderOptimizeOperation = paths["/builder/optimize"]["post"];
 type BuilderSaveOperation = paths["/builder/save"]["post"];
 type FundsCsvOperation = paths["/funds.csv"]["get"];
 type FundProfileOperation = paths["/funds/{instrument_id}"]["get"];
+type FundLookthroughOperation =
+  paths["/funds/{instrument_id}/lookthrough"]["get"];
+type PortfolioLookthroughOperation =
+  paths["/portfolios/{portfolio_id}/lookthrough"]["get"];
+type MacroRegimeOperation = paths["/macro/regime"]["get"];
+type RebalancePolicyOperation =
+  paths["/portfolios/{portfolio_id}/rebalance/policy"]["get"];
+type RebalancePreviewOperation =
+  paths["/portfolios/{portfolio_id}/rebalance/preview"]["get"];
+
+type MarketOverviewOperation = paths["/stocks/overview"]["get"];
+export type MarketOverview =
+  MarketOverviewOperation["responses"]["200"]["content"]["application/json"];
+export type LeaderRow = MarketOverview["gainers"][number];
+export type IndexCard = MarketOverview["indices"][number];
+export type SectorPerf = MarketOverview["sectors"][number];
+
+type StockHistoryOperation = paths["/stocks/{ticker}/history"]["get"];
+export type StockHistory =
+  StockHistoryOperation["responses"]["200"]["content"]["application/json"];
+export type HistoryBar = StockHistory["bars"][number];
+
+type FundHistoryOperation = paths["/funds/{instrument_id}/history"]["get"];
+export type FundHistory =
+  FundHistoryOperation["responses"]["200"]["content"]["application/json"];
+
+type SymbolSearchOperation = paths["/search/symbols"]["get"];
+export type SymbolSearchResult =
+  SymbolSearchOperation["responses"]["200"]["content"]["application/json"][number];
 
 export type StockAnalysis =
   AnalysisOperation["responses"]["200"]["content"]["application/json"];
@@ -135,6 +164,26 @@ export type FundProfile =
 export type FundRisk = NonNullable<FundProfile["risk"]>;
 export type FundNavPoint = FundProfile["nav"][number];
 export type FundHolding = FundProfile["holdings"]["items"][number];
+
+export type FundLookthroughQuery = NonNullable<
+  FundLookthroughOperation["parameters"]["query"]
+>;
+export type FundLookthrough =
+  FundLookthroughOperation["responses"]["200"]["content"]["application/json"];
+export type PortfolioLookthrough =
+  PortfolioLookthroughOperation["responses"]["200"]["content"]["application/json"];
+export type ExposureItem = components["schemas"]["ExposureItem"];
+export type LookthroughSummary = components["schemas"]["LookthroughSummaryOut"];
+export type MacroRegime =
+  MacroRegimeOperation["responses"]["200"]["content"]["application/json"];
+export type RegimeSignal = components["schemas"]["RegimeSignalOut"];
+export type RegimeFlip = components["schemas"]["RegimeFlipOut"];
+export type RebalancePolicy =
+  RebalancePolicyOperation["responses"]["200"]["content"]["application/json"];
+export type RebalancePreview =
+  RebalancePreviewOperation["responses"]["200"]["content"]["application/json"];
+export type PositionDrift = components["schemas"]["PositionDriftOut"];
+export type Proposal = components["schemas"]["ProposalOut"];
 
 export type OptimizeRequest =
   BuilderOptimizeOperation["requestBody"]["content"]["application/json"];
@@ -292,6 +341,42 @@ export function fetchStockAnalysis(
   const qs = params.toString();
   return request<StockAnalysis>(
     `/stocks/${encodeURIComponent(ticker)}/analysis${qs ? `?${qs}` : ""}`,
+    signal,
+  );
+}
+
+export function fetchMarketOverview(signal?: AbortSignal): Promise<MarketOverview> {
+  return request<MarketOverview>("/stocks/overview", signal);
+}
+
+export function fetchStockHistory(
+  ticker: string,
+  bars = 2520,
+  signal?: AbortSignal,
+): Promise<StockHistory> {
+  return request<StockHistory>(
+    `/stocks/${encodeURIComponent(ticker)}/history?bars=${bars}`,
+    signal,
+  );
+}
+
+export function fetchFundHistory(
+  instrumentId: string,
+  bars = 2520,
+  signal?: AbortSignal,
+): Promise<FundHistory> {
+  return request<FundHistory>(
+    `/funds/${encodeURIComponent(instrumentId)}/history?bars=${bars}`,
+    signal,
+  );
+}
+
+export function fetchSymbolSearch(
+  q: string,
+  signal?: AbortSignal,
+): Promise<SymbolSearchResult[]> {
+  return request<SymbolSearchResult[]>(
+    `/search/symbols?q=${encodeURIComponent(q)}`,
     signal,
   );
 }
@@ -662,6 +747,61 @@ export function fetchPriceSeries(
   const qs = params.toString();
   return request<PriceSeries>(
     `/stocks/${encodeURIComponent(ticker)}/prices${qs ? `?${qs}` : ""}`,
+    signal,
+  );
+}
+
+/* ── Look-through, macro regime & rebalancing ─────────────────────────────── */
+
+/** Fetch aggregated look-through exposures for a single fund. */
+export function fetchFundLookthrough(
+  instrumentId: string,
+  query: FundLookthroughQuery = {},
+  signal?: AbortSignal,
+): Promise<FundLookthrough> {
+  const params = new URLSearchParams();
+  if (query.dimension != null) params.set("dimension", query.dimension); // schema allows explicit null — guard both
+  const qs = params.toString();
+  return request<FundLookthrough>(
+    `/funds/${encodeURIComponent(instrumentId)}/lookthrough${qs ? `?${qs}` : ""}`,
+    signal,
+  );
+}
+
+/** Fetch aggregated look-through exposures for a persisted portfolio. */
+export function fetchPortfolioLookthrough(
+  portfolioId: number,
+  signal?: AbortSignal,
+): Promise<PortfolioLookthrough> {
+  return request<PortfolioLookthrough>(
+    `/portfolios/${portfolioId}/lookthrough`,
+    signal,
+  );
+}
+
+/** Fetch the current macro regime signals and recent regime flips. */
+export function fetchMacroRegime(signal?: AbortSignal): Promise<MacroRegime> {
+  return request<MacroRegime>("/macro/regime", signal);
+}
+
+/** Fetch the rebalance policy (bands and frequency) for a portfolio. */
+export function fetchRebalancePolicy(
+  portfolioId: number,
+  signal?: AbortSignal,
+): Promise<RebalancePolicy> {
+  return request<RebalancePolicy>(
+    `/portfolios/${portfolioId}/rebalance/policy`,
+    signal,
+  );
+}
+
+/** Fetch a dry-run rebalance preview with drift and trade proposals. */
+export function fetchRebalancePreview(
+  portfolioId: number,
+  signal?: AbortSignal,
+): Promise<RebalancePreview> {
+  return request<RebalancePreview>(
+    `/portfolios/${portfolioId}/rebalance/preview`,
     signal,
   );
 }

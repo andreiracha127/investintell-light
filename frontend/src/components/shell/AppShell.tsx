@@ -50,9 +50,9 @@ function applySettings(s: Settings) {
 
 const NAV_ITEMS: { href: string; match: (p: string) => boolean; label: string; icon: React.ReactNode }[] = [
   {
-    href: "/stocks/AAPL",
+    href: "/stocks",
     match: (p) => p.startsWith("/stocks"),
-    label: "Stock Analysis",
+    label: "Stocks",
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
         <rect x="2" y="6" width="2.4" height="6" fill="currentColor" />
@@ -115,6 +115,19 @@ const NAV_ITEMS: { href: string; match: (p: string) => boolean; label: string; i
         <rect x="2" y="9" width="3" height="3" fill="var(--color-accent)" />
         <rect x="6.5" y="4" width="3" height="3" fill="currentColor" />
         <rect x="11" y="7" width="3" height="3" fill="currentColor" />
+      </svg>
+    ),
+  },
+  {
+    href: "/macro",
+    match: (p) => p.startsWith("/macro"),
+    label: "Macro",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
+        <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.3" />
+        <path d="M2.5 8h11" stroke="currentColor" strokeWidth="1.1" />
+        <path d="M8 2.5v11" stroke="currentColor" strokeWidth="1.1" />
+        <path d="M4.5 11.5C5.5 9 6.5 7 8 7s2.5 2 3.5 4.5" stroke="var(--color-accent)" strokeWidth="1.4" fill="none" />
       </svg>
     ),
   },
