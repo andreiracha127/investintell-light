@@ -53,17 +53,19 @@ está em produção: `wss://livefeed-production-2c39.up.railway.app/stream`).
     enriquecimento não rodar — o frontend oculta o painel.
   - Cache: prefixo `/stocks/overview` no middleware de catálogo existente.
   - Universo vazio (deploy sem backfill) → 200 com listas vazias, não 5xx.
-- `GET /stocks/{ticker}/history?bars=N` — OHLCV diário cru no contrato do
-  `CHART_ARCHITECTURE.md`: `{t,o,h,l,c,v}` com `t` em epoch ms UTC. Reusa
-  `ensure_eod` + `_select_ohlcv_rows`. Limitação documentada: OHLC cru (consistente com
-  ticks ao vivo); splits antigos aparecem sem ajuste.
+- `GET /stocks/{ticker}/history?bars=N` — OHLCV diário **ajustado** (`adj_open/high/
+  low/close/volume`, colunas que `eod_prices` já tem) no contrato do
+  `CHART_ARCHITECTURE.md`: `{t,o,h,l,c,v}` com `t` em epoch ms UTC. Ajustado é contínuo
+  em splits E coincide com ticks ao vivo na barra atual (Tiingo ancora o ajuste no
+  presente). Reusa `ensure_eod`.
 - Migration `0011`: coluna `sector` (nullable) em `universe_constituents` +
   `scripts/enrich_sectors.py` (lê `sec_cusip_ticker_map` do data lake via DSN já
   configurado, `mode()` por ticker, UPDATE local).
 
 ## Frontend (Next.js 15, investintell-light)
 
-- **Port IXChart** → `src/lib/ixchart/{types,tokens,series,engine,livefeed}.ts`:
+- **Port IXChart** → `src/lib/ixchart/{types,tokens,series,engine}.ts` (o cliente WS
+  fica fora do engine, compartilhado: `src/lib/livefeed/`):
   - `series.ts`: funções puras (resample D/W/M, SMA, RSI, niceTicks, formatadores) —
     unit-tested (vitest, novo dev-dep).
   - `tokens.ts`: lê os mesmos CSS custom properties do `chartColors()` (reage a
@@ -71,12 +73,13 @@ está em produção: `wss://livefeed-production-2c39.up.railway.app/stream`).
   - `engine.ts`: classe `Chart` portada do protótipo (pan/zoom/crosshair/drawing/
     overlays/compare/log/%); dados sintéticos e fetch de métricas do protótipo são
     **removidos** — barras entram por `setBars()`.
-  - `livefeed.ts`: cliente WS sem simulador; **ticks `source:"sim"` são ignorados** —
-    fora do pregão a UI mostra EOD honesto, nunca preço fake. Reconexão com backoff.
 - `src/components/charts/InteractiveChart.tsx` — wrapper React client-only (canvas +
   toolbar: tipo/período/range/overlays/painéis/escala/compare/desenho) + legenda OHLC.
-- `src/lib/livefeed/useLiveTicks.ts` — **um** WebSocket compartilhado por aba
-  (subscribe aditivo/unsubscribe, protocolo do worker), updates com throttle rAF.
+- `src/lib/livefeed/client.ts` + `useLiveTicks.ts` — **um** WebSocket compartilhado por
+  aba (subscribe aditivo/unsubscribe, protocolo do worker, ref-count por símbolo),
+  reconexão com backoff, updates com throttle rAF. Sem simulador; **ticks
+  `source:"sim"` são ignorados** — fora do pregão a UI mostra EOD honesto, nunca
+  preço fake.
 - Landing `/stocks`: `page.tsx` + `MarketOverview` (TanStack Query no overview) =
   `IndexStrip` + `LeadersTable` (tabs, preços live, link p/ detalhe, `AddToPortfolio`)
   + `SectorPanel` (oculto se vazio).
