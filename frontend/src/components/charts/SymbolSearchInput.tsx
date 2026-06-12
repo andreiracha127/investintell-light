@@ -6,7 +6,7 @@
  * Enter sem item destacado usa o texto cru como ticker (fallback).
  */
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { fetchSymbolSearch, type SymbolSearchResult } from "@/lib/api/client";
 
 const KIND_LABEL: Record<string, string> = {
@@ -33,6 +33,7 @@ export function SymbolSearchInput({
   const [open, setOpen] = useState(false);
   const [hi, setHi] = useState(-1);
   const rootRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
 
   // debounce 250ms
   useEffect(() => {
@@ -101,6 +102,8 @@ export function SymbolSearchInput({
         placeholder={placeholder}
         aria-label="Compare symbol"
         aria-expanded={open && results.length > 0}
+        aria-autocomplete="list"
+        aria-controls={listId}
         role="combobox"
         className="h-7 w-32 border border-border-strong bg-field px-2 text-[11px] text-text-primary placeholder:text-text-muted"
       />
@@ -116,6 +119,7 @@ export function SymbolSearchInput({
       )}
       {open && results.length > 0 && (
         <ul
+          id={listId}
           role="listbox"
           className="absolute left-0 top-full z-30 mt-1 max-h-64 w-72 overflow-auto border border-border-strong bg-surface-1 shadow-lg"
         >

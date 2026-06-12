@@ -9,7 +9,8 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchStockHistory, RANGE_PRESETS, type RangePreset } from "@/lib/api/client";
+import { fetchStockHistory, fetchFundHistory, RANGE_PRESETS, type RangePreset, type SymbolSearchResult } from "@/lib/api/client";
+import { SymbolSearchInput } from "@/components/charts/SymbolSearchInput";
 import { Chart } from "@/lib/ixchart/engine";
 import { readIxTokens } from "@/lib/ixchart/tokens";
 import { fmtP, fmtV } from "@/lib/ixchart/series";
@@ -40,12 +41,15 @@ export function InteractiveChart({
   bars,
   range,
   onRangeChange,
+  mode = "ohlcv",
   className,
 }: {
   symbol: string;
   bars: Bar[];
   range: RangePreset;
   onRangeChange: (next: RangePreset) => void;
+  /** "nav" = série de NAV (mutual fund): só Line/Area, sem VOL nem live. */
+  mode?: "ohlcv" | "nav";
   className?: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -53,20 +57,28 @@ export function InteractiveChart({
   const legendRef = useRef<HTMLDivElement>(null);
 
   const [period, setPeriod] = useState<Period>("D");
-  const [type, setType] = useState<ChartType>("candles");
+  const [type, setType] = useState<ChartType>(mode === "nav" ? "line" : "candles");
   const [overlays, setOverlays] = useState({ sma20: true, sma50: false });
-  const [panes, setPanes] = useState({ volume: true, rsi: false });
+  const [panes, setPanes] = useState({ volume: mode !== "nav", rsi: false });
   const [scale, setScale] = useState({ log: false, pct: false });
   const [tool, setTool] = useState<DrawTool | null>(null);
-  const [compare, setCompare] = useState("");
-  const [compareActive, setCompareActive] = useState<string | null>(null);
+  const [compareSel, setCompareSel] = useState<SymbolSearchResult | null>(null);
   const [live, setLive] = useState(true);
   const [feed, setFeed] = useState<FeedStatus>("off");
 
-  const { data: compareBars } = useQuery({
-    queryKey: ["history", compareActive],
-    queryFn: ({ signal }) => fetchStockHistory(compareActive!, 2520, signal),
-    enabled: compareActive != null,
+  const { data: compareBars } = useQuery<{ bars: Bar[] }>({
+    queryKey: [
+      "compare-history",
+      compareSel?.kind,
+      compareSel?.symbol,
+      compareSel?.instrument_id,
+    ],
+    queryFn: ({ signal }) =>
+      compareSel!.instrument_id &&
+      (compareSel!.kind === "mutual_fund" || compareSel!.kind === "mmf")
+        ? fetchFundHistory(compareSel!.instrument_id, 2520, signal)
+        : fetchStockHistory(compareSel!.symbol, 2520, signal),
+    enabled: compareSel != null,
     staleTime: 60 * 60 * 1000,
   });
 
@@ -113,8 +125,8 @@ export function InteractiveChart({
 
   // comparação
   useEffect(() => {
-    chartRef.current?.setCompare(compareActive, compareBars?.bars);
-  }, [compareActive, compareBars]);
+    chartRef.current?.setCompare(compareSel?.symbol ?? null, compareBars?.bars);
+  }, [compareSel, compareBars]);
 
   // opções de render
   useEffect(() => { chartRef.current?.setType(type); }, [type]);
@@ -136,9 +148,11 @@ export function InteractiveChart({
   // feed ao vivo
   useEffect(() => onFeedStatus(setFeed), []);
   useEffect(() => {
-    if (!live) return;
+    if (!live || mode === "nav") return;
     return subscribeTicks(symbol, (tick) => chartRef.current?.applyTick(tick.price, tick.size));
-  }, [symbol, live]);
+  }, [symbol, live, mode]);
+
+  const typeOptions = mode === "nav" ? TYPES.filter((t) => t.id === "line" || t.id === "area") : TYPES;
 
   const btn = (active: boolean) =>
     `px-2 h-7 text-[11px] border-r border-border last:border-r-0 transition-colors ${
@@ -152,7 +166,7 @@ export function InteractiveChart({
       {/* ── toolbar ── */}
       <div className="flex flex-wrap items-center gap-2 border border-b-0 border-border bg-surface-1 px-2 py-1.5 text-[11px]">
         <div role="group" aria-label="Chart type" className={group}>
-          {TYPES.map((t) => (
+          {typeOptions.map((t) => (
             <button key={t.id} type="button" aria-pressed={type === t.id}
               className={btn(type === t.id)} onClick={() => setType(t.id)}>
               {t.label}
@@ -180,8 +194,10 @@ export function InteractiveChart({
             onClick={() => setOverlays((o) => ({ ...o, sma20: !o.sma20 }))}>SMA20</button>
           <button type="button" aria-pressed={overlays.sma50} className={btn(overlays.sma50)}
             onClick={() => setOverlays((o) => ({ ...o, sma50: !o.sma50 }))}>SMA50</button>
-          <button type="button" aria-pressed={panes.volume} className={btn(panes.volume)}
-            onClick={() => setPanes((p) => ({ ...p, volume: !p.volume }))}>VOL</button>
+          {mode !== "nav" && (
+            <button type="button" aria-pressed={panes.volume} className={btn(panes.volume)}
+              onClick={() => setPanes((p) => ({ ...p, volume: !p.volume }))}>VOL</button>
+          )}
           <button type="button" aria-pressed={panes.rsi} className={btn(panes.rsi)}
             onClick={() => setPanes((p) => ({ ...p, rsi: !p.rsi }))}>RSI</button>
         </div>
@@ -203,42 +219,27 @@ export function InteractiveChart({
           <button type="button" className={btn(false)}
             onClick={() => chartRef.current?.clearDrawings()}>Clear</button>
         </div>
-        <form
-          className="flex items-center gap-1"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const sym = compare.trim().toUpperCase();
-            setCompareActive(sym || null);
-          }}
-        >
-          <input
-            value={compare}
-            onChange={(e) => setCompare(e.target.value)}
-            placeholder="Compare…"
-            aria-label="Compare symbol"
-            className="h-7 w-24 border border-border-strong bg-field px-2 text-[11px] text-text-primary placeholder:text-text-muted"
-          />
-          {compareActive && (
-            <button type="button" className="text-[11px] text-text-muted hover:text-text-primary"
-              onClick={() => { setCompare(""); setCompareActive(null); }}>
-              ×
-            </button>
-          )}
-        </form>
+        <SymbolSearchInput
+          active={compareSel?.symbol ?? null}
+          onSelect={(item) => setCompareSel(item)}
+          onClear={() => setCompareSel(null)}
+        />
         <div className="flex-1" />
-        <button
-          type="button"
-          aria-pressed={live}
-          onClick={() => setLive((v) => !v)}
-          className={`flex h-7 items-center gap-1.5 border border-border-strong px-2 text-[11px] ${
-            live && feed === "live" ? "text-gain" : "text-text-muted"
-          }`}
-        >
-          <span className={`h-1.5 w-1.5 rounded-full ${
-            live && feed === "live" ? "bg-gain" : "bg-border-strong"
-          }`} />
-          {live && feed === "live" ? "LIVE" : "EOD"}
-        </button>
+        {mode !== "nav" && (
+          <button
+            type="button"
+            aria-pressed={live}
+            onClick={() => setLive((v) => !v)}
+            className={`flex h-7 items-center gap-1.5 border border-border-strong px-2 text-[11px] ${
+              live && feed === "live" ? "text-gain" : "text-text-muted"
+            }`}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${
+              live && feed === "live" ? "bg-gain" : "bg-border-strong"
+            }`} />
+            {live && feed === "live" ? "LIVE" : "EOD"}
+          </button>
+        )}
       </div>
 
       {/* ── legenda OHLC (atualizada via ref, sem re-render) ── */}
