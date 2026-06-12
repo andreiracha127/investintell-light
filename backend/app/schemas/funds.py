@@ -100,6 +100,22 @@ class FundRiskOut(BaseModel):
     equity_correlation_252d: float | None
 
 
+class FundClassOut(BaseModel):
+    """One share class of the fund's series (F8.6b).
+
+    NOTE: only the series' representative class has a NAV in the source —
+    any class ticker is priced/analyzed with the SERIES NAV as a proxy.
+    ``expense_ratio`` is a fraction (0.0069 = 0.69%).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    class_id: str
+    class_name: str | None
+    ticker: str
+    expense_ratio: float | None
+
+
 class FundNavPoint(BaseModel):
     """One decimated NAV observation (last 2 years, ~260 points)."""
 
@@ -162,4 +178,6 @@ class FundProfileResponse(BaseModel):
     risk: FundRiskOut | None
     nav: list[FundNavPoint]
     holdings: FundHoldingsOut
+    # Share classes, expense_ratio asc NULLS LAST (F8.6b).
+    classes: list[FundClassOut]
     classification_note: str = CLASSIFICATION_NOTE

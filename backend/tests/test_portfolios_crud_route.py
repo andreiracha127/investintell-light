@@ -25,9 +25,40 @@ _CREATED = dt.datetime(2026, 6, 10, 12, 0, tzinfo=dt.UTC)
 
 
 def _position(
-    ticker: str = "AAPL", quantity: float = 10.0, acq_price: float | None = 200.0
+    ticker: str = "AAPL",
+    quantity: float = 10.0,
+    acq_price: float | None = 200.0,
+    basis: str = "reference",
+    commission: float | None = None,
+    trade_date: Any = None,
 ) -> SimpleNamespace:
-    return SimpleNamespace(ticker=ticker, quantity=quantity, acq_price=acq_price)
+    return SimpleNamespace(
+        ticker=ticker,
+        quantity=quantity,
+        acq_price=acq_price,
+        basis=basis,
+        commission=commission,
+        trade_date=trade_date,
+    )
+
+
+def _position_json(
+    ticker: str,
+    quantity: float,
+    acq_price: float | None,
+    basis: str = "reference",
+    commission: float | None = None,
+    trade_date: str | None = None,
+) -> dict[str, Any]:
+    """Expected PositionOut payload (F8.6b added basis/commission/trade_date)."""
+    return {
+        "ticker": ticker,
+        "quantity": quantity,
+        "acq_price": acq_price,
+        "basis": basis,
+        "commission": commission,
+        "trade_date": trade_date,
+    }
 
 
 def _portfolio(
@@ -103,8 +134,8 @@ async def test_create_portfolio_201_normalizes_and_ensures(
     assert body["name"] == "Test"
     assert body["cash"] == 0.0
     assert body["positions"] == [
-        {"ticker": "AAPL", "quantity": 10.0, "acq_price": 200.0},
-        {"ticker": "MSFT", "quantity": 5.0, "acq_price": None},
+        _position_json("AAPL", 10.0, 200.0),
+        _position_json("MSFT", 5.0, None),
     ]
     # Name trimmed and tickers uppercased BEFORE the service sees them.
     assert received[0].name == "Test"
@@ -394,16 +425,49 @@ def _install_put_stubs(
         return existing
 
     async def fake_insert(
-        session: Any, portfolio_id: int, ticker: str, quantity: float, acq_price: float | None
+        session: Any,
+        portfolio_id: int,
+        ticker: str,
+        quantity: float,
+        acq_price: float | None,
+        *,
+        basis: str = "reference",
+        commission: float | None = None,
+        trade_date: Any = None,
     ) -> SimpleNamespace:
-        calls["insert"].append((portfolio_id, ticker, quantity, acq_price))
-        return _position(ticker, quantity, acq_price)
+        calls["insert"].append(
+            (portfolio_id, ticker, quantity, acq_price, basis, commission, trade_date)
+        )
+        return _position(ticker, quantity, acq_price, basis, commission, trade_date)
 
     async def fake_update(
-        session: Any, position: Any, quantity: float, acq_price: float | None
+        session: Any,
+        position: Any,
+        quantity: float,
+        acq_price: float | None,
+        *,
+        basis: str | None = None,
+        commission: Any = portfolio_crud.UNSET,
+        trade_date: Any = portfolio_crud.UNSET,
     ) -> SimpleNamespace:
-        calls["update"].append((position.ticker, quantity, acq_price))
-        return _position(position.ticker, quantity, acq_price)
+        calls["update"].append(
+            (
+                position.ticker,
+                quantity,
+                acq_price,
+                basis,
+                None if commission is portfolio_crud.UNSET else ("SET", commission),
+                None if trade_date is portfolio_crud.UNSET else ("SET", trade_date),
+            )
+        )
+        return _position(
+            position.ticker,
+            quantity,
+            acq_price,
+            basis or position.basis,
+            position.commission if commission is portfolio_crud.UNSET else commission,
+            position.trade_date if trade_date is portfolio_crud.UNSET else trade_date,
+        )
 
     monkeypatch.setattr(portfolio_crud, "portfolio_exists", fake_exists)
     monkeypatch.setattr(portfolio_crud, "get_position", fake_get_position)
@@ -422,9 +486,9 @@ async def test_put_position_insert_path_ensures_ticker(
         )
 
     assert response.status_code == 200
-    assert response.json() == {"ticker": "NVDA", "quantity": 3.0, "acq_price": 120.0}
+    assert response.json() == _position_json("NVDA", 3.0, 120.0)
     assert ensure_calls == [["NVDA"]]  # INSERT path validates against Tiingo
-    assert calls["insert"] == [(1, "NVDA", 3.0, 120.0)]
+    assert calls["insert"] == [(1, "NVDA", 3.0, 120.0, "reference", None, None)]
     assert calls["update"] == []
 
 
@@ -436,9 +500,11 @@ async def test_put_position_update_path_does_not_re_ensure(
         response = await ac.put("/portfolios/1/positions/MSFT", json={"quantity": 8})
 
     assert response.status_code == 200
-    assert response.json() == {"ticker": "MSFT", "quantity": 8.0, "acq_price": None}
+    assert response.json() == _position_json("MSFT", 8.0, None)
     assert ensure_calls == []  # UPDATE path must NOT re-ensure
-    assert calls["update"] == [("MSFT", 8.0, None)]
+    # Fill fields absent from the body — basis None / commission+trade_date
+    # untouched (the F8.6b default keeps the pre-existing behavior).
+    assert calls["update"] == [("MSFT", 8.0, None, None, None, None)]
     assert calls["insert"] == []
 
 
@@ -454,9 +520,49 @@ async def test_put_position_fund_ticker_insert_skips_tiingo_ensure(
         )
 
     assert response.status_code == 200
-    assert response.json() == {"ticker": "VFIAX", "quantity": 10.0, "acq_price": 450.0}
+    assert response.json() == _position_json("VFIAX", 10.0, 450.0)
     assert ensure_calls == []  # fund ticker — Tiingo never consulted
-    assert calls["insert"] == [(1, "VFIAX", 10.0, 450.0)]
+    assert calls["insert"] == [(1, "VFIAX", 10.0, 450.0, "reference", None, None)]
+
+
+async def test_put_position_executed_fill_fields_pass_through(
+    monkeypatch: pytest.MonkeyPatch, ensure_calls: list[list[str]]
+) -> None:
+    """F8.6b: PUT may register a real fill — basis/commission/trade_date are
+    forwarded to the update (and only the provided fields overwrite)."""
+    calls = _install_put_stubs(monkeypatch, existing=_position("MSFT", 5.0, 100.0))
+    async with _client() as ac:
+        response = await ac.put(
+            "/portfolios/1/positions/MSFT",
+            json={
+                "quantity": 10,
+                "acq_price": 100.5,
+                "basis": "executed",
+                "commission": 5,
+                "trade_date": "2026-06-10",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == _position_json(
+        "MSFT", 10.0, 100.5, "executed", 5.0, "2026-06-10"
+    )
+    assert ensure_calls == []
+    assert calls["update"] == [
+        ("MSFT", 10.0, 100.5, "executed", ("SET", 5.0), ("SET", dt.date(2026, 6, 10)))
+    ]
+
+
+async def test_put_position_negative_commission_422(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_put_stubs(monkeypatch, existing=None)
+    async with _client() as ac:
+        response = await ac.put(
+            "/portfolios/1/positions/AAPL", json={"quantity": 1, "commission": -1}
+        )
+
+    assert response.status_code == 422
 
 
 async def test_put_position_missing_portfolio_404(

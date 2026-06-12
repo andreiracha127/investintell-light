@@ -16,14 +16,14 @@ mother-DB value copied by the sync, served with the global staleness markers.
 import datetime as dt
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from typing import Any, cast
 
 from sqlalchemy import ColumnElement, Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
-from app.models.fund import Fund, FundHolding, FundNav, FundRiskLatest
+from app.models.fund import Fund, FundClass, FundHolding, FundNav, FundRiskLatest
 
 # Hard cap on the CSV export — bounded output, no pagination (screener parity).
 CSV_HARD_CAP = 5000
@@ -345,6 +345,10 @@ class FundProfile:
     holdings_report_date: dt.date | None
     holdings_pct_of_nav_total: float | None
     is_top50_truncated: bool
+    # Share classes (F8.6b), expense_ratio asc NULLS LAST. NOTE: any class
+    # is priced with the SERIES NAV as a proxy (the source prices only the
+    # representative class).
+    classes: list[FundClass] = field(default_factory=list)
 
 
 async def fetch_fund_profile(
@@ -407,6 +411,18 @@ async def fetch_fund_profile(
         reported = [float(h.pct_of_nav) for h in holdings if h.pct_of_nav is not None]
         pct_total = sum(reported) if reported else None
 
+    classes = list(
+        (
+            await session.execute(
+                select(FundClass)
+                .where(FundClass.instrument_id == instrument_id)
+                .order_by(
+                    FundClass.expense_ratio.asc().nulls_last(), FundClass.ticker
+                )
+            )
+        ).scalars()
+    )
+
     return FundProfile(
         fund=fund,
         risk=risk,
@@ -415,6 +431,7 @@ async def fetch_fund_profile(
         holdings_report_date=latest_report,
         holdings_pct_of_nav_total=pct_total,
         is_top50_truncated=truncated,
+        classes=classes,
     )
 
 

@@ -50,13 +50,17 @@ async def optimize(payload: OptimizeRequest, session: SessionDep) -> OptimizeRes
 
 @router.post("/save", response_model=SaveResponse, status_code=201)
 async def save(payload: SaveRequest, session: SessionDep) -> SaveResponse:
-    """Persist a builder proposal as a real portfolio (F8.5).
+    """Persist a builder proposal as a real portfolio (F8.5 + F8.6b).
 
-    Each weight is sized at the asset's SPOT price (equities: latest
-    adj_close; funds: latest NAV, stored under the fund's ticker) against
-    ``notional_usd``; the spot price becomes the position's cost basis.
-    Domain failures — asset without a price, fund without a ticker, duplicate
-    portfolio name, weight too small for the notional — are 422 verbatim.
+    Each weight is sized at the asset's REFERENCE price (equities: latest
+    adj_close; funds: latest NAV) against ``notional_usd`` — unless it
+    carries a ``fill_price``, which sizes the position and (with the
+    commission) defines the real cost basis (basis='executed'). Fund weights
+    may select a share class via ``class_ticker`` (same instrument; priced
+    with the series NAV as a proxy). The portfolio is tagged
+    origin='builder'. Domain failures — asset without a price, fund without
+    a ticker, invalid class, duplicate portfolio name, weight too small for
+    the notional — are 422 verbatim.
     """
     try:
         return await builder_save.run_save(session, payload)

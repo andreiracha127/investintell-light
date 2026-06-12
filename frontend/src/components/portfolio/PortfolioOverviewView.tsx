@@ -1025,21 +1025,53 @@ function PositionRow({
         )}
       </td>
       <td className="ix-cell px-2.5 text-right">
-        <EditableValue
-          display={
-            position.acq_price !== null
-              ? formatCurrency(position.acq_price)
-              : "—"
-          }
-          tone="text-text-secondary"
-          initialText={position.acq_price !== null ? String(position.acq_price) : ""}
-          ariaLabel={`acquisition price for ${position.ticker}`}
-          parse={parseCost}
-          onSave={(acqPrice) =>
-            onEdit({ quantity: position.quantity, acq_price: acqPrice })
-          }
-          pending={pending}
-        />
+        <span className="inline-flex items-center justify-end gap-1.5">
+          {/* F8.6b basis flag: EXEC = real fill incl. commissions defines the
+              cost basis; REF = spot/NAV reference (analysis-grade). */}
+          <span
+            aria-label={`cost basis: ${position.basis}`}
+            title={
+              position.basis === "executed"
+                ? `Executed fill${
+                    position.commission !== null
+                      ? ` — commission ${formatCurrency(position.commission)}`
+                      : ""
+                  }${
+                    position.trade_date !== null
+                      ? ` on ${formatDate(position.trade_date)}`
+                      : ""
+                  }`
+                : "Reference price (spot/NAV) — not a real fill"
+            }
+            className={`border px-[4px] py-[1px] text-[9px] font-bold tracking-[0.05em] ${
+              position.basis === "executed"
+                ? "border-accent text-accent"
+                : "border-border text-text-muted"
+            }`}
+          >
+            {position.basis === "executed" ? "EXEC" : "REF"}
+          </span>
+          <EditableValue
+            display={
+              position.acq_price !== null
+                ? formatCurrency(position.acq_price)
+                : "—"
+            }
+            tone="text-text-secondary"
+            initialText={position.acq_price !== null ? String(position.acq_price) : ""}
+            ariaLabel={`acquisition price for ${position.ticker}`}
+            parse={parseCost}
+            onSave={(acqPrice) =>
+              onEdit({ quantity: position.quantity, acq_price: acqPrice })
+            }
+            pending={pending}
+          />
+        </span>
+        {position.commission !== null && (
+          <span className="block text-[10px] text-text-muted tabular-nums">
+            incl. comm. {formatCurrency(position.commission)}
+          </span>
+        )}
       </td>
       <td className="ix-cell px-2.5 text-right">
         <EditableValue

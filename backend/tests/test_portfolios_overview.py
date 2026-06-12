@@ -27,9 +27,21 @@ ClosesMap = dict[str, list[tuple[dt.date, float]]]
 
 
 def _position(
-    ticker: str, quantity: float, acq_price: float | None
+    ticker: str,
+    quantity: float,
+    acq_price: float | None,
+    basis: str = "reference",
+    commission: float | None = None,
+    trade_date: dt.date | None = None,
 ) -> SimpleNamespace:
-    return SimpleNamespace(ticker=ticker, quantity=quantity, acq_price=acq_price)
+    return SimpleNamespace(
+        ticker=ticker,
+        quantity=quantity,
+        acq_price=acq_price,
+        basis=basis,
+        commission=commission,
+        trade_date=trade_date,
+    )
 
 
 def _portfolio(positions: list[SimpleNamespace], cash: float = 0.0) -> SimpleNamespace:
@@ -302,6 +314,65 @@ async def test_overview_ticker_without_price_rows_404(
 
     assert response.status_code == 404
     assert "No price data available for GHOST" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# F8.6b: class-ticker pricing (series-NAV proxy) + basis fields in the payload
+# ---------------------------------------------------------------------------
+
+
+async def test_overview_class_ticker_priced_via_series_nav_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A share-class ticker (fund_classes) is a fund ticker: skipped by the
+    Tiingo ensure, priced from the SERIES NAV (proxy) and displayed as
+    'Fund — Class'. Executed fill fields surface on the overview row."""
+    ensure_calls = _install_stubs(
+        monkeypatch,
+        _portfolio(
+            [
+                _position(
+                    "RGAGX", 10.0, 100.5,
+                    basis="executed", commission=5.0,
+                    trade_date=dt.date(2026, 6, 10),
+                )
+            ]
+        ),
+        closes={},
+        fund_tickers={"RGAGX"},
+        navs={"RGAGX": [(_LAST, 80.0), (_PREV, 79.0)]},
+        fund_names={"RGAGX": "Growth Fund of America — Class R-6"},
+    )
+    async with _client() as ac:
+        response = await ac.get("/portfolios/1/overview")
+
+    assert response.status_code == 200
+    assert ensure_calls == []  # class ticker — Tiingo never consulted
+    (row,) = response.json()["positions"]
+    assert row["name"] == "Growth Fund of America — Class R-6"
+    assert row["last_close"] == 80.0  # series NAV proxies the class NAV
+    assert row["basis"] == "executed"
+    assert row["commission"] == 5.0
+    assert row["trade_date"] == "2026-06-10"
+    assert row["acq_price"] == 100.5  # effective cost basis incl. commission
+    assert row["market_value"] == pytest.approx(800.0)
+
+
+async def test_overview_reference_position_basis_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stubs(
+        monkeypatch,
+        _portfolio([_position("AAPL", 2.0, 100.0)]),
+        closes={"AAPL": [(_LAST, 110.0)]},
+    )
+    async with _client() as ac:
+        response = await ac.get("/portfolios/1/overview")
+
+    (row,) = response.json()["positions"]
+    assert row["basis"] == "reference"
+    assert row["commission"] is None
+    assert row["trade_date"] is None
 
 
 # ---------------------------------------------------------------------------

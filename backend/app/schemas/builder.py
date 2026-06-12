@@ -5,12 +5,13 @@ fractions (0.05 = 5%), never 0-100. ``q`` in views is an ANNUAL return
 (absolute) or annual outperformance (relative). ``confidence`` ∈ (0, 1].
 """
 
+import datetime as dt
 import uuid
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.schemas.portfolios import validate_portfolio_name
+from app.schemas.portfolios import PositionBasis, validate_portfolio_name
 
 # ── Asset references ─────────────────────────────────────────────────────────
 
@@ -118,19 +119,76 @@ class OptimizeResponse(BaseModel):
 # ── Save as portfolio (F8.5) ─────────────────────────────────────────────────
 
 
+# Fixed disclaimer carried by every save response (F8.6b — proposal vs
+# executed semantics, plus the fund-class NAV proxy approximation).
+PRICING_NOTE = (
+    "Reference prices (spot/NAV) are for analysis; executed fills with "
+    "commissions define real cost basis. Fund class NAV is proxied by the "
+    "series NAV."
+)
+
+
 class SaveWeightIn(BaseModel):
     """One proposed weight to persist. Zero/near-zero weights should be
-    filtered out by the caller — a weight that rounds to quantity 0 is a 422."""
+    filtered out by the caller — a weight that rounds to quantity 0 is a 422.
+
+    F8.6b execution fields (all optional, retro-compatible):
+    - without ``fill_price`` the position is saved at the REFERENCE price
+      (spot/NAV) with basis='reference';
+    - with ``fill_price`` the position is EXECUTED: quantity is sized at the
+      fill, and the cost basis includes the commission;
+    - ``class_ticker`` (funds only) saves the position under a share-class
+      ticker of the SAME fund instead of the representative one.
+    """
 
     asset: AssetRefIn
     weight: Annotated[float, Field(gt=0, le=1, allow_inf_nan=False)]
+    fill_price: Annotated[float, Field(gt=0, allow_inf_nan=False)] | None = Field(
+        default=None,
+        description="Actual execution price per share/unit; presence flips the "
+        "position to basis='executed'.",
+    )
+    commission: Annotated[float, Field(ge=0, allow_inf_nan=False)] | None = Field(
+        default=None,
+        description="Total commission paid on the fill (>= 0); requires fill_price.",
+    )
+    trade_date: dt.date | None = Field(
+        default=None, description="Execution date of the fill; requires fill_price."
+    )
+    class_ticker: Annotated[str, Field(min_length=1, max_length=12)] | None = Field(
+        default=None,
+        description="Fund share-class ticker (fund assets only); must belong to "
+        "the same fund instrument. Priced with the series NAV as a proxy.",
+    )
+
+    @model_validator(mode="after")
+    def _check_execution_fields(self) -> "SaveWeightIn":
+        if self.fill_price is None and self.commission is not None:
+            raise ValueError(
+                "commission requires fill_price — a commission on a reference "
+                "(non-executed) position is ambiguous."
+            )
+        if self.fill_price is None and self.trade_date is not None:
+            raise ValueError(
+                "trade_date requires fill_price — a trade date on a reference "
+                "(non-executed) position is ambiguous."
+            )
+        if self.class_ticker is not None and self.asset.kind != "fund":
+            raise ValueError(
+                f"class_ticker {self.class_ticker!r} is only valid for fund "
+                "assets — equities have no share classes."
+            )
+        return self
 
 
 class SaveRequest(BaseModel):
     """Body for POST /builder/save — persist a proposal as a real portfolio.
 
-    ``quantity = weight * notional_usd / spot_price`` per position (rounded to
-    4 decimals); the spot price becomes the position's cost basis.
+    ``quantity = weight * notional_usd / price`` per position (rounded to
+    4 decimals), where price is the fill price when given, else the
+    reference spot/NAV. The stored ``acq_price`` is the reference price for
+    basis='reference', or ``(fill_price*qty + commission)/qty`` (6 decimals)
+    for basis='executed'.
     """
 
     name: str = Field(description="Portfolio name; same rules as POST /portfolios.")
@@ -146,8 +204,14 @@ class SaveRequest(BaseModel):
 class SavedPositionOut(BaseModel):
     ticker: str
     quantity: float
-    # Spot price used for sizing AND stored as the position's cost basis.
+    # Price used for sizing: the fill price when executed, else the
+    # reference spot/NAV.
     price: float
+    # 'reference' | 'executed' (F8.6b).
+    basis: PositionBasis
+    # Effective per-unit cost basis persisted as acq_price — equals `price`
+    # for reference positions; includes commissions when executed.
+    cost_basis: float
 
 
 class SaveResponse(BaseModel):
@@ -155,3 +219,4 @@ class SaveResponse(BaseModel):
     name: str
     notional_usd: float
     positions: list[SavedPositionOut]
+    pricing_note: str = PRICING_NOTE

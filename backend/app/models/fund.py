@@ -91,6 +91,46 @@ class Fund(Base):
     source_nav_max_date: Mapped[date] = mapped_column(Date, nullable=False)
 
 
+class FundClass(Base):
+    """Share-class catalog (F8.6b) — synced from sec_fund_classes.
+
+    The mother DB prices ONE instrument per fund series (a representative
+    class, e.g. AGTHX for the Growth Fund of America); the remaining classes
+    have NO NAV of their own in the source. Pricing/analysis of ANY class
+    ticker therefore uses the series NAV (the representative class) as a
+    PROXY — a documented approximation, also disclosed in the UI.
+    """
+
+    __tablename__ = "fund_classes"
+
+    # SEC class id ('C000...') — globally unique in the source.
+    class_id: Mapped[str] = mapped_column(String, primary_key=True)
+
+    # Series instrument the class belongs to (the NAV proxy anchor).
+    instrument_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("funds.instrument_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    series_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    class_name: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # Class ticker (e.g. RGAGX) — NOT NULL by the sync filter; indexed because
+    # portfolio pricing resolves position tickers through this column.
+    ticker: Mapped[str] = mapped_column(String, nullable=False, index=True)
+
+    # Per-class expense ratio — a fraction (0.0069 = 0.69%), source
+    # expense_ratio_pct is already fractional.
+    expense_ratio: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+
+    # xbrl_period_end of the filing the row was taken from (latest per class).
+    source_period_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class FundRiskLatest(Base):
     __tablename__ = "fund_risk_latest"
 

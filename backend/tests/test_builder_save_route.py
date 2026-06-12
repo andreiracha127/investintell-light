@@ -8,6 +8,7 @@ the 422 contract (asset without price, fund without ticker / unknown fund,
 duplicate portfolio name, notional <= 0, weight that rounds to quantity 0).
 """
 
+import datetime as dt
 import uuid
 from types import SimpleNamespace
 from typing import Any
@@ -36,6 +37,7 @@ def _stub_spots(
     monkeypatch: pytest.MonkeyPatch,
     equities: dict[str, float] | None = None,
     funds: dict[uuid.UUID, FundSpot] | None = None,
+    classes: dict[uuid.UUID, dict[str, str | None]] | None = None,
 ) -> None:
     async def fake_equities(session: Any, tickers: list[str]) -> dict[str, float]:
         return {t: p for t, p in (equities or {}).items() if t in tickers}
@@ -45,26 +47,36 @@ def _stub_spots(
     ) -> dict[uuid.UUID, FundSpot]:
         return {i: s for i, s in (funds or {}).items() if i in fund_ids}
 
+    async def fake_classes(
+        session: Any, fund_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, dict[str, str | None]]:
+        return {i: c for i, c in (classes or {}).items() if i in fund_ids}
+
     monkeypatch.setattr(builder_save, "load_equity_spots", fake_equities)
     monkeypatch.setattr(builder_save, "load_fund_spots", fake_funds)
+    monkeypatch.setattr(builder_save, "load_fund_classes", fake_classes)
 
 
 def _stub_create(
     monkeypatch: pytest.MonkeyPatch,
     raise_duplicate: bool = False,
-) -> list[PortfolioCreate]:
+) -> tuple[list[PortfolioCreate], list[str]]:
     created: list[PortfolioCreate] = []
+    origins: list[str] = []
 
-    async def fake_create(session: Any, payload: PortfolioCreate) -> SimpleNamespace:
+    async def fake_create(
+        session: Any, payload: PortfolioCreate, *, origin: str = "manual"
+    ) -> SimpleNamespace:
         if raise_duplicate:
             raise portfolio_crud.DuplicatePortfolioNameError(
                 f"A portfolio named {payload.name!r} already exists."
             )
         created.append(payload)
+        origins.append(origin)
         return SimpleNamespace(id=7, name=payload.name, positions=payload.positions)
 
     monkeypatch.setattr(portfolio_crud, "create_portfolio", fake_create)
-    return created
+    return created, origins
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +121,7 @@ async def test_save_mixed_fund_and_equity(monkeypatch: pytest.MonkeyPatch) -> No
         equities={"AAPL": 200.0},
         funds={_FUND_ID: FundSpot(ticker="VFIAX", name="Vanguard 500", nav=450.0)},
     )
-    created = _stub_create(monkeypatch)
+    created, origins = _stub_create(monkeypatch)
     payload = {
         "name": "Builder min_cvar 2026-06-11",
         "weights": [
@@ -131,14 +143,23 @@ async def test_save_mixed_fund_and_equity(monkeypatch: pytest.MonkeyPatch) -> No
     assert by_ticker["VFIAX"]["price"] == 450.0
     assert by_ticker["AAPL"]["quantity"] == 2000.0
     assert by_ticker["AAPL"]["price"] == 200.0
+    # No fills — both positions are reference; cost basis == reference price.
+    assert by_ticker["VFIAX"]["basis"] == "reference"
+    assert by_ticker["AAPL"]["basis"] == "reference"
+    assert by_ticker["AAPL"]["cost_basis"] == 200.0
+    # Fixed disclaimer (F8.6b).
+    assert "series NAV" in body["pricing_note"]
 
-    # Persisted payload: cash 0, cost basis = spot price.
+    # Persisted payload: cash 0, cost basis = spot price, origin = builder.
     (persisted,) = created
+    assert origins == ["builder"]
     assert persisted.cash == 0.0
     persisted_by_ticker = {p.ticker: p for p in persisted.positions}
     assert persisted_by_ticker["VFIAX"].acq_price == 450.0
+    assert persisted_by_ticker["VFIAX"].basis == "reference"
     assert persisted_by_ticker["AAPL"].acq_price == 200.0
     assert persisted_by_ticker["AAPL"].quantity == 2000.0
+    assert persisted_by_ticker["AAPL"].commission is None
 
 
 async def test_save_custom_notional(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -294,6 +315,208 @@ async def test_save_zero_weight_422() -> None:
         response = await client.post("/builder/save", json=payload)
 
     assert response.status_code == 422  # Pydantic: weight must be > 0
+
+
+# ---------------------------------------------------------------------------
+# F8.6b: executed fills + fund classes
+# ---------------------------------------------------------------------------
+
+
+def test_executed_cost_basis_exact() -> None:
+    # fill 100, qty 10, commission 5 => (100*10 + 5)/10 = 100.5
+    assert builder_save.executed_cost_basis(100.0, 10.0, 5.0) == 100.5
+    # commission None counts as 0.
+    assert builder_save.executed_cost_basis(100.0, 10.0, None) == 100.0
+    # rounding to 6 decimals: (3*7 + 1)/7 = 3.142857142857...
+    assert builder_save.executed_cost_basis(3.0, 7.0, 1.0) == round(22 / 7, 6)
+
+
+def test_position_for_executed_fill() -> None:
+    # weight 0.1 * notional 10_000 / fill 100 = qty 10; commission 5 => 100.5.
+    position = position_for(
+        "AAPL", 0.1, 99.0, 10_000, fill_price=100.0, commission=5.0,
+        trade_date=dt.date(2026, 6, 10),
+    )
+    assert position.quantity == 10.0
+    assert position.acq_price == 100.5
+    assert position.basis == "executed"
+    assert position.commission == 5.0
+    assert position.trade_date == dt.date(2026, 6, 10)
+
+
+def test_position_for_reference_default() -> None:
+    position = position_for("AAPL", 0.25, 100.0, 1_000_000)
+    assert position.basis == "reference"
+    assert position.commission is None
+    assert position.trade_date is None
+
+
+async def test_save_executed_fill_cost_basis(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fill sizes the position; commission lands in the cost basis."""
+    _stub_spots(monkeypatch, equities={"AAPL": 99.0, "MSFT": 400.0})
+    created, _origins = _stub_create(monkeypatch)
+    payload = {
+        "name": "Executed",
+        "notional_usd": 10_000,
+        "weights": [
+            {
+                "asset": {"kind": "equity", "ticker": "AAPL"},
+                "weight": 0.1,
+                "fill_price": 100.0,
+                "commission": 5.0,
+                "trade_date": "2026-06-10",
+            },
+            {"asset": {"kind": "equity", "ticker": "MSFT"}, "weight": 0.9},
+        ],
+    }
+    async with _client() as client:
+        response = await client.post("/builder/save", json=payload)
+
+    assert response.status_code == 201, response.text
+    by_ticker = {p["ticker"]: p for p in response.json()["positions"]}
+    # qty = 0.1 * 10_000 / 100 (the FILL, not the 99.0 reference) = 10.
+    assert by_ticker["AAPL"]["quantity"] == 10.0
+    assert by_ticker["AAPL"]["price"] == 100.0
+    assert by_ticker["AAPL"]["basis"] == "executed"
+    assert by_ticker["AAPL"]["cost_basis"] == 100.5  # (100*10 + 5)/10
+    assert by_ticker["MSFT"]["basis"] == "reference"
+    assert by_ticker["MSFT"]["cost_basis"] == 400.0
+
+    (persisted,) = created
+    aapl = {p.ticker: p for p in persisted.positions}["AAPL"]
+    assert aapl.acq_price == 100.5
+    assert aapl.basis == "executed"
+    assert aapl.commission == 5.0
+    assert aapl.trade_date == dt.date(2026, 6, 10)
+
+
+async def test_save_commission_without_fill_price_422() -> None:
+    payload = {
+        "name": "Bad commission",
+        "weights": [
+            {
+                "asset": {"kind": "equity", "ticker": "AAPL"},
+                "weight": 1.0,
+                "commission": 5.0,
+            }
+        ],
+    }
+    async with _client() as client:
+        response = await client.post("/builder/save", json=payload)
+    assert response.status_code == 422
+
+
+async def test_save_class_ticker_on_equity_422() -> None:
+    payload = {
+        "name": "Class on equity",
+        "weights": [
+            {
+                "asset": {"kind": "equity", "ticker": "AAPL"},
+                "weight": 1.0,
+                "class_ticker": "RGAGX",
+            }
+        ],
+    }
+    async with _client() as client:
+        response = await client.post("/builder/save", json=payload)
+    assert response.status_code == 422
+
+
+async def test_save_fund_class_ticker_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A valid class_ticker keys the position by the CLASS ticker, priced
+    with the series NAV (proxy)."""
+    _stub_spots(
+        monkeypatch,
+        funds={_FUND_ID: FundSpot(ticker="AGTHX", name="Growth Fund", nav=80.0)},
+        classes={_FUND_ID: {"RGAGX": "Class R-6", "AGTHX": "Class A"}},
+    )
+    created, _origins = _stub_create(monkeypatch)
+    payload = {
+        "name": "Class pick",
+        "notional_usd": 8_000,
+        "weights": [
+            {
+                "asset": {"kind": "fund", "id": str(_FUND_ID)},
+                "weight": 1.0,
+                "class_ticker": "rgagx",
+            }
+        ],
+    }
+    async with _client() as client:
+        response = await client.post("/builder/save", json=payload)
+
+    assert response.status_code == 201, response.text
+    (position,) = response.json()["positions"]
+    assert position["ticker"] == "RGAGX"  # the class, not the representative
+    assert position["quantity"] == 100.0  # 8_000 / 80 (series NAV proxy)
+    assert position["price"] == 80.0
+    assert position["basis"] == "reference"
+    (persisted,) = created
+    assert persisted.positions[0].ticker == "RGAGX"
+    assert persisted.positions[0].acq_price == 80.0
+
+
+async def test_save_fund_class_ticker_invalid_422_lists_classes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_spots(
+        monkeypatch,
+        funds={_FUND_ID: FundSpot(ticker="AGTHX", name="Growth Fund", nav=80.0)},
+        classes={_FUND_ID: {"RGAGX": "Class R-6", "RGABX": "Class B"}},
+    )
+    _stub_create(monkeypatch)
+    payload = {
+        "name": "Wrong class",
+        "weights": [
+            {
+                "asset": {"kind": "fund", "id": str(_FUND_ID)},
+                "weight": 1.0,
+                "class_ticker": "WRONGX",
+            }
+        ],
+    }
+    async with _client() as client:
+        response = await client.post("/builder/save", json=payload)
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "WRONGX" in detail
+    assert "RGABX, RGAGX" in detail  # valid classes listed, sorted
+
+
+async def test_save_fund_class_ticker_executed_fill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Class pick combined with an executed fill: class keys the row, the
+    fill + commission define the cost basis."""
+    _stub_spots(
+        monkeypatch,
+        funds={_FUND_ID: FundSpot(ticker="AGTHX", name="Growth Fund", nav=80.0)},
+        classes={_FUND_ID: {"RGAGX": "Class R-6"}},
+    )
+    _stub_create(monkeypatch)
+    payload = {
+        "name": "Class executed",
+        "notional_usd": 1_000,
+        "weights": [
+            {
+                "asset": {"kind": "fund", "id": str(_FUND_ID)},
+                "weight": 1.0,
+                "class_ticker": "RGAGX",
+                "fill_price": 100.0,
+                "commission": 5.0,
+            }
+        ],
+    }
+    async with _client() as client:
+        response = await client.post("/builder/save", json=payload)
+
+    assert response.status_code == 201, response.text
+    (position,) = response.json()["positions"]
+    assert position["ticker"] == "RGAGX"
+    assert position["quantity"] == 10.0  # 1_000 / 100 (the fill)
+    assert position["basis"] == "executed"
+    assert position["cost_basis"] == 100.5
 
 
 async def test_save_blank_name_422() -> None:

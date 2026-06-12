@@ -279,6 +279,17 @@ def _profile() -> catalog.FundProfile:
         pct_of_nav=0.061,
         is_top50_truncated=True,
     )
+    # Classes arrive from the service already ordered expense_ratio asc
+    # NULLS LAST (F8.6b) — the route serializes them in order.
+    fund_class = SimpleNamespace(
+        class_id="C000001",
+        class_name="Institutional",
+        ticker="VITSX",
+        expense_ratio=0.0002,
+    )
+    fund_class_no_fee = SimpleNamespace(
+        class_id="C000002", class_name=None, ticker="VTSAX", expense_ratio=None
+    )
     return catalog.FundProfile(
         fund=fund,  # type: ignore[arg-type]
         risk=risk,  # type: ignore[arg-type]
@@ -287,6 +298,7 @@ def _profile() -> catalog.FundProfile:
         holdings_report_date=dt.date(2026, 5, 31),
         holdings_pct_of_nav_total=0.61,
         is_top50_truncated=True,
+        classes=[fund_class, fund_class_no_fee],  # type: ignore[list-item]
     )
 
 
@@ -315,6 +327,21 @@ async def test_fund_profile_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     assert holdings["is_top50_truncated"] is True
     assert holdings["pct_of_nav_total"] == 0.61
     assert holdings["items"][0]["issuer_name"] == "Apple Inc"
+    # F8.6b share classes, service order preserved (expense asc NULLS LAST).
+    assert body["classes"] == [
+        {
+            "class_id": "C000001",
+            "class_name": "Institutional",
+            "ticker": "VITSX",
+            "expense_ratio": 0.0002,
+        },
+        {
+            "class_id": "C000002",
+            "class_name": None,
+            "ticker": "VTSAX",
+            "expense_ratio": None,
+        },
+    ]
     assert "classificador" in body["classification_note"]
 
 

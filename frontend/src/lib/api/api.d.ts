@@ -198,6 +198,10 @@ export interface paths {
          *     INSERT path validates the ticker against Tiingo (and warms the EOD cache);
          *     the UPDATE path deliberately does NOT re-ensure — the ticker was already
          *     validated when the position was created.
+         *
+         *     F8.6b: the body optionally carries basis/commission/trade_date (manual
+         *     fill registration). Fields absent from the body keep the stored values
+         *     on UPDATE; on INSERT basis defaults to 'reference'.
          */
         put: operations["put_position_portfolios__portfolio_id__positions__ticker__put"];
         post?: never;
@@ -609,13 +613,17 @@ export interface paths {
         put?: never;
         /**
          * Save
-         * @description Persist a builder proposal as a real portfolio (F8.5).
+         * @description Persist a builder proposal as a real portfolio (F8.5 + F8.6b).
          *
-         *     Each weight is sized at the asset's SPOT price (equities: latest
-         *     adj_close; funds: latest NAV, stored under the fund's ticker) against
-         *     ``notional_usd``; the spot price becomes the position's cost basis.
-         *     Domain failures — asset without a price, fund without a ticker, duplicate
-         *     portfolio name, weight too small for the notional — are 422 verbatim.
+         *     Each weight is sized at the asset's REFERENCE price (equities: latest
+         *     adj_close; funds: latest NAV) against ``notional_usd`` — unless it
+         *     carries a ``fill_price``, which sizes the position and (with the
+         *     commission) defines the real cost basis (basis='executed'). Fund weights
+         *     may select a share class via ``class_ticker`` (same instrument; priced
+         *     with the series NAV as a proxy). The portfolio is tagged
+         *     origin='builder'. Domain failures — asset without a price, fund without
+         *     a ticker, invalid class, duplicate portfolio name, weight too small for
+         *     the notional — are 422 verbatim.
          */
         post: operations["save_builder_save_post"];
         delete?: never;
@@ -1204,6 +1212,24 @@ export interface components {
             available_count: number;
         };
         /**
+         * FundClassOut
+         * @description One share class of the fund's series (F8.6b).
+         *
+         *     NOTE: only the series' representative class has a NAV in the source —
+         *     any class ticker is priced/analyzed with the SERIES NAV as a proxy.
+         *     ``expense_ratio`` is a fraction (0.0069 = 0.69%).
+         */
+        FundClassOut: {
+            /** Class Id */
+            class_id: string;
+            /** Class Name */
+            class_name: string | null;
+            /** Ticker */
+            ticker: string;
+            /** Expense Ratio */
+            expense_ratio: number | null;
+        };
+        /**
          * FundHoldingItem
          * @description One N-PORT holding row. ⚠️ ``pct_of_nav`` is in PERCENT units in the
          *     source (11.62 = 11.62%) — unlike the risk metrics, which are fractions.
@@ -1355,6 +1381,8 @@ export interface components {
             /** Nav */
             nav: components["schemas"]["FundNavPoint"][];
             holdings: components["schemas"]["FundHoldingsOut"];
+            /** Classes */
+            classes: components["schemas"]["FundClassOut"][];
             /**
              * Classification Note
              * @default Labels da fonte podem conter erros do classificador automático
@@ -1950,6 +1978,10 @@ export interface components {
         /**
          * PositionBody
          * @description Quantity/acquisition-price payload for the position upsert (PUT).
+         *
+         *     F8.6b fill fields are optional: omitting them keeps the pre-F8.6b
+         *     behavior (on UPDATE the stored basis/commission/trade_date are left
+         *     untouched; on INSERT basis defaults to 'reference').
          */
         PositionBody: {
             /**
@@ -1959,9 +1991,24 @@ export interface components {
             quantity: number;
             /**
              * Acq Price
-             * @description Acquisition price per share/unit; null = unknown (P&L renders null).
+             * @description Acquisition price per share/unit; null = unknown (P&L renders null). With basis='executed' this is the effective cost basis incl. commissions.
              */
             acq_price?: number | null;
+            /**
+             * Basis
+             * @description 'reference' (spot/NAV for analysis) or 'executed' (real fill incl. commissions). Omitted: insert defaults to 'reference', update keeps the stored value.
+             */
+            basis?: ("reference" | "executed") | null;
+            /**
+             * Commission
+             * @description Total commission paid on the fill, currency units (>= 0).
+             */
+            commission?: number | null;
+            /**
+             * Trade Date
+             * @description Execution date of the fill.
+             */
+            trade_date?: string | null;
         };
         /**
          * PositionCreate
@@ -1975,9 +2022,24 @@ export interface components {
             quantity: number;
             /**
              * Acq Price
-             * @description Acquisition price per share/unit; null = unknown (P&L renders null).
+             * @description Acquisition price per share/unit; null = unknown (P&L renders null). With basis='executed' this is the effective cost basis incl. commissions.
              */
             acq_price?: number | null;
+            /**
+             * Basis
+             * @description 'reference' (spot/NAV for analysis) or 'executed' (real fill incl. commissions). Omitted: insert defaults to 'reference', update keeps the stored value.
+             */
+            basis?: ("reference" | "executed") | null;
+            /**
+             * Commission
+             * @description Total commission paid on the fill, currency units (>= 0).
+             */
+            commission?: number | null;
+            /**
+             * Trade Date
+             * @description Execution date of the fill.
+             */
+            trade_date?: string | null;
             /**
              * Ticker
              * @description Instrument ticker (normalized to uppercase).
@@ -2020,6 +2082,15 @@ export interface components {
             quantity: number;
             /** Acq Price */
             acq_price: number | null;
+            /**
+             * Basis
+             * @enum {string}
+             */
+            basis: "reference" | "executed";
+            /** Commission */
+            commission: number | null;
+            /** Trade Date */
+            trade_date: string | null;
         };
         /**
          * PositionOverview
@@ -2037,9 +2108,25 @@ export interface components {
             quantity: number;
             /**
              * Acq Price
-             * @description Acquisition price per share/unit; null = unknown.
+             * @description Acquisition price per share/unit; null = unknown. With basis='executed' this is the effective cost basis incl. commissions.
              */
             acq_price: number | null;
+            /**
+             * Basis
+             * @description 'reference' (spot/NAV cost basis, analysis-grade) or 'executed' (real fill incl. commissions).
+             * @enum {string}
+             */
+            basis: "reference" | "executed";
+            /**
+             * Commission
+             * @description Total commission paid on the fill, currency units; null when unknown or basis='reference'.
+             */
+            commission: number | null;
+            /**
+             * Trade Date
+             * @description Execution date of the fill; null when unknown or basis='reference'.
+             */
+            trade_date: string | null;
             /**
              * Last Close
              * @description Most recent EOD close, currency units.
@@ -2225,8 +2312,11 @@ export interface components {
          * SaveRequest
          * @description Body for POST /builder/save — persist a proposal as a real portfolio.
          *
-         *     ``quantity = weight * notional_usd / spot_price`` per position (rounded to
-         *     4 decimals); the spot price becomes the position's cost basis.
+         *     ``quantity = weight * notional_usd / price`` per position (rounded to
+         *     4 decimals), where price is the fill price when given, else the
+         *     reference spot/NAV. The stored ``acq_price`` is the reference price for
+         *     basis='reference', or ``(fill_price*qty + commission)/qty`` (6 decimals)
+         *     for basis='executed'.
          */
         SaveRequest: {
             /**
@@ -2252,17 +2342,50 @@ export interface components {
             notional_usd: number;
             /** Positions */
             positions: components["schemas"]["SavedPositionOut"][];
+            /**
+             * Pricing Note
+             * @default Reference prices (spot/NAV) are for analysis; executed fills with commissions define real cost basis. Fund class NAV is proxied by the series NAV.
+             */
+            pricing_note: string;
         };
         /**
          * SaveWeightIn
          * @description One proposed weight to persist. Zero/near-zero weights should be
          *     filtered out by the caller — a weight that rounds to quantity 0 is a 422.
+         *
+         *     F8.6b execution fields (all optional, retro-compatible):
+         *     - without ``fill_price`` the position is saved at the REFERENCE price
+         *       (spot/NAV) with basis='reference';
+         *     - with ``fill_price`` the position is EXECUTED: quantity is sized at the
+         *       fill, and the cost basis includes the commission;
+         *     - ``class_ticker`` (funds only) saves the position under a share-class
+         *       ticker of the SAME fund instead of the representative one.
          */
         SaveWeightIn: {
             /** Asset */
             asset: components["schemas"]["FundRefIn"] | components["schemas"]["EquityRefIn"];
             /** Weight */
             weight: number;
+            /**
+             * Fill Price
+             * @description Actual execution price per share/unit; presence flips the position to basis='executed'.
+             */
+            fill_price?: number | null;
+            /**
+             * Commission
+             * @description Total commission paid on the fill (>= 0); requires fill_price.
+             */
+            commission?: number | null;
+            /**
+             * Trade Date
+             * @description Execution date of the fill; requires fill_price.
+             */
+            trade_date?: string | null;
+            /**
+             * Class Ticker
+             * @description Fund share-class ticker (fund assets only); must belong to the same fund instrument. Priced with the series NAV as a proxy.
+             */
+            class_ticker?: string | null;
         };
         /** SavedPositionOut */
         SavedPositionOut: {
@@ -2272,6 +2395,13 @@ export interface components {
             quantity: number;
             /** Price */
             price: number;
+            /**
+             * Basis
+             * @enum {string}
+             */
+            basis: "reference" | "executed";
+            /** Cost Basis */
+            cost_basis: number;
         };
         /**
          * ScenarioParams

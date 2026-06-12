@@ -16,6 +16,7 @@ from sqlalchemy.dialects import postgresql
 
 from app.models import Base
 from app.sync.funds import (
+    CLASSES_SQL,
     ELIGIBLE_FUNDS_SQL,
     HOLDINGS_SQL,
     MAX_HOLDINGS_PER_SERIES,
@@ -24,6 +25,8 @@ from app.sync.funds import (
     RISK_LATEST_SQL,
     RISK_METRIC_COLUMNS,
     UNCLASSIFIED_LABEL,
+    build_class_rows,
+    build_classes_upsert,
     build_fund_row,
     build_funds_upsert,
     build_holdings_upsert,
@@ -33,6 +36,7 @@ from app.sync.funds import (
     derive_expense_ratio,
     derive_fund_type,
     eligibility_params,
+    index_instruments_by_series,
     index_profiles_by_series,
     latest_aum_by_instrument,
     merge_risk_duplicates,
@@ -284,7 +288,7 @@ def test_eligible_sql_encodes_criterion() -> None:
 
 def test_mother_db_queries_are_read_only() -> None:
     """Absolute rule: only SELECTs ever reach the mother DB."""
-    for sql in (ELIGIBLE_FUNDS_SQL, RISK_LATEST_SQL, NAV_SQL, HOLDINGS_SQL):
+    for sql in (ELIGIBLE_FUNDS_SQL, RISK_LATEST_SQL, NAV_SQL, HOLDINGS_SQL, CLASSES_SQL):
         body = sql.upper()
         for verb in ("INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE"):
             assert verb not in body, f"non-SELECT verb {verb} in mother-DB SQL"
@@ -411,6 +415,79 @@ def test_merge_risk_duplicates_passes_singletons_through() -> None:
 
 
 # ---------------------------------------------------------------------------
+# fund_classes (F8.6b)
+# ---------------------------------------------------------------------------
+
+
+def test_classes_sql_latest_filing_per_class_with_ticker() -> None:
+    assert "DISTINCT ON (class_id)" in CLASSES_SQL
+    assert "FROM sec_fund_classes" in CLASSES_SQL
+    assert "ticker IS NOT NULL" in CLASSES_SQL
+    assert "series_id = ANY($1::text[])" in CLASSES_SQL
+    assert "ORDER BY class_id, xbrl_period_end DESC NULLS LAST" in CLASSES_SQL
+
+
+def _class_record(**overrides: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "class_id": "C000007", "series_id": "S000001234", "class_name": "Class R-6",
+        "ticker": "rgagx", "expense_ratio_pct": Decimal("0.0030"),
+        "xbrl_period_end": dt.date(2025, 12, 31),
+    }
+    row.update(overrides)
+    return row
+
+
+def test_build_class_rows_maps_series_and_uppercases_ticker() -> None:
+    rows = build_class_rows(
+        [_class_record()], {"S000001234": _IID}, _NOW
+    )
+    (row,) = rows
+    assert row == {
+        "class_id": "C000007",
+        "instrument_id": _IID,
+        "series_id": "S000001234",
+        "class_name": "Class R-6",
+        "ticker": "RGAGX",  # uppercased to the position-ticker convention
+        "expense_ratio": Decimal("0.0030"),  # already a fraction in the source
+        "source_period_end": dt.date(2025, 12, 31),
+        "synced_at": _NOW,
+    }
+
+
+def test_build_class_rows_drops_unknown_series_and_blank_tickers() -> None:
+    rows = build_class_rows(
+        [
+            _class_record(series_id="S_UNKNOWN"),
+            _class_record(class_id="C000008", ticker="  "),
+            _class_record(class_id="C000009", series_id=None),
+        ],
+        {"S000001234": _IID},
+        _NOW,
+    )
+    assert rows == []
+
+
+def test_index_instruments_by_series_lowest_uuid_wins() -> None:
+    other = uuid.UUID("00000000-0000-0000-0000-000000000002")
+    eligible = [
+        {"sec_series_id": "S1", "instrument_id": other},
+        {"sec_series_id": "S1", "instrument_id": _IID},
+        {"sec_series_id": "S2", "instrument_id": other},
+    ]
+    assert index_instruments_by_series(eligible) == {"S1": _IID, "S2": other}
+
+
+def test_classes_upsert_is_idempotent_on_class_id() -> None:
+    rows = build_class_rows([_class_record()], {"S000001234": _IID}, _NOW)
+    sql = _compiled(build_classes_upsert(rows))
+    assert "INSERT INTO fund_classes" in sql
+    assert "ON CONFLICT (class_id) DO UPDATE" in sql
+    assert "ticker = excluded.ticker" in sql
+    assert "expense_ratio = excluded.expense_ratio" in sql
+    assert "synced_at = excluded.synced_at" in sql
+
+
+# ---------------------------------------------------------------------------
 # NAV aum fallback
 # ---------------------------------------------------------------------------
 
@@ -492,8 +569,58 @@ def _table(name: str) -> Any:
 
 
 def test_fund_tables_registered() -> None:
-    for name in ("funds", "fund_risk_latest", "fund_nav", "fund_holdings"):
+    for name in (
+        "funds", "fund_risk_latest", "fund_nav", "fund_holdings", "fund_classes"
+    ):
         assert name in Base.metadata.tables
+
+
+def test_fund_classes_pk_fk_and_columns() -> None:
+    """Migration 0007 ↔ FundClass model lockstep."""
+    table = _table("fund_classes")
+    assert [c.name for c in table.primary_key.columns] == ["class_id"]
+    (fk,) = table.foreign_keys
+    assert fk.column.table.name == "funds"
+    assert fk.ondelete == "CASCADE"
+    assert table.c["ticker"].nullable is False
+    assert table.c["synced_at"].nullable is False
+    assert table.c["synced_at"].type.timezone is True
+    for col in ("series_id", "class_name", "expense_ratio", "source_period_end"):
+        assert table.c[col].nullable is True, col
+    indexed = {c.name for idx in table.indexes for c in idx.columns}
+    assert {"ticker", "instrument_id"} <= indexed
+
+
+def test_positions_execution_columns() -> None:
+    """Migration 0007: positions.basis/commission/trade_date + checks."""
+    table = _table("positions")
+    basis = table.c["basis"]
+    assert basis.nullable is False
+    assert basis.server_default is not None
+    assert basis.server_default.arg == "reference"
+    assert table.c["commission"].nullable is True
+    assert table.c["trade_date"].nullable is True
+    from sqlalchemy import CheckConstraint
+
+    checks = {
+        c.name for c in table.constraints if isinstance(c, CheckConstraint)
+    }
+    assert {"ck_positions_basis", "ck_positions_commission_non_negative"} <= checks
+
+
+def test_portfolios_origin_column() -> None:
+    """Migration 0007: portfolios.origin with the manual|builder check."""
+    table = _table("portfolios")
+    origin = table.c["origin"]
+    assert origin.nullable is False
+    assert origin.server_default is not None
+    assert origin.server_default.arg == "manual"
+    from sqlalchemy import CheckConstraint
+
+    checks = {
+        c.name for c in table.constraints if isinstance(c, CheckConstraint)
+    }
+    assert "ck_portfolios_origin" in checks
 
 
 def test_funds_pk_and_staleness_columns() -> None:

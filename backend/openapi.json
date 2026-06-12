@@ -492,7 +492,7 @@
           "portfolios"
         ],
         "summary": "Put Position",
-        "description": "Upsert one position.\n\nINSERT path validates the ticker against Tiingo (and warms the EOD cache);\nthe UPDATE path deliberately does NOT re-ensure \u2014 the ticker was already\nvalidated when the position was created.",
+        "description": "Upsert one position.\n\nINSERT path validates the ticker against Tiingo (and warms the EOD cache);\nthe UPDATE path deliberately does NOT re-ensure \u2014 the ticker was already\nvalidated when the position was created.\n\nF8.6b: the body optionally carries basis/commission/trade_date (manual\nfill registration). Fields absent from the body keep the stored values\non UPDATE; on INSERT basis defaults to 'reference'.",
         "operationId": "put_position_portfolios__portfolio_id__positions__ticker__put",
         "parameters": [
           {
@@ -2029,7 +2029,7 @@
           "builder"
         ],
         "summary": "Save",
-        "description": "Persist a builder proposal as a real portfolio (F8.5).\n\nEach weight is sized at the asset's SPOT price (equities: latest\nadj_close; funds: latest NAV, stored under the fund's ticker) against\n``notional_usd``; the spot price becomes the position's cost basis.\nDomain failures \u2014 asset without a price, fund without a ticker, duplicate\nportfolio name, weight too small for the notional \u2014 are 422 verbatim.",
+        "description": "Persist a builder proposal as a real portfolio (F8.5 + F8.6b).\n\nEach weight is sized at the asset's REFERENCE price (equities: latest\nadj_close; funds: latest NAV) against ``notional_usd`` \u2014 unless it\ncarries a ``fill_price``, which sizes the position and (with the\ncommission) defines the real cost basis (basis='executed'). Fund weights\nmay select a share class via ``class_ticker`` (same instrument; priced\nwith the series NAV as a proxy). The portfolio is tagged\norigin='builder'. Domain failures \u2014 asset without a price, fund without\na ticker, invalid class, duplicate portfolio name, weight too small for\nthe notional \u2014 are 422 verbatim.",
         "operationId": "save_builder_save_post",
         "requestBody": {
           "content": {
@@ -3099,6 +3099,49 @@
         "title": "FilterUpdateResponse",
         "description": "PUT/DELETE filter response \u2014 one round-trip powers the Build UI.\n\n``distribution`` is null (rather than failing the successful write with\n422) when the metric has zero non-NULL rows in the snapshot.\n``available_count`` exposes the non-NULL count so the UI can distinguish\n\"0 matches\" from \"no data\" without relying solely on the 422 path."
       },
+      "FundClassOut": {
+        "properties": {
+          "class_id": {
+            "type": "string",
+            "title": "Class Id"
+          },
+          "class_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Name"
+          },
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "expense_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expense Ratio"
+          }
+        },
+        "type": "object",
+        "required": [
+          "class_id",
+          "class_name",
+          "ticker",
+          "expense_ratio"
+        ],
+        "title": "FundClassOut",
+        "description": "One share class of the fund's series (F8.6b).\n\nNOTE: only the series' representative class has a NAV in the source \u2014\nany class ticker is priced/analyzed with the SERIES NAV as a proxy.\n``expense_ratio`` is a fraction (0.0069 = 0.69%)."
+      },
       "FundHoldingItem": {
         "properties": {
           "rank": {
@@ -3629,6 +3672,13 @@
           "holdings": {
             "$ref": "#/components/schemas/FundHoldingsOut"
           },
+          "classes": {
+            "items": {
+              "$ref": "#/components/schemas/FundClassOut"
+            },
+            "type": "array",
+            "title": "Classes"
+          },
           "classification_note": {
             "type": "string",
             "title": "Classification Note",
@@ -3659,7 +3709,8 @@
           "source_nav_max_date",
           "risk",
           "nav",
-          "holdings"
+          "holdings",
+          "classes"
         ],
         "title": "FundProfileResponse",
         "description": "Full fund profile: identity + all risk metrics + NAV series + holdings."
@@ -5051,7 +5102,49 @@
               }
             ],
             "title": "Acq Price",
-            "description": "Acquisition price per share/unit; null = unknown (P&L renders null)."
+            "description": "Acquisition price per share/unit; null = unknown (P&L renders null). With basis='executed' this is the effective cost basis incl. commissions."
+          },
+          "basis": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "reference",
+                  "executed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basis",
+            "description": "'reference' (spot/NAV for analysis) or 'executed' (real fill incl. commissions). Omitted: insert defaults to 'reference', update keeps the stored value."
+          },
+          "commission": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commission",
+            "description": "Total commission paid on the fill, currency units (>= 0)."
+          },
+          "trade_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trade Date",
+            "description": "Execution date of the fill."
           }
         },
         "type": "object",
@@ -5059,7 +5152,7 @@
           "quantity"
         ],
         "title": "PositionBody",
-        "description": "Quantity/acquisition-price payload for the position upsert (PUT)."
+        "description": "Quantity/acquisition-price payload for the position upsert (PUT).\n\nF8.6b fill fields are optional: omitting them keeps the pre-F8.6b\nbehavior (on UPDATE the stored basis/commission/trade_date are left\nuntouched; on INSERT basis defaults to 'reference')."
       },
       "PositionCreate": {
         "properties": {
@@ -5080,7 +5173,49 @@
               }
             ],
             "title": "Acq Price",
-            "description": "Acquisition price per share/unit; null = unknown (P&L renders null)."
+            "description": "Acquisition price per share/unit; null = unknown (P&L renders null). With basis='executed' this is the effective cost basis incl. commissions."
+          },
+          "basis": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "reference",
+                  "executed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basis",
+            "description": "'reference' (spot/NAV for analysis) or 'executed' (real fill incl. commissions). Omitted: insert defaults to 'reference', update keeps the stored value."
+          },
+          "commission": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commission",
+            "description": "Total commission paid on the fill, currency units (>= 0)."
+          },
+          "trade_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trade Date",
+            "description": "Execution date of the fill."
           },
           "ticker": {
             "type": "string",
@@ -5155,13 +5290,47 @@
               }
             ],
             "title": "Acq Price"
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "reference",
+              "executed"
+            ],
+            "title": "Basis"
+          },
+          "commission": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commission"
+          },
+          "trade_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trade Date"
           }
         },
         "type": "object",
         "required": [
           "ticker",
           "quantity",
-          "acq_price"
+          "acq_price",
+          "basis",
+          "commission",
+          "trade_date"
         ],
         "title": "PositionOut",
         "description": "One persisted position."
@@ -5198,7 +5367,41 @@
               }
             ],
             "title": "Acq Price",
-            "description": "Acquisition price per share/unit; null = unknown."
+            "description": "Acquisition price per share/unit; null = unknown. With basis='executed' this is the effective cost basis incl. commissions."
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "reference",
+              "executed"
+            ],
+            "title": "Basis",
+            "description": "'reference' (spot/NAV cost basis, analysis-grade) or 'executed' (real fill incl. commissions)."
+          },
+          "commission": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commission",
+            "description": "Total commission paid on the fill, currency units; null when unknown or basis='reference'."
+          },
+          "trade_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trade Date",
+            "description": "Execution date of the fill; null when unknown or basis='reference'."
           },
           "last_close": {
             "type": "number",
@@ -5295,6 +5498,9 @@
           "name",
           "quantity",
           "acq_price",
+          "basis",
+          "commission",
+          "trade_date",
           "last_close",
           "prev_close",
           "change",
@@ -5611,7 +5817,7 @@
           "weights"
         ],
         "title": "SaveRequest",
-        "description": "Body for POST /builder/save \u2014 persist a proposal as a real portfolio.\n\n``quantity = weight * notional_usd / spot_price`` per position (rounded to\n4 decimals); the spot price becomes the position's cost basis."
+        "description": "Body for POST /builder/save \u2014 persist a proposal as a real portfolio.\n\n``quantity = weight * notional_usd / price`` per position (rounded to\n4 decimals), where price is the fill price when given, else the\nreference spot/NAV. The stored ``acq_price`` is the reference price for\nbasis='reference', or ``(fill_price*qty + commission)/qty`` (6 decimals)\nfor basis='executed'."
       },
       "SaveResponse": {
         "properties": {
@@ -5633,6 +5839,11 @@
             },
             "type": "array",
             "title": "Positions"
+          },
+          "pricing_note": {
+            "type": "string",
+            "title": "Pricing Note",
+            "default": "Reference prices (spot/NAV) are for analysis; executed fills with commissions define real cost basis. Fund class NAV is proxied by the series NAV."
           }
         },
         "type": "object",
@@ -5669,6 +5880,59 @@
             "maximum": 1.0,
             "exclusiveMinimum": 0.0,
             "title": "Weight"
+          },
+          "fill_price": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fill Price",
+            "description": "Actual execution price per share/unit; presence flips the position to basis='executed'."
+          },
+          "commission": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commission",
+            "description": "Total commission paid on the fill (>= 0); requires fill_price."
+          },
+          "trade_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trade Date",
+            "description": "Execution date of the fill; requires fill_price."
+          },
+          "class_ticker": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 12,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Ticker",
+            "description": "Fund share-class ticker (fund assets only); must belong to the same fund instrument. Priced with the series NAV as a proxy."
           }
         },
         "type": "object",
@@ -5677,7 +5941,7 @@
           "weight"
         ],
         "title": "SaveWeightIn",
-        "description": "One proposed weight to persist. Zero/near-zero weights should be\nfiltered out by the caller \u2014 a weight that rounds to quantity 0 is a 422."
+        "description": "One proposed weight to persist. Zero/near-zero weights should be\nfiltered out by the caller \u2014 a weight that rounds to quantity 0 is a 422.\n\nF8.6b execution fields (all optional, retro-compatible):\n- without ``fill_price`` the position is saved at the REFERENCE price\n  (spot/NAV) with basis='reference';\n- with ``fill_price`` the position is EXECUTED: quantity is sized at the\n  fill, and the cost basis includes the commission;\n- ``class_ticker`` (funds only) saves the position under a share-class\n  ticker of the SAME fund instead of the representative one."
       },
       "SavedPositionOut": {
         "properties": {
@@ -5692,13 +5956,27 @@
           "price": {
             "type": "number",
             "title": "Price"
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "reference",
+              "executed"
+            ],
+            "title": "Basis"
+          },
+          "cost_basis": {
+            "type": "number",
+            "title": "Cost Basis"
           }
         },
         "type": "object",
         "required": [
           "ticker",
           "quantity",
-          "price"
+          "price",
+          "basis",
+          "cost_basis"
         ],
         "title": "SavedPositionOut"
       },

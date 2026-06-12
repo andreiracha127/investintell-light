@@ -10,6 +10,7 @@ rejected with 422, never silently normalized away.
 """
 
 import datetime as dt
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -35,15 +36,39 @@ def validate_portfolio_name(value: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+PositionBasis = Literal["reference", "executed"]
+
+
 class PositionBody(BaseModel):
-    """Quantity/acquisition-price payload for the position upsert (PUT)."""
+    """Quantity/acquisition-price payload for the position upsert (PUT).
+
+    F8.6b fill fields are optional: omitting them keeps the pre-F8.6b
+    behavior (on UPDATE the stored basis/commission/trade_date are left
+    untouched; on INSERT basis defaults to 'reference').
+    """
 
     quantity: float = Field(gt=0, allow_inf_nan=False, description="Shares/units held; > 0.")
     acq_price: float | None = Field(
         default=None,
         gt=0,
         allow_inf_nan=False,
-        description="Acquisition price per share/unit; null = unknown (P&L renders null).",
+        description="Acquisition price per share/unit; null = unknown (P&L renders null). "
+        "With basis='executed' this is the effective cost basis incl. commissions.",
+    )
+    basis: PositionBasis | None = Field(
+        default=None,
+        description="'reference' (spot/NAV for analysis) or 'executed' (real fill "
+        "incl. commissions). Omitted: insert defaults to 'reference', update keeps "
+        "the stored value.",
+    )
+    commission: float | None = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+        description="Total commission paid on the fill, currency units (>= 0).",
+    )
+    trade_date: dt.date | None = Field(
+        default=None, description="Execution date of the fill."
     )
 
 
@@ -126,6 +151,9 @@ class PositionOut(BaseModel):
     ticker: str
     quantity: float
     acq_price: float | None
+    basis: PositionBasis
+    commission: float | None
+    trade_date: dt.date | None
 
 
 class PortfolioOut(BaseModel):
@@ -165,7 +193,20 @@ class PositionOverview(BaseModel):
     name: str | None = Field(description="Display name from the instruments cache.")
     quantity: float
     acq_price: float | None = Field(
-        description="Acquisition price per share/unit; null = unknown."
+        description="Acquisition price per share/unit; null = unknown. With "
+        "basis='executed' this is the effective cost basis incl. commissions."
+    )
+    basis: PositionBasis = Field(
+        description="'reference' (spot/NAV cost basis, analysis-grade) or "
+        "'executed' (real fill incl. commissions)."
+    )
+    commission: float | None = Field(
+        description="Total commission paid on the fill, currency units; null "
+        "when unknown or basis='reference'."
+    )
+    trade_date: dt.date | None = Field(
+        description="Execution date of the fill; null when unknown or "
+        "basis='reference'."
     )
     last_close: float = Field(description="Most recent EOD close, currency units.")
     prev_close: float | None = Field(

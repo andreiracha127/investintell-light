@@ -20,6 +20,11 @@ Pipeline (one run = one `run_sync()` call, normally via scripts/sync_funds.py):
    backfills funds.aum_usd where monthly_avg_net_assets was missing.
 5. Fetch the latest sec_nport_holdings report per series, rank by
    pct_of_nav desc → `fund_holdings` (source is top-50 truncated).
+6. (F8.6b, runs as step 3c) Fetch the share-class catalog from
+   sec_fund_classes (latest filing per class_id, ticker IS NOT NULL,
+   series in the local universe) → `fund_classes`. Only the series'
+   representative class has a NAV in the source — class tickers are priced
+   with the series NAV as a proxy.
 
 ABSOLUTE RULES honoured here (same as app/sync/mother_db.py):
 - The mother DB is READ-ONLY and accessed only by app/sync modules, never
@@ -45,7 +50,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.chunks import chunked
-from app.models.fund import Fund, FundHolding, FundNav, FundRiskLatest
+from app.models.fund import Fund, FundClass, FundHolding, FundNav, FundRiskLatest
 from app.sync.mother_db import connect_mother_db
 
 logger = logging.getLogger(__name__)
@@ -73,6 +78,7 @@ UNCLASSIFIED_LABEL = "Unclassified"
 RISK_FETCH_BATCH = 1000
 NAV_FETCH_BATCH = 200  # per task spec: batches of instrument_ids
 HOLDINGS_FETCH_BATCH = 500
+CLASSES_FETCH_BATCH = 500
 
 # Local upsert chunks (asyncpg caps binds at 32 767 params/query):
 # funds 19 params/row, risk 33, nav 5, holdings 11.
@@ -80,6 +86,7 @@ FUNDS_UPSERT_CHUNK = 1000  # 19 000 params
 RISK_UPSERT_CHUNK = 900  # 29 700 params
 NAV_UPSERT_CHUNK = 5000  # 25 000 params
 HOLDINGS_UPSERT_CHUNK = 2000  # 22 000 params
+CLASSES_UPSERT_CHUNK = 3000  # 8 params/row -> 24 000 params
 
 # Hard safety valve: abort (loudly) instead of inserting an absurd NAV volume.
 NAV_ROW_LIMIT = 10_000_000
@@ -197,6 +204,22 @@ WHERE c.net_assets IS NOT NULL
 GROUP BY c.series_id
 """
 
+# Share-class catalog (F8.6b): one row per class_id, taken from the LATEST
+# filing (max xbrl_period_end, NULLs last) and restricted to classes with a
+# ticker for series in the synced universe. expense_ratio_pct is already a
+# fraction in the source (0.0069 = 0.69%). NOTE: only the series'
+# representative class has a NAV in the source — every class ticker is
+# priced with the series NAV as a proxy (see app.models.fund.FundClass).
+CLASSES_SQL = """
+SELECT DISTINCT ON (class_id)
+       class_id, series_id, class_name, ticker,
+       expense_ratio_pct, xbrl_period_end
+FROM sec_fund_classes
+WHERE series_id = ANY($1::text[])
+  AND ticker IS NOT NULL
+ORDER BY class_id, xbrl_period_end DESC NULLS LAST
+"""
+
 # Metric columns copied verbatim into fund_risk_latest (model order; the
 # tests keep the model, migration and this tuple in lockstep).
 RISK_METRIC_COLUMNS: tuple[str, ...] = (
@@ -275,6 +298,7 @@ class FundSyncReport:
     aum_filled_from_nav: int = 0
     holdings_series: int = 0
     holdings_rows_upserted: int = 0
+    fund_classes_upserted: int = 0
     dry_run: bool = False
 
     def lines(self) -> list[str]:
@@ -292,6 +316,7 @@ class FundSyncReport:
             f"  funds aum_usd filled from NAV:    {self.aum_filled_from_nav}",
             f"fund_holdings series synced:        {self.holdings_series}",
             f"fund_holdings rows upserted:        {self.holdings_rows_upserted}",
+            f"fund_classes upserted:              {self.fund_classes_upserted}",
             f"Dry run (no local writes):          {self.dry_run}",
         ]
 
@@ -522,6 +547,58 @@ def rank_holdings(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     return ranked
 
 
+def build_class_rows(
+    records: Sequence[Mapping[str, Any]],
+    instrument_by_series: Mapping[str, uuid.UUID],
+    synced_at: dt.datetime,
+) -> list[dict[str, Any]]:
+    """Assemble `fund_classes` rows from CLASSES_SQL records (pure).
+
+    Records whose series is not in *instrument_by_series* are dropped (the
+    class belongs to a series outside the synced universe). When several
+    local instruments share a series, the mapping owner decides (the
+    orchestrator picks the lowest instrument_id — deterministic). Tickers
+    are upper-cased to match the position-ticker convention.
+    """
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        series_id = str(record["series_id"]) if record["series_id"] is not None else None
+        instrument_id = instrument_by_series.get(series_id) if series_id else None
+        if instrument_id is None:
+            continue
+        ticker = str(record["ticker"]).strip().upper()
+        if not ticker:
+            continue
+        rows.append(
+            {
+                "class_id": str(record["class_id"]),
+                "instrument_id": instrument_id,
+                "series_id": series_id,
+                "class_name": record["class_name"],
+                "ticker": ticker,
+                "expense_ratio": record["expense_ratio_pct"],
+                "source_period_end": record["xbrl_period_end"],
+                "synced_at": synced_at,
+            }
+        )
+    return rows
+
+
+def index_instruments_by_series(
+    eligible: Sequence[Mapping[str, Any]],
+) -> dict[str, uuid.UUID]:
+    """series_id -> instrument_id; the LOWEST instrument_id wins when several
+    local instruments share a series (deterministic class anchoring)."""
+    by_series: dict[str, uuid.UUID] = {}
+    for record in eligible:
+        series_id = str(record["sec_series_id"])
+        instrument_id = record["instrument_id"]
+        current = by_series.get(series_id)
+        if current is None or instrument_id < current:
+            by_series[series_id] = instrument_id
+    return by_series
+
+
 def merge_risk_duplicates(
     rows: Sequence[Mapping[str, Any]],
 ) -> tuple[list[dict[str, Any]], int]:
@@ -602,6 +679,16 @@ _FUND_MUTABLE_COLUMNS = (
 
 _NAV_MUTABLE_COLUMNS = ("nav", "return_1d", "aum_usd")
 
+_CLASS_MUTABLE_COLUMNS = (
+    "instrument_id",
+    "series_id",
+    "class_name",
+    "ticker",
+    "expense_ratio",
+    "source_period_end",
+    "synced_at",
+)
+
 _HOLDING_MUTABLE_COLUMNS = (
     "issuer_name",
     "cusip",
@@ -615,7 +702,11 @@ _HOLDING_MUTABLE_COLUMNS = (
 
 
 def _upsert(
-    model: type[Fund] | type[FundRiskLatest] | type[FundNav] | type[FundHolding],
+    model: type[Fund]
+    | type[FundRiskLatest]
+    | type[FundNav]
+    | type[FundHolding]
+    | type[FundClass],
     rows: list[dict[str, Any]],
     conflict_cols: list[str],
     update_cols: tuple[str, ...],
@@ -650,6 +741,10 @@ def build_holdings_upsert(rows: list[dict[str, Any]]) -> PgInsert:
         ["series_id", "report_date", "rank"],
         _HOLDING_MUTABLE_COLUMNS,
     )
+
+
+def build_classes_upsert(rows: list[dict[str, Any]]) -> PgInsert:
+    return _upsert(FundClass, rows, ["class_id"], _CLASS_MUTABLE_COLUMNS)
 
 
 # ---------------------------------------------------------------------------
@@ -778,6 +873,27 @@ async def run_sync(
             "Upserted %d funds, %d fund_risk_latest rows",
             report.funds_upserted, report.risk_rows_upserted,
         )
+
+        # Step 3c — share-class catalog (F8.6b): latest filing per class_id,
+        # classes-with-ticker only, anchored on the local series instrument
+        # (lowest instrument_id when shared). Per-batch commit (resumable).
+        instrument_by_series = index_instruments_by_series(eligible)
+        for batch_no, series_batch in enumerate(
+            chunked(series_ids, CLASSES_FETCH_BATCH), start=1
+        ):
+            class_records = [dict(r) for r in await conn.fetch(CLASSES_SQL, series_batch)]
+            class_rows = build_class_rows(class_records, instrument_by_series, now)
+            if class_rows:
+                async with session_factory() as session:
+                    for class_chunk in chunked(class_rows, CLASSES_UPSERT_CHUNK):
+                        await session.execute(build_classes_upsert(class_chunk))
+                    await session.commit()
+            report.fund_classes_upserted += len(class_rows)
+            logger.info(
+                "fund_classes batch %d: %d series queried, %d rows (total %d)",
+                batch_no, len(series_batch), len(class_rows),
+                report.fund_classes_upserted,
+            )
 
         # Step 4 — NAV window, batched; per-batch commit (resumable).
         window_start = nav_window_start(run_date)

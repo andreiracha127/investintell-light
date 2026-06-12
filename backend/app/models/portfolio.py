@@ -7,9 +7,20 @@ against Tiingo at the API layer (fail loud on typos) — deliberately NOT an FK
 to `instruments` so a position never blocks instrument-cache maintenance.
 """
 
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint, func
+from sqlalchemy import (
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -25,6 +36,12 @@ class Portfolio(Base):
 
     # Uninvested cash balance, in currency units.
     cash: Mapped[float] = mapped_column(nullable=False, server_default="0")
+
+    # Provenance: 'manual' (created via the CRUD UI) or 'builder'
+    # (persisted from a builder proposal via POST /builder/save).
+    origin: Mapped[str] = mapped_column(
+        String, nullable=False, server_default="manual"
+    )
 
     # Audit timestamps — both tz-aware, server-set.
     created_at: Mapped[datetime] = mapped_column(
@@ -55,6 +72,12 @@ class Portfolio(Base):
         order_by="Position.ticker",
     )
 
+    # The Base naming convention expands "origin" to "ck_portfolios_origin"
+    # (matches migration 0007).
+    __table_args__ = (
+        CheckConstraint("origin IN ('manual', 'builder')", name="origin"),
+    )
+
 
 class Position(Base):
     __tablename__ = "positions"
@@ -73,7 +96,22 @@ class Position(Base):
     quantity: Mapped[float] = mapped_column(nullable=False)
 
     # Acquisition price per share/unit — nullable: P&L renders null when absent.
+    # basis='executed' positions store the EFFECTIVE cost basis here:
+    # (fill_price * quantity + commission) / quantity.
     acq_price: Mapped[float | None] = mapped_column(nullable=True)
+
+    # 'reference' — acq_price is a spot/NAV reference (analysis/sizing);
+    # 'executed' — acq_price is a real fill incl. commissions (F8.6b).
+    basis: Mapped[str] = mapped_column(
+        String, nullable=False, server_default="reference"
+    )
+
+    # Total commission paid on the fill, currency units (>= 0); null when
+    # unknown or basis='reference'.
+    commission: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+
+    # Execution date of the fill; null when unknown or basis='reference'.
+    trade_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # Audit timestamps — same conventions (and Core-update caveat) as Portfolio.
     created_at: Mapped[datetime] = mapped_column(
@@ -96,6 +134,13 @@ class Position(Base):
         # One row per ticker within a portfolio — the PUT upsert target.
         UniqueConstraint(
             "portfolio_id", "ticker", name="uq_positions_portfolio_id_ticker"
+        ),
+        # Convention-expanded to ck_positions_basis /
+        # ck_positions_commission_non_negative (matches migration 0007).
+        CheckConstraint("basis IN ('reference', 'executed')", name="basis"),
+        CheckConstraint(
+            "commission IS NULL OR commission >= 0",
+            name="commission_non_negative",
         ),
         # Child-side FK index: selectinload of a portfolio's positions and the
         # ON DELETE CASCADE both scan by portfolio_id.

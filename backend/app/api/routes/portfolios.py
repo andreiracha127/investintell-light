@@ -166,24 +166,51 @@ async def put_position(
     INSERT path validates the ticker against Tiingo (and warms the EOD cache);
     the UPDATE path deliberately does NOT re-ensure — the ticker was already
     validated when the position was created.
+
+    F8.6b: the body optionally carries basis/commission/trade_date (manual
+    fill registration). Fields absent from the body keep the stored values
+    on UPDATE; on INSERT basis defaults to 'reference'.
     """
     symbol = _normalize_ticker_or_422(ticker)
     if not await portfolio_crud.portfolio_exists(session, portfolio_id):
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
+    provided = payload.model_fields_set
     position = await portfolio_crud.get_position(session, portfolio_id, symbol)
     if position is None:
-        # Fund tickers (synced funds table) are valid positions priced from
-        # fund_nav — they must NOT be validated against Tiingo (F8.5).
+        # Fund tickers (synced funds/fund_classes tables) are valid positions
+        # priced from fund_nav — they must NOT be validated against Tiingo
+        # (F8.5; class tickers use the series NAV as a proxy, F8.6b).
         is_fund = bool(await portfolio_crud.select_fund_tickers(session, [symbol]))
         if not is_fund:
             start, end = _ensure_window()
             await ensure_eod_or_http_error(session, client, [symbol], start, end)
         position = await portfolio_crud.insert_position(
-            session, portfolio_id, symbol, payload.quantity, payload.acq_price
+            session,
+            portfolio_id,
+            symbol,
+            payload.quantity,
+            payload.acq_price,
+            basis=payload.basis or "reference",
+            commission=payload.commission,
+            trade_date=payload.trade_date,
         )
     else:
         position = await portfolio_crud.update_position(
-            session, position, payload.quantity, payload.acq_price
+            session,
+            position,
+            payload.quantity,
+            payload.acq_price,
+            basis=payload.basis,
+            commission=(
+                payload.commission
+                if "commission" in provided
+                else portfolio_crud.UNSET
+            ),
+            trade_date=(
+                payload.trade_date
+                if "trade_date" in provided
+                else portfolio_crud.UNSET
+            ),
         )
     return PositionOut.model_validate(position)
 

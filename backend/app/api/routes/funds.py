@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.schemas.funds import (
+    FundClassOut,
     FundHoldingItem,
     FundHoldingsOut,
     FundListItem,
@@ -250,4 +251,7 @@ async def get_fund_profile(
             pct_of_nav_total=profile.holdings_pct_of_nav_total,
             is_top50_truncated=profile.is_top50_truncated,
         ),
+        # Share classes (F8.6b) — expense_ratio asc NULLS LAST; any class is
+        # priced with the series NAV as a proxy.
+        classes=[FundClassOut.model_validate(c) for c in profile.classes],
     )
