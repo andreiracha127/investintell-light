@@ -29,6 +29,74 @@ const TYPE_TAG: Record<string, string> = {
   mmf: "Money market",
 };
 
+// N-PORT item C.4 codes: holding.asset_class = assetCat, holding.sector =
+// issuerCat. N-PORT carries NO real (GICS-like) sector — showing the raw
+// issuerCat ("CORP") under a "Sector" header was misleading. The combined
+// human label below is what the filing actually says about the position.
+const NPORT_ASSET_LABEL: Record<string, string> = {
+  EC: "Common stock",
+  EP: "Preferred stock",
+  "ABS-MBS": "MBS",
+  "ABS-CBDO": "CDO/CBO",
+  "ABS-O": "ABS",
+  "ABS-APCP": "ABS (comm. paper)",
+  LON: "Loan",
+  RA: "Repo",
+  STIV: "Short-term",
+  SN: "Structured note",
+  RE: "Real estate",
+  COMM: "Commodity",
+  DIR: "Rates derivative",
+  DE: "Equity derivative",
+  DFE: "FX derivative",
+  DCR: "Credit derivative",
+  DCO: "Commodity derivative",
+  DO: "Derivative",
+};
+
+const NPORT_ISSUER_LABEL: Record<string, string> = {
+  UST: "US Treasury",
+  USGA: "Agency",
+  USGSE: "GSE",
+  MUN: "Municipal",
+  NUSS: "Sovereign",
+  RF: "Fund",
+  PF: "Private fund",
+  CORP: "Corporate",
+};
+
+function holdingTypeLabel(
+  assetClass: string | null,
+  issuerCat: string | null,
+): string | null {
+  // Debt gets the issuer qualifier — that's the distinction that matters.
+  if (assetClass === "DBT") {
+    switch (issuerCat) {
+      case "CORP":
+        return "Corporate bond";
+      case "UST":
+        return "US Treasury";
+      case "USGA":
+        return "Agency bond";
+      case "USGSE":
+        return "GSE bond";
+      case "MUN":
+        return "Municipal bond";
+      case "NUSS":
+        return "Sovereign bond";
+      default:
+        return "Bond";
+    }
+  }
+  if (assetClass && NPORT_ASSET_LABEL[assetClass]) {
+    return NPORT_ASSET_LABEL[assetClass];
+  }
+  if (issuerCat && NPORT_ISSUER_LABEL[issuerCat]) {
+    return NPORT_ISSUER_LABEL[issuerCat];
+  }
+  return assetClass ?? issuerCat; // passthrough for unknown future codes
+}
+
 function pct(value: number | null | undefined, dp = 2): string {
   return value !== null && value !== undefined ? formatPercent(value, dp) : "—";
 }
@@ -179,7 +247,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
                         Issuer
                       </th>
                       <th className="px-2.5 py-[7px] text-left text-[11px] font-semibold text-text-secondary border-b border-border-strong">
-                        Sector
+                        Type
                       </th>
                       <th className="px-2.5 py-[7px] text-right text-[11px] font-semibold text-text-secondary border-b border-border-strong">
                         % NAV
@@ -202,7 +270,10 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
                         </td>
                         <td className="ix-cell px-2.5 text-left text-text-secondary">
                           <span className="block max-w-[200px] truncate">
-                            {holding.sector ?? "—"}
+                            {holdingTypeLabel(
+                              holding.asset_class,
+                              holding.sector,
+                            ) ?? "—"}
                           </span>
                         </td>
                         {/* N-PORT pct_of_nav is already in percent units
