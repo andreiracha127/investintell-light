@@ -155,9 +155,8 @@ export function LookthroughPanel({
   const [activeDim, setActiveDim] = useState<string>("");
 
   useEffect(() => {
-    if (!activeDim) {
-      setActiveDim(Object.keys(dimensions)[0] ?? "");
-    }
+    const keys = Object.keys(dimensions);
+    if (!activeDim || !keys.includes(activeDim)) setActiveDim(keys[0] ?? "");
   }, [dimensions, activeDim]);
 
   const exposureOption = useMemo(

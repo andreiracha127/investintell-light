@@ -12,7 +12,12 @@
  * than a time-axis scatter because ECharts stacked bars on a category axis
  * are guaranteed to align and fill without gaps.
  *
- * Empty/null flips → option with empty series (panel should hide).
+ * **Binary-state assumption:** the builder only recognises `"risk_on"` and
+ * `"risk_off"` states. Any period whose `state` is neither renders as a gap
+ * (both series carry value 0 for that category), which is visible as an empty
+ * bar slot. Unknown states are intentionally not collapsed or merged.
+ *
+ * Empty/null flips → returns `null` (caller should hide the panel entirely).
  */
 import type { EChartsOption, SeriesOption } from "echarts";
 
@@ -52,9 +57,12 @@ function derivePeriods(flips: RegimeFlip[]): RegimePeriod[] {
 }
 
 /** Human-readable x-axis category label for a period. */
-function periodLabel(period: RegimePeriod): string {
+function periodLabel(period: RegimePeriod, asOf?: string): string {
   const start = formatDate(period.start);
-  if (period.end === null) return `${start} →`;
+  if (period.end === null) {
+    // Close the open-ended final period with the as-of anchor when available.
+    return asOf ? `${start} – ${formatDate(asOf)}` : `${start} →`;
+  }
   return `${start} – ${formatDate(period.end)}`;
 }
 
@@ -65,25 +73,26 @@ function periodLabel(period: RegimePeriod): string {
  *
  * @param flips   Recent regime flip records from the API response.
  * @param colors  Design-token color bag.
+ * @param asOf    ISO date string used to close the final open-ended period
+ *                (e.g. the API's `as_of` field). When provided, the last
+ *                period label shows "YYYY-MM-DD – YYYY-MM-DD" instead of
+ *                "YYYY-MM-DD →". Has no effect when `flips` is empty.
  *
- * @returns An EChartsOption ready to pass to `<EChart>`. When `flips` is
- *          empty the option carries empty series so the chart renders blank.
+ * @returns An EChartsOption ready to pass to `<EChart>`, or `null` when
+ *          `flips` is empty (caller should hide the panel entirely).
  */
 export function buildRegimeStripOption(
   flips: RegimeFlip[],
   colors: ChartColors,
-): EChartsOption {
+  asOf?: string,
+): EChartsOption | null {
   const periods = derivePeriods(flips);
 
   if (periods.length === 0) {
-    return {
-      animation: false,
-      backgroundColor: "transparent",
-      series: [],
-    };
+    return null;
   }
 
-  const categories = periods.map(periodLabel);
+  const categories = periods.map((p) => periodLabel(p, asOf));
 
   // For each period: risk_on series value = 1 if state is risk_on, else 0.
   // risk_off series value = 1 if state is risk_off, else 0.
