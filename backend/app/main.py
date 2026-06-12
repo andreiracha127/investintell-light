@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import builder as builder_router
 from app.api.routes import funds as funds_router
 from app.api.routes import health as health_router
+from app.api.routes import macro as macro_router
 from app.api.routes import portfolio as portfolio_router
 from app.api.routes import portfolios as portfolios_router
 from app.api.routes import screener as screener_router
@@ -48,6 +49,7 @@ def create_app() -> FastAPI:
     application.include_router(screener_router.router)
     application.include_router(funds_router.router)
     application.include_router(builder_router.router)
+    application.include_router(macro_router.router)
     return application
 
 
