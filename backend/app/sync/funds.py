@@ -205,6 +205,14 @@ WHERE c.net_assets IS NOT NULL
 GROUP BY c.series_id
 """
 
+# Tickers listados como Exchange Traded Product (OpenFIGI) — complemento da
+# sec_etfs (cobertura parcial) na derivação de fund_type.
+ETP_TICKERS_SQL = """
+SELECT DISTINCT upper(ticker) AS ticker
+FROM sec_cusip_ticker_map
+WHERE security_type = 'ETP' AND ticker IS NOT NULL
+"""
+
 # AUM fallback de ÚLTIMA instância (antes do NAV fallback do orchestrator):
 # total de mercado dos holdings no último N-PORT (CAGG do data-lake).
 # Validado 2026-06-12 contra o AUM oficial: VIGRX 99,94% / ANCFX 99,8% de
@@ -418,11 +426,19 @@ def cascade_strategy_label(
     return str(label).strip() if label is not None else UNCLASSIFIED_LABEL
 
 
-def derive_fund_type(*, in_registered: bool, in_etf: bool, in_mmf: bool) -> str:
+def derive_fund_type(
+    *, in_registered: bool, in_etf: bool, in_mmf: bool, is_etp_listed: bool = False
+) -> str:
     """'etf' | 'mmf' by N-CEN/N-MFP table presence, else 'mutual_fund' —
     every eligible instrument is instruments_universe.instrument_type='fund'
-    (verified 4,558/4,558), so 'unknown' would only hide information."""
-    if in_etf:
+    (verified 4,558/4,558), so 'unknown' would only hide information.
+
+    ``is_etp_listed``: o ticker do fundo aparece como Exchange Traded
+    Product no sec_cusip_ticker_map (OpenFIGI). Cobre os ETFs fora da
+    sec_etfs (cobertura parcial, 985 séries — IVV/QQQ/AGG/TLT etc. ficavam
+    'mutual_fund'; 22 casos medidos em 2026-06-12).
+    """
+    if in_etf or is_etp_listed:
         return "etf"
     if in_mmf:
         return "mmf"
@@ -459,6 +475,7 @@ def build_fund_row(
     prospectus_fee: Decimal | None = None,
     classes_aum: Decimal | None = None,
     nport_aum: Decimal | None = None,
+    etp_tickers: frozenset[str] | set[str] = frozenset(),
 ) -> dict[str, Any]:
     """Assemble one `funds` row from the mother-DB source rows.
 
@@ -474,10 +491,11 @@ def build_fund_row(
         _get(universe, "name"),
         series_id,
     )
+    ticker = _first(identity["ticker"], _get(registered, "ticker"), _get(etf, "ticker"))
     return {
         "instrument_id": identity["instrument_id"],
         "series_id": series_id,
-        "ticker": _first(identity["ticker"], _get(registered, "ticker"), _get(etf, "ticker")),
+        "ticker": ticker,
         "isin": identity["isin"],
         "cusip": identity["cusip_9"],
         "lei": identity["lei"],
@@ -486,6 +504,7 @@ def build_fund_row(
             in_registered=registered is not None,
             in_etf=etf is not None,
             in_mmf=mmf is not None,
+            is_etp_listed=str(ticker).upper() in etp_tickers if ticker else False,
         ),
         "strategy_label": cascade_strategy_label(
             registered, etf, mmf, stage_label=stage_label, peer_label=peer_label
@@ -855,6 +874,9 @@ async def run_sync(
             str(r["series_id"]): r["aum_usd"]
             for r in await conn.fetch(CLASSES_AUM_SQL, series_ids)
         }
+        etp_tickers = frozenset(
+            str(r["ticker"]) for r in await conn.fetch(ETP_TICKERS_SQL)
+        )
         # A CAGG é objeto do data-lake: existe na fonte de produção (Tiger),
         # mas não no Postgres local de dev — enriquecimento opcional, nunca
         # derruba o sync (as 4 fontes primárias de AUM continuam acima).
@@ -910,6 +932,7 @@ async def run_sync(
                 prospectus_fee=prospectus_fees.get(series_id),
                 classes_aum=classes_aum.get(series_id),
                 nport_aum=nport_aum.get(series_id),
+                etp_tickers=etp_tickers,
             )
             fund_rows[row["instrument_id"]] = row
             ft = row["fund_type"]
