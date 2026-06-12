@@ -34,6 +34,7 @@ from app.models.eod_price import EodPrice
 from app.models.instrument import Instrument
 from app.models.news_item import NewsItem
 from app.schemas.analysis import RangeKey, StockAnalysisResponse
+from app.schemas.market import HistoryBar, HistoryResponse, MarketOverviewResponse
 from app.schemas.news import NewsArticle, NewsResponse
 from app.schemas.prices import PricePoint, PriceSeriesResponse
 from app.services._series import (
@@ -45,6 +46,7 @@ from app.services._series import (
 from app.services._series import (
     select_date_bounds as _select_date_bounds,
 )
+from app.services import market_overview
 from app.services.stock_analysis import (
     StockAnalysisError,
     assemble_analysis,
@@ -75,6 +77,39 @@ async def _ensure_eod_or_http_error(
 ) -> None:
     """Thin wrapper — delegates to the shared canonical implementation in app.api._shared."""
     await ensure_eod_or_http_error(session, client, symbols, start, end)
+
+
+# ---------------------------------------------------------------------------
+# Market overview (landing /stocks)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/overview", response_model=MarketOverviewResponse)
+async def get_market_overview(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    client: Annotated[TiingoClient, Depends(get_tiingo_client)],
+) -> MarketOverviewResponse:
+    """Payload único da landing /stocks — leaders/setores das tabelas locais.
+
+    Leaders e setores leem eod_prices ⋈ universe_constituents (pipeline batch
+    F6.2); ficam tão frescos quanto o último backfill. Os 4 ETFs de índice são
+    painel SECUNDÁRIO: warm on-demand via ensure_eod, e falha da Tiingo degrada
+    para indices=[] com warning (degradação declarada, como o news stale).
+    """
+    indices: list = []
+    today = dt.date.today()
+    try:
+        await _ensure_eod_or_http_error(
+            session, client, list(market_overview.INDEX_TICKERS),
+            today - dt.timedelta(days=60), today,
+        )
+        indices = await market_overview.fetch_index_rows(session)
+    except (HTTPException, TiingoError) as exc:
+        logger.warning("Index strip degraded (ensure/fetch failed): %s", exc)
+
+    rows = await market_overview.fetch_overview_rows(session)
+    ranked = market_overview.rank_overview(rows)
+    return MarketOverviewResponse(universe_size=len(rows), indices=indices, **ranked)
 
 
 async def _select_price_rows(
