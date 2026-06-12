@@ -1,6 +1,8 @@
 """Market overview / history schemas (Stocks redesign — landing /stocks)."""
 
 import datetime as dt
+import uuid
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -56,3 +58,18 @@ class HistoryResponse(BaseModel):
     ticker: str
     count: int
     bars: list[HistoryBar]
+
+
+class FundHistoryResponse(BaseModel):
+    instrument_id: uuid.UUID
+    ticker: str | None  # mutual funds podem não ter ticker
+    mode: Literal["ohlcv", "nav"]  # ohlcv = ETF (eod_prices); nav = fund_nav
+    count: int
+    bars: list[HistoryBar]
+
+
+class SymbolSearchResult(BaseModel):
+    symbol: str
+    name: str | None
+    kind: str  # "stock" | "etf" | "mutual_fund" | "mmf" (fund_type passa direto)
+    instrument_id: uuid.UUID | None  # None para stocks
