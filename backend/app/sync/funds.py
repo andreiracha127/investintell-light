@@ -506,8 +506,14 @@ def build_fund_row(
         "inception_date": _first(
             _get(registered, "inception_date"), _get(etf, "inception_date")
         ),
+        # Todo fundo do universo vem de filing N-PORT na SEC — registered
+        # investment companies são US-domiciled por definição; "US" é
+        # derivação, não palpite (cobre séries fora das tabelas de perfil).
         "domicile": _first(
-            _get(registered, "domicile"), _get(etf, "domicile"), _get(mmf, "domicile")
+            _get(registered, "domicile"),
+            _get(etf, "domicile"),
+            _get(mmf, "domicile"),
+            "US",
         ),
         "currency": _first(
             _get(registered, "currency"),

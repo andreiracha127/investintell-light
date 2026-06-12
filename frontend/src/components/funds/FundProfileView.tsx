@@ -322,8 +322,10 @@ function RiskRows({ risk }: { risk: FundRisk }) {
     { label: "VaR 95 1M", value: pct(risk.var_95_1m) },
     { label: "CVaR 95 1M", value: pct(risk.cvar_95_1m) },
     { label: "CVaR 99 EVT", value: pct(risk.cvar_99_evt) },
-    { label: "Downside capture 1Y", value: pct(risk.downside_capture_1y) },
-    { label: "Upside capture 1Y", value: pct(risk.upside_capture_1y) },
+    // Capture ratios arrive ×100 from the risk worker (95.3 = 95.3%) —
+    // unlike the return/vol fractions; num(), not pct().
+    { label: "Downside capture 1Y", value: num(risk.downside_capture_1y, 1) },
+    { label: "Upside capture 1Y", value: num(risk.upside_capture_1y, 1) },
     { label: "Equity corr. 252d", value: num(risk.equity_correlation_252d) },
     {
       label: "Peer Sharpe pctl",
