@@ -5,11 +5,10 @@ import datetime as dt
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+import app.api.routes.stocks as stocks_routes
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
 from app.main import create_app
-
-import app.api.routes.stocks as stocks_routes
 
 
 def _client() -> AsyncClient:
@@ -49,8 +48,10 @@ async def test_history_contract_t_o_h_l_c_v() -> None:
     assert body["ticker"] == "TSLA" and body["count"] == 2
     bar = body["bars"][-1]
     # t = epoch ms UTC de 2026-06-11
-    assert bar["t"] == int(dt.datetime(2026, 6, 11, tzinfo=dt.timezone.utc).timestamp() * 1000)
-    assert (bar["o"], bar["h"], bar["l"], bar["c"], bar["v"]) == (104.0, 106.0, 103.0, 105.5, 1_200_000)
+    assert bar["t"] == int(dt.datetime(2026, 6, 11, tzinfo=dt.UTC).timestamp() * 1000)
+    assert (bar["o"], bar["h"], bar["l"], bar["c"], bar["v"]) == (
+        104.0, 106.0, 103.0, 105.5, 1_200_000,
+    )
 
 
 @pytest.mark.anyio

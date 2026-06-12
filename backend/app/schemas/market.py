@@ -49,7 +49,7 @@ class HistoryBar(BaseModel):
     t: int  # epoch ms UTC do pregão
     o: float
     h: float
-    l: float
+    l: float  # noqa: E741 — campo do contrato {t,o,h,l,c,v}
     c: float
     v: int
 
