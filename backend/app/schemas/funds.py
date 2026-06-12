@@ -134,7 +134,10 @@ class FundHoldingItem(BaseModel):
     cusip: str | None
     isin: str | None
     asset_class: str | None
+    # N-PORT issuerCat code (CORP/UST/MUN...) — kept for completeness.
     sector: str | None
+    # Real GICS sector (sec_cusip_ticker_map); the UI's "Sector" column.
+    gics_sector: str | None
     market_value: float | None
     pct_of_nav: float | None
 

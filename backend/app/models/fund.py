@@ -208,6 +208,10 @@ class FundHolding(Base):
     cusip: Mapped[str | None] = mapped_column(String, nullable=True)
     isin: Mapped[str | None] = mapped_column(String, nullable=True)
     asset_class: Mapped[str | None] = mapped_column(String, nullable=True)
+    # N-PORT issuerCat code (CORP/UST/MUN...) — NOT a real sector.
     sector: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Real GICS sector via sec_cusip_ticker_map (exact CUSIP, fallback
+    # issuer CUSIP-6); NULL when the issuer is outside the resolved map.
+    gics_sector: Mapped[str | None] = mapped_column(String, nullable=True)
     market_value: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     pct_of_nav: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)

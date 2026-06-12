@@ -691,6 +691,49 @@
         }
       }
     },
+    "/portfolios/{portfolio_id}/lookthrough": {
+      "get": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Get Portfolio Lookthrough",
+        "description": "Exposi\u00e7\u00e3o consolidada do portf\u00f3lio atravessando os fundos (Frente C).\n\nDB-first: pesos v\u00eam dos pre\u00e7os/NAVs j\u00e1 sincronizados localmente (sem\nensure Tiingo \u2014 posi\u00e7\u00e3o sem pre\u00e7o local \u00e9 409 expl\u00edcito) e as exposi\u00e7\u00f5es\nv\u00eam das tabelas materializadas pelo worker ``nport_lookthrough`` no\ndata-lake. Posi\u00e7\u00f5es n\u00e3o atravessadas (a\u00e7\u00f5es, fundos sem materializa\u00e7\u00e3o)\nficam EXPL\u00cdCITAS em ``unexpanded`` \u2014 nunca somem silenciosamente.",
+        "operationId": "get_portfolio_lookthrough_portfolios__portfolio_id__lookthrough_get",
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioLookthroughResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/statistics/scenario": {
       "post": {
         "tags": [
@@ -1943,7 +1986,7 @@
           "funds"
         ],
         "summary": "Get Fund Profile",
-        "description": "Full profile: identity + all risk metrics + 2y NAV (~260 points,\ndecimated server-side) + latest top holdings (top-50-truncated source).",
+        "description": "Full profile: identity + all risk metrics + 2y NAV (~260 points,\ndecimated server-side) + latest top holdings (display-capped; the full\nconsolidated exposure lives in /funds/{id}/lookthrough).",
         "operationId": "get_fund_profile_funds__instrument_id__get",
         "parameters": [
           {
@@ -1964,6 +2007,72 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/FundProfileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/funds/{instrument_id}/lookthrough": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Fund Lookthrough",
+        "description": "Exposi\u00e7\u00f5es look-through materializadas do fundo (Frente C).\n\nDB-first: l\u00ea a materializa\u00e7\u00e3o do worker ``nport_lookthrough`` no\ndata-lake \u2014 nenhuma expans\u00e3o roda aqui. 404 quando o fundo n\u00e3o existe no\nuniverso local OU quando a s\u00e9rie ainda n\u00e3o foi materializada (estado\nexpl\u00edcito, nunca uma resposta vazia silenciosa).",
+        "operationId": "get_fund_lookthrough_funds__instrument_id__lookthrough_get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instrument Id"
+            }
+          },
+          {
+            "name": "dimension",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "issuer",
+                    "asset_class",
+                    "sector",
+                    "currency"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dimension"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundLookthroughResponse"
                 }
               }
             }
@@ -2048,6 +2157,165 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SaveResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/macro/regime": {
+      "get": {
+        "tags": [
+          "macro"
+        ],
+        "summary": "Get Macro Regime",
+        "description": "Estado atual do detector de stress de cr\u00e9dito + explicabilidade.",
+        "operationId": "get_macro_regime_macro_regime_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MacroRegimeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/portfolios/{portfolio_id}/rebalance/policy": {
+      "get": {
+        "tags": [
+          "rebalance"
+        ],
+        "summary": "Get Rebalance Policy",
+        "description": "Pol\u00edtica salva do portf\u00f3lio; 404 quando nenhuma foi configurada.",
+        "operationId": "get_rebalance_policy_portfolios__portfolio_id__rebalance_policy_get",
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RebalancePolicyOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "rebalance"
+        ],
+        "summary": "Put Rebalance Policy",
+        "description": "Cria/atualiza a pol\u00edtica (upsert por portfolio_id).",
+        "operationId": "put_rebalance_policy_portfolios__portfolio_id__rebalance_policy_put",
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RebalancePolicyIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RebalancePolicyOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/portfolios/{portfolio_id}/rebalance/preview": {
+      "get": {
+        "tags": [
+          "rebalance"
+        ],
+        "summary": "Get Rebalance Preview",
+        "description": "Avalia\u00e7\u00e3o on-demand: decis\u00e3o + drifts + proposta + turnover (advisory).",
+        "operationId": "get_rebalance_preview_portfolios__portfolio_id__rebalance_preview_get",
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RebalancePreviewResponse"
                 }
               }
             }
@@ -3033,6 +3301,46 @@
         ],
         "title": "ExpectedOut"
       },
+      "ExposureItem": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "direct_pct": {
+            "type": "number",
+            "title": "Direct Pct"
+          },
+          "indirect_pct": {
+            "type": "number",
+            "title": "Indirect Pct"
+          },
+          "total_pct": {
+            "type": "number",
+            "title": "Total Pct"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "direct_pct",
+          "indirect_pct",
+          "total_pct"
+        ],
+        "title": "ExposureItem"
+      },
       "FilterBody": {
         "properties": {
           "min_value": {
@@ -3203,6 +3511,17 @@
             ],
             "title": "Sector"
           },
+          "gics_sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gics Sector"
+          },
           "market_value": {
             "anyOf": [
               {
@@ -3234,6 +3553,7 @@
           "isin",
           "asset_class",
           "sector",
+          "gics_sector",
           "market_value",
           "pct_of_nav"
         ],
@@ -3271,21 +3591,16 @@
               }
             ],
             "title": "Pct Of Nav Total"
-          },
-          "is_top50_truncated": {
-            "type": "boolean",
-            "title": "Is Top50 Truncated"
           }
         },
         "type": "object",
         "required": [
           "report_date",
           "items",
-          "pct_of_nav_total",
-          "is_top50_truncated"
+          "pct_of_nav_total"
         ],
         "title": "FundHoldingsOut",
-        "description": "Latest N-PORT report for the fund's series (top-50 truncated source)."
+        "description": "Latest N-PORT report for the fund's series (full, untruncated source).\n\nThe profile still serves a display-capped list (HOLDINGS_CAP); the\nconsolidated exposure lives in GET /funds/{id}/lookthrough (Frente C)."
       },
       "FundListItem": {
         "properties": {
@@ -3453,6 +3768,46 @@
         ],
         "title": "FundListItem",
         "description": "One row of the funds table: identity + headline risk metrics."
+      },
+      "FundLookthroughResponse": {
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instrument Id"
+          },
+          "series_id": {
+            "type": "string",
+            "title": "Series Id"
+          },
+          "report_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Report Date"
+          },
+          "dimensions": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/ExposureItem"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Dimensions"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/LookthroughSummaryOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "instrument_id",
+          "series_id",
+          "report_date",
+          "dimensions",
+          "summary"
+        ],
+        "title": "FundLookthroughResponse"
       },
       "FundNavPoint": {
         "properties": {
@@ -4277,6 +4632,215 @@
         "title": "HistogramOut",
         "description": "Histogram of in-range daily returns."
       },
+      "LookthroughSummaryOut": {
+        "properties": {
+          "sum_pct_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sum Pct Total"
+          },
+          "direct_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Direct Pct"
+          },
+          "indirect_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Indirect Pct"
+          },
+          "expanded_fund_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expanded Fund Pct"
+          },
+          "nondecomposable_fund_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nondecomposable Fund Pct"
+          },
+          "derivatives_gross_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derivatives Gross Pct"
+          },
+          "derivatives_net_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derivatives Net Pct"
+          },
+          "unidentified_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unidentified Pct"
+          },
+          "coverage_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Pct"
+          },
+          "n_holdings": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Holdings"
+          },
+          "n_children_expanded": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Children Expanded"
+          },
+          "oldest_report_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest Report Date"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sum_pct_total",
+          "direct_pct",
+          "indirect_pct",
+          "expanded_fund_pct",
+          "nondecomposable_fund_pct",
+          "derivatives_gross_pct",
+          "derivatives_net_pct",
+          "unidentified_pct",
+          "coverage_pct",
+          "n_holdings",
+          "n_children_expanded",
+          "oldest_report_date"
+        ],
+        "title": "LookthroughSummaryOut",
+        "description": "Residual expl\u00edcito + proveni\u00eancia (espelha nport_lookthrough_summary)."
+      },
+      "MacroRegimeResponse": {
+        "properties": {
+          "detector": {
+            "type": "string",
+            "title": "Detector"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date",
+            "title": "As Of"
+          },
+          "days_in_state": {
+            "type": "integer",
+            "title": "Days In State"
+          },
+          "last_flip": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Flip"
+          },
+          "signal": {
+            "$ref": "#/components/schemas/RegimeSignalOut"
+          },
+          "recent_flips": {
+            "items": {
+              "$ref": "#/components/schemas/RegimeFlipOut"
+            },
+            "type": "array",
+            "title": "Recent Flips"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detector",
+          "state",
+          "as_of",
+          "days_in_state",
+          "last_flip",
+          "signal",
+          "recent_flips"
+        ],
+        "title": "MacroRegimeResponse",
+        "description": "Estado do detector bin\u00e1rio de stress de cr\u00e9dito (worker credit_regime).\n\nO composite legado (macro_regime_snapshot) foi refutado pelo backtest e\nn\u00e3o alimenta esta resposta nem qualquer gatilho de rebalanceamento."
+      },
       "MetricDefOut": {
         "properties": {
           "code": {
@@ -4788,6 +5352,76 @@
         "title": "PortfolioListItem",
         "description": "One row of GET /portfolios (positions omitted, count only)."
       },
+      "PortfolioLookthroughResponse": {
+        "properties": {
+          "portfolio_id": {
+            "type": "integer",
+            "title": "Portfolio Id"
+          },
+          "total_value": {
+            "type": "number",
+            "title": "Total Value"
+          },
+          "cash_weight_pct": {
+            "type": "number",
+            "title": "Cash Weight Pct"
+          },
+          "expanded_weight_pct": {
+            "type": "number",
+            "title": "Expanded Weight Pct"
+          },
+          "sum_pct_total": {
+            "type": "number",
+            "title": "Sum Pct Total"
+          },
+          "oldest_report_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest Report Date"
+          },
+          "n_funds_expanded": {
+            "type": "integer",
+            "title": "N Funds Expanded"
+          },
+          "unexpanded": {
+            "items": {
+              "$ref": "#/components/schemas/UnexpandedPosition"
+            },
+            "type": "array",
+            "title": "Unexpanded"
+          },
+          "dimensions": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/ExposureItem"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Dimensions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "portfolio_id",
+          "total_value",
+          "cash_weight_pct",
+          "expanded_weight_pct",
+          "sum_pct_total",
+          "oldest_report_date",
+          "n_funds_expanded",
+          "unexpanded",
+          "dimensions"
+        ],
+        "title": "PortfolioLookthroughResponse"
+      },
       "PortfolioNewsResponse": {
         "properties": {
           "portfolio_id": {
@@ -5231,6 +5865,51 @@
         "title": "PositionCreate",
         "description": "One position in the create-portfolio payload."
       },
+      "PositionDriftOut": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "current_weight": {
+            "type": "number",
+            "title": "Current Weight"
+          },
+          "target_weight": {
+            "type": "number",
+            "title": "Target Weight"
+          },
+          "drift_abs": {
+            "type": "number",
+            "title": "Drift Abs"
+          },
+          "drift_rel": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Drift Rel"
+          },
+          "breach": {
+            "type": "boolean",
+            "title": "Breach"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "current_weight",
+          "target_weight",
+          "drift_abs",
+          "drift_rel",
+          "breach"
+        ],
+        "title": "PositionDriftOut"
+      },
       "PositionIn": {
         "properties": {
           "ticker": {
@@ -5645,6 +6324,280 @@
         ],
         "title": "PriceSeriesResponse",
         "description": "EOD price series for one ticker over [start_date, end_date]."
+      },
+      "ProposalOut": {
+        "properties": {
+          "weights": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Weights"
+          },
+          "turnover_pct": {
+            "type": "number",
+            "title": "Turnover Pct"
+          },
+          "objective": {
+            "type": "string",
+            "title": "Objective"
+          },
+          "solver_status": {
+            "type": "string",
+            "title": "Solver Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "weights",
+          "turnover_pct",
+          "objective",
+          "solver_status"
+        ],
+        "title": "ProposalOut",
+        "description": "Proposta advisory \u2014 NUNCA \u00e9 executada automaticamente."
+      },
+      "RebalancePolicyIn": {
+        "properties": {
+          "frequency": {
+            "type": "string",
+            "enum": [
+              "weekly",
+              "monthly",
+              "quarterly"
+            ],
+            "title": "Frequency",
+            "default": "monthly"
+          },
+          "band_abs": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Band Abs",
+            "default": 0.05
+          },
+          "band_rel": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Band Rel",
+            "default": 0.25
+          },
+          "macro_trigger_enabled": {
+            "type": "boolean",
+            "title": "Macro Trigger Enabled",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "RebalancePolicyIn"
+      },
+      "RebalancePolicyOut": {
+        "properties": {
+          "portfolio_id": {
+            "type": "integer",
+            "title": "Portfolio Id"
+          },
+          "frequency": {
+            "type": "string",
+            "enum": [
+              "weekly",
+              "monthly",
+              "quarterly"
+            ],
+            "title": "Frequency"
+          },
+          "band_abs": {
+            "type": "number",
+            "title": "Band Abs"
+          },
+          "band_rel": {
+            "type": "number",
+            "title": "Band Rel"
+          },
+          "macro_trigger_enabled": {
+            "type": "boolean",
+            "title": "Macro Trigger Enabled"
+          },
+          "last_evaluated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Evaluated At"
+          },
+          "is_default": {
+            "type": "boolean",
+            "title": "Is Default",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "portfolio_id",
+          "frequency",
+          "band_abs",
+          "band_rel",
+          "macro_trigger_enabled",
+          "last_evaluated_at"
+        ],
+        "title": "RebalancePolicyOut"
+      },
+      "RebalancePreviewResponse": {
+        "properties": {
+          "portfolio_id": {
+            "type": "integer",
+            "title": "Portfolio Id"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "no_action",
+              "drift_alert",
+              "proposal"
+            ],
+            "title": "Decision"
+          },
+          "calendar_due": {
+            "type": "boolean",
+            "title": "Calendar Due"
+          },
+          "macro_triggered": {
+            "type": "boolean",
+            "title": "Macro Triggered"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/RebalancePolicyOut"
+          },
+          "drifts": {
+            "items": {
+              "$ref": "#/components/schemas/PositionDriftOut"
+            },
+            "type": "array",
+            "title": "Drifts"
+          },
+          "proposal": {
+            "$ref": "#/components/schemas/ProposalOut"
+          },
+          "invested_value": {
+            "type": "number",
+            "title": "Invested Value"
+          },
+          "cash": {
+            "type": "number",
+            "title": "Cash"
+          },
+          "evaluated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Evaluated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "portfolio_id",
+          "decision",
+          "calendar_due",
+          "macro_triggered",
+          "policy",
+          "drifts",
+          "proposal",
+          "invested_value",
+          "cash",
+          "evaluated_at"
+        ],
+        "title": "RebalancePreviewResponse"
+      },
+      "RegimeFlipOut": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "state"
+        ],
+        "title": "RegimeFlipOut"
+      },
+      "RegimeSignalOut": {
+        "properties": {
+          "ratio": {
+            "type": "number",
+            "title": "Ratio"
+          },
+          "p20_5y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P20 5Y"
+          },
+          "distance_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Pct"
+          },
+          "hyg_close": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hyg Close"
+          },
+          "ief_close": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ief Close"
+          },
+          "n_window": {
+            "type": "integer",
+            "title": "N Window"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ratio",
+          "p20_5y",
+          "distance_pct",
+          "hyg_close",
+          "ief_close",
+          "n_window"
+        ],
+        "title": "RegimeSignalOut",
+        "description": "Explicabilidade do detector: ratio vs threshold + proveni\u00eancia."
       },
       "RegressionOut": {
         "properties": {
@@ -6613,6 +7566,30 @@
         ],
         "title": "TickerRef",
         "description": "Pseudo-asset reference: a plain instrument ticker."
+      },
+      "UnexpandedPosition": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "weight_pct": {
+            "type": "number",
+            "title": "Weight Pct"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "weight_pct",
+          "reason"
+        ],
+        "title": "UnexpandedPosition",
+        "description": "Posi\u00e7\u00e3o n\u00e3o atravessada \u2014 residual expl\u00edcito no n\u00edvel do portf\u00f3lio."
       },
       "ValidationError": {
         "properties": {

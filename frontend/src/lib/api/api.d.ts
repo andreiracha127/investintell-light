@@ -264,6 +264,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/portfolios/{portfolio_id}/lookthrough": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Portfolio Lookthrough
+         * @description Exposição consolidada do portfólio atravessando os fundos (Frente C).
+         *
+         *     DB-first: pesos vêm dos preços/NAVs já sincronizados localmente (sem
+         *     ensure Tiingo — posição sem preço local é 409 explícito) e as exposições
+         *     vêm das tabelas materializadas pelo worker ``nport_lookthrough`` no
+         *     data-lake. Posições não atravessadas (ações, fundos sem materialização)
+         *     ficam EXPLÍCITAS em ``unexpanded`` — nunca somem silenciosamente.
+         */
+        get: operations["get_portfolio_lookthrough_portfolios__portfolio_id__lookthrough_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/statistics/scenario": {
         parameters: {
             query?: never;
@@ -565,9 +591,35 @@ export interface paths {
         /**
          * Get Fund Profile
          * @description Full profile: identity + all risk metrics + 2y NAV (~260 points,
-         *     decimated server-side) + latest top holdings (top-50-truncated source).
+         *     decimated server-side) + latest top holdings (display-capped; the full
+         *     consolidated exposure lives in /funds/{id}/lookthrough).
          */
         get: operations["get_fund_profile_funds__instrument_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/funds/{instrument_id}/lookthrough": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fund Lookthrough
+         * @description Exposições look-through materializadas do fundo (Frente C).
+         *
+         *     DB-first: lê a materialização do worker ``nport_lookthrough`` no
+         *     data-lake — nenhuma expansão roda aqui. 404 quando o fundo não existe no
+         *     universo local OU quando a série ainda não foi materializada (estado
+         *     explícito, nunca uma resposta vazia silenciosa).
+         */
+        get: operations["get_fund_lookthrough_funds__instrument_id__lookthrough_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -626,6 +678,70 @@ export interface paths {
          *     the notional — are 422 verbatim.
          */
         post: operations["save_builder_save_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/macro/regime": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Macro Regime
+         * @description Estado atual do detector de stress de crédito + explicabilidade.
+         */
+        get: operations["get_macro_regime_macro_regime_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/portfolios/{portfolio_id}/rebalance/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Rebalance Policy
+         * @description Política salva do portfólio; 404 quando nenhuma foi configurada.
+         */
+        get: operations["get_rebalance_policy_portfolios__portfolio_id__rebalance_policy_get"];
+        /**
+         * Put Rebalance Policy
+         * @description Cria/atualiza a política (upsert por portfolio_id).
+         */
+        put: operations["put_rebalance_policy_portfolios__portfolio_id__rebalance_policy_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/portfolios/{portfolio_id}/rebalance/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Rebalance Preview
+         * @description Avaliação on-demand: decisão + drifts + proposta + turnover (advisory).
+         */
+        get: operations["get_rebalance_preview_portfolios__portfolio_id__rebalance_preview_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1172,6 +1288,19 @@ export interface components {
             /** Return Ann Bl */
             return_ann_bl: number | null;
         };
+        /** ExposureItem */
+        ExposureItem: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string | null;
+            /** Direct Pct */
+            direct_pct: number;
+            /** Indirect Pct */
+            indirect_pct: number;
+            /** Total Pct */
+            total_pct: number;
+        };
         /**
          * FilterBody
          * @description Bounds for PUT /screener/screens/{id}/filters/{metric_code}.
@@ -1247,6 +1376,8 @@ export interface components {
             asset_class: string | null;
             /** Sector */
             sector: string | null;
+            /** Gics Sector */
+            gics_sector: string | null;
             /** Market Value */
             market_value: number | null;
             /** Pct Of Nav */
@@ -1254,7 +1385,10 @@ export interface components {
         };
         /**
          * FundHoldingsOut
-         * @description Latest N-PORT report for the fund's series (top-50 truncated source).
+         * @description Latest N-PORT report for the fund's series (full, untruncated source).
+         *
+         *     The profile still serves a display-capped list (HOLDINGS_CAP); the
+         *     consolidated exposure lives in GET /funds/{id}/lookthrough (Frente C).
          */
         FundHoldingsOut: {
             /** Report Date */
@@ -1263,8 +1397,6 @@ export interface components {
             items: components["schemas"]["FundHoldingItem"][];
             /** Pct Of Nav Total */
             pct_of_nav_total: number | null;
-            /** Is Top50 Truncated */
-            is_top50_truncated: boolean;
         };
         /**
          * FundListItem
@@ -1306,6 +1438,26 @@ export interface components {
             peer_sharpe_pctl: number | null;
             /** Elite Flag */
             elite_flag: boolean | null;
+        };
+        /** FundLookthroughResponse */
+        FundLookthroughResponse: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Series Id */
+            series_id: string;
+            /**
+             * Report Date
+             * Format: date
+             */
+            report_date: string;
+            /** Dimensions */
+            dimensions: {
+                [key: string]: components["schemas"]["ExposureItem"][];
+            };
+            summary: components["schemas"]["LookthroughSummaryOut"];
         };
         /**
          * FundNavPoint
@@ -1536,6 +1688,61 @@ export interface components {
              * @description Each count divided by the maximum count (0-1), for direct bar heights.
              */
             counts_normalized: number[];
+        };
+        /**
+         * LookthroughSummaryOut
+         * @description Residual explícito + proveniência (espelha nport_lookthrough_summary).
+         */
+        LookthroughSummaryOut: {
+            /** Sum Pct Total */
+            sum_pct_total: number | null;
+            /** Direct Pct */
+            direct_pct: number | null;
+            /** Indirect Pct */
+            indirect_pct: number | null;
+            /** Expanded Fund Pct */
+            expanded_fund_pct: number | null;
+            /** Nondecomposable Fund Pct */
+            nondecomposable_fund_pct: number | null;
+            /** Derivatives Gross Pct */
+            derivatives_gross_pct: number | null;
+            /** Derivatives Net Pct */
+            derivatives_net_pct: number | null;
+            /** Unidentified Pct */
+            unidentified_pct: number | null;
+            /** Coverage Pct */
+            coverage_pct: number | null;
+            /** N Holdings */
+            n_holdings: number | null;
+            /** N Children Expanded */
+            n_children_expanded: number | null;
+            /** Oldest Report Date */
+            oldest_report_date: string | null;
+        };
+        /**
+         * MacroRegimeResponse
+         * @description Estado do detector binário de stress de crédito (worker credit_regime).
+         *
+         *     O composite legado (macro_regime_snapshot) foi refutado pelo backtest e
+         *     não alimenta esta resposta nem qualquer gatilho de rebalanceamento.
+         */
+        MacroRegimeResponse: {
+            /** Detector */
+            detector: string;
+            /** State */
+            state: string;
+            /**
+             * As Of
+             * Format: date
+             */
+            as_of: string;
+            /** Days In State */
+            days_in_state: number;
+            /** Last Flip */
+            last_flip: string | null;
+            signal: components["schemas"]["RegimeSignalOut"];
+            /** Recent Flips */
+            recent_flips: components["schemas"]["RegimeFlipOut"][];
         };
         /**
          * MetricDefOut
@@ -1782,6 +1989,29 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** PortfolioLookthroughResponse */
+        PortfolioLookthroughResponse: {
+            /** Portfolio Id */
+            portfolio_id: number;
+            /** Total Value */
+            total_value: number;
+            /** Cash Weight Pct */
+            cash_weight_pct: number;
+            /** Expanded Weight Pct */
+            expanded_weight_pct: number;
+            /** Sum Pct Total */
+            sum_pct_total: number;
+            /** Oldest Report Date */
+            oldest_report_date: string | null;
+            /** N Funds Expanded */
+            n_funds_expanded: number;
+            /** Unexpanded */
+            unexpanded: components["schemas"]["UnexpandedPosition"][];
+            /** Dimensions */
+            dimensions: {
+                [key: string]: components["schemas"]["ExposureItem"][];
+            };
         };
         /**
          * PortfolioNewsResponse
@@ -2046,6 +2276,21 @@ export interface components {
              */
             ticker: string;
         };
+        /** PositionDriftOut */
+        PositionDriftOut: {
+            /** Ticker */
+            ticker: string;
+            /** Current Weight */
+            current_weight: number;
+            /** Target Weight */
+            target_weight: number;
+            /** Drift Abs */
+            drift_abs: number;
+            /** Drift Rel */
+            drift_rel: number | null;
+            /** Breach */
+            breach: boolean;
+        };
         /**
          * PositionIn
          * @description One requested position: a ticker plus EITHER a weight OR a quantity.
@@ -2234,6 +2479,124 @@ export interface components {
             count: number;
             /** Prices */
             prices: components["schemas"]["PricePoint"][];
+        };
+        /**
+         * ProposalOut
+         * @description Proposta advisory — NUNCA é executada automaticamente.
+         */
+        ProposalOut: {
+            /** Weights */
+            weights: {
+                [key: string]: number;
+            };
+            /** Turnover Pct */
+            turnover_pct: number;
+            /** Objective */
+            objective: string;
+            /** Solver Status */
+            solver_status: string;
+        };
+        /** RebalancePolicyIn */
+        RebalancePolicyIn: {
+            /**
+             * Frequency
+             * @default monthly
+             * @enum {string}
+             */
+            frequency: "weekly" | "monthly" | "quarterly";
+            /**
+             * Band Abs
+             * @default 0.05
+             */
+            band_abs: number;
+            /**
+             * Band Rel
+             * @default 0.25
+             */
+            band_rel: number;
+            /**
+             * Macro Trigger Enabled
+             * @default false
+             */
+            macro_trigger_enabled: boolean;
+        };
+        /** RebalancePolicyOut */
+        RebalancePolicyOut: {
+            /** Portfolio Id */
+            portfolio_id: number;
+            /**
+             * Frequency
+             * @enum {string}
+             */
+            frequency: "weekly" | "monthly" | "quarterly";
+            /** Band Abs */
+            band_abs: number;
+            /** Band Rel */
+            band_rel: number;
+            /** Macro Trigger Enabled */
+            macro_trigger_enabled: boolean;
+            /** Last Evaluated At */
+            last_evaluated_at: string | null;
+            /**
+             * Is Default
+             * @default false
+             */
+            is_default: boolean;
+        };
+        /** RebalancePreviewResponse */
+        RebalancePreviewResponse: {
+            /** Portfolio Id */
+            portfolio_id: number;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "no_action" | "drift_alert" | "proposal";
+            /** Calendar Due */
+            calendar_due: boolean;
+            /** Macro Triggered */
+            macro_triggered: boolean;
+            policy: components["schemas"]["RebalancePolicyOut"];
+            /** Drifts */
+            drifts: components["schemas"]["PositionDriftOut"][];
+            proposal: components["schemas"]["ProposalOut"];
+            /** Invested Value */
+            invested_value: number;
+            /** Cash */
+            cash: number;
+            /**
+             * Evaluated At
+             * Format: date-time
+             */
+            evaluated_at: string;
+        };
+        /** RegimeFlipOut */
+        RegimeFlipOut: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** State */
+            state: string;
+        };
+        /**
+         * RegimeSignalOut
+         * @description Explicabilidade do detector: ratio vs threshold + proveniência.
+         */
+        RegimeSignalOut: {
+            /** Ratio */
+            ratio: number;
+            /** P20 5Y */
+            p20_5y: number | null;
+            /** Distance Pct */
+            distance_pct: number | null;
+            /** Hyg Close */
+            hyg_close: number | null;
+            /** Ief Close */
+            ief_close: number | null;
+            /** N Window */
+            n_window: number;
         };
         /**
          * RegressionOut
@@ -2772,6 +3135,18 @@ export interface components {
              */
             ticker: string;
         };
+        /**
+         * UnexpandedPosition
+         * @description Posição não atravessada — residual explícito no nível do portfólio.
+         */
+        UnexpandedPosition: {
+            /** Ticker */
+            ticker: string;
+            /** Weight Pct */
+            weight_pct: number;
+            /** Reason */
+            reason: string;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -3228,6 +3603,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PortfolioNewsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_portfolio_lookthrough_portfolios__portfolio_id__lookthrough_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioLookthroughResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3840,6 +4246,39 @@ export interface operations {
             };
         };
     };
+    get_fund_lookthrough_funds__instrument_id__lookthrough_get: {
+        parameters: {
+            query?: {
+                dimension?: ("issuer" | "asset_class" | "sector" | "currency") | null;
+            };
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundLookthroughResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     optimize_builder_optimize_post: {
         parameters: {
             query?: never;
@@ -3893,6 +4332,123 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SaveResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_macro_regime_macro_regime_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MacroRegimeResponse"];
+                };
+            };
+        };
+    };
+    get_rebalance_policy_portfolios__portfolio_id__rebalance_policy_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebalancePolicyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_rebalance_policy_portfolios__portfolio_id__rebalance_policy_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebalancePolicyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebalancePolicyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_rebalance_preview_portfolios__portfolio_id__rebalance_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebalancePreviewResponse"];
                 };
             };
             /** @description Validation Error */

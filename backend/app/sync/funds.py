@@ -286,9 +286,22 @@ WHERE instrument_id = ANY($1::uuid[])
 ORDER BY instrument_id, nav_date
 """
 
+# N-PORT NÃO tem setor: h.sector é o issuerCat (CORP/UST/MUN...) e
+# h.asset_class o assetCat (EC/DBT/...). O setor REAL (GICS) vem de
+# sec_cusip_ticker_map (resolvida via OpenFIGI + Tiingo meta no projeto
+# allocation; replicada no data-lake): match exato por CUSIP e fallback por
+# emissor (CUSIP-6) — um bond da Apple herda o GICS da Apple. Cobertura
+# medida 2026-06-12: 61,5% do NAV em equities, 44% do NAV total.
 HOLDINGS_SQL = """
+WITH issuer6 AS (
+    SELECT DISTINCT ON (left(cusip, 6)) left(cusip, 6) AS c6, gics_sector
+    FROM sec_cusip_ticker_map
+    WHERE gics_sector IS NOT NULL
+    ORDER BY left(cusip, 6), tiingo_meta_fetched_at DESC NULLS LAST
+)
 SELECT h.series_id, h.report_date, h.cusip, h.isin, h.issuer_name,
-       h.asset_class, h.sector, h.market_value, h.pct_of_nav
+       h.asset_class, h.sector, h.market_value, h.pct_of_nav,
+       coalesce(m.gics_sector, i6.gics_sector) AS gics_sector
 FROM sec_nport_holdings h
 JOIN (
     SELECT series_id, max(report_date) AS report_date
@@ -297,6 +310,9 @@ JOIN (
     GROUP BY series_id
 ) latest ON latest.series_id = h.series_id
         AND latest.report_date = h.report_date
+LEFT JOIN sec_cusip_ticker_map m
+       ON m.cusip = h.cusip AND m.gics_sector IS NOT NULL
+LEFT JOIN issuer6 i6 ON i6.c6 = left(h.cusip, 6)
 """
 
 
@@ -557,6 +573,7 @@ def rank_holdings(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
                     "isin": row.get("isin"),
                     "asset_class": row.get("asset_class"),
                     "sector": row.get("sector"),
+                    "gics_sector": row.get("gics_sector"),
                     "market_value": row.get("market_value"),
                     "pct_of_nav": row.get("pct_of_nav"),
                 }
@@ -712,6 +729,7 @@ _HOLDING_MUTABLE_COLUMNS = (
     "isin",
     "asset_class",
     "sector",
+    "gics_sector",
     "market_value",
     "pct_of_nav",
 )

@@ -273,8 +273,9 @@ def _profile() -> catalog.FundProfile:
         issuer_name="Apple Inc",
         cusip="037833100",
         isin="US0378331005",
-        asset_class="equity",
-        sector="Information Technology",
+        asset_class="EC",
+        sector="CORP",  # N-PORT issuerCat code — not a real sector
+        gics_sector="Information Technology",  # the real (mapped) sector
         market_value=2.1e10,
         pct_of_nav=0.061,
     )
@@ -324,6 +325,9 @@ async def test_fund_profile_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     assert holdings["report_date"] == "2026-05-31"
     assert holdings["pct_of_nav_total"] == 0.61
     assert holdings["items"][0]["issuer_name"] == "Apple Inc"
+    # The real sector travels in gics_sector; sector stays the N-PORT code.
+    assert holdings["items"][0]["gics_sector"] == "Information Technology"
+    assert holdings["items"][0]["sector"] == "CORP"
     # F8.6b share classes, service order preserved (expense asc NULLS LAST).
     assert body["classes"] == [
         {

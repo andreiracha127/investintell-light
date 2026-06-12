@@ -29,72 +29,25 @@ const TYPE_TAG: Record<string, string> = {
   mmf: "Money market",
 };
 
-// N-PORT item C.4 codes: holding.asset_class = assetCat, holding.sector =
-// issuerCat. N-PORT carries NO real (GICS-like) sector — showing the raw
-// issuerCat ("CORP") under a "Sector" header was misleading. The combined
-// human label below is what the filing actually says about the position.
-const NPORT_ASSET_LABEL: Record<string, string> = {
-  EC: "Common stock",
-  EP: "Preferred stock",
-  "ABS-MBS": "MBS",
-  "ABS-CBDO": "CDO/CBO",
-  "ABS-O": "ABS",
-  "ABS-APCP": "ABS (comm. paper)",
-  LON: "Loan",
-  RA: "Repo",
-  STIV: "Short-term",
-  SN: "Structured note",
-  RE: "Real estate",
-  COMM: "Commodity",
-  DIR: "Rates derivative",
-  DE: "Equity derivative",
-  DFE: "FX derivative",
-  DCR: "Credit derivative",
-  DCO: "Commodity derivative",
-  DO: "Derivative",
-};
-
-const NPORT_ISSUER_LABEL: Record<string, string> = {
-  UST: "US Treasury",
+// The Sector column shows the REAL GICS sector (holding.gics_sector, mapped
+// in the data-lake via sec_cusip_ticker_map). For government/municipal/fund
+// paper — where GICS does not apply — the N-PORT issuerCat gives the
+// fixed-income sector. Unmapped issuers show "—", never a raw code.
+const NPORT_ISSUER_SECTOR: Record<string, string> = {
+  UST: "Government",
   USGA: "Agency",
   USGSE: "GSE",
   MUN: "Municipal",
   NUSS: "Sovereign",
   RF: "Fund",
   PF: "Private fund",
-  CORP: "Corporate",
 };
 
-function holdingTypeLabel(
-  assetClass: string | null,
+function holdingSectorLabel(
+  gicsSector: string | null,
   issuerCat: string | null,
 ): string | null {
-  // Debt gets the issuer qualifier — that's the distinction that matters.
-  if (assetClass === "DBT") {
-    switch (issuerCat) {
-      case "CORP":
-        return "Corporate bond";
-      case "UST":
-        return "US Treasury";
-      case "USGA":
-        return "Agency bond";
-      case "USGSE":
-        return "GSE bond";
-      case "MUN":
-        return "Municipal bond";
-      case "NUSS":
-        return "Sovereign bond";
-      default:
-        return "Bond";
-    }
-  }
-  if (assetClass && NPORT_ASSET_LABEL[assetClass]) {
-    return NPORT_ASSET_LABEL[assetClass];
-  }
-  if (issuerCat && NPORT_ISSUER_LABEL[issuerCat]) {
-    return NPORT_ISSUER_LABEL[issuerCat];
-  }
-  return assetClass ?? issuerCat; // passthrough for unknown future codes
+  return gicsSector ?? NPORT_ISSUER_SECTOR[issuerCat ?? ""] ?? null;
 }
 
 function pct(value: number | null | undefined, dp = 2): string {
@@ -247,7 +200,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
                         Issuer
                       </th>
                       <th className="px-2.5 py-[7px] text-left text-[11px] font-semibold text-text-secondary border-b border-border-strong">
-                        Type
+                        Sector
                       </th>
                       <th className="px-2.5 py-[7px] text-right text-[11px] font-semibold text-text-secondary border-b border-border-strong">
                         % NAV
@@ -270,8 +223,8 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
                         </td>
                         <td className="ix-cell px-2.5 text-left text-text-secondary">
                           <span className="block max-w-[200px] truncate">
-                            {holdingTypeLabel(
-                              holding.asset_class,
+                            {holdingSectorLabel(
+                              holding.gics_sector,
                               holding.sector,
                             ) ?? "—"}
                           </span>
@@ -287,11 +240,11 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
                     ))}
                   </tbody>
                 </table>
+                {/* The top-50 truncation gate was retired (Frente C): the
+                    backend no longer exposes is_top50_truncated. */}
                 <p className="mt-2 text-[11px] text-text-muted">
-                  {fund.holdings.is_top50_truncated &&
-                    "Top-50 holdings only (N-PORT source truncation)"}
                   {fund.holdings.pct_of_nav_total !== null &&
-                    ` · reported holdings sum to ${formatNumber(
+                    `Reported holdings sum to ${formatNumber(
                       fund.holdings.pct_of_nav_total,
                       1,
                     )}% of NAV`}
