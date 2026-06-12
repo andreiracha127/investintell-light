@@ -9,7 +9,7 @@ import type { EChartsOption, SeriesOption } from "echarts";
 
 import type { ExposureItem, LookthroughSummary } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/theme";
-import { formatNumber, formatPercent } from "@/lib/format";
+import { formatNumber } from "@/lib/format";
 
 // ── Shared axis/grid defaults (horizontal bar orientation) ────────────────
 
@@ -74,7 +74,7 @@ export function buildExposureBarsOption(
       formatter: (params) => {
         const row = sorted[params.dataIndex];
         if (!row) return "";
-        return formatNumber(row.total_pct * 100, 1) + "%";
+        return formatNumber(row.total_pct, 1) + "%";
       },
     },
   };
@@ -101,10 +101,10 @@ export function buildExposureBarsOption(
         if (!row) return "";
         const lines = params.map(
           (p) =>
-            `${p.marker}${p.seriesName}: <b>${formatNumber(p.value * 100, 2)}%</b>`,
+            `${p.marker}${p.seriesName}: <b>${formatNumber(p.value, 2)}%</b>`,
         );
         lines.push(
-          `<span style="font-size:11px;color:${colors.textMuted}">Total: <b>${formatNumber(row.total_pct * 100, 2)}%</b></span>`,
+          `<span style="font-size:11px;color:${colors.textMuted}">Total: <b>${formatNumber(row.total_pct, 2)}%</b></span>`,
         );
         return `<div style="font-size:12px">${params[0].name}<br/>${lines.join("<br/>")}</div>`;
       },
@@ -123,7 +123,7 @@ export function buildExposureBarsOption(
       splitLine: { lineStyle: { color: colors.grid } },
       axisLabel: {
         color: colors.textMuted,
-        formatter: (value: number) => formatPercent(value, 0),
+        formatter: (value: number) => formatNumber(value, 0) + "%",
       },
     },
     yAxis: {
@@ -156,7 +156,7 @@ export function buildExposureBarsOption(
  * Uses the standard transparent-helper-stack waterfall technique: a
  * "placeholder" series provides the invisible offset; the visible series
  * stacks on top of it. All null values are treated as 0. Values in the
- * LookthroughSummary are decimal fractions (0.95 = 95%).
+ * LookthroughSummary are PERCENT POINTS (94.6 = 94.6%), not fractions.
  */
 export function buildResidualWaterfallOption(
   summary: LookthroughSummary,
@@ -208,7 +208,7 @@ export function buildResidualWaterfallOption(
         value: v,
         itemStyle: {
           color: "transparent",
-          borderColor: colors.accent,
+          borderColor: colors.bar,
           borderWidth: 2,
         },
       };
@@ -238,7 +238,7 @@ export function buildResidualWaterfallOption(
         // Only render the visible series (index 1), not the helper offset.
         const visible = params.find((p) => p.seriesIndex === 1);
         if (!visible) return "";
-        return `<span style="font-size:12px">${visible.name}: <b>${formatNumber(visible.value * 100, 2)}%</b></span>`;
+        return `<span style="font-size:12px">${visible.name}: <b>${formatNumber(visible.value, 2)}%</b></span>`;
       },
     },
     grid: { left: 168, right: 72, top: 16, bottom: 8 },
@@ -247,7 +247,7 @@ export function buildResidualWaterfallOption(
       splitLine: { lineStyle: { color: colors.grid } },
       axisLabel: {
         color: colors.textMuted,
-        formatter: (value: number) => formatPercent(value, 0),
+        formatter: (value: number) => formatNumber(value, 0) + "%",
       },
     },
     yAxis: {
@@ -280,7 +280,7 @@ export function buildResidualWaterfallOption(
           position: "right",
           color: colors.textSecondary,
           formatter: (params) =>
-            formatNumber((params.value as number) * 100, 1) + "%",
+            formatNumber(params.value as number, 1) + "%",
         },
       },
     ],

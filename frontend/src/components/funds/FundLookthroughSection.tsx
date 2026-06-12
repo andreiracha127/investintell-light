@@ -25,7 +25,7 @@ import {
   buildResidualWaterfallOption,
 } from "@/lib/charts/lookthrough";
 import { type ChartColors } from "@/lib/charts/theme";
-import { formatDate, formatNumber, formatPercent } from "@/lib/format";
+import { formatDate, formatNumber } from "@/lib/format";
 
 // ── Dimension label map ───────────────────────────────────────────────────
 
@@ -45,7 +45,7 @@ function humanizeDimension(key: string): string {
 
 function pct(value: number | null | undefined, dp = 1): string {
   return value !== null && value !== undefined
-    ? formatPercent(value, dp)
+    ? formatNumber(value, dp) + "%"
     : "—";
 }
 
@@ -61,13 +61,16 @@ function ExposureCharts({
   dimensions,
   summary,
   colors,
+  activeDim,
+  onDimChange,
 }: {
   dimensions: Record<string, ExposureItem[]>;
   summary: LookthroughSummary;
   colors: ChartColors;
+  activeDim: string;
+  onDimChange: (dim: string) => void;
 }) {
   const dimKeys = Object.keys(dimensions);
-  const [activeDim, setActiveDim] = useState<string>(dimKeys[0] ?? "");
 
   if (dimKeys.length === 0) return null;
 
@@ -86,11 +89,11 @@ function ExposureCharts({
             <button
               key={key}
               type="button"
-              onClick={() => setActiveDim(key)}
+              onClick={() => onDimChange(key)}
               className={[
                 "h-[30px] px-3.5 text-[11px] font-bold uppercase tracking-[0.07em] transition-colors",
                 isActive
-                  ? "bg-accent text-on-accent"
+                  ? "bg-accent-wash border-b-2 border-b-accent text-accent"
                   : "bg-surface-2 text-text-secondary hover:bg-layer-hover",
               ].join(" ")}
             >
@@ -138,6 +141,11 @@ export function FundLookthroughSection({
       return retryPolicy(failureCount, err);
     },
   });
+
+  // activeDim must be declared before any conditional returns (Rules of Hooks).
+  // Initialise from live data once available; fall back to empty string.
+  const firstDim = query.data ? Object.keys(query.data.dimensions)[0] ?? "" : "";
+  const [activeDim, setActiveDim] = useState<string>(firstDim);
 
   // 404 → fund has no decomposition data; render nothing silently.
   if (query.isError && query.error instanceof ApiError && query.error.status === 404) {
@@ -197,11 +205,13 @@ export function FundLookthroughSection({
       </div>
 
       {/* Charts */}
-      <Card title="Exposure breakdown" subtitle={humanizeDimension(Object.keys(dimensions)[0] ?? "")}>
+      <Card title="Exposure breakdown" subtitle={humanizeDimension(activeDim)}>
         <ExposureCharts
           dimensions={dimensions}
           summary={summary}
           colors={colors}
+          activeDim={activeDim}
+          onDimChange={setActiveDim}
         />
       </Card>
     </section>
