@@ -221,6 +221,23 @@ def test_build_fund_row_full_cascade() -> None:
     assert row["source_nav_max_date"] == dt.date(2026, 6, 5)
 
 
+def test_build_fund_row_etp_ticker_classifies_as_etf() -> None:
+    """ETFs fora da sec_etfs (IVV/QQQ/AGG...) são reconhecidos pelo ticker
+    listado como ETP no sec_cusip_ticker_map — nunca 'mutual_fund'."""
+    row = build_fund_row(
+        _identity(), None, None, None, None, _NOW,
+        etp_tickers=frozenset({"FNDX"}),  # _identity() usa ticker FNDX
+    )
+    assert row["fund_type"] == "etf"
+
+    # Ticker fora do set ETP: cai no default mutual_fund.
+    row = build_fund_row(
+        _identity(), None, None, None, None, _NOW,
+        etp_tickers=frozenset({"IVV"}),
+    )
+    assert row["fund_type"] == "mutual_fund"
+
+
 def test_build_fund_row_nport_aum_is_last_resort() -> None:
     """nport_aum só vence quando monthly_avg_net_assets (registered/etf) e
     classes_aum estão ausentes — e nunca sobrepõe uma fonte primária."""
