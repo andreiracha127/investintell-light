@@ -195,6 +195,66 @@ async def _select_ohlcv_rows(
     return list(result.tuples().all())
 
 
+async def _select_adj_ohlcv_rows(
+    session: AsyncSession, ticker: str, start: dt.date, end: dt.date
+) -> list[tuple[dt.date, float, float, float, float, int]]:
+    """(date, adj_open, adj_high, adj_low, adj_close, adj_volume) em [start, end].
+
+    Ajustado, não cru: contínuo em splits/dividendos E coincide com os ticks
+    ao vivo na barra corrente (a Tiingo ancora o ajuste no presente).
+    """
+    result = await session.execute(
+        select(
+            EodPrice.date,
+            EodPrice.adj_open,
+            EodPrice.adj_high,
+            EodPrice.adj_low,
+            EodPrice.adj_close,
+            EodPrice.adj_volume,
+        )
+        .where(EodPrice.ticker == ticker, EodPrice.date >= start, EodPrice.date <= end)
+        .order_by(EodPrice.date)
+    )
+    return list(result.tuples().all())
+
+
+@router.get("/{ticker}/history", response_model=HistoryResponse)
+async def get_stock_history(
+    ticker: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    client: Annotated[TiingoClient, Depends(get_tiingo_client)],
+    bars: Annotated[
+        int, Query(ge=30, le=5000, description="Nº de barras diárias mais recentes.")
+    ] = 760,
+) -> HistoryResponse:
+    """OHLCV diário ajustado no contrato do chart interativo ({t,o,h,l,c,v}).
+
+    Resample semanal/mensal é client-side (engine). t = epoch ms UTC do pregão.
+    """
+    symbol = ticker.strip().upper()
+    today = dt.date.today()
+    # ~252 pregões/ano → 1.6 dias-calendário por barra cobre feriados com folga.
+    start = today - dt.timedelta(days=int(bars * 1.6) + 10)
+    await _ensure_eod_or_http_error(session, client, [symbol], start, today)
+
+    rows = await _select_adj_ohlcv_rows(session, symbol, start, today)
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"No price data available for {symbol}.")
+    rows = rows[-bars:]
+
+    def _ms(d: dt.date) -> int:
+        return int(dt.datetime(d.year, d.month, d.day, tzinfo=dt.timezone.utc).timestamp() * 1000)
+
+    return HistoryResponse(
+        ticker=symbol,
+        count=len(rows),
+        bars=[
+            HistoryBar(t=_ms(d), o=o, h=h, l=lo, c=c, v=int(v or 0))
+            for d, o, h, lo, c, v in rows
+        ],
+    )
+
+
 async def _select_instrument_name(session: AsyncSession, ticker: str) -> str | None:
     """Read the instrument display name, if known."""
     return await session.scalar(select(Instrument.name).where(Instrument.ticker == ticker))
