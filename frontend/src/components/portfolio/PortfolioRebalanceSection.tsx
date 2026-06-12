@@ -37,6 +37,35 @@ import { buildDriftBandsOption } from "@/lib/charts/rebalance";
 import { chartColors, type ChartColors } from "@/lib/charts/theme";
 import { formatCurrency, formatDate, formatNumber, formatPercent } from "@/lib/format";
 
+// ── Optimizer label helpers ───────────────────────────────────────────────────
+
+/** Map from backend objective strings to product copy. */
+const OBJECTIVE_LABELS: Record<string, string> = {
+  min_cvar:           "Minimum CVaR",
+  min_vol:            "Minimum variance",
+  erc:                "Equal risk contribution",
+  max_diversification:"Maximum diversification",
+  equal_weight:       "Equal weight",
+  bl_utility:         "Black–Litterman utility",
+};
+
+/** Humanize an objective string: use label map, fall back to title-cased words. */
+function humanizeObjective(raw: string): string {
+  return OBJECTIVE_LABELS[raw] ?? raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * Humanize a solver status string.
+ * Returns `{ label, isOptimal }` so the caller can apply emphasis when not optimal.
+ */
+function humanizeSolverStatus(raw: string): { label: string; isOptimal: boolean } {
+  if (raw === "optimal") return { label: "Converged", isOptimal: true };
+  return {
+    label: raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+    isOptimal: false,
+  };
+}
+
 // ── Decision pill ─────────────────────────────────────────────────────────────
 
 /**
@@ -203,7 +232,18 @@ function ProposalTable({
         <span>
           {/* turnover_pct is already in percent-points per the backend schema */}
           Estimated turnover: <b>{formatNumber(displayTurnover, 1)}%</b>{" "}
-          (one-way · {proposal.objective} · {proposal.solver_status})
+          {(() => {
+            const { label: statusLabel, isOptimal } = humanizeSolverStatus(proposal.solver_status);
+            return (
+              <>
+                (one-way · {humanizeObjective(proposal.objective)} ·{" "}
+                <span className={isOptimal ? undefined : "text-loss"}>
+                  {statusLabel}
+                </span>
+                )
+              </>
+            );
+          })()}
         </span>
         <span className="tabular-nums">
           Portfolio invested value: {formatCurrency(invested_value)}
