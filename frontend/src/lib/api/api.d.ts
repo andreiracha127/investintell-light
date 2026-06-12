@@ -1626,6 +1626,36 @@ export interface components {
             upside_capture_1y: number | null;
             /** Equity Correlation 252D */
             equity_correlation_252d: number | null;
+            /** Scoring Model */
+            scoring_model: string | null;
+            /** Empirical Duration */
+            empirical_duration: number | null;
+            /** Empirical Duration R2 */
+            empirical_duration_r2: number | null;
+            /** Credit Beta */
+            credit_beta: number | null;
+            /** Credit Beta R2 */
+            credit_beta_r2: number | null;
+            /** Yield Proxy 12M */
+            yield_proxy_12m: number | null;
+            /** Duration Adj Drawdown 1Y */
+            duration_adj_drawdown_1y: number | null;
+            /** Seven Day Net Yield */
+            seven_day_net_yield: number | null;
+            /** Fed Funds Rate At Calc */
+            fed_funds_rate_at_calc: number | null;
+            /** Nav Per Share Mmf */
+            nav_per_share_mmf: number | null;
+            /** Pct Weekly Liquid */
+            pct_weekly_liquid: number | null;
+            /** Weighted Avg Maturity Days */
+            weighted_avg_maturity_days: number | null;
+            /** Crisis Alpha Score */
+            crisis_alpha_score: number | null;
+            /** Inflation Beta */
+            inflation_beta: number | null;
+            /** Inflation Beta R2 */
+            inflation_beta_r2: number | null;
         };
         /** FundsListResponse */
         FundsListResponse: {
@@ -1667,6 +1697,11 @@ export interface components {
             status: string;
             /** Database */
             database: string;
+            /**
+             * Cache
+             * @default memory
+             */
+            cache: string;
         };
         /**
          * HistogramOut

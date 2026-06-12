@@ -56,6 +56,8 @@ function holdingSectorLabel(
   return gicsSector ?? NPORT_ISSUER_SECTOR[issuerCat ?? ""] ?? null;
 }
 
+const HOLDINGS_PAGE_SIZE = 10;
+
 function pct(value: number | null | undefined, dp = 2): string {
   return value !== null && value !== undefined ? formatPercent(value, dp) : "—";
 }
@@ -77,6 +79,12 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
   useEffect(() => {
     setColors(chartColors());
   }, []);
+
+  // Holdings pagination (10 rows per page); reset when the fund changes.
+  const [holdingsPage, setHoldingsPage] = useState(0);
+  useEffect(() => {
+    setHoldingsPage(0);
+  }, [instrumentId]);
 
   const navOption = useMemo(
     () =>
@@ -247,7 +255,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
                         #
                       </th>
                       <th className="px-2.5 py-[7px] text-left text-[11px] font-semibold text-text-secondary border-b border-border-strong">
-                        Issuer
+                        Issuer / Issue
                       </th>
                       <th className="px-2.5 py-[7px] text-left text-[11px] font-semibold text-text-secondary border-b border-border-strong">
                         Sector
@@ -258,7 +266,12 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {fund.holdings.items.map((holding, i) => (
+                    {fund.holdings.items
+                      .slice(
+                        holdingsPage * HOLDINGS_PAGE_SIZE,
+                        (holdingsPage + 1) * HOLDINGS_PAGE_SIZE,
+                      )
+                      .map((holding, i) => (
                       <tr
                         key={holding.rank}
                         className={`border-b border-border transition-colors hover:bg-accent-wash ${
@@ -270,6 +283,16 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
                           <span className="block max-w-[320px] truncate">
                             {holding.issuer_name ?? "—"}
                           </span>
+                          {/* The security identifier pins the exact ISSUE —
+                              essential for bond funds where one issuer
+                              repeats across dozens of distinct issues. */}
+                          {(holding.cusip ?? holding.isin) && (
+                            <span className="block text-[10px] tabular-nums text-text-muted">
+                              {holding.cusip
+                                ? `CUSIP ${holding.cusip}`
+                                : `ISIN ${holding.isin}`}
+                            </span>
+                          )}
                         </td>
                         <td className="ix-cell px-2.5 text-left text-text-secondary">
                           <span className="block max-w-[200px] truncate">
@@ -290,15 +313,22 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
                     ))}
                   </tbody>
                 </table>
-                {/* The top-50 truncation gate was retired (Frente C): the
-                    backend no longer exposes is_top50_truncated. */}
-                <p className="mt-2 text-[11px] text-text-muted">
-                  {fund.holdings.pct_of_nav_total !== null &&
-                    `Reported holdings sum to ${formatNumber(
-                      fund.holdings.pct_of_nav_total,
-                      1,
-                    )}% of NAV`}
-                </p>
+                <div className="mt-2 flex items-center justify-between">
+                  <p className="text-[11px] text-text-muted">
+                    {fund.holdings.pct_of_nav_total !== null &&
+                      `Reported holdings sum to ${formatNumber(
+                        fund.holdings.pct_of_nav_total,
+                        1,
+                      )}% of NAV`}
+                  </p>
+                  <HoldingsPager
+                    page={holdingsPage}
+                    pageCount={Math.ceil(
+                      fund.holdings.items.length / HOLDINGS_PAGE_SIZE,
+                    )}
+                    onChange={setHoldingsPage}
+                  />
+                </div>
               </>
             ) : (
               <p className="py-8 text-center text-[13px] text-text-muted">
@@ -315,7 +345,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
           >
             {risk ? (
               <dl className="m-0">
-                <RiskRows risk={risk} />
+                <RiskRows risk={risk} fundType={fund.fund_type} assetClass={fund.asset_class} />
               </dl>
             ) : (
               <p className="py-8 text-center text-[13px] text-text-muted">
@@ -358,9 +388,104 @@ function Tag({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** The remaining precomputed metrics as dense StatRows (KPIs excluded). */
-function RiskRows({ risk }: { risk: FundRisk }) {
-  const rows: { label: string; value: string; detail?: string }[] = [
+/** Compact pager for the holdings table: ‹ Page X of Y ›. */
+function HoldingsPager({
+  page,
+  pageCount,
+  onChange,
+}: {
+  page: number;
+  pageCount: number;
+  onChange: (page: number) => void;
+}) {
+  if (pageCount <= 1) return null;
+  const btn =
+    "h-[24px] min-w-[24px] border border-border-strong bg-surface-2 px-1.5 text-[11px] font-bold text-text-secondary transition-colors hover:bg-layer-hover disabled:cursor-default disabled:opacity-40";
+  return (
+    <div className="flex items-center gap-2" role="navigation" aria-label="Holdings pages">
+      <button
+        type="button"
+        className={btn}
+        disabled={page === 0}
+        onClick={() => onChange(page - 1)}
+        aria-label="Previous page"
+      >
+        ‹
+      </button>
+      <span className="text-[11px] tabular-nums text-text-muted">
+        Page {page + 1} of {pageCount}
+      </span>
+      <button
+        type="button"
+        className={btn}
+        disabled={page >= pageCount - 1}
+        onClick={() => onChange(page + 1)}
+        aria-label="Next page"
+      >
+        ›
+      </button>
+    </div>
+  );
+}
+
+type RiskRow = { label: string; value: string; detail?: string };
+
+/**
+ * Which analytics block applies to this fund. Driven by the risk worker's
+ * `scoring_model` (equity / fixed_income / cash / alternatives); falls back
+ * to the fund's type/asset class when the snapshot predates the field.
+ */
+function riskClass(
+  scoringModel: string | null,
+  fundType: string,
+  assetClass: string | null,
+): "equity" | "fixed_income" | "cash" | "alternatives" {
+  const model = (scoringModel ?? "").toLowerCase();
+  if (model.includes("fixed") || model.includes("bond")) return "fixed_income";
+  if (model.includes("cash") || model.includes("mmf") || model.includes("money"))
+    return "cash";
+  if (model.includes("alt")) return "alternatives";
+  if (model.includes("equity")) return "equity";
+  // Fallbacks for rows synced before scoring_model existed.
+  if (fundType === "mmf") return "cash";
+  const cls = (assetClass ?? "").toLowerCase();
+  if (cls.includes("fixed") || cls.includes("bond")) return "fixed_income";
+  if (cls.includes("alternative")) return "alternatives";
+  return "equity";
+}
+
+const RISK_CLASS_TITLE: Record<ReturnType<typeof riskClass>, string> = {
+  equity: "Equity analytics",
+  fixed_income: "Fixed income analytics",
+  cash: "Cash analytics",
+  alternatives: "Alternatives analytics",
+};
+
+/** Small section divider inside the risk panel. */
+function RiskGroupHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mt-3 border-b border-border-strong pb-1 text-[10px] font-bold uppercase tracking-[0.08em] text-text-muted">
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The precomputed metrics as dense StatRows (KPIs excluded), grouped:
+ * common block first, then ONLY the analytics block matching the fund's
+ * class — a bond fund shows duration/credit beta, not alpha/beta vs an
+ * equity benchmark.
+ */
+function RiskRows({
+  risk,
+  fundType,
+  assetClass,
+}: {
+  risk: FundRisk;
+  fundType: string;
+  assetClass: string | null;
+}) {
+  const common: RiskRow[] = [
     { label: "Return 1M", value: pct(risk.return_1m) },
     { label: "Return 3M", value: pct(risk.return_3m) },
     { label: "Return 3Y ann.", value: pct(risk.return_3y_ann) },
@@ -370,18 +495,75 @@ function RiskRows({ risk }: { risk: FundRisk }) {
     { label: "Sharpe 3Y", value: num(risk.sharpe_3y) },
     { label: "Sortino 1Y", value: num(risk.sortino_1y) },
     { label: "Calmar 3Y", value: num(risk.calmar_ratio_3y) },
-    { label: "Alpha 1Y", value: pct(risk.alpha_1y) },
-    { label: "Beta 1Y", value: num(risk.beta_1y) },
-    { label: "Info ratio 1Y", value: num(risk.information_ratio_1y) },
-    { label: "Tracking error 1Y", value: pct(risk.tracking_error_1y) },
     { label: "VaR 95 1M", value: pct(risk.var_95_1m) },
     { label: "CVaR 95 1M", value: pct(risk.cvar_95_1m) },
     { label: "CVaR 99 EVT", value: pct(risk.cvar_99_evt) },
-    // Capture ratios arrive ×100 from the risk worker (95.3 = 95.3%) —
-    // unlike the return/vol fractions; num(), not pct().
-    { label: "Downside capture 1Y", value: num(risk.downside_capture_1y, 1) },
-    { label: "Upside capture 1Y", value: num(risk.upside_capture_1y, 1) },
-    { label: "Equity corr. 252d", value: num(risk.equity_correlation_252d) },
+  ];
+
+  const cls = riskClass(risk.scoring_model, fundType, assetClass);
+
+  const r2 = (value: number | null | undefined) =>
+    value !== null && value !== undefined
+      ? { detail: `R² ${formatNumber(value, 2)}` }
+      : {};
+
+  const byClass: Record<typeof cls, RiskRow[]> = {
+    equity: [
+      { label: "Alpha 1Y", value: pct(risk.alpha_1y) },
+      { label: "Beta 1Y", value: num(risk.beta_1y) },
+      { label: "Info ratio 1Y", value: num(risk.information_ratio_1y) },
+      { label: "Tracking error 1Y", value: pct(risk.tracking_error_1y) },
+      // Capture ratios arrive ×100 from the risk worker (95.3 = 95.3%) —
+      // unlike the return/vol fractions; num(), not pct().
+      { label: "Downside capture 1Y", value: num(risk.downside_capture_1y, 1) },
+      { label: "Upside capture 1Y", value: num(risk.upside_capture_1y, 1) },
+      { label: "Equity corr. 252d", value: num(risk.equity_correlation_252d) },
+    ],
+    fixed_income: [
+      {
+        label: "Empirical duration",
+        value: num(risk.empirical_duration),
+        ...r2(risk.empirical_duration_r2),
+      },
+      {
+        label: "Credit beta",
+        value: num(risk.credit_beta),
+        ...r2(risk.credit_beta_r2),
+      },
+      { label: "Yield proxy 12M", value: pct(risk.yield_proxy_12m) },
+      {
+        label: "Duration-adj. drawdown 1Y",
+        value: pct(risk.duration_adj_drawdown_1y),
+      },
+    ],
+    cash: [
+      { label: "7-day net yield", value: pct(risk.seven_day_net_yield) },
+      {
+        label: "Weighted avg maturity",
+        value:
+          risk.weighted_avg_maturity_days !== null &&
+          risk.weighted_avg_maturity_days !== undefined
+            ? `${formatNumber(risk.weighted_avg_maturity_days, 0)} days`
+            : "—",
+      },
+      { label: "Weekly liquid assets", value: pct(risk.pct_weekly_liquid) },
+      { label: "NAV per share", value: num(risk.nav_per_share_mmf, 4) },
+      { label: "Fed funds at calc", value: pct(risk.fed_funds_rate_at_calc) },
+    ],
+    alternatives: [
+      { label: "Equity corr. 252d", value: num(risk.equity_correlation_252d) },
+      { label: "Crisis alpha score", value: num(risk.crisis_alpha_score) },
+      {
+        label: "Inflation beta",
+        value: num(risk.inflation_beta),
+        ...r2(risk.inflation_beta_r2),
+      },
+      { label: "Downside capture 1Y", value: num(risk.downside_capture_1y, 1) },
+      { label: "Upside capture 1Y", value: num(risk.upside_capture_1y, 1) },
+    ],
+  };
+
+  const peers: RiskRow[] = [
     {
       label: "Peer Sharpe pctl",
       value: num(risk.peer_sharpe_pctl, 0),
@@ -395,9 +577,18 @@ function RiskRows({ risk }: { risk: FundRisk }) {
     { label: "Manager score", value: num(risk.manager_score) },
     { label: "Elite", value: risk.elite_flag === null ? "—" : risk.elite_flag ? "Yes" : "No" },
   ];
+
   return (
     <>
-      {rows.map((row) => (
+      {common.map((row) => (
+        <StatRow key={row.label} label={row.label} value={row.value} detail={row.detail} />
+      ))}
+      <RiskGroupHeader>{RISK_CLASS_TITLE[cls]}</RiskGroupHeader>
+      {byClass[cls].map((row) => (
+        <StatRow key={row.label} label={row.label} value={row.value} detail={row.detail} />
+      ))}
+      <RiskGroupHeader>Peer comparison</RiskGroupHeader>
+      {peers.map((row) => (
         <StatRow key={row.label} label={row.label} value={row.value} detail={row.detail} />
       ))}
     </>

@@ -177,6 +177,28 @@ class FundRiskLatest(Base):
     upside_capture_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     equity_correlation_252d: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
 
+    # Class-specific analytics (risk_calc per-class passes in the mother DB).
+    # scoring_model says which pass produced the row: equity / fixed_income /
+    # cash / alternatives — the UI shows only the block that applies.
+    scoring_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Fixed income
+    empirical_duration: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    empirical_duration_r2: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    credit_beta: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    credit_beta_r2: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    yield_proxy_12m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    duration_adj_drawdown_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    # Cash / money market
+    seven_day_net_yield: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    fed_funds_rate_at_calc: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    nav_per_share_mmf: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    pct_weekly_liquid: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    weighted_avg_maturity_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Alternatives
+    crisis_alpha_score: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    inflation_beta: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    inflation_beta_r2: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+
 
 class FundNav(Base):
     __tablename__ = "fund_nav"

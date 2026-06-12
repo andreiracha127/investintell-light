@@ -278,6 +278,23 @@ RISK_METRIC_COLUMNS: tuple[str, ...] = (
     "downside_capture_1y",
     "upside_capture_1y",
     "equity_correlation_252d",
+    # Class-specific analytics passes (risk_calc): the UI shows the block
+    # matching scoring_model (equity / fixed_income / cash / alternatives).
+    "scoring_model",
+    "empirical_duration",
+    "empirical_duration_r2",
+    "credit_beta",
+    "credit_beta_r2",
+    "yield_proxy_12m",
+    "duration_adj_drawdown_1y",
+    "seven_day_net_yield",
+    "fed_funds_rate_at_calc",
+    "nav_per_share_mmf",
+    "pct_weekly_liquid",
+    "weighted_avg_maturity_days",
+    "crisis_alpha_score",
+    "inflation_beta",
+    "inflation_beta_r2",
 )
 
 RISK_LATEST_SQL = f"""
