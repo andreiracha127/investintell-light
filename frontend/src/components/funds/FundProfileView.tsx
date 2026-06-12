@@ -86,9 +86,8 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     [profileQuery.data, colors],
   );
 
-  // Nav span in month-steps: (ly - fy) * 12 + (lm - fm) counts the number
-  // of month boundaries crossed. 13 distinct calendar months = 12 month-steps.
-  // Both analytics charts share this gate, so compute it once.
+  // Both analytics charts share this gate, so compute it once: (ly - fy) * 12 + (lm - fm)
+  // counts month boundaries crossed; 13 distinct calendar months = 12 month-steps.
   const navSpanMonthSteps = useMemo(() => {
     if (!profileQuery.data) return 0;
     const dates = profileQuery.data.nav

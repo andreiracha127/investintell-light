@@ -22,6 +22,11 @@ import { formatDate, formatPercent } from "@/lib/format";
 
 // ── Month × year heatmap ─────────────────────────────────────────────────
 
+// Use at least this opacity so cells near zero don't disappear entirely.
+const MIN_CELL_OPACITY = 0.15;
+// At this opacity threshold the cell is dark enough to warrant a light label.
+const LIGHT_LABEL_THRESHOLD = 0.6;
+
 const MONTH_LABELS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -67,11 +72,10 @@ export function buildMonthlyReturnsOption(
     const xIdx = c.month - 1; // 0..11
     const yIdx = yearIndex.get(c.year) ?? 0;
     const opacity = maxAbs > 0 ? Math.abs(c.value) / maxAbs : 0;
-    // Use at least 0.15 opacity so cells don't disappear entirely near zero.
-    const clampedOpacity = Math.max(0.15, opacity);
+    const clampedOpacity = Math.max(MIN_CELL_OPACITY, opacity);
     const color = c.value >= 0 ? colors.gain : colors.loss;
     // Label: white/on-accent at high opacity, normal text otherwise.
-    const labelColor = clampedOpacity > 0.6 ? colors.textOnAccent : colors.text;
+    const labelColor = clampedOpacity > LIGHT_LABEL_THRESHOLD ? colors.textOnAccent : colors.text;
 
     return {
       value: [xIdx, yIdx, c.value],
@@ -113,15 +117,9 @@ export function buildMonthlyReturnsOption(
       axisLabel: { color: colors.textSecondary, fontSize: 11 },
       splitArea: { show: false },
     },
-    visualMap: {
-      // Hidden — colors are set per-cell via itemStyle, not via visualMap.
-      show: false,
-      type: "continuous",
-      min: -1,
-      max: 1,
-    },
     series: [
       {
+        // Colors are fully managed per-cell via itemStyle — no visualMap.
         name: "Monthly return",
         type: "heatmap",
         data,

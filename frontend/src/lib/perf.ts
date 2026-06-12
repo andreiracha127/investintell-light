@@ -174,7 +174,7 @@ export function drawdownSeries(nav: FundNavPoint[]): DrawdownResult | null {
   // Filter and sort ascending.
   const valid = nav
     .filter((p): p is FundNavPoint & { nav: number } => p.nav !== null)
-    .sort((a, b) => a.date.localeCompare(b.date));
+    .sort((a, b) => a.date.localeCompare(b.date)); // ISO-8601 strings sort lexicographically
 
   if (valid.length < 2) return null;
 
