@@ -695,15 +695,16 @@ export function fetchPriceSeries(
   );
 }
 
-/* ── Lookthrough, Macro Regime & Rebalance (F9) ───────────────────────────── */
+/* ── Look-through, macro regime & rebalancing ─────────────────────────────── */
 
-export function getFundLookthrough(
+/** Fetch aggregated look-through exposures for a single fund. */
+export function fetchFundLookthrough(
   instrumentId: string,
   query: FundLookthroughQuery = {},
   signal?: AbortSignal,
 ): Promise<FundLookthrough> {
   const params = new URLSearchParams();
-  if (query.dimension != null) params.set("dimension", query.dimension);
+  if (query.dimension != null) params.set("dimension", query.dimension); // schema allows explicit null — guard both
   const qs = params.toString();
   return request<FundLookthrough>(
     `/funds/${encodeURIComponent(instrumentId)}/lookthrough${qs ? `?${qs}` : ""}`,
@@ -711,7 +712,8 @@ export function getFundLookthrough(
   );
 }
 
-export function getPortfolioLookthrough(
+/** Fetch aggregated look-through exposures for a persisted portfolio. */
+export function fetchPortfolioLookthrough(
   portfolioId: number,
   signal?: AbortSignal,
 ): Promise<PortfolioLookthrough> {
@@ -721,11 +723,13 @@ export function getPortfolioLookthrough(
   );
 }
 
-export function getMacroRegime(signal?: AbortSignal): Promise<MacroRegime> {
+/** Fetch the current macro regime signals and recent regime flips. */
+export function fetchMacroRegime(signal?: AbortSignal): Promise<MacroRegime> {
   return request<MacroRegime>("/macro/regime", signal);
 }
 
-export function getRebalancePolicy(
+/** Fetch the rebalance policy (bands and frequency) for a portfolio. */
+export function fetchRebalancePolicy(
   portfolioId: number,
   signal?: AbortSignal,
 ): Promise<RebalancePolicy> {
@@ -735,7 +739,8 @@ export function getRebalancePolicy(
   );
 }
 
-export function getRebalancePreview(
+/** Fetch a dry-run rebalance preview with drift and trade proposals. */
+export function fetchRebalancePreview(
   portfolioId: number,
   signal?: AbortSignal,
 ): Promise<RebalancePreview> {
