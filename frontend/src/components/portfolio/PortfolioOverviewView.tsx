@@ -17,7 +17,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import {
-  ApiError,
   createPortfolio,
   deletePortfolio,
   deletePosition,
@@ -41,6 +40,7 @@ import { buildAllocationOption, type AllocationSlice } from "@/lib/charts/alloca
 import { chartColors, type ChartColors } from "@/lib/charts/theme";
 import { EChart } from "@/components/charts/EChart";
 import { Card, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
+import { retryPolicy } from "@/components/screener/shared";
 import { PortfolioNewsPanel } from "@/components/portfolio/PortfolioNewsPanel";
 import { PortfolioLookthroughSection } from "@/components/portfolio/PortfolioLookthroughSection";
 import { PortfolioRebalanceSection } from "@/components/portfolio/PortfolioRebalanceSection";
@@ -55,11 +55,6 @@ const BUTTON_CLASS =
   "h-[28px] px-3 bg-field border border-border-strong text-[12px] " +
   "text-text-secondary hover:bg-layer-hover hover:text-text-primary " +
   "transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
-
-/** Shared retry policy: never retry 4xx (deterministic), retry 5xx/network twice. */
-const retryPolicy = (failureCount: number, err: Error) =>
-  !(err instanceof ApiError && err.status >= 400 && err.status < 500) &&
-  failureCount < 2;
 
 /** Display a share count without fake precision: 8 -> "8", 8.5 -> "8.50". */
 const formatShares = (quantity: number) =>

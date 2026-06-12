@@ -170,6 +170,9 @@ function ProposalTable({
   // Fallback: compute from deltas × 100 × 0.5 (one-way) if ever absent.
   const displayTurnover = proposal.turnover_pct;
 
+  // Hoist solver status destructuring out of the JSX IIFE.
+  const { label: statusLabel, isOptimal } = humanizeSolverStatus(proposal.solver_status);
+
   const TH_CLASS =
     "px-2.5 py-2 text-[11px] font-bold uppercase tracking-[0.07em] " +
     "text-text-muted border-b border-border bg-surface-2 text-right";
@@ -232,18 +235,13 @@ function ProposalTable({
         <span>
           {/* turnover_pct is already in percent-points per the backend schema */}
           Estimated turnover: <b>{formatNumber(displayTurnover, 1)}%</b>{" "}
-          {(() => {
-            const { label: statusLabel, isOptimal } = humanizeSolverStatus(proposal.solver_status);
-            return (
-              <>
-                (one-way · {humanizeObjective(proposal.objective)} ·{" "}
-                <span className={isOptimal ? undefined : "text-loss"}>
-                  {statusLabel}
-                </span>
-                )
-              </>
-            );
-          })()}
+          <>
+            (one-way · {humanizeObjective(proposal.objective)} ·{" "}
+            <span className={isOptimal ? undefined : "text-loss"}>
+              {statusLabel}
+            </span>
+            )
+          </>
         </span>
         <span className="tabular-nums">
           Portfolio invested value: {formatCurrency(invested_value)}
@@ -278,8 +276,8 @@ export function PortfolioRebalanceSection({
   });
 
   // Query 2: preview — enabled only once we know a policy exists.
-  const policyExists =
-    policyQuery.isSuccess && policyQuery.data !== undefined;
+  // isSuccess already narrows data to be defined; the !== undefined guard is redundant.
+  const policyExists = policyQuery.isSuccess;
   const previewQuery = useQuery({
     queryKey: ["rebalance-preview", portfolioId],
     queryFn: ({ signal }) => fetchRebalancePreview(portfolioId, signal),
@@ -292,7 +290,8 @@ export function PortfolioRebalanceSection({
   const driftOption = useMemo(() => {
     if (!previewQuery.data || !colors) return null;
     const drifts: PositionDrift[] = previewQuery.data.drifts;
-    return buildDriftBandsOption(drifts, colors);
+    const { band_abs, band_rel } = previewQuery.data.policy;
+    return buildDriftBandsOption(drifts, colors, band_abs, band_rel);
   }, [previewQuery.data, colors]);
 
   // ── All hooks above this line — early returns below ──────────────────────
@@ -371,12 +370,11 @@ export function PortfolioRebalanceSection({
 
         {/* Preview error (policy exists but preview failed) */}
         {previewQuery.isError && (
-          <div
-            role="alert"
-            className="mt-2 text-[12px] text-loss"
-          >
-            {previewQuery.error.message}
-          </div>
+          <ErrorPanel
+            title="Failed to load rebalance preview"
+            message={previewQuery.error.message}
+            onRetry={() => previewQuery.refetch()}
+          />
         )}
 
         {/* Drift chart */}
@@ -385,11 +383,11 @@ export function PortfolioRebalanceSection({
             <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.07em] text-text-muted">
               Position drift
             </p>
-            {/* Height is calculated from row count: 32px per row + 40px overhead,
+            {/* Height calculated from row count: 32px per bar row + 40px grid margins,
                 minimum 120px. EChart does not accept a style prop so we wrap. */}
             <div
               style={{
-                height: `${Math.max(120, preview.drifts.length * 32 + 40)}px`,
+                height: `${Math.max(120, preview.drifts.length * 32 + 40)}px`, // 32px per bar row + 40px grid margins
               }}
             >
               <EChart option={driftOption} className="h-full w-full" />
