@@ -9,13 +9,12 @@
  * decomposition data). Any other error follows the view's error panel pattern.
  */
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   ApiError,
   fetchFundLookthrough,
   type ExposureItem,
-  type LookthroughSummary,
 } from "@/lib/api/client";
 import { EChart } from "@/components/charts/EChart";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
@@ -59,16 +58,16 @@ function count(value: number | null | undefined): string {
 
 function ExposureCharts({
   dimensions,
-  summary,
-  colors,
   activeDim,
   onDimChange,
+  exposureOption,
+  waterfallOption,
 }: {
   dimensions: Record<string, ExposureItem[]>;
-  summary: LookthroughSummary;
-  colors: ChartColors;
   activeDim: string;
   onDimChange: (dim: string) => void;
+  exposureOption: ReturnType<typeof buildExposureBarsOption>;
+  waterfallOption: ReturnType<typeof buildResidualWaterfallOption>;
 }) {
   const dimKeys = Object.keys(dimensions);
 
@@ -76,19 +75,22 @@ function ExposureCharts({
 
   const activeItems = dimensions[activeDim] ?? [];
 
-  const exposureOption = buildExposureBarsOption(activeItems, colors);
-  const waterfallOption = buildResidualWaterfallOption(summary, colors);
-
   return (
     <>
       {/* Dimension switcher — square-cut segmented control */}
-      <div className="mb-3 flex flex-wrap gap-px border border-border bg-border">
+      <div
+        role="tablist"
+        aria-label="Exposure dimension"
+        className="mb-3 flex flex-wrap gap-px border border-border bg-border"
+      >
         {dimKeys.map((key) => {
           const isActive = key === activeDim;
           return (
             <button
               key={key}
               type="button"
+              role="tab"
+              aria-selected={isActive}
               onClick={() => onDimChange(key)}
               className={[
                 "h-[30px] px-3.5 text-[11px] font-bold uppercase tracking-[0.07em] transition-colors",
@@ -142,10 +144,38 @@ export function FundLookthroughSection({
     },
   });
 
-  // activeDim must be declared before any conditional returns (Rules of Hooks).
-  // Initialise from live data once available; fall back to empty string.
-  const firstDim = query.data ? Object.keys(query.data.dimensions)[0] ?? "" : "";
-  const [activeDim, setActiveDim] = useState<string>(firstDim);
+  // All hooks must be declared before any conditional returns (Rules of Hooks).
+
+  // activeDim: useState(firstDim) is seeded before React Query resolves and
+  // would stay "" forever. Seed via effect instead: once data arrives and
+  // activeDim is still empty, pick the first dimension key.
+  const [activeDim, setActiveDim] = useState<string>("");
+  useEffect(() => {
+    if (query.data && !activeDim) {
+      setActiveDim(Object.keys(query.data.dimensions)[0] ?? "");
+    }
+  }, [query.data, activeDim]);
+
+  // Both memos run unconditionally (Rules of Hooks). The results are only
+  // consumed after all early returns, so query.data is guaranteed non-null
+  // at that point. We guard with ?? [] / a no-op path to keep TypeScript happy
+  // for the undefined case that never reaches the render.
+  const exposureOption = useMemo(
+    () =>
+      buildExposureBarsOption(
+        query.data?.dimensions[activeDim] ?? [],
+        colors,
+      ),
+    [query.data, activeDim, colors],
+  );
+
+  const waterfallOption = useMemo(
+    () =>
+      query.data
+        ? buildResidualWaterfallOption(query.data.summary, colors)
+        : ({ series: [] } as ReturnType<typeof buildResidualWaterfallOption>),
+    [query.data, colors],
+  );
 
   // 404 → fund has no decomposition data; render nothing silently.
   if (query.isError && query.error instanceof ApiError && query.error.status === 404) {
@@ -208,10 +238,10 @@ export function FundLookthroughSection({
       <Card title="Exposure breakdown" subtitle={humanizeDimension(activeDim)}>
         <ExposureCharts
           dimensions={dimensions}
-          summary={summary}
-          colors={colors}
           activeDim={activeDim}
           onDimChange={setActiveDim}
+          exposureOption={exposureOption}
+          waterfallOption={waterfallOption}
         />
       </Card>
     </section>

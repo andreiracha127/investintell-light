@@ -13,9 +13,7 @@ import { formatNumber } from "@/lib/format";
 
 // ── Shared axis/grid defaults (horizontal bar orientation) ────────────────
 
-function hBarGrid() {
-  return { left: 160, right: 72, top: 32, bottom: 8 };
-}
+const HBAR_GRID = { left: 160, right: 72, top: 32, bottom: 8 } as const;
 
 // ── Exposure bars ─────────────────────────────────────────────────────────
 
@@ -117,7 +115,7 @@ export function buildExposureBarsOption(
       itemWidth: 10,
       itemHeight: 10,
     },
-    grid: hBarGrid(),
+    grid: HBAR_GRID,
     xAxis: {
       type: "value",
       splitLine: { lineStyle: { color: colors.grid } },
@@ -157,6 +155,12 @@ export function buildExposureBarsOption(
  * "placeholder" series provides the invisible offset; the visible series
  * stacks on top of it. All null values are treated as 0. Values in the
  * LookthroughSummary are PERCENT POINTS (94.6 = 94.6%), not fractions.
+ *
+ * Note: `derivatives_net_pct` can be negative (short exposure exceeds long).
+ * For the purposes of this composition view the offset contribution of
+ * derivatives is clamped to 0 so that cumulative offsets for subsequent bars
+ * remain well-placed. The segment value itself and the "Total" bar (which uses
+ * sum_pct_total directly) are unaffected — nothing misleads.
  */
 export function buildResidualWaterfallOption(
   summary: LookthroughSummary,
@@ -183,11 +187,13 @@ export function buildResidualWaterfallOption(
 
   // Invisible offset for the helper series: cumulative sum before each step;
   // the final "Total" bar starts from 0 (outline bar).
+  // derivNet is clamped to 0 for offset arithmetic — see JSDoc.
+  const derivNetOffset = Math.max(0, derivNet);
   const offsets = [
     0,
     identified,
     identified + nondecomp,
-    identified + nondecomp + derivNet,
+    identified + nondecomp + derivNetOffset,
     0, // Total bar floats from 0
   ];
 
@@ -203,7 +209,7 @@ export function buildResidualWaterfallOption(
   // For the "Total" bar we want an outlined style, not a filled bar.
   const barData = values.map((v, i) => {
     if (i === categories.length - 1) {
-      // Outlined "Total" bar: transparent fill, accent border.
+      // Outlined "Total" bar: transparent fill, graphite border.
       return {
         value: v,
         itemStyle: {
