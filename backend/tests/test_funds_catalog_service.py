@@ -43,8 +43,14 @@ def test_default_sort_is_whitelisted() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_no_filters_yields_no_conditions() -> None:
-    assert catalog.filter_conditions(catalog.FundFilters()) == []
+def test_no_filters_yields_only_unclassified_exclusion() -> None:
+    """Baseline: with no active filters the ONLY predicate is the
+    unconditional 'Unclassified' exclusion (never listed; profiles stay
+    reachable by direct id)."""
+    conditions = catalog.filter_conditions(catalog.FundFilters())
+    assert len(conditions) == 1
+    sql = str(conditions[0].compile(compile_kwargs={"literal_binds": True}))
+    assert "Unclassified" in sql
 
 
 def test_every_filter_contributes_one_condition() -> None:
@@ -61,13 +67,15 @@ def test_every_filter_contributes_one_condition() -> None:
         max_drawdown_1y_min=-0.2,
     )
     conditions = catalog.filter_conditions(filters)
-    assert len(conditions) == len(catalog.FILTER_FIELD_NAMES) == 10
+    # +1: the unconditional Unclassified exclusion precedes the 10 filters.
+    assert len(conditions) - 1 == len(catalog.FILTER_FIELD_NAMES) == 10
 
 
 def test_search_wildcards_are_escaped() -> None:
+    # conditions[0] is the Unclassified exclusion; the search predicate follows.
     conditions = catalog.filter_conditions(catalog.FundFilters(search="100%_a"))
     sql = str(
-        conditions[0].compile(compile_kwargs={"literal_binds": True})
+        conditions[1].compile(compile_kwargs={"literal_binds": True})
     )
     assert "100\\%\\_a" in sql
 

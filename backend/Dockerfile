@@ -14,9 +14,11 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-# Código da aplicação (app/ apenas — scripts/tests/alembic ficam fora do
-# request path; migrations rodam fora do container).
+# Código da aplicação. scripts/ entra na imagem para o serviço cron do
+# Railway (fund-catalog-sync roda scripts/sync_funds.py); tests/alembic
+# continuam fora (migrations rodam fora do container).
 COPY app ./app
+COPY scripts ./scripts
 
 EXPOSE 8000
 CMD ["uv", "run", "--no-sync", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

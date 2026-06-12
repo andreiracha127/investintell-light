@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
 from app.models.fund import Fund, FundClass, FundHolding, FundNav, FundRiskLatest
+from app.sync.funds import UNCLASSIFIED_LABEL
 
 # Hard cap on the CSV export — bounded output, no pagination (screener parity).
 CSV_HARD_CAP = 5000
@@ -116,8 +117,16 @@ def filter_conditions(filters: FundFilters) -> list[ColumnElement[bool]]:
     Risk-metric bounds compare against fund_risk_latest columns — SQL NULL
     comparisons are falsy, so funds without that metric drop out by
     definition (a fund that cannot be ranked never matches a bound on it).
+
+    'Unclassified' funds are excluded from the listing UNCONDITIONALLY
+    (decisão do dono, 2026-06-12): the residual ~1% the reclassification
+    pipeline could not label has no strategy/peer context and pollutes the
+    screen. Their profile pages stay reachable by direct id (the profile
+    fetch does not go through these conditions).
     """
-    conditions: list[ColumnElement[bool]] = []
+    conditions: list[ColumnElement[bool]] = [
+        Fund.strategy_label.is_distinct_from(UNCLASSIFIED_LABEL)
+    ]
     if filters.search:
         pattern = f"%{_escape_like(filters.search)}%"
         conditions.append(

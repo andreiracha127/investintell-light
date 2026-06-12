@@ -6,7 +6,8 @@ __pycache__/
 **/__pycache__/
 tests/
 alembic/
-scripts/
+# scripts/ ENTRA na imagem: o serviço cron fund-catalog-sync (Railway) roda
+# scripts/sync_funds.py. tests/alembic/seeds continuam fora.
 seeds/
 .env
 *.log
