@@ -5,7 +5,7 @@
  * Errors fail loud: a non-OK response throws `ApiError` carrying the backend
  * `detail`, which the UI renders verbatim. No silent fallbacks.
  */
-import type { paths } from "@/lib/api/api";
+import type { components, paths } from "@/lib/api/api";
 
 type AnalysisOperation = paths["/stocks/{ticker}/analysis"]["get"];
 type PricesOperation = paths["/stocks/{ticker}/prices"]["get"];
@@ -34,6 +34,15 @@ type BuilderOptimizeOperation = paths["/builder/optimize"]["post"];
 type BuilderSaveOperation = paths["/builder/save"]["post"];
 type FundsCsvOperation = paths["/funds.csv"]["get"];
 type FundProfileOperation = paths["/funds/{instrument_id}"]["get"];
+type FundLookthroughOperation =
+  paths["/funds/{instrument_id}/lookthrough"]["get"];
+type PortfolioLookthroughOperation =
+  paths["/portfolios/{portfolio_id}/lookthrough"]["get"];
+type MacroRegimeOperation = paths["/macro/regime"]["get"];
+type RebalancePolicyOperation =
+  paths["/portfolios/{portfolio_id}/rebalance/policy"]["get"];
+type RebalancePreviewOperation =
+  paths["/portfolios/{portfolio_id}/rebalance/preview"]["get"];
 
 export type StockAnalysis =
   AnalysisOperation["responses"]["200"]["content"]["application/json"];
@@ -135,6 +144,26 @@ export type FundProfile =
 export type FundRisk = NonNullable<FundProfile["risk"]>;
 export type FundNavPoint = FundProfile["nav"][number];
 export type FundHolding = FundProfile["holdings"]["items"][number];
+
+export type FundLookthroughQuery = NonNullable<
+  FundLookthroughOperation["parameters"]["query"]
+>;
+export type FundLookthrough =
+  FundLookthroughOperation["responses"]["200"]["content"]["application/json"];
+export type PortfolioLookthrough =
+  PortfolioLookthroughOperation["responses"]["200"]["content"]["application/json"];
+export type ExposureItem = components["schemas"]["ExposureItem"];
+export type LookthroughSummary = components["schemas"]["LookthroughSummaryOut"];
+export type MacroRegime =
+  MacroRegimeOperation["responses"]["200"]["content"]["application/json"];
+export type RegimeSignal = components["schemas"]["RegimeSignalOut"];
+export type RegimeFlip = components["schemas"]["RegimeFlipOut"];
+export type RebalancePolicy =
+  RebalancePolicyOperation["responses"]["200"]["content"]["application/json"];
+export type RebalancePreview =
+  RebalancePreviewOperation["responses"]["200"]["content"]["application/json"];
+export type PositionDrift = components["schemas"]["PositionDriftOut"];
+export type Proposal = components["schemas"]["ProposalOut"];
 
 export type OptimizeRequest =
   BuilderOptimizeOperation["requestBody"]["content"]["application/json"];
@@ -662,6 +691,56 @@ export function fetchPriceSeries(
   const qs = params.toString();
   return request<PriceSeries>(
     `/stocks/${encodeURIComponent(ticker)}/prices${qs ? `?${qs}` : ""}`,
+    signal,
+  );
+}
+
+/* ── Lookthrough, Macro Regime & Rebalance (F9) ───────────────────────────── */
+
+export function getFundLookthrough(
+  instrumentId: string,
+  query: FundLookthroughQuery = {},
+  signal?: AbortSignal,
+): Promise<FundLookthrough> {
+  const params = new URLSearchParams();
+  if (query.dimension != null) params.set("dimension", query.dimension);
+  const qs = params.toString();
+  return request<FundLookthrough>(
+    `/funds/${encodeURIComponent(instrumentId)}/lookthrough${qs ? `?${qs}` : ""}`,
+    signal,
+  );
+}
+
+export function getPortfolioLookthrough(
+  portfolioId: number,
+  signal?: AbortSignal,
+): Promise<PortfolioLookthrough> {
+  return request<PortfolioLookthrough>(
+    `/portfolios/${portfolioId}/lookthrough`,
+    signal,
+  );
+}
+
+export function getMacroRegime(signal?: AbortSignal): Promise<MacroRegime> {
+  return request<MacroRegime>("/macro/regime", signal);
+}
+
+export function getRebalancePolicy(
+  portfolioId: number,
+  signal?: AbortSignal,
+): Promise<RebalancePolicy> {
+  return request<RebalancePolicy>(
+    `/portfolios/${portfolioId}/rebalance/policy`,
+    signal,
+  );
+}
+
+export function getRebalancePreview(
+  portfolioId: number,
+  signal?: AbortSignal,
+): Promise<RebalancePreview> {
+  return request<RebalancePreview>(
+    `/portfolios/${portfolioId}/rebalance/preview`,
     signal,
   );
 }
