@@ -33,6 +33,10 @@ class UniverseConstituent(Base):
     # Company title as listed in SEC company_tickers.json.
     name: Mapped[str | None] = mapped_column(String, nullable=True)
 
+    # Setor GICS (11 setores) via sec_cusip_ticker_map do data-lake —
+    # populado por scripts/enrich_sectors.py; NULL = fora do mapa.
+    sector: Mapped[str | None] = mapped_column(String, nullable=True)
+
     # Lifecycle: 'active' | 'no_tiingo_data' (backfill found no Tiingo coverage)
     # | 'excluded' (manually removed from the universe).
     # Indexed: the backfill and the metrics job both select WHERE status='active'.
