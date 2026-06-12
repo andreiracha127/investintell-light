@@ -32,6 +32,16 @@ class Settings(BaseSettings):
     # there; it never computes look-through in a request path.
     datalake_db_url: str | None = None
 
+    # --- Catalog response cache (2026-06-12) ---
+    # Optional Redis DSN (redis://[:pass@]host:port/db). Unset or unreachable
+    # → in-process memory cache (fail-open by design: caching must never
+    # break a request). Only PUBLIC catalog routes are cached (see
+    # app/core/cache.py CACHED_GET_PREFIXES) — never portfolio/user data.
+    redis_url: str | None = None
+    # TTL for cached catalog responses. The mirror refreshes once a day
+    # (fund-catalog-sync 09:00 UTC), so minutes-level TTL is conservative.
+    catalog_cache_ttl_seconds: int = 900
+
     # --- API / CORS settings (F2) ---
     # Browser origins allowed to call the API (the Next.js frontend dev server).
     cors_allow_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]

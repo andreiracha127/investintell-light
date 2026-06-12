@@ -3,6 +3,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import text
 
+from app.core.cache import catalog_cache
 from app.core.db import AsyncSessionLocal
 from app.schemas.health import HealthResponse
 
@@ -28,4 +29,7 @@ async def health_check() -> HealthResponse:
             detail="database unreachable",
         ) from exc
 
-    return HealthResponse(status="ok", database="ok")
+    # Cache é informativo, nunca gateia o health (fail-open por design).
+    return HealthResponse(
+        status="ok", database="ok", cache=await catalog_cache.active_backend()
+    )

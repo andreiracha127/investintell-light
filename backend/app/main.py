@@ -14,6 +14,7 @@ from app.api.routes import rebalance as rebalance_router
 from app.api.routes import screener as screener_router
 from app.api.routes import statistics as statistics_router
 from app.api.routes import stocks as stocks_router
+from app.core.cache import CatalogCacheMiddleware
 from app.core.config import get_settings
 from app.core.db import engine
 from app.core.tiingo_provider import provider as tiingo_provider
@@ -34,6 +35,10 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    # Cache de respostas das rotas de catálogo público (Redis fail-open →
+    # memória). Registrado ANTES do CORS na pilha (CORS por fora) para que
+    # hits cacheados também recebam os headers de CORS.
+    application.add_middleware(CatalogCacheMiddleware)
     application.add_middleware(
         CORSMiddleware,
         allow_origins=get_settings().cors_allow_origins,
