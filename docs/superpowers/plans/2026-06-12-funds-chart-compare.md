@@ -43,14 +43,14 @@
 
 ### Task 0: Preparar o worktree
 
-- [ ] **Step 0.1: Instalar dependências do frontend no worktree** (node_modules não existe lá):
+- [x] **Step 0.1: Instalar dependências do frontend no worktree** (node_modules não existe lá):
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign && pnpm install
 ```
 Expected: `Done` sem erros.
 
-- [ ] **Step 0.2: Sanity das suítes no worktree**
+- [x] **Step 0.2: Sanity das suítes no worktree**
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign/backend && uv run pytest -q 2>&1 | tail -1 && cd ../frontend && pnpm run test 2>&1 | grep "Tests"
@@ -64,7 +64,7 @@ Expected: `681 passed` e `11 passed` (estado herdado da branch).
 **Files:**
 - Modify: `backend/app/schemas/market.py`
 
-- [ ] **Step 1.1: Adicionar ao final de `app/schemas/market.py`** (imports novos no topo: `import uuid` e `from typing import Literal`):
+- [x] **Step 1.1: Adicionar ao final de `app/schemas/market.py`** (imports novos no topo: `import uuid` e `from typing import Literal`):
 
 ```python
 class FundHistoryResponse(BaseModel):
@@ -82,7 +82,7 @@ class SymbolSearchResult(BaseModel):
     instrument_id: uuid.UUID | None  # None para stocks
 ```
 
-- [ ] **Step 1.2: Sanity import + commit**
+- [x] **Step 1.2: Sanity import + commit**
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign/backend && uv run python -c "from app.schemas.market import FundHistoryResponse, SymbolSearchResult; print('ok')" && cd .. && git add backend/app/schemas/market.py && git commit -m "feat(backend): schemas FundHistoryResponse e SymbolSearchResult"
@@ -96,7 +96,7 @@ cd /e/investintell-light/.worktrees/stocks-redesign/backend && uv run python -c 
 - Modify: `backend/app/api/routes/funds.py`
 - Test: `backend/tests/test_fund_history_route.py`
 
-- [ ] **Step 2.1: Escrever os testes** — `backend/tests/test_fund_history_route.py`:
+- [x] **Step 2.1: Escrever os testes** — `backend/tests/test_fund_history_route.py`:
 
 ```python
 """Tests de GET /funds/{instrument_id}/history (helpers stubados, sem DB/Tiingo)."""
@@ -234,14 +234,14 @@ async def test_bars_validation() -> None:
     assert resp.status_code == 422
 ```
 
-- [ ] **Step 2.2: Rodar e ver falhar**
+- [x] **Step 2.2: Rodar e ver falhar**
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign/backend && uv run pytest tests/test_fund_history_route.py -q
 ```
 Expected: FAIL — `AttributeError: module ... has no attribute '_get_fund'` / 404 (rota não existe).
 
-- [ ] **Step 2.3: Implementar** — em `backend/app/api/routes/funds.py`.
+- [x] **Step 2.3: Implementar** — em `backend/app/api/routes/funds.py`.
 
 Imports novos (juntar aos existentes):
 
@@ -357,14 +357,14 @@ async def get_fund_history(
 
 Nota: `SessionDep` já existe em funds.py (alias de `Annotated[AsyncSession, Depends(get_session)]`); `Annotated`/`Query`/`HTTPException`/`uuid` já estão importados. Se `logger` já existir no módulo, não redeclarar.
 
-- [ ] **Step 2.4: Rodar e ver passar (suíte inteira)**
+- [x] **Step 2.4: Rodar e ver passar (suíte inteira)**
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign/backend && uv run pytest -q 2>&1 | tail -1
 ```
 Expected: `687 passed` (6 novos, sem regressões).
 
-- [ ] **Step 2.5: Commit**
+- [x] **Step 2.5: Commit**
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign && git add backend/app/api/routes/funds.py backend/tests/test_fund_history_route.py && git commit -m "feat(backend): GET /funds/{id}/history — ETF OHLCV / NAV fallback p/ chart interativo"
@@ -380,7 +380,7 @@ cd /e/investintell-light/.worktrees/stocks-redesign && git add backend/app/api/r
 - Modify: `backend/app/main.py`
 - Test: `backend/tests/test_symbol_search.py`, `backend/tests/test_search_route.py`
 
-- [ ] **Step 3.1: Testes do ranking puro** — `backend/tests/test_symbol_search.py`:
+- [x] **Step 3.1: Testes do ranking puro** — `backend/tests/test_symbol_search.py`:
 
 ```python
 """Tests do ranking puro do symbol search (sem DB)."""
@@ -423,14 +423,14 @@ def test_case_insensitive_query() -> None:
     assert out[0].symbol == "MSFT"
 ```
 
-- [ ] **Step 3.2: Rodar e ver falhar**
+- [x] **Step 3.2: Rodar e ver falhar**
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign/backend && uv run pytest tests/test_symbol_search.py -q
 ```
 Expected: FAIL — `ModuleNotFoundError: app.services.symbol_search`.
 
-- [ ] **Step 3.3: Implementar o service** — `backend/app/services/symbol_search.py`:
+- [x] **Step 3.3: Implementar o service** — `backend/app/services/symbol_search.py`:
 
 ```python
 """Symbol search unificado (Compare autocomplete): universe + funds.
@@ -511,14 +511,14 @@ def rank_hits(hits: list[SymbolHit], q: str, limit: int) -> list[SymbolHit]:
     return sorted(by_symbol.values(), key=key)[:limit]
 ```
 
-- [ ] **Step 3.4: Rodar e ver passar**
+- [x] **Step 3.4: Rodar e ver passar**
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign/backend && uv run pytest tests/test_symbol_search.py -q
 ```
 Expected: 4 passed.
 
-- [ ] **Step 3.5: Teste da rota** — `backend/tests/test_search_route.py`:
+- [x] **Step 3.5: Teste da rota** — `backend/tests/test_search_route.py`:
 
 ```python
 """Tests de GET /search/symbols (readers stubados, sem DB)."""
@@ -574,14 +574,14 @@ async def test_search_limit_le_25() -> None:
         assert (await client.get("/search/symbols?q=A&limit=26")).status_code == 422
 ```
 
-- [ ] **Step 3.6: Rodar e ver falhar**
+- [x] **Step 3.6: Rodar e ver falhar**
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign/backend && uv run pytest tests/test_search_route.py -q
 ```
 Expected: FAIL — `ModuleNotFoundError: app.api.routes.search`.
 
-- [ ] **Step 3.7: Implementar a rota** — `backend/app/api/routes/search.py`:
+- [x] **Step 3.7: Implementar a rota** — `backend/app/api/routes/search.py`:
 
 ```python
 """Symbol search (Compare autocomplete): GET /search/symbols.
@@ -634,14 +634,14 @@ e junto aos `include_router` (após `funds_router`):
     application.include_router(search_router.router)
 ```
 
-- [ ] **Step 3.8: Rodar suíte inteira**
+- [x] **Step 3.8: Rodar suíte inteira**
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign/backend && uv run pytest -q 2>&1 | tail -1
 ```
 Expected: `694 passed` (7 novos no total da task).
 
-- [ ] **Step 3.9: Commit**
+- [x] **Step 3.9: Commit**
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign && git add backend/app/services/symbol_search.py backend/app/api/routes/search.py backend/app/main.py backend/tests/test_symbol_search.py backend/tests/test_search_route.py && git commit -m "feat(backend): GET /search/symbols — busca unificada universe+funds com ranking"
@@ -655,14 +655,14 @@ cd /e/investintell-light/.worktrees/stocks-redesign && git add backend/app/servi
 - Modify: `backend/openapi.json` (gerado), `frontend/src/lib/api/api.d.ts` (gerado)
 - Modify: `frontend/src/lib/api/client.ts`
 
-- [ ] **Step 4.1: Regenerar**
+- [x] **Step 4.1: Regenerar**
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign/backend && uv run python scripts/export_openapi.py && cd ../frontend && pnpm run types
 ```
 Expected: `api.d.ts` ganha `"/funds/{instrument_id}/history"` e `"/search/symbols"`.
 
-- [ ] **Step 4.2: Tipos + fetchers** — em `frontend/src/lib/api/client.ts`, na seção de type aliases (junto de `StockHistoryOperation`):
+- [x] **Step 4.2: Tipos + fetchers** — em `frontend/src/lib/api/client.ts`, na seção de type aliases (junto de `StockHistoryOperation`):
 
 ```ts
 type FundHistoryOperation = paths["/funds/{instrument_id}/history"]["get"];
@@ -699,7 +699,7 @@ export function fetchSymbolSearch(
 }
 ```
 
-- [ ] **Step 4.3: Typecheck + commit**
+- [x] **Step 4.3: Typecheck + commit**
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign/frontend && pnpm run typecheck && cd .. && git add backend/openapi.json frontend/src/lib/api/api.d.ts frontend/src/lib/api/client.ts && git commit -m "feat(frontend): tipos e fetchers de fund history e symbol search"
@@ -712,7 +712,7 @@ cd /e/investintell-light/.worktrees/stocks-redesign/frontend && pnpm run typeche
 **Files:**
 - Create: `frontend/src/components/charts/SymbolSearchInput.tsx`
 
-- [ ] **Step 5.1: Criar o componente**
+- [x] **Step 5.1: Criar o componente**
 
 ```tsx
 "use client";
@@ -861,7 +861,7 @@ export function SymbolSearchInput({
 }
 ```
 
-- [ ] **Step 5.2: Typecheck + commit**
+- [x] **Step 5.2: Typecheck + commit**
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign/frontend && pnpm run typecheck && cd .. && git add frontend/src/components/charts/SymbolSearchInput.tsx && git commit -m "feat(frontend): SymbolSearchInput — autocomplete do Compare"
@@ -874,7 +874,7 @@ cd /e/investintell-light/.worktrees/stocks-redesign/frontend && pnpm run typeche
 **Files:**
 - Modify: `frontend/src/components/charts/InteractiveChart.tsx`
 
-- [ ] **Step 6.1: Imports e assinatura.** Adicionar imports:
+- [x] **Step 6.1: Imports e assinatura.** Adicionar imports:
 
 ```ts
 import { fetchFundHistory, type SymbolSearchResult } from "@/lib/api/client";
@@ -904,7 +904,7 @@ export function InteractiveChart({
 }) {
 ```
 
-- [ ] **Step 6.2: Estado sensível ao mode.** Substituir as inicializações de `type` e `panes`:
+- [x] **Step 6.2: Estado sensível ao mode.** Substituir as inicializações de `type` e `panes`:
 
 ```ts
   const [type, setType] = useState<ChartType>(mode === "nav" ? "line" : "candles");
@@ -919,7 +919,7 @@ E logo após os arrays TYPES/TOOLS (fora do componente eles são constantes; DEN
 
 No JSX da toolbar: o map de tipos passa a iterar `typeOptions`; o botão VOL é envolvido em `{mode !== "nav" && (...)}`; o botão LIVE inteiro (incluindo o `<div className="flex-1" />` fica) é envolvido em `{mode !== "nav" && (...)}`.
 
-- [ ] **Step 6.3: Live guard.** No effect do feed:
+- [x] **Step 6.3: Live guard.** No effect do feed:
 
 ```ts
   useEffect(() => {
@@ -928,7 +928,7 @@ No JSX da toolbar: o map de tipos passa a iterar `typeOptions`; o botão VOL é 
   }, [symbol, live, mode]);
 ```
 
-- [ ] **Step 6.4: Compare via SymbolSearchInput.** Substituir os states `compare`/`compareActive`:
+- [x] **Step 6.4: Compare via SymbolSearchInput.** Substituir os states `compare`/`compareActive`:
 
 ```ts
   const [compareSel, setCompareSel] = useState<SymbolSearchResult | null>(null);
@@ -972,14 +972,14 @@ Substituir o `<form>` inteiro do Compare por:
         />
 ```
 
-- [ ] **Step 6.5: Typecheck + lint + testes**
+- [x] **Step 6.5: Typecheck + lint + testes**
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign/frontend && pnpm run typecheck && pnpm run lint && pnpm run test
 ```
 Expected: PASS (11 testes existentes intactos).
 
-- [ ] **Step 6.6: Commit**
+- [x] **Step 6.6: Commit**
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign && git add frontend/src/components/charts/InteractiveChart.tsx && git commit -m "feat(frontend): InteractiveChart — mode nav e Compare com autocomplete"
@@ -992,7 +992,7 @@ cd /e/investintell-light/.worktrees/stocks-redesign && git add frontend/src/comp
 **Files:**
 - Modify: `frontend/src/components/funds/FundProfileView.tsx`
 
-- [ ] **Step 7.1: Query + estado.** Imports novos:
+- [x] **Step 7.1: Query + estado.** Imports novos:
 
 ```ts
 import { fetchFundHistory, RANGE_PRESETS, type RangePreset } from "@/lib/api/client";
@@ -1017,7 +1017,7 @@ Dentro de `FundProfileView`, junto da `profileQuery`:
 
 Remover o `navOption` useMemo.
 
-- [ ] **Step 7.2: Substituir o Card NAV.** Trocar o bloco:
+- [x] **Step 7.2: Substituir o Card NAV.** Trocar o bloco:
 
 ```tsx
           <Card title="NAV" subtitle="2y window, decimated server-side">
@@ -1053,14 +1053,14 @@ por:
           )}
 ```
 
-- [ ] **Step 7.3: Typecheck + lint**
+- [x] **Step 7.3: Typecheck + lint**
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign/frontend && pnpm run typecheck && pnpm run lint
 ```
 Expected: PASS (sem imports órfãos).
 
-- [ ] **Step 7.4: Commit**
+- [x] **Step 7.4: Commit**
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign && git add frontend/src/components/funds/FundProfileView.tsx && git commit -m "feat(frontend): fund profile — chart interativo (ETF=OHLCV+live, fund=NAV)"
@@ -1070,14 +1070,14 @@ cd /e/investintell-light/.worktrees/stocks-redesign && git add frontend/src/comp
 
 ### Task 8: Verificação ponta-a-ponta
 
-- [ ] **Step 8.1: Suítes completas**
+- [x] **Step 8.1: Suítes completas**
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign/backend && uv run pytest -q 2>&1 | tail -1 && cd ../frontend && pnpm run test 2>&1 | grep "Tests" && pnpm run typecheck && pnpm run lint
 ```
 Expected: `694 passed` backend, `11 passed` frontend, typecheck/lint limpos.
 
-- [ ] **Step 8.2: Smoke do backend** (porta 8001 para não colidir com a working tree principal):
+- [x] **Step 8.2: Smoke do backend** (porta 8001 para não colidir com a working tree principal):
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign/backend && uv run uvicorn app.main:app --port 8001 &
@@ -1091,7 +1091,7 @@ curl -s "http://localhost:8001/funds/<id-acima>/history?bars=40" | head -c 200  
 ```
 Expected: search devolve SPY (etf) primeiro; ETF history `"mode":"ohlcv"`; mutual fund `"mode":"nav"` com `o==h==l==c`.
 
-- [ ] **Step 8.3: Smoke visual** — frontend dev na 3001 apontando para a 8001:
+- [x] **Step 8.3: Smoke visual** — frontend dev na 3001 apontando para a 8001:
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign/frontend && NEXT_PUBLIC_API_URL=http://localhost:8001 NEXT_PUBLIC_LIVEFEED_WS_URL=wss://livefeed-production-2c39.up.railway.app/stream pnpm run dev -- --port 3001
@@ -1104,7 +1104,7 @@ Verificar no browser (Playwright MCP):
 2. Abrir um mutual fund: chart em linha, SEM botões Candles/OHLC/VOL/LIVE; ranges e SMA funcionam.
 3. Em `/stocks/TSLA`: digitar "VFI" no Compare → dropdown sugere fundos e ações; selecionar um → série tracejada aparece e escala vira %.
 
-- [ ] **Step 8.4: Marcar checkboxes + commit final**
+- [x] **Step 8.4: Marcar checkboxes + commit final**
 
 ```bash
 cd /e/investintell-light/.worktrees/stocks-redesign && git add docs/superpowers/plans/2026-06-12-funds-chart-compare.md && git commit -m "docs: plano funds-chart-compare executado"

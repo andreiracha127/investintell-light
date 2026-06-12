@@ -2,7 +2,8 @@
 
 /**
  * Fund profile (F8.2) — GET /funds/{id}: serif header with tags, KPI tiles,
- * 2y NAV chart (decimated server-side), top holdings (top-50-truncated
+ * interactive chart (ETF = OHLCV candles + live; mutual fund = NAV line),
+ * top holdings (top-50-truncated
  * N-PORT source, disclaimed) and the full precomputed risk-metric panel.
  * Every number is the mother-DB value with its source calc_date.
  */
