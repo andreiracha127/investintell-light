@@ -58,13 +58,15 @@ export interface MonthlyReturn {
  *     month-end baseline so computing a return would require an arbitrary
  *     starting point. Callers should note this when displaying the oldest
  *     month label.
- *   - The current (potentially partial) month is INCLUDED if it contains
- *     ≥ 2 valid nav observations AND there is a prior month-end — the
- *     month-to-date return is computable (last obs / prev month-end - 1).
- *     The ≥2 guard prevents a single-observation month from registering as
- *     a meaningful data point. No `partial` flag is emitted: callers that
- *     need to distinguish MTD from full-month returns should check whether
- *     the last month in the series coincides with today.
+ *   - The current (potentially partial) month — i.e. the LAST month in the
+ *     series — is INCLUDED only if it contains ≥ 2 valid nav observations
+ *     AND there is a prior month-end, preventing a single-observation
+ *     month-to-date figure from registering as a meaningful data point.
+ *     All prior (closed) calendar months are emitted regardless of their
+ *     observation count, because a single month-end NAV is sufficient to
+ *     compute (navEnd / navPrev − 1). No `partial` flag is emitted: callers
+ *     that need to distinguish MTD from full-month returns should check
+ *     whether the last month in the series coincides with today.
  *   - Null navs are skipped at the individual-observation level; a month
  *     whose every observation is null produces no month-end reference and
  *     is silently dropped (no return emitted for that month either).
@@ -118,8 +120,10 @@ export function monthlyReturns(nav: FundNavPoint[]): MonthlyReturn[] {
     const cur = months[i];
     const prev = months[i - 1];
 
-    // Partial-month guard: must have ≥2 observations.
-    if (cur.count < 2) continue;
+    // Partial-month guard: applies ONLY to the last (potentially open) month.
+    // Closed historical months always have a valid month-end NAV regardless
+    // of how many intra-month observations were captured.
+    if (i === months.length - 1 && cur.count < 2) continue;
 
     result.push({
       year: cur.year,

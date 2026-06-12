@@ -213,30 +213,35 @@ export function buildDrawdownOption(
         lineStyle: { color: colors.loss, width: 1.5 },
         itemStyle: { color: colors.loss },
         areaStyle: { color: colors.loss, opacity: 0.2 },
-        markArea: {
-          silent: true,
-          itemStyle: {
-            color: colors.loss,
-            opacity: 0.1,
-            borderColor: colors.loss,
-            borderWidth: 1,
-            borderType: "dashed",
-          },
-          label: {
-            show: true,
-            position: "top",
-            color: colors.loss,
-            fontSize: 11,
-            formatter: () =>
-              `Worst: ${formatPercent(dd.worst.depth, 2)}`,
-          },
-          data: [
-            [
-              { xAxis: dd.worst.from },
-              { xAxis: dd.worst.to },
+        // Only render the worst-drawdown shading when there is an actual
+        // drawdown (depth < 0). A monotonic NAV produces depth === 0 and
+        // the "Worst: 0.00%" label must never be rendered.
+        ...(dd.worst.depth < 0 && {
+          markArea: {
+            silent: true,
+            itemStyle: {
+              color: colors.loss,
+              opacity: 0.1,
+              borderColor: colors.loss,
+              borderWidth: 1,
+              borderType: "dashed",
+            },
+            label: {
+              show: true,
+              position: "top",
+              color: colors.loss,
+              fontSize: 11,
+              formatter: () =>
+                `Worst: ${formatPercent(dd.worst.depth, 2)}`,
+            },
+            data: [
+              [
+                { xAxis: dd.worst.from },
+                { xAxis: dd.worst.to },
+              ],
             ],
-          ],
-        },
+          },
+        }),
       },
     ],
   };

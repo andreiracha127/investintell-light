@@ -86,42 +86,38 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     [profileQuery.data, colors],
   );
 
-  // Monthly returns heatmap — only shown when the nav spans ≥ 13 months
-  // (the first month is always excluded as a baseline; ≥13 months guarantees
-  // at least one full-month return to display).
+  // Nav span in month-steps: (ly - fy) * 12 + (lm - fm) counts the number
+  // of month boundaries crossed. 13 distinct calendar months = 12 month-steps.
+  // Both analytics charts share this gate, so compute it once.
+  const navSpanMonthSteps = useMemo(() => {
+    if (!profileQuery.data) return 0;
+    const dates = profileQuery.data.nav
+      .filter((p) => p.nav !== null)
+      .map((p) => p.date)
+      .sort();
+    if (dates.length < 2) return 0;
+    const [fy, fm] = dates[0].split("-").map(Number);
+    const [ly, lm] = dates[dates.length - 1].split("-").map(Number);
+    return (ly - fy) * 12 + (lm - fm);
+  }, [profileQuery.data]);
+
+  // Monthly returns heatmap — only shown when the nav spans at least
+  // 13 distinct calendar months (= 12 month-steps). The first month is
+  // always excluded as a baseline, so 13 months guarantees ≥ 1 return cell.
   const monthlyReturnsOption = useMemo(() => {
     if (!profileQuery.data || !colors) return null;
-    const nav = profileQuery.data.nav;
-    // Check span: compare first and last valid-date's year×month.
-    const dates = nav
-      .filter((p) => p.nav !== null)
-      .map((p) => p.date)
-      .sort();
-    if (dates.length < 2) return null;
-    const [fy, fm] = dates[0].split("-").map(Number);
-    const [ly, lm] = dates[dates.length - 1].split("-").map(Number);
-    const spanMonths = (ly - fy) * 12 + (lm - fm);
-    if (spanMonths < 13) return null;
-    const cells = monthlyReturns(nav);
+    if (navSpanMonthSteps < 12) return null;
+    const cells = monthlyReturns(profileQuery.data.nav);
     return buildMonthlyReturnsOption(cells, colors);
-  }, [profileQuery.data, colors]);
+  }, [profileQuery.data, colors, navSpanMonthSteps]);
 
-  // Drawdown chart — only shown when nav spans ≥ 13 months (same gate).
+  // Drawdown chart — same 13-distinct-month gate as the heatmap above.
   const drawdownOption = useMemo(() => {
     if (!profileQuery.data || !colors) return null;
-    const nav = profileQuery.data.nav;
-    const dates = nav
-      .filter((p) => p.nav !== null)
-      .map((p) => p.date)
-      .sort();
-    if (dates.length < 2) return null;
-    const [fy, fm] = dates[0].split("-").map(Number);
-    const [ly, lm] = dates[dates.length - 1].split("-").map(Number);
-    const spanMonths = (ly - fy) * 12 + (lm - fm);
-    if (spanMonths < 13) return null;
-    const dd = drawdownSeries(nav);
+    if (navSpanMonthSteps < 12) return null;
+    const dd = drawdownSeries(profileQuery.data.nav);
     return buildDrawdownOption(dd, colors);
-  }, [profileQuery.data, colors]);
+  }, [profileQuery.data, colors, navSpanMonthSteps]);
 
   if (profileQuery.isPending) {
     return (
