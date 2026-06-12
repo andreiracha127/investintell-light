@@ -19,7 +19,6 @@ from app.sync.funds import (
     CLASSES_SQL,
     ELIGIBLE_FUNDS_SQL,
     HOLDINGS_SQL,
-    MAX_HOLDINGS_PER_SERIES,
     NAV_SQL,
     RISK_CALC_CUTOFF,
     RISK_LATEST_SQL,
@@ -336,17 +335,18 @@ def test_rank_holdings_orders_by_pct_desc_nulls_last() -> None:
     assert [(r["rank"], r["cusip"]) for r in ranked] == [
         (1, "HIGH"), (2, "LOW"), (3, "NONE"),
     ]
-    assert all(r["is_top50_truncated"] is True for r in ranked)
+    assert all("is_top50_truncated" not in r for r in ranked)
 
 
-def test_rank_holdings_caps_at_50_per_series() -> None:
+def test_rank_holdings_keeps_all_rows_no_truncation() -> None:
+    # Frente C: o gate top-50 foi aposentado — todos os holdings são mantidos.
     rows = [
         _holding(cusip=f"C{i:03d}", pct_of_nav=Decimal(i)) for i in range(60)
     ]
     ranked = rank_holdings(rows)
-    assert len(ranked) == MAX_HOLDINGS_PER_SERIES == 50
+    assert len(ranked) == 60
     assert ranked[0]["cusip"] == "C059"  # highest pct first
-    assert [r["rank"] for r in ranked] == list(range(1, 51))
+    assert [r["rank"] for r in ranked] == list(range(1, 61))
 
 
 def test_rank_holdings_groups_by_series() -> None:
@@ -660,12 +660,10 @@ def test_fund_nav_composite_pk_and_fk_cascade() -> None:
     assert fk.ondelete == "CASCADE"
 
 
-def test_fund_holdings_composite_pk_and_truncation_flag() -> None:
+def test_fund_holdings_composite_pk_and_no_truncation_flag() -> None:
     table = _table("fund_holdings")
     assert [c.name for c in table.primary_key.columns] == [
         "series_id", "report_date", "rank",
     ]
-    flag = table.c["is_top50_truncated"]
-    assert flag.nullable is False
-    assert flag.server_default is not None
-    assert flag.server_default.arg == "true"
+    # Frente C: o flag is_top50_truncated foi aposentado (migration 0008).
+    assert "is_top50_truncated" not in table.c

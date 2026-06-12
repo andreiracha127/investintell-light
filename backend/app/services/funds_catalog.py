@@ -344,7 +344,6 @@ class FundProfile:
     holdings: list[FundHolding]
     holdings_report_date: dt.date | None
     holdings_pct_of_nav_total: float | None
-    is_top50_truncated: bool
     # Share classes (F8.6b), expense_ratio asc NULLS LAST. NOTE: any class
     # is priced with the SERIES NAV as a proxy (the source prices only the
     # representative class).
@@ -391,9 +390,10 @@ async def fetch_fund_profile(
         )
     )
     holdings: list[FundHolding] = []
-    truncated = False
     pct_total: float | None = None
     if latest_report is not None:
+        # HOLDINGS_CAP is a DISPLAY cap for the profile widget (top holdings
+        # by rank) — the full exposure lives in /funds/{id}/lookthrough.
         holdings = list(
             (
                 await session.execute(
@@ -407,7 +407,6 @@ async def fetch_fund_profile(
                 )
             ).scalars()
         )
-        truncated = any(h.is_top50_truncated for h in holdings)
         reported = [float(h.pct_of_nav) for h in holdings if h.pct_of_nav is not None]
         pct_total = sum(reported) if reported else None
 
@@ -430,7 +429,6 @@ async def fetch_fund_profile(
         holdings=holdings,
         holdings_report_date=latest_report,
         holdings_pct_of_nav_total=pct_total,
-        is_top50_truncated=truncated,
         classes=classes,
     )
 

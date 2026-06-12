@@ -11,7 +11,8 @@ request path:
   per instrument (precomputed in the mother DB; the Light NEVER recomputes).
 - `fund_nav` — rolling daily NAV window (2 years + 30 days).
 - `fund_holdings` — latest N-PORT report per series, ranked by pct_of_nav.
-  ⚠️ the source is top-50 holdings per fund (is_top50_truncated).
+  Sem truncamento (Frente C): a fonte é 100% dos holdings; a exposição
+  consolidada vem do look-through materializado no data-lake.
 """
 
 import uuid
@@ -210,9 +211,3 @@ class FundHolding(Base):
     sector: Mapped[str | None] = mapped_column(String, nullable=True)
     market_value: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     pct_of_nav: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-
-    # The N-PORT source keeps only the top-50 holdings per fund — every row
-    # carries this disclaimer flag (always true in v1).
-    is_top50_truncated: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default="true"
-    )

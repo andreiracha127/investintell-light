@@ -19,7 +19,7 @@ Pipeline (one run = one `run_sync()` call, normally via scripts/sync_funds.py):
    (today - 2 years - 30 days) → `fund_nav`; the latest non-NULL aum_usd
    backfills funds.aum_usd where monthly_avg_net_assets was missing.
 5. Fetch the latest sec_nport_holdings report per series, rank by
-   pct_of_nav desc → `fund_holdings` (source is top-50 truncated).
+   pct_of_nav desc → `fund_holdings` (no truncation since Frente C).
 6. (F8.6b, runs as step 3c) Fetch the share-class catalog from
    sec_fund_classes (latest filing per class_id, ticker IS NOT NULL,
    series in the local universe) → `fund_classes`. Only the series'
@@ -67,8 +67,9 @@ NAV_MAX_STALENESS_DAYS = 30
 # Local NAV window: 2 years + 30 days back from today.
 NAV_WINDOW_DAYS = NAV_MIN_HISTORY_DAYS + NAV_MAX_STALENESS_DAYS
 
-# The N-PORT source keeps at most the top-50 holdings per fund.
-MAX_HOLDINGS_PER_SERIES = 50
+# Frente C (2026-06-12): o gate top-50 foi APOSENTADO — a fonte N-PORT no
+# data-lake é 100% dos holdings (reingestão C0) e a exposição real vem do
+# look-through materializado; o sync local não trunca mais.
 
 UNCLASSIFIED_LABEL = "Unclassified"
 
@@ -507,7 +508,7 @@ def rank_holdings(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
 
     Within each (series_id, report_date): order by pct_of_nav desc (NULL
     last), tie-break market_value desc (NULL last) then cusip; assign
-    1-based ranks; keep at most MAX_HOLDINGS_PER_SERIES rows.
+    1-based ranks. No truncation (Frente C): every reported holding is kept.
     """
     by_series: dict[tuple[str, dt.date], list[Mapping[str, Any]]] = {}
     for row in rows:
@@ -527,7 +528,7 @@ def rank_holdings(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
 
     ranked: list[dict[str, Any]] = []
     for (series_id, report_date), holdings in sorted(by_series.items()):
-        ordered = sorted(holdings, key=sort_key)[:MAX_HOLDINGS_PER_SERIES]
+        ordered = sorted(holdings, key=sort_key)
         for rank, row in enumerate(ordered, start=1):
             ranked.append(
                 {
@@ -541,7 +542,6 @@ def rank_holdings(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
                     "sector": row.get("sector"),
                     "market_value": row.get("market_value"),
                     "pct_of_nav": row.get("pct_of_nav"),
-                    "is_top50_truncated": True,
                 }
             )
     return ranked
@@ -697,7 +697,6 @@ _HOLDING_MUTABLE_COLUMNS = (
     "sector",
     "market_value",
     "pct_of_nav",
-    "is_top50_truncated",
 )
 
 

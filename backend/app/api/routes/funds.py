@@ -23,6 +23,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.datalake import get_datalake_session
 from app.core.db import get_session
 from app.schemas.funds import (
     FundClassOut,
@@ -35,12 +36,21 @@ from app.schemas.funds import (
     FundsListResponse,
     FundsStaleness,
 )
+from app.schemas.lookthrough import (
+    FundLookthroughResponse,
+    LookthroughSummaryOut,
+    build_dimensions,
+)
 from app.services import funds_catalog as catalog
+from app.services import lookthrough
 from app.services.screener import render_csv
 
 router = APIRouter(tags=["funds"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+DatalakeDep = Annotated[AsyncSession, Depends(get_datalake_session)]
+
+DimensionParam = Literal["issuer", "asset_class", "sector", "currency"]
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
@@ -215,7 +225,8 @@ async def get_fund_profile(
     instrument_id: uuid.UUID, session: SessionDep
 ) -> FundProfileResponse:
     """Full profile: identity + all risk metrics + 2y NAV (~260 points,
-    decimated server-side) + latest top holdings (top-50-truncated source)."""
+    decimated server-side) + latest top holdings (display-capped; the full
+    consolidated exposure lives in /funds/{id}/lookthrough)."""
     profile = await catalog.fetch_fund_profile(session, instrument_id)
     if profile is None:
         raise HTTPException(
@@ -249,9 +260,63 @@ async def get_fund_profile(
             report_date=profile.holdings_report_date,
             items=[FundHoldingItem.model_validate(h) for h in profile.holdings],
             pct_of_nav_total=profile.holdings_pct_of_nav_total,
-            is_top50_truncated=profile.is_top50_truncated,
         ),
         # Share classes (F8.6b) — expense_ratio asc NULLS LAST; any class is
         # priced with the series NAV as a proxy.
         classes=[FundClassOut.model_validate(c) for c in profile.classes],
+    )
+
+
+@router.get(
+    "/funds/{instrument_id}/lookthrough",
+    response_model=FundLookthroughResponse,
+)
+async def get_fund_lookthrough(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    datalake: DatalakeDep,
+    dimension: DimensionParam | None = None,
+) -> FundLookthroughResponse:
+    """Exposições look-through materializadas do fundo (Frente C).
+
+    DB-first: lê a materialização do worker ``nport_lookthrough`` no
+    data-lake — nenhuma expansão roda aqui. 404 quando o fundo não existe no
+    universo local OU quando a série ainda não foi materializada (estado
+    explícito, nunca uma resposta vazia silenciosa).
+    """
+    series_id = await lookthrough.get_fund_series(session, instrument_id)
+    if series_id is None:
+        raise HTTPException(
+            status_code=404, detail=f"Fund {instrument_id} not found."
+        )
+    data = await lookthrough.fetch_series_lookthrough(
+        datalake, series_id, dimension
+    )
+    if data is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Look-through not materialized for series {series_id} — "
+                "the nport_lookthrough worker has not covered it yet."
+            ),
+        )
+    return FundLookthroughResponse(
+        instrument_id=instrument_id,
+        series_id=data.series_id,
+        report_date=data.report_date,
+        dimensions=build_dimensions(data.exposures, only=dimension),
+        summary=LookthroughSummaryOut(
+            sum_pct_total=data.summary.sum_pct_total,
+            direct_pct=data.summary.direct_pct,
+            indirect_pct=data.summary.indirect_pct,
+            expanded_fund_pct=data.summary.expanded_fund_pct,
+            nondecomposable_fund_pct=data.summary.nondecomposable_fund_pct,
+            derivatives_gross_pct=data.summary.derivatives_gross_pct,
+            derivatives_net_pct=data.summary.derivatives_net_pct,
+            unidentified_pct=data.summary.unidentified_pct,
+            coverage_pct=data.summary.coverage_pct,
+            n_holdings=data.summary.n_holdings,
+            n_children_expanded=data.summary.n_children_expanded,
+            oldest_report_date=data.summary.oldest_report_date,
+        ),
     )

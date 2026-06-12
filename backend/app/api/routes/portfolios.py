@@ -33,6 +33,12 @@ from app.ingestion.news import ensure_news
 from app.models.news_item import NewsItem
 from app.schemas._tickers import normalize_ticker
 from app.schemas.news import NewsArticle
+from app.core.datalake import get_datalake_session
+from app.schemas.lookthrough import (
+    PortfolioLookthroughResponse,
+    UnexpandedPosition,
+    build_dimensions,
+)
 from app.schemas.portfolios import (
     PortfolioCreate,
     PortfolioListItem,
@@ -43,7 +49,7 @@ from app.schemas.portfolios import (
     PositionBody,
     PositionOut,
 )
-from app.services import portfolio_crud
+from app.services import lookthrough, portfolio_crud
 from app.tiingo.client import TiingoClient
 from app.tiingo.exceptions import TiingoError
 
@@ -361,4 +367,108 @@ async def get_portfolio_news(
         count=len(rows),
         stale=stale,
         items=[NewsArticle.model_validate(row) for row in rows],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Look-through (Frente C)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{portfolio_id}/lookthrough", response_model=PortfolioLookthroughResponse
+)
+async def get_portfolio_lookthrough(
+    portfolio_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    datalake: Annotated[AsyncSession, Depends(get_datalake_session)],
+) -> PortfolioLookthroughResponse:
+    """Exposição consolidada do portfólio atravessando os fundos (Frente C).
+
+    DB-first: pesos vêm dos preços/NAVs já sincronizados localmente (sem
+    ensure Tiingo — posição sem preço local é 409 explícito) e as exposições
+    vêm das tabelas materializadas pelo worker ``nport_lookthrough`` no
+    data-lake. Posições não atravessadas (ações, fundos sem materialização)
+    ficam EXPLÍCITAS em ``unexpanded`` — nunca somem silenciosamente.
+    """
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    if portfolio is None:
+        raise HTTPException(
+            status_code=404, detail=f"Portfolio {portfolio_id} not found."
+        )
+
+    positions = list(portfolio.positions)
+    tickers = [position.ticker for position in positions]
+    series_by_ticker = await lookthrough.get_fund_series_by_ticker(
+        session, tickers
+    )
+    closes = await portfolio_crud.select_last_two_closes(session, tickers)
+    nav_tickers = [t for t in series_by_ticker if t not in closes]
+    if nav_tickers:
+        closes.update(
+            await portfolio_crud.select_last_two_navs(session, nav_tickers)
+        )
+
+    missing = [p.ticker for p in positions if not closes.get(p.ticker)]
+    if missing:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "No local price data for: "
+                f"{', '.join(sorted(missing))} — open the portfolio overview "
+                "to refresh prices first."
+            ),
+        )
+
+    market_values = {
+        position.ticker: position.quantity * closes[position.ticker][0][1]
+        for position in positions
+    }
+    cash = float(portfolio.cash)
+    total_value = sum(market_values.values()) + cash
+
+    series_ids = sorted(
+        {series_by_ticker[t] for t in series_by_ticker}
+    )
+    lookthroughs = await lookthrough.fetch_many_lookthroughs(
+        datalake, series_ids
+    )
+
+    weighted: list[tuple[float, lookthrough.SeriesLookthrough]] = []
+    unexpanded: list[UnexpandedPosition] = []
+    for position in positions:
+        weight = (
+            market_values[position.ticker] / total_value if total_value else 0.0
+        )
+        series_id = series_by_ticker.get(position.ticker)
+        if series_id is None:
+            unexpanded.append(
+                UnexpandedPosition(
+                    ticker=position.ticker,
+                    weight_pct=100.0 * weight,
+                    reason="not_a_fund",
+                )
+            )
+        elif series_id not in lookthroughs:
+            unexpanded.append(
+                UnexpandedPosition(
+                    ticker=position.ticker,
+                    weight_pct=100.0 * weight,
+                    reason="not_materialized",
+                )
+            )
+        else:
+            weighted.append((weight, lookthroughs[series_id]))
+
+    rows, aggregates = lookthrough.consolidate_portfolio(weighted)
+    return PortfolioLookthroughResponse(
+        portfolio_id=portfolio.id,
+        total_value=total_value,
+        cash_weight_pct=100.0 * cash / total_value if total_value else 0.0,
+        expanded_weight_pct=aggregates.expanded_weight_pct,
+        sum_pct_total=aggregates.sum_pct_total,
+        oldest_report_date=aggregates.oldest_report_date,
+        n_funds_expanded=len(weighted),
+        unexpanded=unexpanded,
+        dimensions=build_dimensions(rows),
     )

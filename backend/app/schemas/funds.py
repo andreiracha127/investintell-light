@@ -140,14 +140,16 @@ class FundHoldingItem(BaseModel):
 
 
 class FundHoldingsOut(BaseModel):
-    """Latest N-PORT report for the fund's series (top-50 truncated source)."""
+    """Latest N-PORT report for the fund's series (full, untruncated source).
+
+    The profile still serves a display-capped list (HOLDINGS_CAP); the
+    consolidated exposure lives in GET /funds/{id}/lookthrough (Frente C).
+    """
 
     report_date: dt.date | None
     items: list[FundHoldingItem]
-    # Sum of the reported pct_of_nav (percent units) — visibly < 100 because
-    # of the top-50 source cap.
+    # Sum of the reported pct_of_nav (percent units) over the returned items.
     pct_of_nav_total: float | None
-    is_top50_truncated: bool
 
 
 class FundProfileResponse(BaseModel):

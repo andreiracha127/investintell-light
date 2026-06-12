@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     tiingo_token: str | None = None
     # Read-only connection to the investintell-allocation mother DB — used from F6 onward.
     investintell_db_url: str | None = None
+    # Read-only connection to the TimescaleDB Cloud data-lake (Tiger
+    # Investintell-Prod) — consumed by the look-through endpoints (Frente C):
+    # the Light READS the tables materialized by the nport_lookthrough worker
+    # there; it never computes look-through in a request path.
+    datalake_db_url: str | None = None
 
     # --- API / CORS settings (F2) ---
     # Browser origins allowed to call the API (the Next.js frontend dev server).
