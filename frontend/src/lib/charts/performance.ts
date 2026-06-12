@@ -22,9 +22,7 @@ import { formatDate, formatPercent } from "@/lib/format";
 
 // ── Month × year heatmap ─────────────────────────────────────────────────
 
-// Use at least this opacity so cells near zero don't disappear entirely.
-const MIN_CELL_OPACITY = 0.15;
-// At this opacity threshold the cell is dark enough to warrant a light label.
+// At this relative-intensity threshold the cell is dark enough to warrant a light label.
 const LIGHT_LABEL_THRESHOLD = 0.6;
 
 const MONTH_LABELS = [
@@ -60,26 +58,24 @@ export function buildMonthlyReturnsOption(
   // Maximum absolute return for opacity scaling.
   const maxAbs = Math.max(...cells.map((c) => Math.abs(c.value)));
 
-  // Build data entries: [xIndex (month-1), yIndex (year desc), value, rawValue].
-  // ECharts heatmap data format: each entry is the `value` array passed to the cell.
+  // Build data entries: [xIndex (month-1), yIndex (year desc), value].
+  // Cell color is driven by the hidden visualMap below; per-cell label color
+  // is set via the ECharts per-point label override (visualMap does not touch it).
   type HeatCell = {
     value: [number, number, number];
-    itemStyle: { color: string; opacity: number };
     label: { color: string };
   };
 
   const data: HeatCell[] = cells.map((c) => {
     const xIdx = c.month - 1; // 0..11
     const yIdx = yearIndex.get(c.year) ?? 0;
-    const opacity = maxAbs > 0 ? Math.abs(c.value) / maxAbs : 0;
-    const clampedOpacity = Math.max(MIN_CELL_OPACITY, opacity);
-    const color = c.value >= 0 ? colors.gain : colors.loss;
-    // Label: white/on-accent at high opacity, normal text otherwise.
-    const labelColor = clampedOpacity > LIGHT_LABEL_THRESHOLD ? colors.textOnAccent : colors.text;
+    // Relative intensity [0, 1] used only for adaptive label contrast.
+    const intensity = maxAbs > 0 ? Math.abs(c.value) / maxAbs : 0;
+    // Label: light (on-accent) when cell is saturated; normal text for pale cells.
+    const labelColor = intensity > LIGHT_LABEL_THRESHOLD ? colors.textOnAccent : colors.text;
 
     return {
       value: [xIdx, yIdx, c.value],
-      itemStyle: { color, opacity: clampedOpacity },
       label: { color: labelColor },
     };
   });
@@ -87,6 +83,18 @@ export function buildMonthlyReturnsOption(
   return {
     animation: false,
     backgroundColor: "transparent",
+    // ECharts 6 requires a visualMap for heatmap series. A hidden continuous
+    // visualMap drives cell color; per-cell label.color overrides are unaffected.
+    visualMap: {
+      show: false,
+      type: "continuous",
+      min: -maxAbs,
+      max: maxAbs,
+      inRange: {
+        // loss (red) → neutral surface → gain (green): symmetric diverging scale.
+        color: [colors.loss, colors.grid, colors.gain],
+      },
+    },
     tooltip: {
       position: "top",
       backgroundColor: colors.surface,
@@ -119,7 +127,8 @@ export function buildMonthlyReturnsOption(
     },
     series: [
       {
-        // Colors are fully managed per-cell via itemStyle — no visualMap.
+        // Cell color is driven by the hidden visualMap above.
+        // Per-cell label.color is set on each data point independently.
         name: "Monthly return",
         type: "heatmap",
         data,

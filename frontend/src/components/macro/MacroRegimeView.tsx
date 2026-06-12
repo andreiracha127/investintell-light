@@ -74,7 +74,7 @@ export function MacroRegimeView() {
   // All hooks before early returns.
   const stripOption = useMemo(() => {
     if (!query.data || !colors) return null;
-    return buildRegimeStripOption(query.data.recent_flips, colors);
+    return buildRegimeStripOption(query.data.recent_flips, colors, query.data.as_of);
   }, [query.data, colors]);
 
   // 404 → regime not materialized yet.
