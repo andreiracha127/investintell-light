@@ -28,6 +28,19 @@ Run backend/db/ddl/2026-06-13_dynamic_catalog.sql is additive. To roll back:
   DROP MATERIALIZED VIEW IF EXISTS cagg_eod_weekly, cagg_eod_monthly, cagg_nav_weekly, fund_risk_latest_mv CASCADE;
   DROP VIEW IF EXISTS funds_v, fund_holdings_v, fund_classes_v CASCADE;
 
-## Worker coordination (Phase 4)
-Add to the risk_metrics worker (repo investintell-datalake-workers), AFTER its commit:
+## Worker coordination (Phase 4) — REQUIRED, not optional
+`fund_risk_latest_mv` is a PLAIN materialized view: it does NOT auto-refresh.
+Until it is refreshed it keeps serving the calc that was current when it was
+last populated, so EVERY fund risk metric the API returns (GET /funds,
+/funds/{id}, screener) silently goes stale after the daily risk calc runs.
+
+REQUIRED: the `risk_metrics` worker (repo `investintell-datalake-workers`) MUST
+run the following as the LAST step of its daily job, AFTER it commits the new
+fund_risk_metrics rows:
   REFRESH MATERIALIZED VIEW CONCURRENTLY fund_risk_latest_mv;
+(CONCURRENTLY needs the unique index `fund_risk_latest_mv_pk` on instrument_id,
+created by 2026-06-13_dynamic_catalog.sql — already in place.)
+
+This repo (investintell-light) CANNOT make that change; it must be applied in
+investintell-datalake-workers. If the worker run cannot refresh, run the REFRESH
+manually after the calc — the MV is the API's sole source of fund risk metrics.

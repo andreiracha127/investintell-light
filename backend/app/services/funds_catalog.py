@@ -24,7 +24,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
 from app.models.fund import Fund, FundClass, FundHolding, FundRiskLatest
-from app.sync.funds import UNCLASSIFIED_LABEL
+
+# Canonical strategy label for funds the mother-DB cascade could not classify.
+# (Was sourced from the now-retired app.sync.funds; this service is its sole
+# runtime consumer — used by the strategy filter below.)
+UNCLASSIFIED_LABEL = "Unclassified"
 
 # Hard cap on the CSV export — bounded output, no pagination (screener parity).
 CSV_HARD_CAP = 5000
