@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@highcharts/grid-pro": "^3.0.0",
     "@tanstack/react-query": "^5.101.0",
     "echarts": "^6",
     "next": "15.5.19",
