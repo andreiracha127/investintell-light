@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     # there; it never computes look-through in a request path.
     datalake_db_url: str | None = None
 
+    # --- InsForge auth (JWT validated locally; Auth stays on InsForge) ---
+    # The FastAPI verifies RS256 InsForge JWTs against a cached JWKS — no
+    # round-trip per request. Unset → protected routes return 503 (declared).
+    insforge_issuer: str | None = None
+    insforge_jwks_url: str | None = None
+    insforge_audience: str | None = None
+
     # --- Catalog response cache (2026-06-12) ---
     # Optional Redis DSN (redis://[:pass@]host:port/db). Unset or unreachable
     # → in-process memory cache (fail-open by design: caching must never
