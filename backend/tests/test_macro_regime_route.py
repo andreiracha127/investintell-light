@@ -23,12 +23,16 @@ def _client() -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
-def _snapshot() -> mr.CreditRegimeSnapshot:
+def _snapshot(
+    state: str = "risk_on", stress_score: float | None = None
+) -> mr.CreditRegimeSnapshot:
     return mr.CreditRegimeSnapshot(
         as_of=dt.date(2026, 6, 11),
-        state="risk_on",
+        state=state,
         ratio=0.8412,
         p20_5y=0.7901,
+        p_exit_5y=0.8012,
+        stress_score=stress_score,
         hyg_close=79.11,
         ief_close=94.05,
         n_window=1260,
@@ -39,6 +43,74 @@ def _snapshot() -> mr.CreditRegimeSnapshot:
             mr.RegimeFlip(date=dt.date(2020, 3, 9), state="risk_off"),
         ],
     )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Modo low-drawdown (score graduado) — classificação por bandas do stress_score
+# ──────────────────────────────────────────────────────────────────────────────
+def test_graded_state_bands() -> None:
+    assert mr.graded_state(None) == "risk_on"
+    assert mr.graded_state(0.0) == "risk_on"
+    assert mr.graded_state(24.9) == "risk_on"
+    assert mr.graded_state(25.0) == "caution"
+    assert mr.graded_state(49.9) == "caution"
+    assert mr.graded_state(50.0) == "risk_off"
+    assert mr.graded_state(100.0) == "risk_off"
+
+
+@pytest.mark.anyio
+async def test_macro_regime_binary_mode_is_default_and_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default = binário: stress_score na faixa de caution NÃO muda o state
+    binário (o graded_state vem como info, mas o flip seco é preservado)."""
+
+    async def fake_fetch(datalake):
+        return _snapshot(state="risk_on", stress_score=30.0)
+
+    monkeypatch.setattr(mr, "fetch_credit_regime", fake_fetch)
+    async with _client() as client:
+        resp = await client.get("/macro/regime")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mode"] == "binary"
+    assert body["state"] == "risk_on"          # binário, inalterado
+    assert body["stress_score"] == 30.0
+    assert body["graded_state"] == "caution"   # informativo
+
+
+@pytest.mark.anyio
+async def test_macro_regime_low_drawdown_mode_grades_to_caution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_fetch(datalake):
+        return _snapshot(state="risk_on", stress_score=30.0)
+
+    monkeypatch.setattr(mr, "fetch_credit_regime", fake_fetch)
+    async with _client() as client:
+        resp = await client.get("/macro/regime?low_drawdown_mode=true")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mode"] == "low_drawdown"
+    assert body["state"] == "caution"          # estado intermediário graduado
+    assert body["stress_score"] == 30.0
+    assert body["bands"]["caution_score"] == 25.0
+    assert body["bands"]["risk_off_score"] == 50.0
+
+
+@pytest.mark.anyio
+async def test_macro_regime_low_drawdown_risk_off_at_high_score(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_fetch(datalake):
+        return _snapshot(state="risk_off", stress_score=72.0)
+
+    monkeypatch.setattr(mr, "fetch_credit_regime", fake_fetch)
+    async with _client() as client:
+        resp = await client.get("/macro/regime?low_drawdown_mode=true")
+    body = resp.json()
+    assert body["state"] == "risk_off"
+    assert body["graded_state"] == "risk_off"
 
 
 @pytest.mark.anyio

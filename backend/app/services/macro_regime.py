@@ -8,6 +8,7 @@ NÃO é consumido em lugar nenhum do Light.
 """
 
 import datetime as dt
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,6 +16,30 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 RECENT_FLIPS = 6
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return float(raw)
+
+
+# Modo low-drawdown (score graduado) — configurável por env, SEM deploy. Default
+# = binário (detector validado). As bandas mapeiam o stress_score 0–100 do worker
+# em estados intermediários (espelham o '≥50 crisis / ≥25 risk_off' do legado sem
+# amplificação, perfil Sharpe 0,555 / Max DD 20,9%). Override por requisição via
+# ``GET /macro/regime?low_drawdown_mode=true``.
+LOW_DRAWDOWN_MODE_DEFAULT = _env_flag("MACRO_REGIME_LOW_DRAWDOWN_MODE", False)
+CAUTION_SCORE = _env_float("MACRO_REGIME_CAUTION_SCORE", 25.0)
+RISK_OFF_SCORE = _env_float("MACRO_REGIME_RISK_OFF_SCORE", 50.0)
 
 
 @dataclass(frozen=True)
@@ -35,10 +60,35 @@ class CreditRegimeSnapshot:
     days_in_state: int
     last_flip: dt.date | None
     recent_flips: list[RegimeFlip]
+    stress_score: float | None = None
+    p_exit_5y: float | None = None
+
+
+def graded_state(
+    stress_score: float | None,
+    *,
+    caution_score: float = CAUTION_SCORE,
+    risk_off_score: float = RISK_OFF_SCORE,
+) -> str:
+    """Estado graduado (modo low-drawdown) por bandas do stress_score 0–100.
+
+    Em vez do flip seco risk_on↔risk_off, classifica a PROXIMIDADE do ratio aos
+    limites de percentil em estados intermediários (espelha o 'caution' do
+    composite): score ≥ risk_off_score → risk_off; ≥ caution_score → caution;
+    senão risk_on. None (warmup) → risk_on.
+    """
+    if stress_score is None:
+        return "risk_on"
+    if stress_score >= risk_off_score:
+        return "risk_off"
+    if stress_score >= caution_score:
+        return "caution"
+    return "risk_on"
 
 
 _LATEST_SQL = text("""
-    SELECT regime_date, state, ratio, p20_5y, hyg_close, ief_close, n_window
+    SELECT regime_date, state, ratio, p20_5y, p_exit_5y, stress_score,
+           hyg_close, ief_close, n_window
     FROM credit_regime_daily
     ORDER BY regime_date DESC
     LIMIT 1
@@ -87,6 +137,8 @@ async def fetch_credit_regime(
         state=latest.state,
         ratio=float(latest.ratio),
         p20_5y=f(latest.p20_5y),
+        p_exit_5y=f(latest.p_exit_5y),
+        stress_score=f(latest.stress_score),
         hyg_close=f(latest.hyg_close),
         ief_close=f(latest.ief_close),
         n_window=latest.n_window,
