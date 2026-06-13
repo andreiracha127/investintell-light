@@ -134,10 +134,12 @@ async def load_fund_classes(
     """
     if not fund_ids:
         return {}
+    # FundClass (fund_classes_v) is keyed by series_id, not instrument_id;
+    # recover the instrument by joining funds_v on series_id (Task 2.5).
     result = await session.execute(
-        select(FundClass.instrument_id, FundClass.ticker, FundClass.class_name).where(
-            FundClass.instrument_id.in_(fund_ids)
-        )
+        select(Fund.instrument_id, FundClass.ticker, FundClass.class_name)
+        .join(FundClass, FundClass.series_id == Fund.series_id)
+        .where(Fund.instrument_id.in_(fund_ids))
     )
     classes: dict[uuid.UUID, dict[str, str | None]] = {}
     for instrument_id, ticker, class_name in result.all():

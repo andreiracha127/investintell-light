@@ -449,11 +449,13 @@ async def fetch_fund_profile(
         reported = [float(h.pct_of_nav) for h in holdings if h.pct_of_nav is not None]
         pct_total = sum(reported) if reported else None
 
+    # FundClass (fund_classes_v) is keyed by series_id — a class links to a
+    # fund via the series, not the instrument. Resolve through the loaded fund.
     classes = list(
         (
             await session.execute(
                 select(FundClass)
-                .where(FundClass.instrument_id == instrument_id)
+                .where(FundClass.series_id == fund.series_id)
                 .order_by(
                     FundClass.expense_ratio.asc().nulls_last(), FundClass.ticker
                 )

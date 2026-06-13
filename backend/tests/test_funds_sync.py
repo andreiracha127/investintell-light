@@ -486,9 +486,10 @@ def test_build_class_rows_maps_series_and_uppercases_ticker() -> None:
         [_class_record()], {"S000001234": _IID}, _NOW
     )
     (row,) = rows
+    # fund_classes_v (Task 2.5) is keyed by series_id; the row no longer carries
+    # instrument_id (the unknown-series drop still relies on the mapping above).
     assert row == {
         "class_id": "C000007",
-        "instrument_id": _IID,
         "series_id": "S000001234",
         "class_name": "Class R-6",
         "ticker": "RGAGX",  # uppercased to the position-ticker convention
@@ -615,28 +616,31 @@ def _table(name: str) -> Any:
 
 
 def test_fund_tables_registered() -> None:
-    # `funds` is now the dynamic VIEW funds_v (Task 2.3); fund_risk_latest_mv is
-    # the MV (Task 2.2). The remaining three are still physical tables for now.
+    # funds_v / fund_risk_latest_mv / fund_holdings_v / fund_classes_v are now
+    # dynamic VIEWs/MVs (Tasks 2.2-2.5); fund_nav is still a physical table.
     for name in (
-        "funds_v", "fund_risk_latest_mv", "fund_nav", "fund_holdings", "fund_classes"
+        "funds_v", "fund_risk_latest_mv", "fund_nav",
+        "fund_holdings_v", "fund_classes_v",
     ):
         assert name in Base.metadata.tables
 
 
 def test_fund_classes_pk_fk_and_columns() -> None:
-    """FundClass model lockstep. Fund is now the funds_v VIEW (Task 2.3) — a
-    view cannot be a FK target, so instrument_id is a plain indexed column with
-    NO ForeignKey to funds."""
-    table = _table("fund_classes")
+    """FundClass model lockstep. Now the fund_classes_v VIEW (Task 2.5) keyed by
+    series_id — the instrument_id column was DROPPED (a class links to a fund via
+    series_id; readers resolve series→instrument through funds_v). A view cannot
+    be a FK target, so there are no foreign keys."""
+    table = _table("fund_classes_v")
     assert [c.name for c in table.primary_key.columns] == ["class_id"]
     assert not table.foreign_keys
+    assert "instrument_id" not in table.c
     assert table.c["ticker"].nullable is False
     assert table.c["synced_at"].nullable is False
     assert table.c["synced_at"].type.timezone is True
     for col in ("series_id", "class_name", "expense_ratio", "source_period_end"):
         assert table.c[col].nullable is True, col
     indexed = {c.name for idx in table.indexes for c in idx.columns}
-    assert {"ticker", "instrument_id"} <= indexed
+    assert {"ticker", "series_id"} <= indexed
 
 
 def test_positions_execution_columns() -> None:
@@ -714,7 +718,9 @@ def test_fund_nav_composite_pk_and_no_fk() -> None:
 
 
 def test_fund_holdings_composite_pk_and_no_truncation_flag() -> None:
-    table = _table("fund_holdings")
+    # FundHolding is now the fund_holdings_v VIEW (Task 2.5); the ORM identity
+    # PK (series_id, report_date, rank) is unchanged.
+    table = _table("fund_holdings_v")
     assert [c.name for c in table.primary_key.columns] == [
         "series_id", "report_date", "rank",
     ]

@@ -356,10 +356,14 @@ async def _fund_instrument_by_ticker(
         instrument_by_ticker.setdefault(ticker, instrument_id)
     remaining = [t for t in tickers if t not in instrument_by_ticker]
     if remaining:
+        # FundClass (fund_classes_v) is keyed by series_id; resolve the
+        # instrument by joining funds_v on series_id (Task 2.5). Lowest
+        # instrument_id still wins ties (deterministic).
         class_rows = await session.execute(
-            select(FundClass.ticker, FundClass.instrument_id)
+            select(FundClass.ticker, Fund.instrument_id)
+            .join(Fund, Fund.series_id == FundClass.series_id)
             .where(FundClass.ticker.in_(remaining))
-            .order_by(FundClass.ticker, FundClass.instrument_id)
+            .order_by(FundClass.ticker, Fund.instrument_id)
         )
         for ticker, instrument_id in class_rows.all():
             instrument_by_ticker.setdefault(ticker, instrument_id)
@@ -448,9 +452,9 @@ async def select_fund_names(
     if remaining:
         class_rows = await session.execute(
             select(FundClass.ticker, FundClass.class_name, Fund.name)
-            .join(Fund, Fund.instrument_id == FundClass.instrument_id)
+            .join(Fund, Fund.series_id == FundClass.series_id)
             .where(FundClass.ticker.in_(remaining))
-            .order_by(FundClass.ticker, FundClass.instrument_id)
+            .order_by(FundClass.ticker, Fund.instrument_id)
         )
         for ticker, class_name, fund_name in class_rows.all():
             display = f"{fund_name} — {class_name}" if class_name else fund_name

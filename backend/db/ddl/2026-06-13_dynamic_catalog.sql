@@ -286,3 +286,36 @@ LEFT JOIN nport_aum      ON nport_aum.series_id = e.sec_series_id
 LEFT JOIN etp            ON etp.ticker = upper(e.ticker)
 LEFT JOIN universe u     ON u.instrument_id = e.instrument_id
 LEFT JOIN nav_latest_aum ON nav_latest_aum.instrument_id = e.instrument_id;
+
+-- ---------------------------------------------------------------------------
+-- fund_holdings_v / fund_classes_v — dynamic VIEWs replacing the sync_funds.py
+-- `fund_holdings` and `fund_classes` snapshots (Task 2.5, 2026-06-13).
+-- ---------------------------------------------------------------------------
+-- Both are keyed by series_id (a class links to a fund via series_id; the
+-- profile/portfolio readers resolve series→instrument through funds_v). The
+-- snapshot may have CAPPED holdings per series; this view is uncapped — the
+-- profile route display-caps to top-50 by rank, so the visible slice matches.
+
+-- Latest N-PORT holdings per series, ranked by pct_of_nav desc.
+CREATE OR REPLACE VIEW fund_holdings_v AS
+WITH latest AS (
+  SELECT series_id, max(report_date) AS report_date
+  FROM sec_nport_holdings GROUP BY series_id
+)
+SELECT h.series_id, h.report_date,
+       row_number() OVER (PARTITION BY h.series_id ORDER BY h.pct_of_nav DESC NULLS LAST) AS rank,
+       h.issuer_name, h.cusip, h.isin, h.asset_class, h.sector,
+       NULL::text AS gics_sector,
+       h.market_value, h.pct_of_nav
+FROM sec_nport_holdings h
+JOIN latest l ON l.series_id = h.series_id AND l.report_date = h.report_date;
+
+-- Share classes from sec_fund_classes (latest period per class).
+CREATE OR REPLACE VIEW fund_classes_v AS
+SELECT DISTINCT ON (class_id)
+       class_id, series_id, class_name, ticker,
+       expense_ratio_pct AS expense_ratio, xbrl_period_end AS source_period_end,
+       now() AS synced_at
+FROM sec_fund_classes
+WHERE ticker IS NOT NULL
+ORDER BY class_id, xbrl_period_end DESC NULLS LAST;

@@ -625,10 +625,12 @@ def build_class_rows(
         ticker = str(record["ticker"]).strip().upper()
         if not ticker:
             continue
+        # instrument_id is still computed above to DROP classes whose series is
+        # outside the synced universe, but fund_classes_v no longer stores it
+        # (a class links to a fund via series_id — Task 2.5).
         rows.append(
             {
                 "class_id": str(record["class_id"]),
-                "instrument_id": instrument_id,
                 "series_id": series_id,
                 "class_name": record["class_name"],
                 "ticker": ticker,
@@ -732,8 +734,9 @@ _FUND_MUTABLE_COLUMNS = (
 
 _NAV_MUTABLE_COLUMNS = ("nav", "return_1d", "aum_usd")
 
+# fund_classes_v (Task 2.5) dropped instrument_id — a class links to a fund via
+# series_id. (This sync writer is itself retired in Task 4.2.)
 _CLASS_MUTABLE_COLUMNS = (
-    "instrument_id",
     "series_id",
     "class_name",
     "ticker",

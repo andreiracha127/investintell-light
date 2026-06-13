@@ -1,18 +1,22 @@
 """
 ORM models for the local fund universe (F8.1).
 
-All four tables are read-only copies of mother-DB data, written ONLY by the
-fund sync (scripts/sync_funds.py via app/sync/funds.py) — never in any
-request path:
+All read-only; the fund snapshots are retired in favour of dynamic
+VIEWs/MVs on Tiger (db/ddl/2026-06-13_dynamic_catalog.sql) derived live from
+the source tables — never written in any request path:
 
-- `funds` — identity + classification + fees, one row per eligible
-  instrument_id (criterion: dispatch F8 §3 F8.1-2).
-- `fund_risk_latest` — snapshot of the latest fund_risk_metrics calc_date
-  per instrument (precomputed in the mother DB; the Light NEVER recomputes).
+- `funds_v` — identity + classification + fees, one row per eligible
+  instrument_id (criterion: dispatch F8 §3 F8.1-2). Dynamic VIEW.
+- `fund_risk_latest_mv` — latest fund_risk_metrics calc_date per instrument
+  (precomputed; the Light NEVER recomputes). Materialized view.
 - `fund_nav` — rolling daily NAV window (2 years + 30 days).
-- `fund_holdings` — latest N-PORT report per series, ranked by pct_of_nav.
-  Sem truncamento (Frente C): a fonte é 100% dos holdings; a exposição
-  consolidada vem do look-through materializado no data-lake.
+- `fund_holdings_v` — latest N-PORT report per series, ranked by pct_of_nav.
+  Dynamic VIEW; uncapped (the source is 100% of holdings — the profile route
+  display-caps to top-50; the consolidated exposure comes from the data-lake
+  look-through).
+- `fund_classes_v` — share classes (DISTINCT ON class_id, latest period).
+  Dynamic VIEW keyed by series_id (no instrument_id — readers resolve
+  series→instrument through funds_v).
 """
 
 import uuid
@@ -91,31 +95,29 @@ class Fund(Base):
 
 
 class FundClass(Base):
-    """Share-class catalog (F8.6b) — synced from sec_fund_classes.
+    """Share-class catalog (F8.6b) — dynamic VIEW over sec_fund_classes.
 
     The mother DB prices ONE instrument per fund series (a representative
     class, e.g. AGTHX for the Growth Fund of America); the remaining classes
     have NO NAV of their own in the source. Pricing/analysis of ANY class
     ticker therefore uses the series NAV (the representative class) as a
     PROXY — a documented approximation, also disclosed in the UI.
+
+    Now backed by the fund_classes_v VIEW (db/ddl/2026-06-13_dynamic_catalog.sql,
+    Task 2.5): DISTINCT ON (class_id) over sec_fund_classes, latest period per
+    class. A class links to a fund via series_id — there is NO instrument_id
+    column; readers resolve series→instrument through funds_v (the Fund model).
     """
 
-    __tablename__ = "fund_classes"
+    __tablename__ = "fund_classes_v"
 
     # SEC class id ('C000...') — globally unique in the source.
     class_id: Mapped[str] = mapped_column(String, primary_key=True)
 
-    # Series instrument the class belongs to (the NAV proxy anchor). Fund is
-    # now a VIEW (funds_v) and a view cannot be a FK target, so this is a plain
-    # indexed column (no ForeignKey); referential integrity is guaranteed by
-    # the shared instrument_identity lineage.
-    instrument_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid,
-        nullable=False,
-        index=True,
-    )
-
-    series_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Series the class belongs to (the NAV proxy anchor, joins to
+    # funds_v.series_id). The source always carries it; nullable kept for the
+    # ORM since a view has no NOT NULL enforcement.
+    series_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     class_name: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Class ticker (e.g. RGAGX) — NOT NULL by the sync filter; indexed because
@@ -196,7 +198,10 @@ class FundNav(Base):
 
 
 class FundHolding(Base):
-    __tablename__ = "fund_holdings"
+    # Dynamic VIEW (fund_holdings_v, db/ddl/2026-06-13_dynamic_catalog.sql,
+    # Task 2.5): latest N-PORT report per series, ranked by pct_of_nav desc.
+    # gics_sector is NULL::text in the source view (no resolved GICS column).
+    __tablename__ = "fund_holdings_v"
 
     # Keyed by series (not instrument): share classes share one portfolio.
     # No FK to funds — series_id is not unique there (multi-class series).
