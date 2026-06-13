@@ -244,8 +244,8 @@ WHERE series_id = ANY($1::text[])
 ORDER BY class_id, xbrl_period_end DESC NULLS LAST
 """
 
-# Metric columns copied verbatim into fund_risk_latest (model order; the
-# tests keep the model, migration and this tuple in lockstep).
+# The 33 latest-per-fund metric columns (model order). Mirrors the MV-backed
+# FundRiskLatest (fund_risk_latest_mv); tests keep model and tuple in lockstep.
 RISK_METRIC_COLUMNS: tuple[str, ...] = (
     "return_1m",
     "return_3m",
@@ -278,23 +278,6 @@ RISK_METRIC_COLUMNS: tuple[str, ...] = (
     "downside_capture_1y",
     "upside_capture_1y",
     "equity_correlation_252d",
-    # Class-specific analytics passes (risk_calc): the UI shows the block
-    # matching scoring_model (equity / fixed_income / cash / alternatives).
-    "scoring_model",
-    "empirical_duration",
-    "empirical_duration_r2",
-    "credit_beta",
-    "credit_beta_r2",
-    "yield_proxy_12m",
-    "duration_adj_drawdown_1y",
-    "seven_day_net_yield",
-    "fed_funds_rate_at_calc",
-    "nav_per_share_mmf",
-    "pct_weekly_liquid",
-    "weighted_avg_maturity_days",
-    "crisis_alpha_score",
-    "inflation_beta",
-    "inflation_beta_r2",
 )
 
 RISK_LATEST_SQL = f"""

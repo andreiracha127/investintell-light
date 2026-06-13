@@ -99,24 +99,6 @@ class FundRiskOut(BaseModel):
     upside_capture_1y: float | None
     equity_correlation_252d: float | None
 
-    # Class-specific analytics (risk_calc per-class passes). scoring_model
-    # tells which block applies: equity / fixed_income / cash / alternatives.
-    scoring_model: str | None
-    empirical_duration: float | None
-    empirical_duration_r2: float | None
-    credit_beta: float | None
-    credit_beta_r2: float | None
-    yield_proxy_12m: float | None
-    duration_adj_drawdown_1y: float | None
-    seven_day_net_yield: float | None
-    fed_funds_rate_at_calc: float | None
-    nav_per_share_mmf: float | None
-    pct_weekly_liquid: float | None
-    weighted_avg_maturity_days: int | None
-    crisis_alpha_score: float | None
-    inflation_beta: float | None
-    inflation_beta_r2: float | None
-
 
 class FundClassOut(BaseModel):
     """One share class of the fund's series (F8.6b).

@@ -89,8 +89,8 @@ def test_build_funds_select_compiles_with_filters_and_sort() -> None:
         offset=100,
     )
     sql = str(stmt)
-    assert "LEFT OUTER JOIN fund_risk_latest" in sql
-    assert "ORDER BY fund_risk_latest.sharpe_1y DESC NULLS LAST" in sql
+    assert "LEFT OUTER JOIN fund_risk_latest_mv" in sql
+    assert "ORDER BY fund_risk_latest_mv.sharpe_1y DESC NULLS LAST" in sql
     assert "LIMIT" in sql and "OFFSET" in sql
 
 

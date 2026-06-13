@@ -567,7 +567,7 @@ def test_risk_upsert_updates_every_metric() -> None:
         **{col: None for col in RISK_METRIC_COLUMNS},
     }
     sql = _compiled(build_risk_upsert([row]))
-    assert "INSERT INTO fund_risk_latest" in sql
+    assert "INSERT INTO fund_risk_latest_mv" in sql
     assert "ON CONFLICT (instrument_id) DO UPDATE" in sql
     for col in RISK_METRIC_COLUMNS:
         assert f"{col} = excluded.{col}" in sql
@@ -612,7 +612,7 @@ def _table(name: str) -> Any:
 
 def test_fund_tables_registered() -> None:
     for name in (
-        "funds", "fund_risk_latest", "fund_nav", "fund_holdings", "fund_classes"
+        "funds", "fund_risk_latest_mv", "fund_nav", "fund_holdings", "fund_classes"
     ):
         assert name in Base.metadata.tables
 
@@ -681,12 +681,12 @@ def test_funds_filter_columns_are_indexed() -> None:
     assert {"series_id", "fund_type", "strategy_label"} <= indexed
 
 
-def test_fund_risk_latest_pk_fk_and_metric_lockstep() -> None:
-    table = _table("fund_risk_latest")
+def test_fund_risk_latest_pk_and_metric_lockstep() -> None:
+    # Now MV-backed (fund_risk_latest_mv): a materialized view is not a FK
+    # target, so instrument_id is a plain PK with NO ForeignKey to funds.
+    table = _table("fund_risk_latest_mv")
     assert [c.name for c in table.primary_key.columns] == ["instrument_id"]
-    (fk,) = table.foreign_keys
-    assert fk.column.table.name == "funds"
-    assert fk.ondelete == "CASCADE"
+    assert not table.foreign_keys
     # Model columns == PK + calc_date + RISK_METRIC_COLUMNS, exactly.
     assert {c.name for c in table.c} == {"instrument_id", "calc_date", *RISK_METRIC_COLUMNS}
     assert table.c["calc_date"].nullable is False
