@@ -1,7 +1,7 @@
 """fund_risk_latest — métricas específicas por classe de fundo
 
-Revision ID: 0011
-Revises: 0010
+Revision ID: 0012
+Revises: 0011
 
 A fund_risk_metrics do DB-mãe carrega passes de analytics por classe
 (risk_calc): renda fixa (empirical_duration, credit_beta, yield_proxy_12m,
@@ -16,8 +16,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0011"
-down_revision: str | None = "0010"
+revision: str = "0012"
+down_revision: str | None = "0011"
 branch_labels: str | None = None
 depends_on: str | None = None
 
