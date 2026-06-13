@@ -28,28 +28,32 @@ carimba ``last_evaluated_at``; o preview on-demand não carimba nada.
 import datetime as dt
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.fund import Fund
+from app.models.portfolio import Portfolio
 from app.models.rebalance import RebalancePolicy
 from app.schemas.builder import (
     ConstraintsIn,
     EquityRefIn,
     FundRefIn,
+    Objective,
     OptimizeRequest,
 )
+from app.schemas.rebalance import Decision, Frequency
 from app.services import portfolio_builder, portfolio_crud
-from app.services.macro_regime import fetch_credit_regime
+from app.services.macro_regime import CreditRegimeSnapshot, fetch_credit_regime
 
 FREQUENCY_DAYS = {"weekly": 7, "monthly": 30, "quarterly": 91}
 
-DEFAULT_FREQUENCY = "monthly"
+DEFAULT_FREQUENCY: Frequency = "monthly"
 DEFAULT_BAND_ABS = 0.05   # 5 p.p. (fração decimal)
 DEFAULT_BAND_REL = 0.25   # 25% do peso-alvo
-DEFAULT_OBJECTIVE = "min_cvar"
+DEFAULT_OBJECTIVE: Objective = "min_cvar"
 BUILDER_CAP = 0.25        # cap default do builder (ConstraintsIn)
 
 
@@ -77,7 +81,7 @@ class Proposal:
 
 @dataclass(frozen=True)
 class Evaluation:
-    decision: str               # 'no_action' | 'drift_alert' | 'proposal'
+    decision: Decision          # 'no_action' | 'drift_alert' | 'proposal'
     calendar_due: bool
     macro_triggered: bool
     drifts: list[PositionDrift]
@@ -144,7 +148,12 @@ def compute_drifts(
     return drifts
 
 
-def decide(drifts, *, calendar_is_due: bool, macro_is_triggered: bool) -> str:
+def decide(
+    drifts: list[PositionDrift],
+    *,
+    calendar_is_due: bool,
+    macro_is_triggered: bool,
+) -> Decision:
     """proposal (calendário/macro) > drift_alert (banda) > no_action."""
     if calendar_is_due or macro_is_triggered:
         return "proposal"
@@ -153,7 +162,7 @@ def decide(drifts, *, calendar_is_due: bool, macro_is_triggered: bool) -> str:
     return "no_action"
 
 
-def turnover_pct(drifts) -> float:
+def turnover_pct(drifts: list[PositionDrift]) -> float:
     """Turnover one-way: 0.5 × Σ|diff|, em % do valor investido."""
     return 50.0 * sum(abs(d.drift_abs) for d in drifts)
 
@@ -181,7 +190,7 @@ async def portfolio_exists(session: AsyncSession, portfolio_id: int) -> bool:
 
 
 async def upsert_policy(
-    session: AsyncSession, portfolio_id: int, **fields
+    session: AsyncSession, portfolio_id: int, **fields: Any
 ) -> RebalancePolicy:
     stmt = (
         pg_insert(RebalancePolicy)
@@ -215,10 +224,16 @@ async def fund_instrument_ids_by_ticker(
     result = await session.execute(
         select(Fund.ticker, Fund.instrument_id).where(Fund.ticker.in_(tickers))
     )
-    return dict(result.all())
+    return {
+        ticker: instrument_id
+        for ticker, instrument_id in result.all()
+        if ticker is not None
+    }
 
 
-async def fetch_credit_regime_state(datalake: AsyncSession | None):
+async def fetch_credit_regime_state(
+    datalake: AsyncSession | None,
+) -> CreditRegimeSnapshot | None:
     """Estado do detector da frente B (state + last_flip), para o gatilho."""
     if datalake is None:
         raise RebalanceError(
@@ -236,8 +251,8 @@ async def fetch_credit_regime_state(datalake: AsyncSession | None):
 async def evaluate_portfolio(
     session: AsyncSession,
     datalake: AsyncSession | None,
-    portfolio,
-    policy,
+    portfolio: Portfolio,
+    policy: RebalancePolicy | None,
     *,
     now: dt.datetime | None = None,
 ) -> Evaluation:

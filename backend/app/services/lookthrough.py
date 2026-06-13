@@ -17,6 +17,7 @@ Semantics inherited from the worker (do not reinterpret here):
 import datetime as dt
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -122,8 +123,8 @@ _EXPOSURES_SQL = text("""
 """)
 
 
-def _summary_from_row(row) -> LookthroughSummary:
-    def f(value) -> float | None:
+def _summary_from_row(row: Any) -> LookthroughSummary:
+    def f(value: Any) -> float | None:
         return float(value) if value is not None else None
 
     return LookthroughSummary(

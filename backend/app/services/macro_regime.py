@@ -9,6 +9,7 @@ NÃO é consumido em lugar nenhum do Light.
 
 import datetime as dt
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -78,7 +79,7 @@ async def fetch_credit_regime(
         )
     ).scalar_one()
 
-    def f(value) -> float | None:
+    def f(value: Any) -> float | None:
         return float(value) if value is not None else None
 
     return CreditRegimeSnapshot(

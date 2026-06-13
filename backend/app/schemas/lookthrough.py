@@ -7,6 +7,8 @@ renormalized — they mirror the materialized tables computed by the
 
 import datetime as dt
 import uuid
+from collections.abc import Iterable
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -58,7 +60,9 @@ class UnexpandedPosition(BaseModel):
     reason: str
 
 
-def build_dimensions(rows, only: str | None = None) -> dict[str, list[ExposureItem]]:
+def build_dimensions(
+    rows: Iterable[Any], only: str | None = None
+) -> dict[str, list[ExposureItem]]:
     """Group service ExposureRow-likes into the response dimensions dict.
 
     ``only`` restricts the dict to a single dimension (the ?dimension= query

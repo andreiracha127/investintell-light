@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.datalake import get_optional_datalake_session
 from app.core.db import get_session
+from app.models.rebalance import RebalancePolicy
 from app.rebalance import evaluator
 from app.schemas.rebalance import (
     PositionDriftOut,
@@ -38,7 +39,9 @@ OptionalDatalakeDep = Annotated[
 ]
 
 
-def _policy_out(policy, *, is_default: bool) -> RebalancePolicyOut:
+def _policy_out(
+    policy: RebalancePolicy, *, is_default: bool
+) -> RebalancePolicyOut:
     return RebalancePolicyOut(
         portfolio_id=policy.portfolio_id,
         frequency=policy.frequency,

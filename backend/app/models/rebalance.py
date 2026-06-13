@@ -20,6 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
+from app.schemas.rebalance import Frequency
 
 
 class RebalancePolicy(Base):
@@ -30,7 +31,7 @@ class RebalancePolicy(Base):
     )
 
     # Gatilho calendário: 'weekly' | 'monthly' (default) | 'quarterly'.
-    frequency: Mapped[str] = mapped_column(
+    frequency: Mapped[Frequency] = mapped_column(
         String, nullable=False, server_default="monthly"
     )
 
