@@ -73,24 +73,49 @@ export function toApiView(
   };
 }
 
+/** Friendly confidence presets (Idzorek confidence ∈ (0,1]). */
+const CONFIDENCE_LEVELS = [
+  { label: "Low", value: 0.25 },
+  { label: "Medium", value: 0.5 },
+  { label: "High", value: 0.75 },
+] as const;
+
 export function ViewsCard({
   open,
   onToggle,
+  showViews,
   views,
   setViews,
   assets,
   blUtilityWithoutViews,
+  delta,
+  tau,
+  onDelta,
+  onTau,
 }: {
   open: boolean;
   onToggle: () => void;
+  /** Market views only make sense for a hand-picked basket (Simulate mode). */
+  showViews: boolean;
   views: ViewDraft[];
   setViews: (updater: (prev: ViewDraft[]) => ViewDraft[]) => void;
   assets: UniverseAsset[];
   blUtilityWithoutViews: boolean;
+  /** Black-Litterman model parameters as raw text (validated by the parent). */
+  delta: string;
+  tau: string;
+  onDelta: (value: string) => void;
+  onTau: (value: string) => void;
 }) {
   const update = (id: number, patch: Partial<ViewDraft>) =>
     setViews((prev) => prev.map((v) => (v.id === id ? { ...v, ...patch } : v)));
   const remove = (id: number) => setViews((prev) => prev.filter((v) => v.id !== id));
+
+  const summary = showViews
+    ? views.length === 0
+      ? "optional market views & model"
+      : `${views.length} view${views.length > 1 ? "s" : ""}`
+    : "model parameters";
 
   return (
     <section className="border border-border bg-surface-2">
@@ -101,9 +126,9 @@ export function ViewsCard({
         className="ix-pad flex w-full items-center justify-between gap-2 text-left transition-colors hover:bg-layer-hover"
       >
         <h2 className="ix-label m-0">
-          Views (Black-Litterman)
+          Advanced
           <span className="ml-2 font-normal normal-case tracking-normal text-text-secondary">
-            {views.length === 0 ? "none" : `${views.length} view${views.length > 1 ? "s" : ""}`}
+            {summary}
           </span>
         </h2>
         <span aria-hidden className="text-[11px] text-text-muted">
@@ -112,40 +137,96 @@ export function ViewsCard({
       </button>
 
       {open && (
-        <div className="ix-pad flex flex-col gap-3 border-t border-border pt-3">
-          {views.map((view) => (
-            <ViewRow
-              key={view.id}
-              view={view}
-              assets={assets}
-              onChange={(patch) => update(view.id, patch)}
-              onRemove={() => remove(view.id)}
-            />
-          ))}
+        <div className="ix-pad flex flex-col gap-4 border-t border-border pt-3">
+          {showViews && (
+            <div className="flex flex-col gap-3">
+              <h3 className="ix-label m-0 text-text-secondary">Market views</h3>
+              {views.map((view) => (
+                <ViewRow
+                  key={view.id}
+                  view={view}
+                  assets={assets}
+                  onChange={(patch) => update(view.id, patch)}
+                  onRemove={() => remove(view.id)}
+                />
+              ))}
 
-          <div>
-            <button
-              type="button"
-              onClick={() => setViews((prev) => [...prev, newViewDraft()])}
-              className="h-[30px] border border-border-strong bg-field px-3 text-[12px] text-text-secondary transition-colors hover:bg-layer-hover"
-            >
-              + Add view
-            </button>
-          </div>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setViews((prev) => [...prev, newViewDraft()])}
+                  className="h-[30px] border border-border-strong bg-field px-3 text-[12px] text-text-secondary transition-colors hover:bg-layer-hover"
+                >
+                  + Add a view
+                </button>
+              </div>
 
-          <p className="ix-fs m-0 text-text-muted">
-            Views require a known AUM for every asset — funds only; equities and
-            funds without AUM are rejected (422).
-          </p>
-          {blUtilityWithoutViews && (
-            <p role="status" className="ix-fs m-0 border-l-[3px] border-accent bg-accent-wash px-2.5 py-1.5 text-text-secondary">
-              BL max utility with zero views reproduces the market-cap (AUM)
-              weights — add a view to express a tilt.
-            </p>
+              <p className="ix-fs m-0 text-text-muted">
+                A view is your expectation for an asset (&ldquo;X returns 12% a
+                year&rdquo;) or a pair (&ldquo;X beats Y by 5%&rdquo;). Views need
+                a known AUM for every asset — funds only; equities and funds
+                without AUM are rejected (422).
+              </p>
+              {blUtilityWithoutViews && (
+                <p role="status" className="ix-fs m-0 border-l-[3px] border-accent bg-accent-wash px-2.5 py-1.5 text-text-secondary">
+                  BL max utility with zero views reproduces the market-cap (AUM)
+                  weights — add a view to express a tilt.
+                </p>
+              )}
+            </div>
           )}
+
+          {/* ── Model parameters (rarely changed) ───────────────────────── */}
+          <div className="flex flex-col gap-2">
+            <h3 className="ix-label m-0 text-text-secondary">Model parameters</h3>
+            <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+              <ParamField
+                label="Risk aversion (δ)"
+                value={delta}
+                onChange={onDelta}
+                placeholder="2.5"
+              />
+              <ParamField
+                label="Uncertainty (τ)"
+                value={tau}
+                onChange={onTau}
+                placeholder="0.05"
+              />
+            </div>
+            <p className="ix-fs m-0 text-text-muted">
+              Black-Litterman tuning for the equilibrium prior. The defaults
+              (δ=2.5, τ=0.05) suit most cases — leave them unless you know why.
+            </p>
+          </div>
         </div>
       )}
     </section>
+  );
+}
+
+function ParamField({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <label className="flex w-[150px] flex-col gap-1">
+      <span className={FIELD_LABEL_CLASS}>{label}</span>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        inputMode="decimal"
+        aria-label={label}
+        className={`${INPUT_CLASS} tabular-nums`}
+      />
+    </label>
   );
 }
 
@@ -213,24 +294,31 @@ function ViewRow({
         />
       </label>
 
-      <label className="flex w-[170px] flex-col gap-1">
-        <span className={FIELD_LABEL_CLASS}>
-          Confidence{" "}
-          <span className="tabular-nums normal-case text-text-secondary">
-            {view.confidence.toFixed(2)}
-          </span>
-        </span>
-        <input
-          type="range"
-          min={0.05}
-          max={1}
-          step={0.05}
-          value={view.confidence}
-          onChange={(e) => onChange({ confidence: Number(e.target.value) })}
-          aria-label="View confidence (0.05 to 1.00)"
-          className="h-[34px] accent-[var(--color-accent)]"
-        />
-      </label>
+      <fieldset className="m-0 flex flex-col gap-1 border-0 p-0">
+        <span className={FIELD_LABEL_CLASS}>How sure are you?</span>
+        <div
+          role="radiogroup"
+          aria-label="View confidence"
+          className="flex items-stretch border border-border-strong"
+        >
+          {CONFIDENCE_LEVELS.map((lvl) => (
+            <button
+              key={lvl.label}
+              type="button"
+              role="radio"
+              aria-checked={view.confidence === lvl.value}
+              onClick={() => onChange({ confidence: lvl.value })}
+              className={`h-[34px] px-3 text-[11.5px] transition-colors ${
+                view.confidence === lvl.value
+                  ? "bg-accent font-bold text-on-accent"
+                  : "bg-field font-medium text-text-secondary hover:bg-layer-hover"
+              }`}
+            >
+              {lvl.label}
+            </button>
+          ))}
+        </div>
+      </fieldset>
 
       <button
         type="button"

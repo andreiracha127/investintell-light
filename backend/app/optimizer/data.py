@@ -16,11 +16,12 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.eod_price import EodPrice
-from app.models.fund import Fund, FundNav
+from app.models.fund import Fund, FundNav, FundRiskLatest
+from app.services import funds_catalog
 
 DEFAULT_WINDOW_DAYS = 730
 MIN_COMMON_OBS = 400
@@ -157,3 +158,66 @@ async def load_fund_aum(
     )
     found = {row[0]: (float(row[1]) if row[1] is not None else None) for row in result.all()}
     return {fund_id: found.get(fund_id) for fund_id in fund_ids}
+
+
+@dataclass(frozen=True)
+class UniverseFund:
+    """A fund selected by a universe spec — id plus display labels."""
+
+    id: uuid.UUID
+    ticker: str | None
+    name: str
+
+
+async def select_universe_funds(
+    session: AsyncSession,
+    filters: funds_catalog.FundFilters,
+    *,
+    rank_by: str,
+    rank_dir: str,
+    max_assets: int,
+    require_aum: bool = False,
+    window_days: int = DEFAULT_WINDOW_DAYS,
+    min_obs: int = MIN_COMMON_OBS,
+    today: dt.date | None = None,
+) -> list[UniverseFund]:
+    """Resolve a universe spec to ranked fund candidates (top ``max_assets``).
+
+    Reuses the GET /funds filter predicates and sort whitelist, and only keeps
+    funds that EACH have at least ``min_obs`` non-null NAV observations in the
+    window — a per-fund coverage heuristic that screens out short-history funds.
+    It does NOT by itself guarantee the cross-fund date intersection clears
+    ``MIN_COMMON_OBS``; ``load_aligned_returns`` still enforces that on the
+    resolved set (a fail-loud 422 if the overlap falls short). ``require_aum``
+    (BL paths) additionally drops funds without a positive AUM, so market
+    weights are always computable on the result.
+    """
+    today = today or dt.date.today()
+    since = today - dt.timedelta(days=window_days)
+
+    nav_counts = (
+        select(FundNav.instrument_id, func.count().label("n"))
+        .where(FundNav.nav_date >= since, FundNav.nav.is_not(None))
+        .group_by(FundNav.instrument_id)
+        .subquery()
+    )
+
+    order_col = funds_catalog.sort_column(rank_by)
+    order = order_col.desc() if rank_dir == "desc" else order_col.asc()
+
+    conditions = list(funds_catalog.filter_conditions(filters))
+    if require_aum:
+        conditions.append(Fund.aum_usd.is_not(None))
+        conditions.append(Fund.aum_usd > 0)
+
+    stmt = (
+        select(Fund.instrument_id, Fund.ticker, Fund.name)
+        .select_from(Fund)
+        .outerjoin(FundRiskLatest, FundRiskLatest.instrument_id == Fund.instrument_id)
+        .join(nav_counts, nav_counts.c.instrument_id == Fund.instrument_id)
+        .where(*conditions, nav_counts.c.n >= min_obs)
+        .order_by(order.nulls_last(), Fund.ticker.nulls_last(), Fund.instrument_id)
+        .limit(max_assets)
+    )
+    result = await session.execute(stmt)
+    return [UniverseFund(id=iid, ticker=ticker, name=name) for iid, ticker, name in result.all()]

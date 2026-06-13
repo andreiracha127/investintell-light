@@ -227,3 +227,141 @@ async def test_view_on_asset_outside_universe_maps_to_422(
         response = await client.post("/builder/optimize", json=payload)
     assert response.status_code == 422
     assert "not in the request universe" in response.json()["detail"]
+
+
+# ── Universe optimization (filter+rank the fund universe) ────────────────────
+
+
+def _stub_universe(
+    monkeypatch: pytest.MonkeyPatch, funds: list[optimizer_data.UniverseFund]
+) -> dict[str, Any]:
+    """Stub the candidate selection; capture the args the service passed."""
+    captured: dict[str, Any] = {}
+
+    async def fake_select(
+        session: Any,
+        filters: Any,
+        *,
+        rank_by: str,
+        rank_dir: str,
+        max_assets: int,
+        require_aum: bool = False,
+        window_days: int = 730,
+        **_: Any,
+    ) -> list[optimizer_data.UniverseFund]:
+        captured.update(
+            filters=filters,
+            rank_by=rank_by,
+            rank_dir=rank_dir,
+            max_assets=max_assets,
+            require_aum=require_aum,
+            window_days=window_days,
+        )
+        return funds
+
+    monkeypatch.setattr(optimizer_data, "select_universe_funds", fake_select)
+    return captured
+
+
+def _universe_funds(n: int) -> list[optimizer_data.UniverseFund]:
+    return [
+        optimizer_data.UniverseFund(id=_FUND_IDS[i], ticker=f"TIC{i}", name=f"Fund {i}")
+        for i in range(n)
+    ]
+
+
+async def test_optimize_universe_min_cvar_happy_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+    captured = _stub_universe(monkeypatch, _universe_funds(4))
+    payload = {
+        "universe": {"fund_type": "etf", "aum_min": 1e8, "max_assets": 4},
+        "objective": "min_cvar",
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body["weights"]) == 4
+    assert abs(sum(w["weight"] for w in body["weights"]) - 1.0) < 1e-6
+    # Universe results are self-describing (the client never saw the funds).
+    assert {w["ticker"] for w in body["weights"]} == {"TIC0", "TIC1", "TIC2", "TIC3"}
+    assert all(w["name"] for w in body["weights"])
+    assert all(w["asset"]["kind"] == "fund" for w in body["weights"])
+    # min_cvar without views needs no market weights → AUM not required.
+    assert captured["require_aum"] is False
+    assert captured["max_assets"] == 4
+    assert captured["rank_by"] == "aum_usd"
+
+
+async def test_optimize_universe_bl_utility_requires_aum(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+    _stub_aum(monkeypatch)
+    captured = _stub_universe(monkeypatch, _universe_funds(4))
+    payload = {
+        "universe": {"rank_by": "sharpe_1y", "max_assets": 12},
+        "objective": "bl_utility",
+        "constraints": {"cap": None},
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["diagnostics"]["mu_equilibrium"] is not None
+    assert body["diagnostics"]["mu_posterior"] is None
+    # bl_utility needs equilibrium market weights → candidates must have AUM.
+    assert captured["require_aum"] is True
+    assert captured["rank_by"] == "sharpe_1y"
+
+
+async def test_optimize_universe_too_few_candidates_maps_to_422(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_universe(monkeypatch, _universe_funds(1))
+    payload = {"universe": {"fund_type": "mmf"}}
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 422
+    assert "universe selection matched 1" in response.json()["detail"]
+
+
+async def test_optimize_requires_exactly_one_asset_source() -> None:
+    async with _client() as client:
+        neither = await client.post("/builder/optimize", json={"objective": "min_cvar"})
+        both = await client.post(
+            "/builder/optimize",
+            json={"assets": [_fund_ref(0), _fund_ref(1)], "universe": {}},
+        )
+    assert neither.status_code == 422
+    assert both.status_code == 422
+
+
+async def test_optimize_universe_with_views_rejected() -> None:
+    payload = {
+        "universe": {"max_assets": 5},
+        "views": [
+            {"type": "absolute", "asset": _fund_ref(0), "q": 0.1, "confidence": 0.5}
+        ],
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 422
+
+
+def test_humanize_error_makes_infeasible_actionable() -> None:
+    from app.services.portfolio_builder import humanize_error
+
+    out = humanize_error("min_vol: solver status 'infeasible' (expected 'optimal')")
+    assert "constraint" in out.lower()
+    # Fail-loud: the original technical message is preserved verbatim.
+    assert "solver status 'infeasible'" in out
+
+
+def test_humanize_error_passes_actionable_messages_through() -> None:
+    from app.services.portfolio_builder import humanize_error
+
+    msg = "insufficient common history: 120 overlapping observations"
+    assert humanize_error(msg) == msg

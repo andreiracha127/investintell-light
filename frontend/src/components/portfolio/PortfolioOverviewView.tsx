@@ -495,6 +495,13 @@ function PortfolioManageBar({
           />
         </span>
 
+        <Link
+          href={`/builder?portfolio=${selected.id}`}
+          className={`${BUTTON_CLASS} ml-auto inline-flex items-center hover:border-accent hover:text-accent`}
+        >
+          Optimize in Builder →
+        </Link>
+
         <button
           type="button"
           onClick={() => {
@@ -504,7 +511,7 @@ function PortfolioManageBar({
             }
           }}
           disabled={deleteMutation.isPending}
-          className={`${BUTTON_CLASS} ml-auto hover:text-loss hover:border-loss`}
+          className={`${BUTTON_CLASS} hover:text-loss hover:border-loss`}
         >
           {deleteMutation.isPending ? "Deleting…" : "Delete"}
         </button>

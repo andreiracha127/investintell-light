@@ -39,19 +39,53 @@ from app.optimizer import data as optimizer_data
 from app.optimizer import engine
 from app.schemas.builder import (
     AbsoluteViewIn,
+    AssetRefIn,
     DiagnosticsOut,
     EquityRefIn,
     ExpectedOut,
     FundRefIn,
     OptimizeRequest,
     OptimizeResponse,
+    UniverseSpecIn,
     ViewIn,
     WeightOut,
 )
+from app.services import funds_catalog
 
 
 class BuilderError(ValueError):
     """Domain failure in the builder — mapped verbatim to HTTP 422."""
+
+
+# Display labels (ticker, name) for a fund label key — only the universe path
+# resolves them; the explicit-list path leaves them None (the client knows).
+_LabelMap = dict[str, tuple[str | None, str]]
+
+
+def humanize_error(detail: str) -> str:
+    """Prepend an actionable hint for known-technical optimizer failures.
+
+    Fail-loud is preserved: the original message is always kept verbatim (in
+    parentheses) so nothing is masked. Messages that are already actionable
+    (insufficient history, missing AUM, view errors) pass through unchanged.
+    """
+    low = detail.lower()
+    if "infeasible" in low or "unbounded" in low:
+        # Covers BOTH the pre-solve feasibility checks (cap×n<1, min_weight×n>1)
+        # and a non-'optimal' CVXPY status. Remedies are phrased for both paths
+        # (in universe mode the user did not hand-pick the assets).
+        return (
+            "No allocation satisfies these constraints — raise the cap per "
+            "asset, lower any minimum weight, or widen the asset set (more "
+            f"tickers, or a larger universe / higher max funds) ({detail})"
+        )
+    if "nan/inf" in low or "weights sum to" in low:
+        return (
+            "The optimizer could not converge on a stable allocation — some "
+            "assets may have degenerate history in this window; widen the "
+            f"window or drop the affected assets ({detail})"
+        )
+    return detail
 
 
 def _to_data_ref(ref: FundRefIn | EquityRefIn) -> optimizer_data.AssetRef:
@@ -103,11 +137,11 @@ def _build_views(
 
 
 async def _market_weights_for(
-    session: AsyncSession, payload: OptimizeRequest, labels: list[str]
+    session: AsyncSession, assets: list[AssetRefIn], labels: list[str]
 ) -> np.ndarray:
     """w_mkt from real AUM. Fail-loud on equities and on funds without AUM."""
     equity_labels = [
-        _ref_key(ref) for ref in payload.assets if isinstance(ref, EquityRefIn)
+        _ref_key(ref) for ref in assets if isinstance(ref, EquityRefIn)
     ]
     if equity_labels:
         raise BuilderError(
@@ -115,7 +149,7 @@ async def _market_weights_for(
             f"no builder: {', '.join(equity_labels)} — remova-as ou otimize sem views"
         )
     fund_ids: list[uuid.UUID] = [
-        ref.id for ref in payload.assets if isinstance(ref, FundRefIn)
+        ref.id for ref in assets if isinstance(ref, FundRefIn)
     ]
     aum_by_id = await optimizer_data.load_fund_aum(session, fund_ids)
     aums: list[float | None] = [aum_by_id.get(fund_id) for fund_id in fund_ids]
@@ -145,8 +179,63 @@ def _solve_mu_free(
     raise BuilderError(f"unknown objective: {objective}")  # pragma: no cover - Literal-guarded
 
 
+def _filters_from_spec(spec: UniverseSpecIn) -> funds_catalog.FundFilters:
+    """Map a UniverseSpecIn onto the catalog's FundFilters (search left off)."""
+    return funds_catalog.FundFilters(
+        search=None,
+        fund_type=spec.fund_type,
+        strategy_label=spec.strategy_label,
+        asset_class=spec.asset_class,
+        expense_ratio_max=spec.expense_ratio_max,
+        aum_min=spec.aum_min,
+        sharpe_1y_min=spec.sharpe_1y_min,
+        volatility_1y_max=spec.volatility_1y_max,
+        return_1y_min=spec.return_1y_min,
+        max_drawdown_1y_min=spec.max_drawdown_1y_min,
+    )
+
+
+async def _resolve_assets(
+    session: AsyncSession, payload: OptimizeRequest
+) -> tuple[list[AssetRefIn], _LabelMap]:
+    """Concrete asset list + fund label map for either request shape.
+
+    Explicit ``assets`` pass through with an empty label map (the client owns
+    the labels). A ``universe`` spec is resolved to ranked fund candidates that
+    EACH have enough NAV history (and a positive AUM when the objective needs
+    Black-Litterman market weights), failing loud when fewer than two qualify.
+    The cross-asset date overlap (MIN_COMMON_OBS) is still enforced downstream
+    by ``load_aligned_returns`` on the resolved set.
+    """
+    if payload.assets is not None:
+        return list(payload.assets), {}
+
+    assert payload.universe is not None  # the schema validator guarantees one
+    spec = payload.universe
+    needs_bl = bool(payload.views) or payload.objective == "bl_utility"
+    candidates = await optimizer_data.select_universe_funds(
+        session,
+        _filters_from_spec(spec),
+        rank_by=spec.rank_by,
+        rank_dir=spec.rank_dir,
+        max_assets=spec.max_assets,
+        require_aum=needs_bl,
+        window_days=payload.window_days,
+    )
+    if len(candidates) < 2:
+        raise BuilderError(
+            f"universe selection matched {len(candidates)} optimizable fund(s) — "
+            "relax the filters, lower the metric thresholds, or widen the window "
+            "(at least 2 funds with enough overlapping history are required)"
+        )
+    assets: list[AssetRefIn] = [FundRefIn(kind="fund", id=c.id) for c in candidates]
+    label_map: _LabelMap = {f"fund:{c.id}": (c.ticker, c.name) for c in candidates}
+    return assets, label_map
+
+
 async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> OptimizeResponse:
-    refs = [_to_data_ref(ref) for ref in payload.assets]
+    assets, label_map = await _resolve_assets(session, payload)
+    refs = [_to_data_ref(ref) for ref in assets]
     try:
         frame: pd.DataFrame = await optimizer_data.load_aligned_returns(
             session, refs, window_days=payload.window_days
@@ -171,7 +260,7 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
     mu_posterior: np.ndarray | None = None
     w_mkt: np.ndarray | None = None
     if needs_bl:
-        w_mkt = await _market_weights_for(session, payload, labels)
+        w_mkt = await _market_weights_for(session, assets, labels)
         mu_equilibrium = bl.equilibrium(sigma, w_mkt, delta=payload.bl.delta)
         if has_views and payload.views is not None:
             try:
@@ -225,8 +314,13 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
 
     return OptimizeResponse(
         weights=[
-            WeightOut(asset=ref, weight=float(weights[index_of[_ref_key(ref)]]))
-            for ref in payload.assets
+            WeightOut(
+                asset=ref,
+                weight=float(weights[index_of[_ref_key(ref)]]),
+                ticker=label_map.get(_ref_key(ref), (None, ""))[0],
+                name=label_map.get(_ref_key(ref), (None, None))[1] or None,
+            )
+            for ref in assets
         ],
         expected=ExpectedOut(
             vol_ann=vol_ann, cvar_95_in_sample=cvar_95, return_ann_bl=return_ann_bl

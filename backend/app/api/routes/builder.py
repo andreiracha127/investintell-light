@@ -45,7 +45,9 @@ async def optimize(payload: OptimizeRequest, session: SessionDep) -> OptimizeRes
     try:
         return await portfolio_builder.run_optimize(session, payload)
     except BuilderError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=422, detail=portfolio_builder.humanize_error(str(exc))
+        ) from exc
 
 
 @router.post("/save", response_model=SaveResponse, status_code=201)

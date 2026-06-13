@@ -132,9 +132,8 @@ export function ResultsPanel({
             weight: w.weight,
             ticker: known
               ? assetTicker(known)
-              : w.asset.kind === "equity"
-                ? w.asset.ticker
-                : w.asset.id,
+              : (w.ticker ??
+                (w.asset.kind === "equity" ? w.asset.ticker : w.asset.id)),
           };
         }),
     [weights, assetsByKey],
@@ -233,10 +232,9 @@ export function ResultsPanel({
           key,
           ticker: known
             ? assetTicker(known)
-            : w.asset.kind === "equity"
-              ? w.asset.ticker
-              : w.asset.id,
-          name: known ? assetName(known) : "",
+            : (w.ticker ??
+              (w.asset.kind === "equity" ? w.asset.ticker : w.asset.id)),
+          name: known ? assetName(known) : (w.name ?? ""),
           weight: w.weight,
           kind: w.asset.kind,
         };

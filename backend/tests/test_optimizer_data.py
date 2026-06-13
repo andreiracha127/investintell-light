@@ -126,3 +126,78 @@ async def test_load_aligned_returns_duplicate_assets_raise() -> None:
             ],
             today=_TODAY,
         )
+
+
+# ── select_universe_funds (candidate resolution) ─────────────────────────────
+
+
+class _CaptureSession:
+    """Returns canned rows and records the compiled SQL of the statement."""
+
+    def __init__(self, rows: list[tuple[Any, ...]]) -> None:
+        self._rows = rows
+        self.sql: str = ""
+
+    async def execute(self, stmt: Any) -> _FakeResult:
+        self.sql = str(stmt).lower()
+        return _FakeResult(self._rows)
+
+
+async def test_select_universe_funds_maps_rows_and_joins_history() -> None:
+    from app.services import funds_catalog
+
+    rows = [(_FUND_A, "AAA", "Alpha Fund"), (_FUND_B, "BBB", "Beta Fund")]
+    session = _CaptureSession(rows)
+    # rank_by != aum_usd so the discriminating assertion below cannot be
+    # satisfied by the ORDER BY clause alone.
+    out = await optimizer_data.select_universe_funds(
+        session,  # type: ignore[arg-type]
+        funds_catalog.FundFilters(fund_type="etf"),
+        rank_by="sharpe_1y",
+        rank_dir="desc",
+        max_assets=5,
+        require_aum=True,
+        window_days=730,
+        today=_TODAY,
+    )
+    assert [u.id for u in out] == [_FUND_A, _FUND_B]
+    assert out[0].ticker == "AAA"
+    assert out[0].name == "Alpha Fund"
+    # The history guard joins fund_nav; require_aum adds the positive-AUM guard.
+    # (">" renders as a bound param, so match the column-comparison prefix.)
+    assert "fund_nav" in session.sql
+    assert "aum_usd is not null" in session.sql
+    assert "aum_usd >" in session.sql
+
+
+async def test_select_universe_funds_without_require_aum_omits_aum_guard() -> None:
+    from app.services import funds_catalog
+
+    session = _CaptureSession([(_FUND_A, "AAA", "Alpha Fund")])
+    await optimizer_data.select_universe_funds(
+        session,  # type: ignore[arg-type]
+        funds_catalog.FundFilters(),
+        rank_by="sharpe_1y",
+        rank_dir="asc",
+        max_assets=5,
+        require_aum=False,
+        today=_TODAY,
+    )
+    # Negative pairing: the AUM guard must NOT be present when not required.
+    assert "aum_usd is not null" not in session.sql
+    assert "fund_nav" in session.sql
+
+
+async def test_select_universe_funds_unknown_rank_column_raises() -> None:
+    from app.services import funds_catalog
+
+    session = _CaptureSession([])
+    with pytest.raises(funds_catalog.UnknownSortColumnError):
+        await optimizer_data.select_universe_funds(
+            session,  # type: ignore[arg-type]
+            funds_catalog.FundFilters(),
+            rank_by="; DROP TABLE funds;--",
+            rank_dir="desc",
+            max_assets=5,
+            today=_TODAY,
+        )
