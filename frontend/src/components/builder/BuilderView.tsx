@@ -1,15 +1,19 @@
 "use client";
 
 /**
- * Portfolio Builder (F8.5) — assemble a mixed fund/equity universe, set
- * constraints + objective, optionally express Black-Litterman views, and
- * POST /builder/optimize. The backend computes ALL finance; this view only
- * collects inputs and renders the response. 422s surface verbatim.
+ * Portfolio Builder (F8.5) — optimize weights either over a hand-picked basket
+ * ("Simulate": unified stock/fund search + saved-portfolio import) or over the
+ * filtered+ranked fund universe ("Fund universe": no manual tickers). Set
+ * constraints + objective, optionally express advanced views, and POST
+ * /builder/optimize. The backend computes ALL finance; this view only collects
+ * inputs and renders the response. 422s surface verbatim.
  */
-import { useMutation } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  fetchPortfolioOverview,
   postBuilderOptimize,
   type BuilderObjective,
   type BuilderViewIn,
@@ -24,10 +28,26 @@ import {
   INPUT_CLASS,
 } from "@/components/screener/shared";
 
-import { assetKey, toRef, type UniverseAsset, OBJECTIVES } from "./assets";
+import {
+  assetKey,
+  defaultUniverseDraft,
+  toRef,
+  universeDraftToSpec,
+  type UniverseAsset,
+  type UniverseDraft,
+  OBJECTIVES,
+} from "./assets";
 import { UniverseCard } from "./UniverseCard";
+import { FundUniverseCard } from "./FundUniverseCard";
 import { ViewsCard, toApiView, type ViewDraft } from "./ViewsCard";
 import { ResultsPanel, type BaseAllocation } from "./ResultsPanel";
+
+type BuilderMode = "simulate" | "universe";
+
+const MODES: { value: BuilderMode; label: string; hint: string }[] = [
+  { value: "simulate", label: "Simulate", hint: "Pick stocks & funds to test" },
+  { value: "universe", label: "Fund universe", hint: "Optimize a filtered set" },
+];
 
 /** Parse a non-empty numeric input; invalid/blank -> null. */
 function parseNum(text: string): number | null {
@@ -43,7 +63,10 @@ export function BuilderView() {
     setColors(chartColors());
   }, []);
 
-  /* ── Universe ──────────────────────────────────────────────────────── */
+  /* ── Mode ──────────────────────────────────────────────────────────── */
+  const [mode, setMode] = useState<BuilderMode>("simulate");
+
+  /* ── Simulate universe ─────────────────────────────────────────────── */
   const [assets, setAssets] = useState<UniverseAsset[]>([]);
   const [base, setBase] = useState<BaseAllocation | null>(null);
 
@@ -62,10 +85,14 @@ export function BuilderView() {
   const removeAsset = (key: string) =>
     setAssets((prev) => prev.filter((a) => assetKey(a) !== key));
 
-  const seedPortfolio = (overview: PortfolioOverview) => {
-    addAssets(
-      overview.positions.map((p) => ({ kind: "equity" as const, ticker: p.ticker })),
-    );
+  const seedPortfolio = useCallback((overview: PortfolioOverview) => {
+    setAssets((prev) => {
+      const seen = new Set(prev.map(assetKey));
+      const fresh = overview.positions
+        .map((p) => ({ kind: "equity" as const, ticker: p.ticker }))
+        .filter((a) => !seen.has(assetKey(a)));
+      return fresh.length === 0 ? prev : [...prev, ...fresh];
+    });
     const total = overview.aggregates.total_market_value;
     setBase({
       name: overview.name,
@@ -78,12 +105,16 @@ export function BuilderView() {
           : [],
       ),
     });
-  };
+  }, []);
 
   const assetsByKey = useMemo(
     () => new Map(assets.map((a) => [assetKey(a), a])),
     [assets],
   );
+
+  /* ── Fund universe ─────────────────────────────────────────────────── */
+  const [universeDraft, setUniverseDraft] = useState<UniverseDraft>(defaultUniverseDraft);
+  const [universeCount, setUniverseCount] = useState<number | null>(null);
 
   /* ── Constraints & objective ───────────────────────────────────────── */
   const [objective, setObjective] = useState<BuilderObjective>("min_cvar");
@@ -91,41 +122,96 @@ export function BuilderView() {
   const [minWeightPct, setMinWeightPct] = useState("");
   const [windowDays, setWindowDays] = useState("730");
 
-  /* ── Views ─────────────────────────────────────────────────────────── */
-  const [viewsOpen, setViewsOpen] = useState(false);
+  /* ── Advanced (views + BL model params) ────────────────────────────── */
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [views, setViews] = useState<ViewDraft[]>([]);
+  const [deltaText, setDeltaText] = useState("2.5");
+  const [tauText, setTauText] = useState("0.05");
 
   const apiViews: (BuilderViewIn | null)[] = views.map((v) =>
     toApiView(v, assetsByKey),
   );
   const viewsValid = apiViews.every((v) => v !== null);
 
+  /* ── Deep-link: /builder?portfolio=<id> auto-seeds the Simulate basket ── */
+  const searchParams = useSearchParams();
+  const portfolioParam = searchParams.get("portfolio");
+  const seededRef = useRef(false);
+  const deepLinkQuery = useQuery({
+    queryKey: ["builder-deeplink", portfolioParam],
+    queryFn: ({ signal }) =>
+      fetchPortfolioOverview(Number(portfolioParam), signal),
+    enabled:
+      portfolioParam !== null && /^\d+$/.test(portfolioParam) && !seededRef.current,
+    staleTime: 60_000,
+  });
+  useEffect(() => {
+    if (deepLinkQuery.data && !seededRef.current) {
+      seededRef.current = true;
+      setMode("simulate");
+      seedPortfolio(deepLinkQuery.data);
+    }
+  }, [deepLinkQuery.data, seedPortfolio]);
+
   /* ── Run ───────────────────────────────────────────────────────────── */
   const mutation = useMutation({
     mutationFn: (body: OptimizeRequest) => postBuilderOptimize(body),
   });
 
+  const switchMode = (next: BuilderMode) => {
+    if (next === mode) return;
+    setMode(next);
+    mutation.reset();
+  };
+
   const cap = parseNum(capPct);
   const windowVal = parseNum(windowDays);
   const minWeight = parseNum(minWeightPct);
+  const delta = parseNum(deltaText);
+  const tau = parseNum(tauText);
   // Blank cap = uncapped (null); a typed but non-numeric cap blocks the run.
   const capOk = capPct.trim() === "" || cap !== null;
+  // δ/τ only drive the Black-Litterman utility objective; every other objective
+  // ignores them, so a blank/edited value must not block those runs.
+  const blParamsOk =
+    objective !== "bl_utility" ||
+    (delta !== null && delta > 0 && tau !== null && tau > 0);
+  const universeOk = universeCount === null || universeCount >= 2;
+
   const canRun =
-    assets.length >= 2 && windowVal !== null && viewsValid && capOk;
+    windowVal !== null &&
+    capOk &&
+    blParamsOk &&
+    (mode === "simulate"
+      ? assets.length >= 2 && viewsValid
+      : universeOk);
 
   const onRun = () => {
     if (!canRun || mutation.isPending) return;
+    const constraints = {
+      cap: cap !== null ? cap / 100 : null,
+      min_weight: minWeight !== null ? minWeight / 100 : null,
+    };
+    const common = {
+      objective,
+      constraints,
+      window_days: windowVal as number,
+      // Always send valid BL params; non-BL objectives fall back to defaults
+      // (the backend schema validates δ>0, τ>0 regardless of objective).
+      bl: {
+        delta: delta !== null && delta > 0 ? delta : 2.5,
+        tau: tau !== null && tau > 0 ? tau : 0.05,
+      },
+    };
+    if (mode === "universe") {
+      mutation.mutate({ ...common, universe: universeDraftToSpec(universeDraft) });
+      return;
+    }
     const completed = apiViews.filter((v): v is BuilderViewIn => v !== null);
     mutation.mutate({
+      ...common,
       assets: assets.map(toRef),
-      objective,
-      constraints: {
-        cap: cap !== null ? cap / 100 : null,
-        min_weight: minWeight !== null ? minWeight / 100 : null,
-      },
-      window_days: windowVal as number,
       ...(completed.length > 0 && { views: completed }),
-      bl: { delta: 2.5, tau: 0.05 },
     });
   };
 
@@ -139,12 +225,50 @@ export function BuilderView() {
       />
 
       <div className="flex flex-col gap-3">
-        <UniverseCard
-          assets={assets}
-          onAdd={addAssets}
-          onRemove={removeAsset}
-          onSeedPortfolio={seedPortfolio}
-        />
+        {/* ── Mode toggle ─────────────────────────────────────────────── */}
+        <div className="flex items-stretch border border-border-strong w-fit">
+          {MODES.map((m) => (
+            <button
+              key={m.value}
+              type="button"
+              onClick={() => switchMode(m.value)}
+              aria-pressed={mode === m.value}
+              title={m.hint}
+              className={`flex h-[34px] flex-col justify-center px-4 text-[12.5px] transition-colors ${
+                mode === m.value
+                  ? "bg-accent font-bold text-on-accent"
+                  : "bg-field font-medium text-text-secondary hover:bg-layer-hover"
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+
+        {deepLinkQuery.isError && (
+          <p
+            role="alert"
+            className="ix-fs m-0 border-l-[3px] border-loss bg-surface-2 px-2.5 py-1.5 text-loss"
+          >
+            Couldn&apos;t import portfolio #{portfolioParam} — add assets
+            manually. ({deepLinkQuery.error.message})
+          </p>
+        )}
+
+        {mode === "simulate" ? (
+          <UniverseCard
+            assets={assets}
+            onAdd={addAssets}
+            onRemove={removeAsset}
+            onSeedPortfolio={seedPortfolio}
+          />
+        ) : (
+          <FundUniverseCard
+            draft={universeDraft}
+            setDraft={setUniverseDraft}
+            onCount={setUniverseCount}
+          />
+        )}
 
         <Card title="Constraints & objective">
           <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
@@ -193,15 +317,20 @@ export function BuilderView() {
         </Card>
 
         <ViewsCard
-          open={viewsOpen}
-          onToggle={() => setViewsOpen((v) => !v)}
+          open={advancedOpen}
+          onToggle={() => setAdvancedOpen((v) => !v)}
+          showViews={mode === "simulate"}
           views={views}
           setViews={setViews}
           assets={assets}
           blUtilityWithoutViews={objective === "bl_utility" && views.length === 0}
+          delta={deltaText}
+          tau={tauText}
+          onDelta={setDeltaText}
+          onTau={setTauText}
         />
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={onRun}
@@ -212,14 +341,25 @@ export function BuilderView() {
           >
             {mutation.isPending ? "Optimizing…" : "Suggest weights"}
           </button>
-          {assets.length < 2 && (
+          {mode === "simulate" && assets.length < 2 && (
             <span className="ix-fs text-text-muted">
               Add at least 2 assets to optimize.
             </span>
           )}
-          {assets.length >= 2 && !viewsValid && (
+          {mode === "simulate" && assets.length >= 2 && !viewsValid && (
             <span className="ix-fs text-text-muted">
               Complete or remove incomplete views to run.
+            </span>
+          )}
+          {mode === "universe" && !universeOk && (
+            <span className="ix-fs text-text-muted">
+              Fewer than 2 funds match — relax the filters.
+            </span>
+          )}
+          {!blParamsOk && (
+            <span className="ix-fs text-text-muted">
+              BL max utility needs positive model parameters (δ, τ) — check the
+              Advanced section.
             </span>
           )}
         </div>
@@ -239,14 +379,14 @@ export function BuilderView() {
             result={mutation.data}
             objective={objective}
             assetsByKey={assetsByKey}
-            base={base}
+            base={mode === "simulate" ? base : null}
             colors={colors}
           />
         ) : (
           <p className="ix-pad ix-fs m-0 border border-border bg-surface-2 text-text-muted">
-            Assemble a universe (saved portfolio positions, funds or ad-hoc
-            tickers), pick an objective, optionally add Black-Litterman views,
-            then press Suggest weights.
+            {mode === "simulate"
+              ? "Search and add stocks or funds (or import a saved portfolio), pick an objective, optionally add advanced views, then press Suggest weights."
+              : "Filter and rank the fund universe, pick an objective, then press Suggest weights — the optimizer selects the funds for you."}
           </p>
         )}
       </div>

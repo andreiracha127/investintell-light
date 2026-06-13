@@ -2035,10 +2035,15 @@ export interface components {
             /** Items */
             items: components["schemas"]["NewsArticle"][];
         };
-        /** OptimizeRequest */
+        /**
+         * OptimizeRequest
+         * @description Optimize over either an explicit ``assets`` list OR a ``universe`` spec
+         *     (exactly one). ``universe`` resolves to fund candidates server-side.
+         */
         OptimizeRequest: {
             /** Assets */
-            assets: (components["schemas"]["FundRefIn"] | components["schemas"]["EquityRefIn"])[];
+            assets?: (components["schemas"]["FundRefIn"] | components["schemas"]["EquityRefIn"])[] | null;
+            universe?: components["schemas"]["UniverseSpecIn"] | null;
             /**
              * Objective
              * @default min_cvar
@@ -3403,6 +3408,54 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /**
+         * UniverseSpecIn
+         * @description Filter + rank a slice of the FUND universe instead of listing assets.
+         *
+         *     The optimizer then runs over the resolved candidates (funds only, v1 —
+         *     same rule as views: equities have no AUM/market cap in the builder yet).
+         *     Candidates are restricted to funds that EACH have enough NAV history; the
+         *     cross-asset overlap requirement is still enforced on the resolved set. All
+         *     filter fields share the GET /funds vocabulary; ``rank_by``/``rank_dir``
+         *     pick the top ``max_assets`` of the matching set.
+         */
+        UniverseSpecIn: {
+            /** Fund Type */
+            fund_type?: ("etf" | "mmf" | "mutual_fund") | null;
+            /** Asset Class */
+            asset_class?: ("equity" | "fixed_income" | "cash" | "alternatives") | null;
+            /** Strategy Label */
+            strategy_label?: string | null;
+            /** Expense Ratio Max */
+            expense_ratio_max?: number | null;
+            /** Aum Min */
+            aum_min?: number | null;
+            /** Sharpe 1Y Min */
+            sharpe_1y_min?: number | null;
+            /** Volatility 1Y Max */
+            volatility_1y_max?: number | null;
+            /** Return 1Y Min */
+            return_1y_min?: number | null;
+            /** Max Drawdown 1Y Min */
+            max_drawdown_1y_min?: number | null;
+            /**
+             * Rank By
+             * @default aum_usd
+             * @enum {string}
+             */
+            rank_by: "aum_usd" | "sharpe_1y" | "return_1y" | "expense_ratio" | "volatility_1y" | "max_drawdown_1y";
+            /**
+             * Rank Dir
+             * @default desc
+             * @enum {string}
+             */
+            rank_dir: "asc" | "desc";
+            /**
+             * Max Assets
+             * @default 30
+             */
+            max_assets: number;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -3422,6 +3475,10 @@ export interface components {
             asset: components["schemas"]["FundRefIn"] | components["schemas"]["EquityRefIn"];
             /** Weight */
             weight: number;
+            /** Ticker */
+            ticker?: string | null;
+            /** Name */
+            name?: string | null;
         };
     };
     responses: never;

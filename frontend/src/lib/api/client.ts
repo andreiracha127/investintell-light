@@ -190,7 +190,9 @@ export type OptimizeRequest =
 export type OptimizeResponse =
   BuilderOptimizeOperation["responses"]["200"]["content"]["application/json"];
 /** Discriminated asset reference: a synced fund (uuid) or an equity ticker. */
-export type BuilderAssetRef = OptimizeRequest["assets"][number];
+export type BuilderAssetRef = NonNullable<OptimizeRequest["assets"]>[number];
+/** Filter+rank spec to optimize over the fund universe (no explicit list). */
+export type BuilderUniverseSpec = NonNullable<OptimizeRequest["universe"]>;
 export type BuilderObjective = OptimizeRequest["objective"];
 export type BuilderViewIn = NonNullable<OptimizeRequest["views"]>[number];
 export type WeightOut = OptimizeResponse["weights"][number];

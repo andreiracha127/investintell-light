@@ -73,9 +73,59 @@ Objective = Literal[
     "equal_weight", "min_vol", "erc", "max_diversification", "min_cvar", "bl_utility"
 ]
 
+# Candidate-universe selection vocabulary — mirrors the GET /funds filters and
+# sort whitelist so a universe optimization reuses the same catalog semantics.
+FundTypeFilter = Literal["etf", "mmf", "mutual_fund"]
+AssetClassFilter = Literal["equity", "fixed_income", "cash", "alternatives"]
+UniverseRankBy = Literal[
+    "aum_usd",
+    "sharpe_1y",
+    "return_1y",
+    "expense_ratio",
+    "volatility_1y",
+    "max_drawdown_1y",
+]
+
+# Hard ceiling on a resolved universe — matches the explicit-list cap so both
+# paths feed the optimizer the same bounded number of assets.
+MAX_UNIVERSE_ASSETS = 50
+DEFAULT_UNIVERSE_ASSETS = 30
+
+
+class UniverseSpecIn(BaseModel):
+    """Filter + rank a slice of the FUND universe instead of listing assets.
+
+    The optimizer then runs over the resolved candidates (funds only, v1 —
+    same rule as views: equities have no AUM/market cap in the builder yet).
+    Candidates are restricted to funds that EACH have enough NAV history; the
+    cross-asset overlap requirement is still enforced on the resolved set. All
+    filter fields share the GET /funds vocabulary; ``rank_by``/``rank_dir``
+    pick the top ``max_assets`` of the matching set.
+    """
+
+    fund_type: FundTypeFilter | None = None
+    asset_class: AssetClassFilter | None = None
+    strategy_label: Annotated[str, Field(max_length=80)] | None = None
+    expense_ratio_max: Annotated[float, Field(ge=0)] | None = None
+    aum_min: Annotated[float, Field(ge=0)] | None = None
+    sharpe_1y_min: float | None = None
+    volatility_1y_max: Annotated[float, Field(ge=0)] | None = None
+    return_1y_min: float | None = None
+    max_drawdown_1y_min: float | None = None
+    rank_by: UniverseRankBy = "aum_usd"
+    rank_dir: Literal["asc", "desc"] = "desc"
+    max_assets: Annotated[
+        int, Field(ge=2, le=MAX_UNIVERSE_ASSETS)
+    ] = DEFAULT_UNIVERSE_ASSETS
+
 
 class OptimizeRequest(BaseModel):
-    assets: Annotated[list[AssetRefIn], Field(min_length=2, max_length=50)]
+    """Optimize over either an explicit ``assets`` list OR a ``universe`` spec
+    (exactly one). ``universe`` resolves to fund candidates server-side.
+    """
+
+    assets: Annotated[list[AssetRefIn], Field(min_length=2, max_length=50)] | None = None
+    universe: UniverseSpecIn | None = None
     objective: Objective = "min_cvar"
     constraints: ConstraintsIn = ConstraintsIn()
     window_days: Annotated[int, Field(ge=30, le=3650)] = 730
@@ -84,6 +134,23 @@ class OptimizeRequest(BaseModel):
     views: list[ViewIn] | None = None
     bl: BLParamsIn = BLParamsIn()
 
+    @model_validator(mode="after")
+    def _check_asset_source(self) -> "OptimizeRequest":
+        if (self.assets is None) == (self.universe is None):
+            raise ValueError(
+                "provide exactly one of 'assets' (explicit list) or 'universe' "
+                "(filter+rank the fund universe)"
+            )
+        # Views reference specific assets by ref; in universe mode the user
+        # cannot know which funds get selected, so the two are incompatible.
+        if self.universe is not None and self.views:
+            raise ValueError(
+                "views cannot be combined with 'universe' — views reference "
+                "specific assets, which a universe optimization selects for you; "
+                "use an explicit 'assets' list to express views"
+            )
+        return self
+
 
 # ── Response ─────────────────────────────────────────────────────────────────
 
@@ -91,6 +158,11 @@ class OptimizeRequest(BaseModel):
 class WeightOut(BaseModel):
     asset: AssetRefIn
     weight: float
+    # Display labels resolved server-side. Populated for funds selected via a
+    # ``universe`` spec (the client never saw them); null on the explicit-list
+    # path, where the client already knows the labels it sent.
+    ticker: str | None = None
+    name: str | None = None
 
 
 class ExpectedOut(BaseModel):

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 
 import { BuilderView } from "@/components/builder/BuilderView";
 
@@ -7,5 +8,11 @@ export const metadata: Metadata = {
 };
 
 export default function BuilderPage() {
-  return <BuilderView />;
+  // BuilderView reads ?portfolio=<id> via useSearchParams, which the App
+  // Router requires to sit under a Suspense boundary.
+  return (
+    <Suspense fallback={null}>
+      <BuilderView />
+    </Suspense>
+  );
 }

@@ -5671,27 +5671,44 @@
       "OptimizeRequest": {
         "properties": {
           "assets": {
-            "items": {
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/FundRefIn"
+            "anyOf": [
+              {
+                "items": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/FundRefIn"
+                    },
+                    {
+                      "$ref": "#/components/schemas/EquityRefIn"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "kind",
+                    "mapping": {
+                      "equity": "#/components/schemas/EquityRefIn",
+                      "fund": "#/components/schemas/FundRefIn"
+                    }
+                  }
                 },
-                {
-                  "$ref": "#/components/schemas/EquityRefIn"
-                }
-              ],
-              "discriminator": {
-                "propertyName": "kind",
-                "mapping": {
-                  "equity": "#/components/schemas/EquityRefIn",
-                  "fund": "#/components/schemas/FundRefIn"
-                }
+                "type": "array",
+                "maxItems": 50,
+                "minItems": 2
+              },
+              {
+                "type": "null"
               }
-            },
-            "type": "array",
-            "maxItems": 50,
-            "minItems": 2,
+            ],
             "title": "Assets"
+          },
+          "universe": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UniverseSpecIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "objective": {
             "type": "string",
@@ -5756,10 +5773,8 @@
           }
         },
         "type": "object",
-        "required": [
-          "assets"
-        ],
-        "title": "OptimizeRequest"
+        "title": "OptimizeRequest",
+        "description": "Optimize over either an explicit ``assets`` list OR a ``universe`` spec\n(exactly one). ``universe`` resolves to fund candidates server-side."
       },
       "OptimizeResponse": {
         "properties": {
@@ -8360,6 +8375,156 @@
         "title": "UnexpandedPosition",
         "description": "Posi\u00e7\u00e3o n\u00e3o atravessada \u2014 residual expl\u00edcito no n\u00edvel do portf\u00f3lio."
       },
+      "UniverseSpecIn": {
+        "properties": {
+          "fund_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "etf",
+                  "mmf",
+                  "mutual_fund"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fund Type"
+          },
+          "asset_class": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "equity",
+                  "fixed_income",
+                  "cash",
+                  "alternatives"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Class"
+          },
+          "strategy_label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Label"
+          },
+          "expense_ratio_max": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expense Ratio Max"
+          },
+          "aum_min": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aum Min"
+          },
+          "sharpe_1y_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe 1Y Min"
+          },
+          "volatility_1y_max": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volatility 1Y Max"
+          },
+          "return_1y_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return 1Y Min"
+          },
+          "max_drawdown_1y_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown 1Y Min"
+          },
+          "rank_by": {
+            "type": "string",
+            "enum": [
+              "aum_usd",
+              "sharpe_1y",
+              "return_1y",
+              "expense_ratio",
+              "volatility_1y",
+              "max_drawdown_1y"
+            ],
+            "title": "Rank By",
+            "default": "aum_usd"
+          },
+          "rank_dir": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "Rank Dir",
+            "default": "desc"
+          },
+          "max_assets": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 2.0,
+            "title": "Max Assets",
+            "default": 30
+          }
+        },
+        "type": "object",
+        "title": "UniverseSpecIn",
+        "description": "Filter + rank a slice of the FUND universe instead of listing assets.\n\nThe optimizer then runs over the resolved candidates (funds only, v1 \u2014\nsame rule as views: equities have no AUM/market cap in the builder yet).\nCandidates are restricted to funds that EACH have enough NAV history; the\ncross-asset overlap requirement is still enforced on the resolved set. All\nfilter fields share the GET /funds vocabulary; ``rank_by``/``rank_dir``\npick the top ``max_assets`` of the matching set."
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -8423,6 +8588,28 @@
           "weight": {
             "type": "number",
             "title": "Weight"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
           }
         },
         "type": "object",
