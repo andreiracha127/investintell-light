@@ -319,3 +319,19 @@ SELECT DISTINCT ON (class_id)
 FROM sec_fund_classes
 WHERE ticker IS NOT NULL
 ORDER BY class_id, xbrl_period_end DESC NULLS LAST;
+
+-- ===========================================================================
+-- PHASE 4 — STAGED, NOT EXECUTED BY THIS MIGRATION.
+-- ===========================================================================
+-- The statements below are intentionally NOT run when this file is applied.
+-- They are staged here for the human runbook flip and must be executed MANUALLY
+-- ONLY after the dynamic catalog path (funds_v / fund_*_v / *_mv) has been
+-- verified in production. Renaming the snapshot tables before verification would
+-- break the live serving path. Keep this block last and inert until the flip.
+--
+-- PHASE 4 — run ONLY after the dynamic path is verified in production.
+ALTER TABLE IF EXISTS funds            RENAME TO funds_deprecated;
+ALTER TABLE IF EXISTS fund_risk_latest RENAME TO fund_risk_latest_deprecated;
+ALTER TABLE IF EXISTS fund_nav         RENAME TO fund_nav_deprecated;
+ALTER TABLE IF EXISTS fund_holdings    RENAME TO fund_holdings_deprecated;
+ALTER TABLE IF EXISTS fund_classes     RENAME TO fund_classes_deprecated;
