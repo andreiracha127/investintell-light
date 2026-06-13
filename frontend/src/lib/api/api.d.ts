@@ -764,7 +764,7 @@ export interface paths {
         };
         /**
          * Get Macro Regime
-         * @description Estado atual do detector de stress de crédito + explicabilidade.
+         * @description Estado atual do detector vote2of3 + breakdown dos votos + explicabilidade.
          */
         get: operations["get_macro_regime_macro_regime_get"];
         put?: never;
@@ -1924,16 +1924,20 @@ export interface components {
         };
         /**
          * MacroRegimeResponse
-         * @description Estado do detector binário de stress de crédito (worker credit_regime).
+         * @description Estado do detector vote2of3 (worker regime_composite) + breakdown dos votos.
          *
-         *     O composite legado (macro_regime_snapshot) foi refutado pelo backtest e
-         *     não alimenta esta resposta nem qualquer gatilho de rebalanceamento.
+         *     risk_off ⇔ ≥2 votos entre credit/trend/nfci. Estados binários — o composite
+         *     por score ponderado (legado) foi refutado. O credit_regime segue materializado
+         *     (é 1 dos votos); o composite é o detector promovido (Sharpe 0,549 / DD 25,3%).
          */
         MacroRegimeResponse: {
             /** Detector */
             detector: string;
             /** State */
             state: string;
+            /** Vote Count */
+            vote_count: number;
+            votes: components["schemas"]["RegimeVotesOut"];
             /**
              * As Of
              * Format: date
@@ -2806,21 +2810,29 @@ export interface components {
         };
         /**
          * RegimeSignalOut
-         * @description Explicabilidade do detector: ratio vs threshold + proveniência.
+         * @description Proveniência/explicabilidade do voto de crédito + valor do NFCI.
          */
         RegimeSignalOut: {
             /** Ratio */
-            ratio: number;
+            ratio: number | null;
             /** P20 5Y */
             p20_5y: number | null;
             /** Distance Pct */
             distance_pct: number | null;
-            /** Hyg Close */
-            hyg_close: number | null;
-            /** Ief Close */
-            ief_close: number | null;
-            /** N Window */
-            n_window: number;
+            /** Nfci */
+            nfci: number | null;
+        };
+        /**
+         * RegimeVotesOut
+         * @description Breakdown dos 3 votos do ensemble (explicabilidade: qual sinal está ativo).
+         */
+        RegimeVotesOut: {
+            /** Credit */
+            credit: boolean;
+            /** Trend */
+            trend: boolean;
+            /** Nfci */
+            nfci: boolean;
         };
         /**
          * RegressionOut

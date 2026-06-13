@@ -290,7 +290,7 @@ async def test_preview_macro_trigger_forces_proposal(
         return SimpleNamespace(state="risk_off", last_flip=dt.date(2026, 6, 11))
 
     monkeypatch.setattr(ev, "get_policy", fake_get_policy)
-    monkeypatch.setattr(ev, "fetch_credit_regime_state", fake_regime)
+    monkeypatch.setattr(ev, "fetch_regime_state", fake_regime)
 
     async with _client() as client:
         resp = await client.get("/portfolios/7/rebalance/preview")

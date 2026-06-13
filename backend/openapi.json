@@ -2317,7 +2317,7 @@
           "macro"
         ],
         "summary": "Get Macro Regime",
-        "description": "Estado atual do detector de stress de cr\u00e9dito + explicabilidade.",
+        "description": "Estado atual do detector vote2of3 + breakdown dos votos + explicabilidade.",
         "operationId": "get_macro_regime_macro_regime_get",
         "responses": {
           "200": {
@@ -5394,6 +5394,13 @@
             "type": "string",
             "title": "State"
           },
+          "vote_count": {
+            "type": "integer",
+            "title": "Vote Count"
+          },
+          "votes": {
+            "$ref": "#/components/schemas/RegimeVotesOut"
+          },
           "as_of": {
             "type": "string",
             "format": "date",
@@ -5430,6 +5437,8 @@
         "required": [
           "detector",
           "state",
+          "vote_count",
+          "votes",
           "as_of",
           "days_in_state",
           "last_flip",
@@ -5437,7 +5446,7 @@
           "recent_flips"
         ],
         "title": "MacroRegimeResponse",
-        "description": "Estado do detector bin\u00e1rio de stress de cr\u00e9dito (worker credit_regime).\n\nO composite legado (macro_regime_snapshot) foi refutado pelo backtest e\nn\u00e3o alimenta esta resposta nem qualquer gatilho de rebalanceamento."
+        "description": "Estado do detector vote2of3 (worker regime_composite) + breakdown dos votos.\n\nrisk_off \u21d4 \u22652 votos entre credit/trend/nfci. Estados bin\u00e1rios \u2014 o composite\npor score ponderado (legado) foi refutado. O credit_regime segue materializado\n(\u00e9 1 dos votos); o composite \u00e9 o detector promovido (Sharpe 0,549 / DD 25,3%)."
       },
       "MarketOverviewResponse": {
         "properties": {
@@ -7215,7 +7224,14 @@
       "RegimeSignalOut": {
         "properties": {
           "ratio": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Ratio"
           },
           "p20_5y": {
@@ -7240,7 +7256,7 @@
             ],
             "title": "Distance Pct"
           },
-          "hyg_close": {
+          "nfci": {
             "anyOf": [
               {
                 "type": "number"
@@ -7249,22 +7265,7 @@
                 "type": "null"
               }
             ],
-            "title": "Hyg Close"
-          },
-          "ief_close": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ief Close"
-          },
-          "n_window": {
-            "type": "integer",
-            "title": "N Window"
+            "title": "Nfci"
           }
         },
         "type": "object",
@@ -7272,12 +7273,34 @@
           "ratio",
           "p20_5y",
           "distance_pct",
-          "hyg_close",
-          "ief_close",
-          "n_window"
+          "nfci"
         ],
         "title": "RegimeSignalOut",
-        "description": "Explicabilidade do detector: ratio vs threshold + proveni\u00eancia."
+        "description": "Proveni\u00eancia/explicabilidade do voto de cr\u00e9dito + valor do NFCI."
+      },
+      "RegimeVotesOut": {
+        "properties": {
+          "credit": {
+            "type": "boolean",
+            "title": "Credit"
+          },
+          "trend": {
+            "type": "boolean",
+            "title": "Trend"
+          },
+          "nfci": {
+            "type": "boolean",
+            "title": "Nfci"
+          }
+        },
+        "type": "object",
+        "required": [
+          "credit",
+          "trend",
+          "nfci"
+        ],
+        "title": "RegimeVotesOut",
+        "description": "Breakdown dos 3 votos do ensemble (explicabilidade: qual sinal est\u00e1 ativo)."
       },
       "RegressionOut": {
         "properties": {

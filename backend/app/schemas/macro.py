@@ -1,30 +1,26 @@
-"""Response schemas for GET /macro/regime (Frente B re-escopada)."""
+"""Response schemas for GET /macro/regime (detector vote2of3 — Frente B)."""
 
 import datetime as dt
 
 from pydantic import BaseModel
 
 
+class RegimeVotesOut(BaseModel):
+    """Breakdown dos 3 votos do ensemble (explicabilidade: qual sinal está ativo)."""
+
+    credit: bool  # HYG/IEF < p20 móvel 5y
+    trend: bool  # SPY fechamento mensal < SMA 10 meses
+    nfci: bool  # Chicago Fed NFCI > 0 (histerese)
+
+
 class RegimeSignalOut(BaseModel):
-    """Explicabilidade do detector: ratio vs thresholds + proveniência."""
+    """Proveniência/explicabilidade do voto de crédito + valor do NFCI."""
 
-    ratio: float
-    p20_5y: float | None
-    # Banda de saída da histerese (p25 default; == p20_5y se exit == entry).
-    p_exit_5y: float | None = None
-    # Distância percentual do ratio ao threshold de entrada (positivo = acima
-    # do p20, i.e. folga até disparar; negativo = abaixo, em stress).
+    ratio: float | None  # HYG/IEF
+    p20_5y: float | None  # gatilho do voto de crédito
+    # Distância percentual do ratio ao p20 (positivo = folga até disparar o crédito).
     distance_pct: float | None
-    hyg_close: float | None
-    ief_close: float | None
-    n_window: int
-
-
-class RegimeBandsOut(BaseModel):
-    """Bandas de score do modo low-drawdown (graduado)."""
-
-    caution_score: float  # ≥ → caution
-    risk_off_score: float  # ≥ → risk_off
+    nfci: float | None  # último valor NFCI (forward-filled)
 
 
 class RegimeFlipOut(BaseModel):
@@ -33,22 +29,17 @@ class RegimeFlipOut(BaseModel):
 
 
 class MacroRegimeResponse(BaseModel):
-    """Estado do detector de stress de crédito (worker credit_regime).
+    """Estado do detector vote2of3 (worker regime_composite) + breakdown dos votos.
 
-    Default = ``mode='binary'`` (detector validado, risk_on|risk_off). Com
-    ``?low_drawdown_mode=true`` (ou env) o ``state`` passa a ser o graduado
-    (risk_on|caution|risk_off) derivado do ``stress_score`` 0–100, priorizando
-    a suavização da curva de capital. O composite legado (macro_regime_snapshot)
-    segue refutado e não alimenta nenhum gatilho de rebalanceamento.
+    risk_off ⇔ ≥2 votos entre credit/trend/nfci. Estados binários — o composite
+    por score ponderado (legado) foi refutado. O credit_regime segue materializado
+    (é 1 dos votos); o composite é o detector promovido (Sharpe 0,549 / DD 25,3%).
     """
 
-    detector: str  # 'credit_stress_hyg_ief_p20_5y'
-    mode: str  # 'binary' | 'low_drawdown'
-    state: str  # 'risk_on' | 'caution' | 'risk_off' (caution só no low_drawdown)
-    binary_state: str  # estado binário do worker (sempre, p/ referência)
-    graded_state: str  # classificação graduada do stress_score (sempre, informativa)
-    stress_score: float | None  # 0–100; None no warmup
-    bands: RegimeBandsOut
+    detector: str  # 'vote2of3'
+    state: str  # 'risk_on' | 'risk_off'
+    vote_count: int  # 0..3
+    votes: RegimeVotesOut
     as_of: dt.date
     days_in_state: int
     last_flip: dt.date | None

@@ -46,7 +46,10 @@ from app.schemas.builder import (
 )
 from app.schemas.rebalance import Decision, Frequency
 from app.services import portfolio_builder, portfolio_crud
-from app.services.macro_regime import CreditRegimeSnapshot, fetch_credit_regime
+from app.services.macro_regime import (
+    CompositeRegimeSnapshot,
+    fetch_composite_regime,
+)
 
 FREQUENCY_DAYS = {"weekly": 7, "monthly": 30, "quarterly": 91}
 
@@ -231,16 +234,16 @@ async def fund_instrument_ids_by_ticker(
     }
 
 
-async def fetch_credit_regime_state(
+async def fetch_regime_state(
     datalake: AsyncSession | None,
-) -> CreditRegimeSnapshot | None:
-    """Estado do detector da frente B (state + last_flip), para o gatilho."""
+) -> CompositeRegimeSnapshot | None:
+    """Estado do detector promovido vote2of3 (state + last_flip), para o gatilho."""
     if datalake is None:
         raise RebalanceError(
             "macro_trigger_enabled requires the data-lake connection "
-            "(DATALAKE_DB_URL) — the credit_regime detector lives there."
+            "(DATALAKE_DB_URL) — the regime_composite detector lives there."
         )
-    return await fetch_credit_regime(datalake)
+    return await fetch_composite_regime(datalake)
 
 
 # ---------------------------------------------------------------------------
@@ -322,11 +325,11 @@ async def evaluate_portfolio(
     is_due = calendar_due(last_evaluated, frequency, now)
     macro_fired = False
     if macro_enabled:
-        regime = await fetch_credit_regime_state(datalake)
+        regime = await fetch_regime_state(datalake)
         if regime is None:
             raise RebalanceError(
-                "credit_regime_daily not materialized — run the credit_regime "
-                "worker before enabling the macro trigger."
+                "regime_composite_daily not materialized — run the "
+                "regime_composite worker before enabling the macro trigger."
             )
         macro_fired = macro_triggered(
             True, regime.state, regime.last_flip, last_evaluated
