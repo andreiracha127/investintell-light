@@ -95,11 +95,6 @@ const PNL_AGG = (a: Aggregates): string => {
   return `P&L · ${formatCurrency(a.total_pnl, { signed: true })}${pct}`;
 };
 
-const ALL_KEYS = [
-  "ticker", "name", "last", "change", "change_pct", "cost", "basis", "commission",
-  "shares", "pnl", "pnl_pct", "mktvalue",
-] as const;
-
 export function positionsGridColumns(aggregates: Aggregates, callbacks?: PositionsCallbacks): GridColumns {
   const cols: GridColumns = [
     { id: "ticker", header: { format: "Ticker" }, className: "ix-grid-cell-text", cells: { formatter: tickerFormatter } },
