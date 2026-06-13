@@ -19,6 +19,7 @@ import {
   retryPolicy,
 } from "@/components/screener/shared";
 import { DataGrid } from "@/components/ui/DataGrid";
+import { GridSkeleton } from "@/components/ui/GridSkeleton";
 import { formatCompact } from "@/lib/format";
 import { screenResultsToGridOptions } from "@/lib/grid/gridOptions";
 
@@ -113,11 +114,9 @@ export function ResultsTab({
 
   if (resultsQuery.isPending) {
     return (
-      <div
-        aria-busy="true"
-        aria-label="Loading screen results"
-        className="h-[320px] bg-surface-2 animate-pulse"
-      />
+      <div aria-busy="true" aria-label="Loading screen results">
+        <GridSkeleton className="h-[320px]" />
+      </div>
     );
   }
   if (resultsQuery.isError) {

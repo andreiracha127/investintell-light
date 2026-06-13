@@ -17,6 +17,7 @@ import {
   type FundsQuery,
 } from "@/lib/api/client";
 import { DataGrid } from "@/components/ui/DataGrid";
+import { GridSkeleton } from "@/components/ui/GridSkeleton";
 import { fundsListToGridOptions } from "@/lib/grid/fundsGridOptions";
 import { PageTitle } from "@/components/ui/panels";
 import {
@@ -238,11 +239,9 @@ export function FundsView() {
 
       {/* ── Table ───────────────────────────────────────────────────────── */}
       {fundsQuery.isPending ? (
-        <div
-          aria-busy="true"
-          aria-label="Loading funds"
-          className="h-[420px] bg-surface-2 animate-pulse"
-        />
+        <div aria-busy="true" aria-label="Loading funds">
+          <GridSkeleton className="h-[420px]" />
+        </div>
       ) : fundsQuery.isError ? (
         <ErrorPanel
           title="Failed to load funds"
