@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-/** Home = Stock Analysis of the default ticker. */
+/** Home = Stocks market overview (landing). */
 export default function Home() {
-  redirect("/stocks/AAPL");
+  redirect("/stocks");
 }
