@@ -43,8 +43,16 @@ class Settings(BaseSettings):
     catalog_cache_ttl_seconds: int = 900
 
     # --- API / CORS settings (F2) ---
-    # Browser origins allowed to call the API (the Next.js frontend dev server).
-    cors_allow_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    # Browser origins allowed to call the API. Dev = Next.js local server;
+    # prod = the public site (www + apex). Em produção o InsForge compute
+    # sobrescreve via env var CORS_ALLOW_ORIGINS (JSON list), mas o domínio
+    # oficial fica versionado aqui para sobreviver a redeploys sem a env var.
+    cors_allow_origins: list[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://www.investintell.com",
+        "https://investintell.com",
+    ]
 
     # --- Tiingo client settings (F1) ---
     tiingo_base_url: str = "https://api.tiingo.com"
