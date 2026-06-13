@@ -21,3 +21,25 @@ out/
 # OS
 .DS_Store
 Thumbs.db
+
+# InsForge & AI agent skills
+.insforge
+.agent
+.agents
+.augment
+.claude
+.cline
+.github/copilot*
+.kilocode
+.qoder
+.qwen
+.roo
+.trae
+.windsurf
+
+# MCP tool caches / outputs (local only)
+.serena/
+.playwright-mcp/
+
+# Lean research workspace (local-only, 225MB+ of data/containers)
+lean-research/
