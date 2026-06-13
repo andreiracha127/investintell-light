@@ -252,18 +252,28 @@ async def fetch_funds(
 
 
 async def fetch_staleness(session: AsyncSession) -> Staleness:
-    """MAX(synced_at), MAX(source_calc_date), MAX(source_nav_max_date)."""
-    row = (
-        await session.execute(
-            select(
-                func.max(Fund.synced_at),
-                func.max(Fund.source_calc_date),
-                func.max(Fund.source_nav_max_date),
-            )
-        )
-    ).one()
+    """Global data-freshness markers, derived from the dynamic sources.
+
+    The retired sync snapshot carried per-row synced_at/source_calc_date/
+    source_nav_max_date; the funds_v VIEW has none, so staleness is read live:
+    - source_calc_date  = MAX(fund_risk_latest_mv.calc_date)
+    - source_nav_max_date = MAX(fund_nav.nav_date)
+    - synced_at         = the view is "as fresh as the read" → query time, but
+      only when the universe is non-empty (None on an empty catalog, matching
+      the previous empty-table contract). Task 2.4 finalizes the NAV source.
+    """
+    source_calc_date = await session.scalar(select(func.max(FundRiskLatest.calc_date)))
+    source_nav_max_date = await session.scalar(select(func.max(FundNav.nav_date)))
+    fund_count = int(
+        await session.scalar(select(func.count()).select_from(Fund)) or 0
+    )
+    has_universe = fund_count > 0 and (
+        source_calc_date is not None or source_nav_max_date is not None
+    )
     return Staleness(
-        synced_at=row[0], source_calc_date=row[1], source_nav_max_date=row[2]
+        synced_at=dt.datetime.now(dt.UTC) if has_universe else None,
+        source_calc_date=source_calc_date,
+        source_nav_max_date=source_nav_max_date,
     )
 
 
@@ -430,6 +440,14 @@ async def fetch_fund_profile(
             )
         ).scalars()
     )
+
+    # funds_v has no sync markers; derive the per-fund staleness the route
+    # exposes from the dynamic sources (risk MV calc_date + latest NAV date).
+    # Attached on the instance so the route serializes them unchanged (Task 2.4
+    # finalizes the staleness source).
+    fund.synced_at = dt.datetime.now(dt.UTC)  # type: ignore[attr-defined]
+    fund.source_calc_date = risk.calc_date if risk is not None else None  # type: ignore[attr-defined]
+    fund.source_nav_max_date = max_nav_date  # type: ignore[attr-defined]
 
     return FundProfile(
         fund=fund,

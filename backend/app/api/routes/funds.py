@@ -272,9 +272,11 @@ async def get_fund_profile(
         inception_date=fund.inception_date,
         domicile=fund.domicile,
         currency=fund.currency,
-        synced_at=fund.synced_at,
-        source_calc_date=fund.source_calc_date,
-        source_nav_max_date=fund.source_nav_max_date,
+        # funds_v (a VIEW) carries no sync markers; the catalog service derives
+        # and attaches these on the fund instance (Task 2.4 finalizes staleness).
+        synced_at=getattr(fund, "synced_at", None),
+        source_calc_date=getattr(fund, "source_calc_date", None),
+        source_nav_max_date=getattr(fund, "source_nav_max_date", None),
         risk=FundRiskOut.model_validate(profile.risk) if profile.risk else None,
         nav=[FundNavPoint(date=d, nav=v) for d, v in profile.nav],
         holdings=FundHoldingsOut(

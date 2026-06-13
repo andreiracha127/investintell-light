@@ -23,7 +23,6 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
-    ForeignKey,
     Integer,
     Numeric,
     String,
@@ -35,7 +34,13 @@ from app.models.base import Base
 
 
 class Fund(Base):
-    __tablename__ = "funds"
+    # Dynamic catalog VIEW (db/ddl/2026-06-13_dynamic_catalog.sql) — a faithful
+    # SQL port of the retired sync_funds.py `funds` snapshot, derived live from
+    # instrument_identity / sec_* / fund_risk_metrics / nav_timeseries on Tiger.
+    # A view has no sync markers, so synced_at / source_calc_date /
+    # source_nav_max_date are NOT columns here; the catalog service derives
+    # staleness from the risk MV + NAV (Task 2.4 finalizes the staleness source).
+    __tablename__ = "funds_v"
 
     # Canonical mother-DB instrument UUID (instrument_identity.instrument_id).
     instrument_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
@@ -84,13 +89,6 @@ class Fund(Base):
     domicile: Mapped[str | None] = mapped_column(String, nullable=True)
     currency: Mapped[str | None] = mapped_column(String, nullable=True)
 
-    # Staleness fields (dispatch §3 F8.1-4) — exposed via the API in F8.2.
-    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    # Latest fund_risk_metrics.calc_date in the source at sync time.
-    source_calc_date: Mapped[date] = mapped_column(Date, nullable=False)
-    # Latest nav_timeseries.nav_date in the source at sync time.
-    source_nav_max_date: Mapped[date] = mapped_column(Date, nullable=False)
-
 
 class FundClass(Base):
     """Share-class catalog (F8.6b) — synced from sec_fund_classes.
@@ -107,10 +105,12 @@ class FundClass(Base):
     # SEC class id ('C000...') — globally unique in the source.
     class_id: Mapped[str] = mapped_column(String, primary_key=True)
 
-    # Series instrument the class belongs to (the NAV proxy anchor).
+    # Series instrument the class belongs to (the NAV proxy anchor). Fund is
+    # now a VIEW (funds_v) and a view cannot be a FK target, so this is a plain
+    # indexed column (no ForeignKey); referential integrity is guaranteed by
+    # the shared instrument_identity lineage.
     instrument_id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
-        ForeignKey("funds.instrument_id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -182,9 +182,10 @@ class FundNav(Base):
     __tablename__ = "fund_nav"
 
     # Composite PK doubles as the (instrument_id, nav_date) lookup index.
+    # Fund is now a VIEW (funds_v); a view cannot be a FK target, so this is a
+    # plain PK column (no ForeignKey to funds).
     instrument_id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
-        ForeignKey("funds.instrument_id", ondelete="CASCADE"),
         primary_key=True,
     )
     nav_date: Mapped[date] = mapped_column(Date, primary_key=True)

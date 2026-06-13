@@ -540,9 +540,6 @@ def build_fund_row(
             _get(mmf, "currency"),
             _get(universe, "currency"),
         ),
-        "synced_at": synced_at,
-        "source_calc_date": identity["source_calc_date"],
-        "source_nav_max_date": identity["source_nav_max_date"],
     }
 
 
@@ -731,9 +728,6 @@ _FUND_MUTABLE_COLUMNS = (
     "inception_date",
     "domicile",
     "currency",
-    "synced_at",
-    "source_calc_date",
-    "source_nav_max_date",
 )
 
 _NAV_MUTABLE_COLUMNS = ("nav", "return_1d", "aum_usd")

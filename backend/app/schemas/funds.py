@@ -177,9 +177,11 @@ class FundProfileResponse(BaseModel):
     inception_date: dt.date | None
     domicile: str | None
     currency: str | None
-    synced_at: dt.datetime
-    source_calc_date: dt.date
-    source_nav_max_date: dt.date
+    # Staleness markers — now derived from the dynamic sources (the funds_v VIEW
+    # has no sync columns), hence nullable like FundsStaleness (Task 2.3/2.4).
+    synced_at: dt.datetime | None
+    source_calc_date: dt.date | None
+    source_nav_max_date: dt.date | None
     risk: FundRiskOut | None
     nav: list[FundNavPoint]
     holdings: FundHoldingsOut

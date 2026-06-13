@@ -216,9 +216,11 @@ def test_build_fund_row_full_cascade() -> None:
     assert row["inception_date"] == dt.date(2010, 1, 4)
     assert row["domicile"] == "US"
     assert row["currency"] == "USD"
-    assert row["synced_at"] == _NOW
-    assert row["source_calc_date"] == dt.date(2026, 6, 9)
-    assert row["source_nav_max_date"] == dt.date(2026, 6, 5)
+    # Staleness markers (synced_at / source_calc_date / source_nav_max_date) are
+    # no longer emitted — Fund is the funds_v VIEW (Task 2.3), which has none.
+    assert "synced_at" not in row
+    assert "source_calc_date" not in row
+    assert "source_nav_max_date" not in row
 
 
 def test_build_fund_row_etp_ticker_classifies_as_etf() -> None:
@@ -554,10 +556,12 @@ def test_latest_aum_by_instrument_takes_latest_non_null() -> None:
 def test_funds_upsert_is_idempotent_on_instrument_id() -> None:
     row = build_fund_row(_identity(), None, None, None, None, _NOW)
     sql = _compiled(build_funds_upsert([row]))
-    assert "INSERT INTO funds" in sql
+    # Fund now maps the funds_v VIEW (Task 2.3); the upsert builder still
+    # compiles (sync is retired in Task 4) and no longer touches staleness.
+    assert "INSERT INTO funds_v" in sql
     assert "ON CONFLICT (instrument_id) DO UPDATE" in sql
     assert "strategy_label = excluded.strategy_label" in sql
-    assert "synced_at = excluded.synced_at" in sql
+    assert "synced_at" not in sql
 
 
 def test_risk_upsert_updates_every_metric() -> None:
@@ -611,19 +615,21 @@ def _table(name: str) -> Any:
 
 
 def test_fund_tables_registered() -> None:
+    # `funds` is now the dynamic VIEW funds_v (Task 2.3); fund_risk_latest_mv is
+    # the MV (Task 2.2). The remaining three are still physical tables for now.
     for name in (
-        "funds", "fund_risk_latest_mv", "fund_nav", "fund_holdings", "fund_classes"
+        "funds_v", "fund_risk_latest_mv", "fund_nav", "fund_holdings", "fund_classes"
     ):
         assert name in Base.metadata.tables
 
 
 def test_fund_classes_pk_fk_and_columns() -> None:
-    """Migration 0007 ↔ FundClass model lockstep."""
+    """FundClass model lockstep. Fund is now the funds_v VIEW (Task 2.3) — a
+    view cannot be a FK target, so instrument_id is a plain indexed column with
+    NO ForeignKey to funds."""
     table = _table("fund_classes")
     assert [c.name for c in table.primary_key.columns] == ["class_id"]
-    (fk,) = table.foreign_keys
-    assert fk.column.table.name == "funds"
-    assert fk.ondelete == "CASCADE"
+    assert not table.foreign_keys
     assert table.c["ticker"].nullable is False
     assert table.c["synced_at"].nullable is False
     assert table.c["synced_at"].type.timezone is True
@@ -665,19 +671,24 @@ def test_portfolios_origin_column() -> None:
     assert "ck_portfolios_origin" in checks
 
 
-def test_funds_pk_and_staleness_columns() -> None:
-    table = _table("funds")
-    assert table.primary_key.name == "pk_funds"
+def test_funds_pk_and_columns() -> None:
+    # Fund is now the dynamic VIEW funds_v (Task 2.3): instrument_id is the PK;
+    # the staleness columns (synced_at / source_calc_date / source_nav_max_date)
+    # were dropped (a view has no sync markers — the catalog service derives
+    # staleness from the risk MV + NAV instead).
+    table = _table("funds_v")
     assert [c.name for c in table.primary_key.columns] == ["instrument_id"]
     for col in ("synced_at", "source_calc_date", "source_nav_max_date"):
-        assert table.c[col].nullable is False, col
-    assert table.c["synced_at"].type.timezone is True
+        assert col not in table.c, col
     for col in ("series_id", "name", "fund_type", "strategy_label"):
         assert table.c[col].nullable is False, col
 
 
 def test_funds_filter_columns_are_indexed() -> None:
-    indexed = {c.name for idx in _table("funds").indexes for c in idx.columns}
+    # The model still declares index=True on the filter columns; these Index
+    # objects live in metadata for the funds_v-mapped class (the physical view
+    # ignores them, but the ORM contract is preserved for consistency).
+    indexed = {c.name for idx in _table("funds_v").indexes for c in idx.columns}
     assert {"series_id", "fund_type", "strategy_label"} <= indexed
 
 
@@ -694,12 +705,12 @@ def test_fund_risk_latest_pk_and_metric_lockstep() -> None:
         assert table.c[col].nullable is True, col
 
 
-def test_fund_nav_composite_pk_and_fk_cascade() -> None:
+def test_fund_nav_composite_pk_and_no_fk() -> None:
+    # Fund is now the funds_v VIEW (Task 2.3): a view cannot be a FK target, so
+    # fund_nav.instrument_id is a plain composite-PK column with NO ForeignKey.
     table = _table("fund_nav")
     assert [c.name for c in table.primary_key.columns] == ["instrument_id", "nav_date"]
-    (fk,) = table.foreign_keys
-    assert fk.column.table.name == "funds"
-    assert fk.ondelete == "CASCADE"
+    assert not table.foreign_keys
 
 
 def test_fund_holdings_composite_pk_and_no_truncation_flag() -> None:
