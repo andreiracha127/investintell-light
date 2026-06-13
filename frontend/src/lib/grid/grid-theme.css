@@ -82,3 +82,13 @@
   color: var(--color-text-secondary);
 }
 .hcg-theme-graphite .ix-grid-elite { color: var(--color-accent); font-weight: 700; }
+
+/* Portfolio positions cell renderers. */
+.hcg-theme-graphite .ix-grid-sub { display: block; font-size: 11px; }
+.hcg-theme-graphite .ix-grid-name { display: block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--color-text-muted); }
+.hcg-theme-graphite .ix-grid-basis { display: inline-block; border: 1px solid var(--color-border-strong); padding: 1px 4px; font-size: 9px; font-weight: 700; letter-spacing: 0.05em; color: var(--color-text-muted); }
+.hcg-theme-graphite .ix-grid-basis-exec { border-color: var(--color-accent); color: var(--color-accent); }
+.hcg-theme-graphite .ix-grid-comm { display: block; font-size: 10px; color: var(--color-text-muted); }
+.hcg-theme-graphite .ix-grid-remove { cursor: pointer; color: var(--color-text-muted); }
+.hcg-theme-graphite .ix-grid-remove:hover { color: var(--color-loss); }
+.hcg-theme-graphite .ix-grid-editable { text-decoration: underline dotted var(--color-text-muted); text-underline-offset: 3px; }
