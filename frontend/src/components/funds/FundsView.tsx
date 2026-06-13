@@ -3,11 +3,16 @@
 /**
  * Funds universe (F8.2) — server-driven dense table over GET /funds:
  * filter panel (search debounce, type/asset-class selects, free-text
- * strategy, numeric bounds), header-click sorting, square pagination and
- * CSV export. The frontend formats; the backend filters/sorts/paginates —
- * every metric is the mother-DB value (never recomputed here).
+ * strategy, numeric bounds), header-click sorting, infinite-windowed
+ * scrolling and CSV export. The frontend formats; the backend
+ * filters/sorts/pages — every metric is the mother-DB value (never
+ * recomputed here).
+ *
+ * Scope (Task C): rows load incrementally as the user scrolls the virtualized
+ * grid near the bottom; a "Load more" button is the always-present a11y +
+ * safety-net fallback. Filters/sort live in the query key, so any change resets
+ * the infinite query to page 1.
  */
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -18,18 +23,22 @@ import {
 } from "@/lib/api/client";
 import { DataGrid } from "@/components/ui/DataGrid";
 import { GridSkeleton } from "@/components/ui/GridSkeleton";
+import { LoadMoreFooter } from "@/components/ui/LoadMoreFooter";
 import { fundsListToGridOptions } from "@/lib/grid/fundsGridOptions";
+import {
+  useGridInfiniteScroll,
+  useInfiniteGrid,
+} from "@/lib/grid/useInfiniteGrid";
 import { PageTitle } from "@/components/ui/panels";
 import {
   BUTTON_CLASS,
   ErrorPanel,
   FIELD_LABEL_CLASS,
   INPUT_CLASS,
-  retryPolicy,
 } from "@/components/screener/shared";
 import { formatCompact, formatDate } from "@/lib/format";
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 100;
 type SortDir = "asc" | "desc";
 
 type FundType = NonNullable<FundsQuery["fund_type"]>;
@@ -69,9 +78,9 @@ export function FundsView() {
   const [volMaxPct, setVolMaxPct] = useState("");
   const [sort, setSort] = useState("aum_usd");
   const [dir, setDir] = useState<SortDir>("desc");
-  const [page, setPage] = useState(1);
 
-  // Debounce free-text filters; any filter change restarts at page 1.
+  // Debounce free-text filters; the debounced values feed the query key below,
+  // so any filter change restarts the infinite query at page 1.
   useEffect(() => {
     const timer = setTimeout(() => {
       setSearch(searchText.trim());
@@ -99,17 +108,14 @@ export function FundsView() {
     dir,
   };
   const filterKey = JSON.stringify(query);
-  useEffect(() => {
-    setPage(1);
-  }, [filterKey]);
 
-  const fundsQuery = useQuery({
-    queryKey: ["funds", filterKey, page],
-    queryFn: ({ signal }) =>
+  // Infinite-windowed loader: filters/sort live in the key, so any change
+  // restarts at page 1. Virtualization renders only the visible window.
+  const fundsQuery = useInfiniteGrid({
+    queryKey: ["funds", filterKey],
+    fetchPage: (page, signal) =>
       fetchFunds({ ...query, page, page_size: PAGE_SIZE }, signal),
-    placeholderData: keepPreviousData,
-    staleTime: 30_000,
-    retry: retryPolicy,
+    countOf: (p) => p.items.length,
   });
 
   const [exporting, setExporting] = useState(false);
@@ -135,18 +141,28 @@ export function FundsView() {
   };
 
   // The grid toggles internally and reports the resulting order via afterSort;
-  // we just apply it. Setters are stable, so [] deps are correct.
+  // we just apply it (which re-keys the query → resets to page 1). Setters are
+  // stable, so [] deps are correct.
   const onSortChange = useCallback((code: string, nextDir: SortDir) => {
     setSort(code);
     setDir(nextDir);
-    setPage(1);
   }, []);
 
-  const data = fundsQuery.data;
-  const meta = data
-    ? `${formatCompact(data.total)} funds${
-        data.staleness.source_calc_date
-          ? ` · data as of ${formatDate(data.staleness.source_calc_date)}`
+  // Merge all loaded pages' items; the last page carries canonical metadata
+  // (total, staleness, classification_note).
+  const lastPage = fundsQuery.lastPage;
+  const mergedItems = useMemo(
+    () => fundsQuery.pages.flatMap((p) => p.items),
+    [fundsQuery.pages],
+  );
+  const mergedData: FundsList | undefined = lastPage
+    ? { ...lastPage, items: mergedItems }
+    : undefined;
+
+  const meta = lastPage
+    ? `${formatCompact(lastPage.total)} funds${
+        lastPage.staleness.source_calc_date
+          ? ` · data as of ${formatDate(lastPage.staleness.source_calc_date)}`
           : ""
       }`
     : "—";
@@ -245,18 +261,20 @@ export function FundsView() {
       ) : fundsQuery.isError ? (
         <ErrorPanel
           title="Failed to load funds"
-          message={fundsQuery.error.message}
+          message={fundsQuery.error?.message ?? "Unknown error"}
           onRetry={() => fundsQuery.refetch()}
         />
-      ) : data === undefined ? null : (
+      ) : mergedData === undefined ? null : (
         <FundsTable
-          data={data}
-          page={page}
-          setPage={setPage}
+          data={mergedData}
+          loadedCount={fundsQuery.loadedCount}
           sort={sort}
           dir={dir}
           onSortChange={onSortChange}
           isFetching={fundsQuery.isFetching}
+          hasNextPage={fundsQuery.hasNextPage}
+          isFetchingNextPage={fundsQuery.isFetchingNextPage}
+          fetchNextPage={fundsQuery.fetchNextPage}
           exporting={exporting}
           exportError={exportError}
           onExport={() => void exportCsv()}
@@ -294,23 +312,27 @@ function BoundField({
 
 function FundsTable({
   data,
-  page,
-  setPage,
+  loadedCount,
   sort,
   dir,
   onSortChange,
   isFetching,
+  hasNextPage,
+  isFetchingNextPage,
+  fetchNextPage,
   exporting,
   exportError,
   onExport,
 }: {
   data: FundsList;
-  page: number;
-  setPage: (updater: (p: number) => number) => void;
+  loadedCount: number;
   sort: string;
   dir: SortDir;
   onSortChange: (code: string, dir: SortDir) => void;
   isFetching: boolean;
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  fetchNextPage: () => void;
   exporting: boolean;
   exportError: string | null;
   onExport: () => void;
@@ -320,9 +342,13 @@ function FundsTable({
     () => fundsListToGridOptions(data, { sort, dir }, { onSortChange }),
     [data, sort, dir, onSortChange],
   );
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const firstRow = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const lastRow = Math.min(page * PAGE_SIZE, total);
+
+  // Automatic near-bottom trigger; the "Load more" button is the fallback.
+  const onGridReady = useGridInfiniteScroll({
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  });
 
   return (
     <section className="bg-surface-2 border border-border">
@@ -356,60 +382,24 @@ function FundsTable({
         <DataGrid
           options={gridOptions}
           className="h-[600px] w-full"
+          onReady={onGridReady}
           emptyMessage="No funds match the current filters."
         />
       </div>
 
-      <div className="flex flex-wrap items-center gap-2.5 border-t border-border px-[var(--ix-pad)] py-2.5 text-[12px] text-text-secondary">
-        <span className="tabular-nums">
-          {total === 0 ? "0 rows" : `${firstRow}–${lastRow} of ${formatCompact(total)}`}
-        </span>
-        <span className="text-[11px] text-text-muted">{data.classification_note}</span>
-        <div className="ml-auto flex items-center gap-px">
-          <button
-            type="button"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1 || isFetching}
-            aria-label="Previous page"
-            className="h-[30px] w-8 bg-field border border-border-strong text-text-secondary hover:bg-layer-hover transition-colors disabled:cursor-not-allowed disabled:text-text-muted disabled:hover:bg-field"
-          >
-            ‹
-          </button>
-          {pageWindow(page, totalPages).map((p) => (
-            <button
-              key={p}
-              type="button"
-              onClick={() => setPage(() => p)}
-              disabled={isFetching}
-              aria-label={`Page ${p}`}
-              aria-current={p === page ? "page" : undefined}
-              className={`flex h-[30px] items-center px-3 tabular-nums transition-colors ${
-                p === page
-                  ? "bg-accent border border-accent font-bold text-on-accent"
-                  : "bg-field border border-border-strong text-text-secondary hover:bg-layer-hover"
-              }`}
-            >
-              {p}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages || isFetching}
-            aria-label="Next page"
-            className="h-[30px] w-8 bg-field border border-border-strong text-text-secondary hover:bg-layer-hover transition-colors disabled:cursor-not-allowed disabled:text-text-muted disabled:hover:bg-field"
-          >
-            ›
-          </button>
-        </div>
-      </div>
+      {data.classification_note && (
+        <p className="border-t border-border px-[var(--ix-pad)] py-2 text-[11px] text-text-muted">
+          {data.classification_note}
+        </p>
+      )}
+
+      <LoadMoreFooter
+        loaded={loadedCount}
+        total={total}
+        hasNextPage={hasNextPage}
+        isFetchingNextPage={isFetchingNextPage}
+        onLoadMore={fetchNextPage}
+      />
     </section>
   );
-}
-
-/** Up to 5 page numbers centered on the current page — presentation only. */
-function pageWindow(page: number, totalPages: number): number[] {
-  const size = Math.min(5, totalPages);
-  const start = Math.min(Math.max(1, page - 2), totalPages - size + 1);
-  return Array.from({ length: size }, (_, i) => start + i);
 }

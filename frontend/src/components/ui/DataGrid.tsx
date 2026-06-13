@@ -17,24 +17,51 @@ export function DataGrid({
   options,
   className,
   emptyMessage,
+  onReady,
 }: {
   options: Options;
   className?: string;
   emptyMessage?: string;
+  /**
+   * Called with the live Grid instance once `viewport` (and thus
+   * `viewport.tbodyElement`) is ready — after the initial async create AND
+   * after every `update()`. Consumers (e.g. infinite scroll) use it to attach
+   * a listener to the body scroll container; the handler must be idempotent
+   * (detach any previous listener before attaching a new one) because the
+   * viewport/tbody may be rebuilt by `update()`.
+   */
+  onReady?: (grid: Grid) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<Grid | null>(null);
   // Keep the freshest options for the async create callback without re-running it.
   const latestOptions = useRef(options);
   latestOptions.current = options;
+  // Hold onReady in a ref so changing its identity never re-runs the create
+  // effect (which would destroy/recreate the grid).
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
+
+  // Fire onReady only once `viewport.tbodyElement` exists. Guards every access.
+  const notifyReady = (grid: Grid | null) => {
+    if (grid?.viewport?.tbodyElement) onReadyRef.current?.(grid);
+  };
 
   useEffect(() => {
     let disposed = false;
     const el = containerRef.current;
     if (!el) return;
+    // Async factory overload: resolves AFTER load, so viewport is ready.
     void import("@highcharts/grid-pro").then(({ grid }) => {
       if (disposed || !containerRef.current) return;
-      gridRef.current = grid(containerRef.current, latestOptions.current);
+      void grid(containerRef.current, latestOptions.current, true).then((g) => {
+        if (disposed) {
+          g.destroy();
+          return;
+        }
+        gridRef.current = g;
+        notifyReady(g);
+      });
     });
     return () => {
       disposed = true;
@@ -44,7 +71,11 @@ export function DataGrid({
   }, []);
 
   useEffect(() => {
-    void gridRef.current?.update(options);
+    const grid = gridRef.current;
+    if (!grid) return;
+    // update() may rebuild the viewport/tbody; re-notify once it settles so the
+    // consumer can rebind its scroll listener to the fresh tbodyElement.
+    void grid.update(options).then(() => notifyReady(grid));
   }, [options]);
 
   const showEmpty = !!emptyMessage && gridRowCount(options) === 0;
