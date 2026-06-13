@@ -51,3 +51,34 @@
 .hcg-theme-graphite .ix-grid-cell-text {
   text-align: left;
 }
+
+/* Funds cell renderers (used by fundsGridOptions formatters). */
+.hcg-theme-graphite .ix-grid-link {
+  font-weight: 700;
+  color: var(--color-accent);
+}
+.hcg-theme-graphite .ix-grid-link:hover { text-decoration: underline; }
+.hcg-theme-graphite .ix-grid-link-plain { color: var(--color-text-primary); text-decoration: none; }
+.hcg-theme-graphite .ix-grid-link-plain:hover { text-decoration: underline; }
+.hcg-theme-graphite .ix-grid-trunc {
+  display: inline-block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+.hcg-theme-graphite .ix-grid-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-field);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+.hcg-theme-graphite .ix-grid-elite { color: var(--color-accent); font-weight: 700; }
