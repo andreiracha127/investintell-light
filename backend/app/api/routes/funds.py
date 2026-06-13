@@ -53,10 +53,20 @@ from app.schemas.lookthrough import (
     build_dimensions,
 )
 from app.schemas.market import FundHistoryResponse, HistoryBar
+from app.schemas.timeseries import LineSeriesResponse
 from app.services import funds_catalog as catalog
 from app.services import lookthrough
 from app.services._series import select_adj_ohlcv_rows as _select_adj_ohlcv_rows_impl
 from app.services.screener import render_csv
+from app.services.timeseries import (
+    RangeKey,
+    range_start,
+    resolve_interval,
+    to_ms_pairs,
+)
+from app.services.timeseries import (
+    select_nav_line as _select_nav_line_impl,
+)
 from app.tiingo.client import TiingoClient
 from app.tiingo.exceptions import TiingoError
 
@@ -67,6 +77,7 @@ logger = logging.getLogger(__name__)
 # Module-level aliases so tests can monkeypatch them directly on this module.
 _ensure_eod_or_http_error = ensure_eod_or_http_error
 _select_adj_ohlcv_rows = _select_adj_ohlcv_rows_impl
+_select_nav_line = _select_nav_line_impl
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 DatalakeDep = Annotated[AsyncSession, Depends(get_datalake_session)]
@@ -434,4 +445,30 @@ async def get_fund_history(
         mode="nav",
         count=len(nav_rows),
         bars=[HistoryBar(t=_ms(d), o=v, h=v, l=v, c=v, v=0) for d, v in nav_rows],
+    )
+
+
+@router.get("/funds/{instrument_id}/timeseries", response_model=LineSeriesResponse)
+async def get_fund_timeseries(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    range_: Annotated[
+        RangeKey, Query(alias="range", description="Visible range preset.")
+    ] = "1Y",
+) -> LineSeriesResponse:
+    """Fund NAV line in Highcharts arrays; granularity by range.
+
+    <=1Y serves daily (raw nav_timeseries), 1-5Y weekly CAGG, >5Y monthly CAGG —
+    the downsample happens in the DB, never in Python.
+    """
+    today = dt.date.today()
+    interval = resolve_interval(range_)
+    start = range_start(range_, today)
+    rows = await _select_nav_line(session, str(instrument_id), interval, start)
+    if not rows:
+        raise HTTPException(
+            status_code=404, detail=f"No NAV history for fund {instrument_id}."
+        )
+    return LineSeriesResponse(
+        id=str(instrument_id), interval=interval, series=to_ms_pairs(rows)
     )
