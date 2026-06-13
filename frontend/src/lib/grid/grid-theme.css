@@ -1,0 +1,53 @@
+/*
+ * Graphite token bridge for Highcharts Grid Pro.
+ * Maps the grid's --hcg-* custom properties onto the project's design tokens
+ * (globals.css @theme) so the grid inherits light/dark/density automatically.
+ * Square, hairline, tabular — consistent with the Cockpit/Carbon tables.
+ */
+.hcg-theme-graphite {
+  /* surfaces & text */
+  --hcg-background: var(--color-surface-2);
+  --hcg-color: var(--color-text-primary);
+  --hcg-border-color: var(--color-border);
+  --hcg-border-width: 1px;
+  --hcg-border-radius: 0;
+  --hcg-icon-border-radius: 0;
+
+  /* density */
+  --hcg-font-size: var(--ix-fs);
+  --hcg-padding: 8px;
+  --hcg-header-vertical-padding: 8px;
+  --hcg-pagination-vertical-padding: 8px;
+
+  /* rows */
+  --hcg-row-even-background: var(--color-zebra);
+  --hcg-row-hover-background: var(--color-accent-wash);
+
+  /* focus / accent */
+  --hcg-focus-ring-color: var(--color-accent);
+
+  /* header/menu buttons */
+  --hcg-button-color: var(--color-text-secondary);
+  --hcg-button-hover-background: var(--color-layer-hover);
+  --hcg-button-hover-color: var(--color-text-primary);
+  --hcg-button-border-color: var(--color-border-strong);
+  --hcg-button-border-radius: 0;
+
+  /* inputs (filter / search / edit cells) */
+  --hcg-input-border-color: var(--color-border-strong);
+  --hcg-input-hover-border-color: var(--color-accent);
+  --hcg-input-border-radius: 0;
+
+  /* pagination selected page */
+  --hcg-pagination-button-selected-background: var(--color-accent);
+  --hcg-pagination-button-selected-color: var(--color-on-accent);
+}
+
+/* Numeric cells: right-aligned, tabular numerals (data-table convention). */
+.hcg-theme-graphite .ix-grid-cell-num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.hcg-theme-graphite .ix-grid-cell-text {
+  text-align: left;
+}
