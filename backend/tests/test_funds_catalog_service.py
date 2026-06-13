@@ -4,10 +4,12 @@ CSV projection (header + stable cells via the screener renderer).
 """
 
 import datetime as dt
+import uuid
 
 import pytest
 
 from app.services import funds_catalog as catalog
+from app.services.funds_catalog import build_nav_series_select
 from app.services.screener import render_csv
 
 # ---------------------------------------------------------------------------
@@ -136,6 +138,21 @@ def test_decimate_long_series_keeps_endpoints_and_order() -> None:
 def test_decimate_target_must_be_at_least_two() -> None:
     with pytest.raises(ValueError):
         catalog.decimate_nav(_series(10), target=1)
+
+
+# ---------------------------------------------------------------------------
+# NAV series SELECT (raw nav_timeseries hypertable — Task 2.4)
+# ---------------------------------------------------------------------------
+
+
+def test_nav_series_select_targets_nav_timeseries() -> None:
+    stmt = build_nav_series_select(
+        uuid.UUID("00000000-0000-0000-0000-000000000001"),
+        dt.date(2024, 1, 1),
+    )
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": False}))
+    assert "nav_timeseries" in sql
+    assert "nav_date" in sql
 
 
 # ---------------------------------------------------------------------------

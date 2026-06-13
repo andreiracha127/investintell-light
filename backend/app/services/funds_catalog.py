@@ -19,11 +19,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, fields
 from typing import Any, cast
 
-from sqlalchemy import ColumnElement, Select, func, or_, select
+from sqlalchemy import ColumnElement, Select, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
-from app.models.fund import Fund, FundClass, FundHolding, FundNav, FundRiskLatest
+from app.models.fund import Fund, FundClass, FundHolding, FundRiskLatest
 from app.sync.funds import UNCLASSIFIED_LABEL
 
 # Hard cap on the CSV export — bounded output, no pagination (screener parity).
@@ -257,13 +257,16 @@ async def fetch_staleness(session: AsyncSession) -> Staleness:
     The retired sync snapshot carried per-row synced_at/source_calc_date/
     source_nav_max_date; the funds_v VIEW has none, so staleness is read live:
     - source_calc_date  = MAX(fund_risk_latest_mv.calc_date)
-    - source_nav_max_date = MAX(fund_nav.nav_date)
+    - source_nav_max_date = MAX(nav_timeseries.nav_date)  (raw hypertable, 2.4)
     - synced_at         = the view is "as fresh as the read" → query time, but
       only when the universe is non-empty (None on an empty catalog, matching
-      the previous empty-table contract). Task 2.4 finalizes the NAV source.
+      the previous empty-table contract).
     """
     source_calc_date = await session.scalar(select(func.max(FundRiskLatest.calc_date)))
-    source_nav_max_date = await session.scalar(select(func.max(FundNav.nav_date)))
+    source_nav_max_date = cast(
+        "dt.date | None",
+        await session.scalar(text("SELECT max(nav_date) FROM nav_timeseries")),
+    )
     fund_count = int(
         await session.scalar(select(func.count()).select_from(Fund)) or 0
     )
@@ -324,8 +327,28 @@ def csv_rows(rows: Sequence[dict[str, Any]]) -> list[dict[str, str | float | Non
 
 
 # ---------------------------------------------------------------------------
-# NAV decimation (pure — unit-tested)
+# NAV series read (raw nav_timeseries hypertable) + decimation (pure)
 # ---------------------------------------------------------------------------
+
+
+def build_nav_series_select(instrument_id: uuid.UUID, start: dt.date) -> Select[Any]:
+    """NAV (nav_date, nav) for one fund from the raw nav_timeseries hypertable.
+
+    Reads the timeseries directly (Task 2.4) instead of the retired fund_nav
+    snapshot. Bound params (no user input reaches SQL text); date-sorted; NULL
+    NAVs dropped so the chart shows real prints only.
+    """
+    return (
+        select(text("nav_date"), text("nav"))
+        .select_from(text("nav_timeseries"))
+        .where(
+            text("instrument_id = :iid"),
+            text("nav_date >= :start"),
+            text("nav IS NOT NULL"),
+        )
+        .order_by(text("nav_date"))
+        .params(iid=str(instrument_id), start=start)
+    )
 
 
 def decimate_nav(
@@ -381,21 +404,18 @@ async def fetch_fund_profile(
         return None
     risk = await session.get(FundRiskLatest, instrument_id)
 
-    max_nav_date = await session.scalar(
-        select(func.max(FundNav.nav_date)).where(
-            FundNav.instrument_id == instrument_id
-        )
+    max_nav_date = cast(
+        "dt.date | None",
+        await session.scalar(
+            text("SELECT max(nav_date) FROM nav_timeseries WHERE instrument_id = :iid"),
+            {"iid": str(instrument_id)},
+        ),
     )
     nav: list[tuple[dt.date, float | None]] = []
     if max_nav_date is not None:
         window_start = max_nav_date - dt.timedelta(days=NAV_WINDOW_DAYS)
         result = await session.execute(
-            select(FundNav.nav_date, FundNav.nav)
-            .where(
-                FundNav.instrument_id == instrument_id,
-                FundNav.nav_date >= window_start,
-            )
-            .order_by(FundNav.nav_date)
+            build_nav_series_select(instrument_id, window_start)
         )
         raw = [
             (cast("dt.date", nav_date), float(value) if value is not None else None)

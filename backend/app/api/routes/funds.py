@@ -1,8 +1,8 @@
 """Fund universe endpoints (F8.2): navigable list, full profile and CSV.
 
-DB-only contract: every read is served from the local F8.1 snapshot tables
-(`funds`, `fund_risk_latest`, `fund_nav`, `fund_holdings`) — these routes
-NEVER talk to the mother DB or Tiingo. Routes are thin: SQL, the sort
+DB-only contract: every read is served from the local catalog sources
+(`funds_v`, `fund_risk_latest_mv`, `nav_timeseries`, `fund_holdings`) — these
+routes NEVER talk to the mother DB or Tiingo. Routes are thin: SQL, the sort
 whitelist and the pure CSV/decimation helpers live in
 ``app.services.funds_catalog``.
 
@@ -19,7 +19,7 @@ automatic classifier has known errors — every response carries the fixed
 ETF exception: GET /funds/{id}/history may warm eod_prices via the sanctioned
 ingestion path (app.api._shared.ensure_eod_or_http_error) — ETFs trade like
 stocks and reuse the stocks OHLCV series; on Tiingo failure it degrades to
-the local fund_nav series (mode "nav").
+the local nav_timeseries series (mode "nav").
 """
 
 import datetime as dt
@@ -28,14 +28,14 @@ import uuid
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import select
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._shared import ensure_eod_or_http_error
 from app.core.datalake import get_datalake_session
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
-from app.models.fund import Fund, FundNav
+from app.models.fund import Fund
 from app.schemas.funds import (
     FundClassOut,
     FundHoldingItem,
@@ -357,16 +357,19 @@ async def _get_fund(session: AsyncSession, instrument_id: uuid.UUID) -> Fund | N
 async def _select_nav_rows(
     session: AsyncSession, instrument_id: uuid.UUID, start: dt.date, end: dt.date
 ) -> list[tuple[dt.date, float]]:
-    """(nav_date, nav) em [start, end], ASC, NAVs nulos descartados."""
+    """(nav_date, nav) em [start, end], ASC, NAVs nulos descartados.
+
+    Lê a hypertable bruta ``nav_timeseries`` (Task 2.4), não o snapshot
+    ``fund_nav`` aposentado; mesmo shape de retorno.
+    """
     result = await session.execute(
-        select(FundNav.nav_date, FundNav.nav)
-        .where(
-            FundNav.instrument_id == instrument_id,
-            FundNav.nav_date >= start,
-            FundNav.nav_date <= end,
-            FundNav.nav.is_not(None),
-        )
-        .order_by(FundNav.nav_date)
+        text(
+            "SELECT nav_date, nav FROM nav_timeseries "
+            "WHERE instrument_id = :iid AND nav_date >= :start "
+            "AND nav_date <= :end AND nav IS NOT NULL "
+            "ORDER BY nav_date"
+        ),
+        {"iid": str(instrument_id), "start": start, "end": end},
     )
     return [(d, float(v)) for d, v in result.all()]
 
