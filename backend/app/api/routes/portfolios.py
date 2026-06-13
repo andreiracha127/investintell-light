@@ -26,6 +26,7 @@ from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._shared import ensure_eod_or_http_error, raise_news_fetch_error
+from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.core.datalake import get_datalake_session
 from app.core.db import get_session
@@ -55,7 +56,11 @@ from app.tiingo.exceptions import TiingoError
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/portfolios", tags=["portfolios"])
+router = APIRouter(
+    prefix="/portfolios",
+    tags=["portfolios"],
+    dependencies=[Depends(get_current_user)],
+)
 
 # Window passed to the EOD ensure: informational only — the ingestion service
 # fetches full history for cold tickers and refreshes incrementally for stale
