@@ -40,8 +40,8 @@ import { buildAllocationOption, type AllocationSlice } from "@/lib/charts/alloca
 import { chartColors, type ChartColors } from "@/lib/charts/theme";
 import { EChart } from "@/components/charts/EChart";
 import { DataGrid } from "@/components/ui/DataGrid";
-import { positionsToGridOptions } from "@/lib/grid/positionsGridOptions";
-import { flashClassForDir } from "@/lib/grid/liveFlash";
+import { positionsToGridOptions, POSITION_COLS } from "@/lib/grid/positionsGridOptions";
+import { flashClassForDir, FLASH_UP, FLASH_DOWN } from "@/lib/grid/liveFlash";
 import { useLiveTicks } from "@/lib/livefeed/useLiveTicks";
 import { Card, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
 import { retryPolicy } from "@/components/screener/shared";
@@ -779,26 +779,35 @@ function PositionsTable({
   // grid.update(), which would clobber an in-progress Pro cell edit (cost /
   // shares). Positions render NON-virtualized, so every row is in viewport.rows.
   const gridRef = useRef<Grid | null>(null);
+  // Bumped whenever DataGrid re-fires onReady (after create AND after every
+  // update()). Adding it to the live-tick effect deps re-flushes the current
+  // ticks onto a (re)built viewport — otherwise grid.update() (overview
+  // refetch, or a cost/shares edit re-memoizing gridOptions) rebuilds the
+  // cells and lastFormatter reverts "Last" to the EOD close until the next
+  // tick. It also covers the case where the grid becomes ready after the first
+  // tick batch arrives. setGridEpoch only fires inside onReady (a grid-lib
+  // callback), never during render, so there's no render loop.
+  const [gridEpoch, setGridEpoch] = useState(0);
 
   useEffect(() => {
     const vp = gridRef.current?.viewport;
     if (!vp) return;
     for (const row of vp.rows) {
-      const sym = String(row.getCell("ticker")?.value ?? "");
+      const sym = String(row.getCell(POSITION_COLS.ticker)?.value ?? "");
       const tick = ticks[sym];
       if (!tick) continue;
-      const el = row.getCell("last")?.htmlElement;
+      const el = row.getCell(POSITION_COLS.last)?.htmlElement;
       if (!el) continue;
       el.textContent = formatCurrency(tick.price);
       const cls = flashClassForDir(tick.dir);
       if (!cls) continue;
       // Re-trigger the CSS animation on rapid ticks: drop both flash classes,
       // force a reflow, then add the current one.
-      el.classList.remove("ix-grid-flash-up", "ix-grid-flash-down");
+      el.classList.remove(FLASH_UP, FLASH_DOWN);
       void el.offsetWidth; // reflow
       el.classList.add(cls);
     }
-  }, [ticks]);
+  }, [ticks, gridEpoch]);
 
   const liveActive = feedStatus === "live" && Object.keys(ticks).length > 0;
 
@@ -834,6 +843,7 @@ function PositionsTable({
           className="min-h-[120px] w-full"
           onReady={(g) => {
             gridRef.current = g;
+            setGridEpoch((n) => n + 1);
           }}
         />
       </div>
@@ -854,16 +864,14 @@ function PositionsTable({
 
       {/* Footer: LIVE/EOD badge + cash + total value */}
       <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 border-t border-border px-[var(--ix-pad)] py-2.5 text-[12px] text-text-secondary">
-        {liveActive ? (
+        {(liveActive || aggregates.as_of) && (
           <span className="border border-border bg-field px-[7px] py-[2px] text-[10px] text-text-muted">
-            <span className="text-gain">● LIVE</span>
+            {liveActive ? (
+              <span className="text-gain">● LIVE</span>
+            ) : (
+              <>EOD · {formatDate(aggregates.as_of!)}</>
+            )}
           </span>
-        ) : (
-          aggregates.as_of && (
-            <span className="border border-border bg-field px-[7px] py-[2px] text-[10px] text-text-muted">
-              EOD · {formatDate(aggregates.as_of)}
-            </span>
-          )
         )}
         <span className="tabular-nums">Cash: {formatCurrency(aggregates.cash)}</span>
         <span className="ml-auto font-bold tabular-nums text-text-primary">

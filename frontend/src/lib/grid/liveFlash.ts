@@ -7,9 +7,16 @@
  */
 export type TickDir = 1 | -1 | 0;
 
+/**
+ * Flash class names, shared so the helper and the DOM-toggling effect can't
+ * drift. Matched as literals by `grid-theme.css` (CSS can't import these).
+ */
+export const FLASH_UP = "ix-grid-flash-up";
+export const FLASH_DOWN = "ix-grid-flash-down";
+
 /** 1 → up, -1 → down, 0 (unchanged) → no flash. */
 export function flashClassForDir(dir: TickDir): string | null {
-  if (dir === 1) return "ix-grid-flash-up";
-  if (dir === -1) return "ix-grid-flash-down";
+  if (dir === 1) return FLASH_UP;
+  if (dir === -1) return FLASH_DOWN;
   return null;
 }

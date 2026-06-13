@@ -24,6 +24,13 @@ export interface PositionsCallbacks {
   onRemove: (ticker: string) => void;
 }
 
+/**
+ * Column ids referenced cross-file by the live-tick effect (which reads the
+ * "ticker" cell to match a symbol and writes the "last" cell). Shared so a
+ * rename stays compile-safe; other column ids stay inline.
+ */
+export const POSITION_COLS = { ticker: "ticker", last: "last" } as const;
+
 export function escapeHtml(value: unknown): string {
   return String(value)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -97,8 +104,8 @@ const PNL_AGG = (a: Aggregates): string => {
 
 export function positionsGridColumns(aggregates: Aggregates, callbacks?: PositionsCallbacks): GridColumns {
   const cols: GridColumns = [
-    { id: "ticker", header: { format: "Ticker" }, className: "ix-grid-cell-text", cells: { formatter: tickerFormatter } },
-    { id: "last", header: { format: "Last" }, className: "ix-grid-cell-num", cells: { formatter: lastFormatter } },
+    { id: POSITION_COLS.ticker, header: { format: "Ticker" }, className: "ix-grid-cell-text", cells: { formatter: tickerFormatter } },
+    { id: POSITION_COLS.last, header: { format: "Last" }, className: "ix-grid-cell-num", cells: { formatter: lastFormatter } },
     { id: "change", header: { format: "Change" }, className: "ix-grid-cell-num", cells: { formatter: changeFormatter } },
     { id: "cost", header: { format: "Cost" }, className: "ix-grid-cell-num", dataType: "number", cells: { formatter: costFormatter, editMode: { enabled: true } } },
     { id: "shares", header: { format: "Shares" }, className: "ix-grid-cell-num", dataType: "number", cells: { formatter: sharesFormatter, editMode: { enabled: true } } },
