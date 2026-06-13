@@ -1,0 +1,13 @@
+# Railway deploy config for the FastAPI API service (always-on, NOT cron).
+# Pointed at by the API service via the `railway_config_file` setting, like
+# railway.livefeed.toml in the workers repo. Does NOT replace railway.toml
+# (the fund-catalog-sync cron, retired in Phase 4 of this migration).
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+restartPolicyType = "always"
+healthcheckPath = "/health"
+healthcheckTimeout = 120
