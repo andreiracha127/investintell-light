@@ -92,3 +92,7 @@
 .hcg-theme-graphite .ix-grid-remove { cursor: pointer; color: var(--color-text-muted); }
 .hcg-theme-graphite .ix-grid-remove:hover { color: var(--color-loss); }
 .hcg-theme-graphite .ix-grid-editable { text-decoration: underline dotted var(--color-text-muted); text-underline-offset: 3px; }
+
+/* Universe-preview include checkbox column: centered toggle. */
+.hcg-theme-graphite .ix-grid-cell-check { text-align: center; }
+.hcg-theme-graphite .ix-grid-cell-check input[type="checkbox"] { accent-color: var(--color-accent); cursor: pointer; }

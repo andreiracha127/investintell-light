@@ -3455,6 +3455,8 @@ export interface components {
              * @default 30
              */
             max_assets: number;
+            /** Include Instrument Ids */
+            include_instrument_ids?: string[] | null;
         };
         /** ValidationError */
         ValidationError: {
