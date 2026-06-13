@@ -8,16 +8,16 @@
  * every metric is the mother-DB value (never recomputed here).
  */
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   fetchFunds,
   fetchFundsCsv,
-  type FundListItem,
   type FundsList,
   type FundsQuery,
 } from "@/lib/api/client";
+import { DataGrid } from "@/components/ui/DataGrid";
+import { fundsListToGridOptions } from "@/lib/grid/fundsGridOptions";
 import { PageTitle } from "@/components/ui/panels";
 import {
   BUTTON_CLASS,
@@ -26,7 +26,7 @@ import {
   INPUT_CLASS,
   retryPolicy,
 } from "@/components/screener/shared";
-import { formatCompact, formatDate, formatNumber, formatPercent } from "@/lib/format";
+import { formatCompact, formatDate } from "@/lib/format";
 
 const PAGE_SIZE = 50;
 type SortDir = "asc" | "desc";
@@ -45,34 +45,6 @@ const ASSET_CLASSES: { value: AssetClass; label: string }[] = [
   { value: "fixed_income", label: "Fixed income" },
   { value: "cash", label: "Cash" },
   { value: "alternatives", label: "Alternatives" },
-];
-
-const TYPE_TAG: Record<string, string> = {
-  etf: "ETF",
-  mutual_fund: "MF",
-  mmf: "MMF",
-};
-
-// Backend stores the raw enum (equity/fixed_income/...); the table must show
-// the same labels the filter dropdown uses.
-const ASSET_CLASS_LABEL: Record<string, string> = Object.fromEntries(
-  ASSET_CLASSES.map((a) => [a.value, a.label]),
-);
-
-/** Sortable table columns — code is the backend whitelist column. */
-const COLUMNS: { code: string; label: string; numeric: boolean }[] = [
-  { code: "ticker", label: "Ticker", numeric: false },
-  { code: "name", label: "Name", numeric: false },
-  { code: "fund_type", label: "Type", numeric: false },
-  { code: "strategy_label", label: "Strategy", numeric: false },
-  { code: "asset_class", label: "Asset class", numeric: false },
-  { code: "aum_usd", label: "AUM", numeric: true },
-  { code: "expense_ratio", label: "Expense", numeric: true },
-  { code: "return_1y", label: "Return 1Y", numeric: true },
-  { code: "volatility_1y", label: "Vol 1Y", numeric: true },
-  { code: "sharpe_1y", label: "Sharpe 1Y", numeric: true },
-  { code: "peer_sharpe_pctl", label: "Peer pctl", numeric: true },
-  { code: "elite_flag", label: "Elite", numeric: true },
 ];
 
 /** Parse a non-empty numeric input; invalid/blank -> undefined (no filter). */
@@ -161,15 +133,13 @@ export function FundsView() {
     }
   };
 
-  const onSort = (code: string) => {
-    if (sort === code) {
-      setDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSort(code);
-      setDir(code === "ticker" || code === "name" ? "asc" : "desc");
-    }
+  // The grid toggles internally and reports the resulting order via afterSort;
+  // we just apply it. Setters are stable, so [] deps are correct.
+  const onSortChange = useCallback((code: string, nextDir: SortDir) => {
+    setSort(code);
+    setDir(nextDir);
     setPage(1);
-  };
+  }, []);
 
   const data = fundsQuery.data;
   const meta = data
@@ -286,7 +256,7 @@ export function FundsView() {
           setPage={setPage}
           sort={sort}
           dir={dir}
-          onSort={onSort}
+          onSortChange={onSortChange}
           isFetching={fundsQuery.isFetching}
           exporting={exporting}
           exportError={exportError}
@@ -329,7 +299,7 @@ function FundsTable({
   setPage,
   sort,
   dir,
-  onSort,
+  onSortChange,
   isFetching,
   exporting,
   exportError,
@@ -340,13 +310,17 @@ function FundsTable({
   setPage: (updater: (p: number) => number) => void;
   sort: string;
   dir: SortDir;
-  onSort: (code: string) => void;
+  onSortChange: (code: string, dir: SortDir) => void;
   isFetching: boolean;
   exporting: boolean;
   exportError: string | null;
   onExport: () => void;
 }) {
-  const { items, total } = data;
+  const { total } = data;
+  const gridOptions = useMemo(
+    () => fundsListToGridOptions(data, { sort, dir }, { onSortChange }),
+    [data, sort, dir, onSortChange],
+  );
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const firstRow = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const lastRow = Math.min(page * PAGE_SIZE, total);
@@ -379,56 +353,8 @@ function FundsTable({
         </p>
       )}
 
-      <div className={`overflow-x-auto transition-opacity ${isFetching ? "opacity-60" : ""}`}>
-        <table className="w-full min-w-[1080px] border-collapse ix-fs tabular-nums lining-nums">
-          <thead>
-            <tr className="bg-field">
-              {COLUMNS.map((col) => {
-                const active = sort === col.code;
-                return (
-                  <th
-                    key={col.code}
-                    className={`sticky top-0 whitespace-nowrap bg-field px-2.5 py-[9px] first:pl-[var(--ix-pad)] last:pr-[var(--ix-pad)] border-t border-t-border ${
-                      col.numeric ? "text-right" : "text-left"
-                    } ${
-                      active
-                        ? "border-b-2 border-b-accent font-bold text-accent"
-                        : "border-b border-b-border-strong font-semibold text-text-secondary"
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => onSort(col.code)}
-                      aria-label={`Sort by ${col.label}`}
-                      className={`whitespace-nowrap transition-colors ${
-                        active ? "font-bold text-accent" : "font-semibold hover:text-text-primary"
-                      }`}
-                    >
-                      {col.label}
-                      {active && (
-                        <span aria-hidden="true" className="ml-1">
-                          {dir === "asc" ? "▲" : "▼"}
-                        </span>
-                      )}
-                    </button>
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((fund, i) => (
-              <FundRow key={fund.instrument_id} fund={fund} zebra={i % 2 === 1} />
-            ))}
-            {items.length === 0 && (
-              <tr>
-                <td colSpan={COLUMNS.length} className="py-6 text-center text-[13px] text-text-muted">
-                  No funds match the current filters.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      <div className={`transition-opacity ${isFetching ? "opacity-60" : ""}`}>
+        <DataGrid options={gridOptions} className="h-[600px] w-full" />
       </div>
 
       <div className="flex flex-wrap items-center gap-2.5 border-t border-border px-[var(--ix-pad)] py-2.5 text-[12px] text-text-secondary">
@@ -483,97 +409,4 @@ function pageWindow(page: number, totalPages: number): number[] {
   const size = Math.min(5, totalPages);
   const start = Math.min(Math.max(1, page - 2), totalPages - size + 1);
   return Array.from({ length: size }, (_, i) => start + i);
-}
-
-const CELL_CLASS = "ix-cell px-2.5 first:pl-[var(--ix-pad)] last:pr-[var(--ix-pad)]";
-
-function signTone(value: number): string {
-  if (value > 0) return "font-bold text-gain";
-  if (value < 0) return "font-bold text-loss";
-  return "text-text-primary";
-}
-
-function FundRow({ fund, zebra }: { fund: FundListItem; zebra: boolean }) {
-  const href = `/funds/${encodeURIComponent(fund.instrument_id)}`;
-  return (
-    <tr
-      className={`border-b border-border transition-colors hover:bg-accent-wash ${
-        zebra ? "bg-zebra" : ""
-      }`}
-    >
-      <td className={CELL_CLASS}>
-        <Link href={href} className="font-bold text-accent hover:underline">
-          {fund.ticker ?? "—"}
-        </Link>
-      </td>
-      <td className={`${CELL_CLASS} text-left`}>
-        <Link href={href} className="text-text-primary no-underline hover:underline">
-          <span className="block max-w-[280px] truncate">{fund.name}</span>
-        </Link>
-      </td>
-      <td className={`${CELL_CLASS} text-left`}>
-        <span className="inline-flex h-[18px] items-center border border-border-strong bg-field px-1.5 text-[10px] font-bold uppercase tracking-[0.05em] text-text-secondary">
-          {TYPE_TAG[fund.fund_type] ?? fund.fund_type}
-        </span>
-      </td>
-      <td className={`${CELL_CLASS} text-left text-text-secondary`}>
-        <span className="block max-w-[200px] truncate">{fund.strategy_label}</span>
-      </td>
-      <td className={`${CELL_CLASS} text-left text-text-secondary`}>
-        {fund.asset_class
-          ? (ASSET_CLASS_LABEL[fund.asset_class] ?? fund.asset_class)
-          : "—"}
-      </td>
-      <td className={`${CELL_CLASS} text-right`}>
-        {fund.aum_usd !== null ? `$${formatCompact(fund.aum_usd)}` : "—"}
-      </td>
-      <td className={`${CELL_CLASS} text-right`}>
-        {fund.expense_ratio !== null ? formatPercent(fund.expense_ratio) : "—"}
-      </td>
-      <td
-        className={`${CELL_CLASS} text-right ${
-          fund.return_1y !== null ? signTone(fund.return_1y) : "text-text-primary"
-        }`}
-      >
-        {fund.return_1y !== null ? formatPercent(fund.return_1y, 2, { signed: true }) : "—"}
-      </td>
-      <td className={`${CELL_CLASS} text-right`}>
-        {fund.volatility_1y !== null ? formatPercent(fund.volatility_1y) : "—"}
-      </td>
-      <td className={`${CELL_CLASS} text-right`}>
-        {fund.sharpe_1y !== null ? formatNumber(fund.sharpe_1y) : "—"}
-      </td>
-      <td className={`${CELL_CLASS} text-right`}>
-        {fund.peer_sharpe_pctl !== null ? (
-          <span className="inline-flex items-center justify-end gap-1.5">
-            <span className="relative inline-block h-[4px] w-[52px] bg-field border border-border">
-              <span
-                className="absolute inset-y-0 left-0 bg-accent"
-                style={{ width: `${Math.min(100, Math.max(0, fund.peer_sharpe_pctl))}%` }}
-              />
-            </span>
-            <span className="w-[26px] text-right">{formatNumber(fund.peer_sharpe_pctl, 0)}</span>
-          </span>
-        ) : (
-          "—"
-        )}
-      </td>
-      <td className={`${CELL_CLASS} text-right`}>
-        {fund.elite_flag ? (
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 16 16"
-            fill="none"
-            aria-label="Elite fund"
-            className="inline text-accent"
-          >
-            <path d="M2.5 8.5L6.5 12.5L13.5 4" stroke="currentColor" strokeWidth="2" />
-          </svg>
-        ) : (
-          <span className="text-text-muted">—</span>
-        )}
-      </td>
-    </tr>
-  );
 }
