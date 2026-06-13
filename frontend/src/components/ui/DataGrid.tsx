@@ -9,15 +9,18 @@
 import { useEffect, useRef } from "react";
 import type { Grid, Options } from "@highcharts/grid-pro";
 
+import { gridRowCount } from "@/lib/grid/gridEmpty";
 import "@highcharts/grid-pro/css/grid-pro.css";
 import "@/lib/grid/grid-theme.css";
 
 export function DataGrid({
   options,
   className,
+  emptyMessage,
 }: {
   options: Options;
   className?: string;
+  emptyMessage?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<Grid | null>(null);
@@ -44,5 +47,16 @@ export function DataGrid({
     void gridRef.current?.update(options);
   }, [options]);
 
-  return <div ref={containerRef} className={className} />;
+  const showEmpty = !!emptyMessage && gridRowCount(options) === 0;
+
+  return (
+    <div className={`relative ${className ?? ""}`}>
+      <div ref={containerRef} className="h-full w-full" />
+      {showEmpty && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4 text-center text-[13px] text-text-muted">
+          {emptyMessage}
+        </div>
+      )}
+    </div>
+  );
 }

@@ -354,7 +354,11 @@ function FundsTable({
       )}
 
       <div className={`transition-opacity ${isFetching ? "opacity-60" : ""}`}>
-        <DataGrid options={gridOptions} className="h-[600px] w-full" />
+        <DataGrid
+          options={gridOptions}
+          className="h-[600px] w-full"
+          emptyMessage="No funds match the current filters."
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-2.5 border-t border-border px-[var(--ix-pad)] py-2.5 text-[12px] text-text-secondary">

@@ -193,7 +193,17 @@ export function ResultsTab({
       <div
         className={`transition-opacity ${resultsQuery.isFetching ? "opacity-60" : ""}`}
       >
-        {gridOptions && <DataGrid options={gridOptions} className="h-[560px] w-full" />}
+        {gridOptions && (
+          <DataGrid
+            options={gridOptions}
+            className="h-[560px] w-full"
+            emptyMessage={
+              total === 0 && search
+                ? `No matches for "${search}".`
+                : "No matches — loosen the filters, or the metrics snapshot may not be computed yet."
+            }
+          />
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-2.5 border-t border-border px-[var(--ix-pad)] py-2.5 text-[12px] text-text-secondary">
