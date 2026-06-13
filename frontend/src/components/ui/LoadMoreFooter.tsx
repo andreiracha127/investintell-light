@@ -29,19 +29,23 @@ export function LoadMoreFooter({
           ? "0 rows"
           : `Loaded ${formatCompact(loaded)} of ${formatCompact(total)}`}
       </span>
-      <button
-        type="button"
-        onClick={onLoadMore}
-        disabled={allLoaded || isFetchingNextPage}
-        aria-label="Load more rows"
-        className="ml-auto flex h-[30px] items-center px-3 tabular-nums bg-field border border-border-strong text-text-secondary transition-colors hover:bg-layer-hover disabled:cursor-not-allowed disabled:text-text-muted disabled:hover:bg-field"
-      >
-        {isFetchingNextPage
-          ? "Loading…"
-          : allLoaded
-            ? "All loaded"
-            : "Load more"}
-      </button>
+      {/* On an empty result the empty-state overlay covers the grid, so a
+          disabled "All loaded" button reads oddly — show only the count. */}
+      {total > 0 && (
+        <button
+          type="button"
+          onClick={onLoadMore}
+          disabled={allLoaded || isFetchingNextPage}
+          aria-label="Load more rows"
+          className="ml-auto flex h-[30px] items-center px-3 tabular-nums bg-field border border-border-strong text-text-secondary transition-colors hover:bg-layer-hover disabled:cursor-not-allowed disabled:text-text-muted disabled:hover:bg-field"
+        >
+          {isFetchingNextPage
+            ? "Loading…"
+            : allLoaded
+              ? "All loaded"
+              : "Load more"}
+        </button>
+      )}
     </div>
   );
 }

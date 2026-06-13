@@ -31,6 +31,10 @@ export function loadedCount<TPage>(
  * loaded. Robust to a server `total` that drifts below the loaded count
  * (e.g. rows deleted between requests) — it never asks for more than `total`.
  *
+ * Assumes deterministic, non-empty paging: the backend keeps returning rows
+ * until `loaded >= total`. An empty mid-stream page would not advance `loaded`,
+ * so this would keep requesting the next index (the server is the stop guard).
+ *
  * @param lastPage The most recently fetched page (carries the live `total`).
  * @param allPages Every page fetched so far (its length is the next index).
  * @param countOf  Extracts the row count contributed by one page.

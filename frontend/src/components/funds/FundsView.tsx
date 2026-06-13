@@ -155,9 +155,10 @@ export function FundsView() {
     () => fundsQuery.pages.flatMap((p) => p.items),
     [fundsQuery.pages],
   );
-  const mergedData: FundsList | undefined = lastPage
-    ? { ...lastPage, items: mergedItems }
-    : undefined;
+  const mergedData = useMemo<FundsList | undefined>(
+    () => (lastPage ? { ...lastPage, items: mergedItems } : undefined),
+    [lastPage, mergedItems],
+  );
 
   const meta = lastPage
     ? `${formatCompact(lastPage.total)} funds${

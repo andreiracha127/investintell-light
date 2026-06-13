@@ -34,6 +34,7 @@ import {
 } from "@/lib/grid/infiniteScroll";
 
 /** Distance (px) from the bottom of the body that triggers the next fetch. */
+// ~3 row-heights of prefetch lead so the next page lands before the user hits bottom.
 const NEAR_BOTTOM_PX = 320;
 
 export interface UseInfiniteGridParams<TPage extends PagedTotal> {

@@ -53,6 +53,13 @@ describe("nextPageParam", () => {
     const pages = [page(100, 100), page(80, 0)];
     expect(nextPageParam(pages[1], pages, rowCount)).toBeUndefined();
   });
+
+  it("keeps advancing on an empty mid-stream page (deterministic-paging assumption)", () => {
+    // An empty page below total does not raise `loaded`, so we still ask for
+    // the next index — the backend is trusted to return rows until loaded≥total.
+    const pages = [page(250, 100), page(250, 0)];
+    expect(nextPageParam(pages[1], pages, rowCount)).toBe(3);
+  });
 });
 
 describe("isNearBottom", () => {
