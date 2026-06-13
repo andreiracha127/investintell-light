@@ -220,6 +220,7 @@ async def _resolve_assets(
         rank_dir=spec.rank_dir,
         max_assets=spec.max_assets,
         require_aum=needs_bl,
+        include_ids=spec.include_instrument_ids,
         window_days=payload.window_days,
     )
     if len(candidates) < 2:

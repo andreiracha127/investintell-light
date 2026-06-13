@@ -117,6 +117,15 @@ class UniverseSpecIn(BaseModel):
     max_assets: Annotated[
         int, Field(ge=2, le=MAX_UNIVERSE_ASSETS)
     ] = DEFAULT_UNIVERSE_ASSETS
+    include_instrument_ids: (
+        Annotated[list[str], Field(min_length=2, max_length=MAX_UNIVERSE_ASSETS)] | None
+    ) = None
+    """Optional explicit subset (UUID strings) of the ranked universe to keep.
+
+    When the user prunes the previewed top-``max_assets`` candidates via
+    checkboxes, the kept ids are sent here; the optimizer runs over exactly
+    these (still subject to the same NAV/overlap guards). ``None`` = use the
+    full top-``max_assets`` ranked set (default behaviour)."""
 
 
 class OptimizeRequest(BaseModel):

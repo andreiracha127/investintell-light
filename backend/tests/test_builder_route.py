@@ -247,6 +247,7 @@ def _stub_universe(
         max_assets: int,
         require_aum: bool = False,
         window_days: int = 730,
+        include_ids: Any = None,
         **_: Any,
     ) -> list[optimizer_data.UniverseFund]:
         captured.update(
@@ -256,6 +257,7 @@ def _stub_universe(
             max_assets=max_assets,
             require_aum=require_aum,
             window_days=window_days,
+            include_ids=include_ids,
         )
         return funds
 
@@ -315,6 +317,54 @@ async def test_optimize_universe_bl_utility_requires_aum(
     # bl_utility needs equilibrium market weights → candidates must have AUM.
     assert captured["require_aum"] is True
     assert captured["rank_by"] == "sharpe_1y"
+
+
+async def test_optimize_universe_with_include_instrument_ids_prunes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+    # The pruned set the user kept (2 of the previewed candidates).
+    kept = [_FUND_IDS[0], _FUND_IDS[2]]
+    captured = _stub_universe(
+        monkeypatch,
+        [
+            optimizer_data.UniverseFund(id=fid, ticker=f"TIC{i}", name=f"Fund {i}")
+            for i, fid in zip((0, 2), kept)
+        ],
+    )
+    payload = {
+        "universe": {
+            "fund_type": "etf",
+            "max_assets": 10,
+            "include_instrument_ids": [str(_FUND_IDS[0]), str(_FUND_IDS[2])],
+        },
+        "objective": "min_cvar",
+        # 2 kept assets need a cap > 0.5 to leave a feasible long-only simplex.
+        "constraints": {"cap": 0.6},
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    # Weights cover exactly the pruned funds.
+    assert {w["ticker"] for w in body["weights"]} == {"TIC0", "TIC2"}
+    assert len(body["weights"]) == 2
+    # The kept ids were forwarded to the candidate resolver.
+    assert captured["include_ids"] == [str(_FUND_IDS[0]), str(_FUND_IDS[2])]
+
+
+async def test_optimize_universe_include_ids_single_element_rejected() -> None:
+    payload = {
+        "universe": {
+            "max_assets": 10,
+            "include_instrument_ids": [str(_FUND_IDS[0])],
+        },
+        "objective": "min_cvar",
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    # Field(min_length=2) → a 1-element pruned list is a validation error.
+    assert response.status_code == 422
 
 
 async def test_optimize_universe_too_few_candidates_maps_to_422(
