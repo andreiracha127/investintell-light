@@ -43,3 +43,6 @@ Thumbs.db
 
 # Lean research workspace (local-only, 225MB+ of data/containers)
 lean-research/
+
+# Superpowers brainstorm visual companion (local mockups)
+.superpowers/
