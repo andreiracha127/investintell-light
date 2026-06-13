@@ -96,3 +96,17 @@
 /* Universe-preview include checkbox column: centered toggle. */
 .hcg-theme-graphite .ix-grid-cell-check { text-align: center; }
 .hcg-theme-graphite .ix-grid-cell-check input[type="checkbox"] { accent-color: var(--color-accent); cursor: pointer; }
+
+/* Live-tick flash on the "Last" cell: a brief gain/loss bg tint that fades
+   out. Uses an animation (not a transition) so it auto-resets; the component
+   removes + re-adds the class (with a reflow) to re-trigger it on each tick. */
+.hcg-theme-graphite .ix-grid-flash-up { animation: ix-grid-flash-up 0.6s ease-out; }
+.hcg-theme-graphite .ix-grid-flash-down { animation: ix-grid-flash-down 0.6s ease-out; }
+@keyframes ix-grid-flash-up {
+  from { background: var(--color-gain-muted); }
+  to { background: transparent; }
+}
+@keyframes ix-grid-flash-down {
+  from { background: var(--color-loss-muted); }
+  to { background: transparent; }
+}

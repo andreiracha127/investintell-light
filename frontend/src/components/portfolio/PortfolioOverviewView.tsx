@@ -14,7 +14,8 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Grid } from "@highcharts/grid-pro";
 
 import {
   createPortfolio,
@@ -40,6 +41,8 @@ import { chartColors, type ChartColors } from "@/lib/charts/theme";
 import { EChart } from "@/components/charts/EChart";
 import { DataGrid } from "@/components/ui/DataGrid";
 import { positionsToGridOptions } from "@/lib/grid/positionsGridOptions";
+import { flashClassForDir } from "@/lib/grid/liveFlash";
+import { useLiveTicks } from "@/lib/livefeed/useLiveTicks";
 import { Card, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
 import { retryPolicy } from "@/components/screener/shared";
 import { PortfolioNewsPanel } from "@/components/portfolio/PortfolioNewsPanel";
@@ -765,6 +768,40 @@ function PositionsTable({
     [overview, positions, portfolioId, editMutation, removeMutation, queryClient],
   );
 
+  // ── Live price ticks (path: targeted DOM flash) ──────────────────────────
+  // Subscribe to the rendered positions' tickers. The hook degrades to a no-op
+  // ("off") without a configured feed, so this is silent when no WS is set.
+  const tickers = useMemo(() => positions.map((p) => p.ticker), [positions]);
+  const { ticks, status: feedStatus } = useLiveTicks(tickers);
+
+  // The live Grid instance, captured via DataGrid's onReady. We update the
+  // "Last" cell DOM directly instead of re-running positionsToGridOptions +
+  // grid.update(), which would clobber an in-progress Pro cell edit (cost /
+  // shares). Positions render NON-virtualized, so every row is in viewport.rows.
+  const gridRef = useRef<Grid | null>(null);
+
+  useEffect(() => {
+    const vp = gridRef.current?.viewport;
+    if (!vp) return;
+    for (const row of vp.rows) {
+      const sym = String(row.getCell("ticker")?.value ?? "");
+      const tick = ticks[sym];
+      if (!tick) continue;
+      const el = row.getCell("last")?.htmlElement;
+      if (!el) continue;
+      el.textContent = formatCurrency(tick.price);
+      const cls = flashClassForDir(tick.dir);
+      if (!cls) continue;
+      // Re-trigger the CSS animation on rapid ticks: drop both flash classes,
+      // force a reflow, then add the current one.
+      el.classList.remove("ix-grid-flash-up", "ix-grid-flash-down");
+      void el.offsetWidth; // reflow
+      el.classList.add(cls);
+    }
+  }, [ticks]);
+
+  const liveActive = feedStatus === "live" && Object.keys(ticks).length > 0;
+
   return (
     <section className="border border-border bg-surface-2">
       <div className="px-[var(--ix-pad)] py-3">
@@ -792,7 +829,13 @@ function PositionsTable({
         onDirty={() => addMutation.reset()}
       />
       <div className="border-t border-border">
-        <DataGrid options={gridOptions} className="min-h-[120px] w-full" />
+        <DataGrid
+          options={gridOptions}
+          className="min-h-[120px] w-full"
+          onReady={(g) => {
+            gridRef.current = g;
+          }}
+        />
       </div>
       {positions.length === 0 && (
         <p className="py-4 text-center text-[13px] text-text-muted">
@@ -809,12 +852,18 @@ function PositionsTable({
         </p>
       )}
 
-      {/* Footer: EOD tag + cash + total value */}
+      {/* Footer: LIVE/EOD badge + cash + total value */}
       <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 border-t border-border px-[var(--ix-pad)] py-2.5 text-[12px] text-text-secondary">
-        {aggregates.as_of && (
+        {liveActive ? (
           <span className="border border-border bg-field px-[7px] py-[2px] text-[10px] text-text-muted">
-            EOD · {formatDate(aggregates.as_of)}
+            <span className="text-gain">● LIVE</span>
           </span>
+        ) : (
+          aggregates.as_of && (
+            <span className="border border-border bg-field px-[7px] py-[2px] text-[10px] text-text-muted">
+              EOD · {formatDate(aggregates.as_of)}
+            </span>
+          )
         )}
         <span className="tabular-nums">Cash: {formatCurrency(aggregates.cash)}</span>
         <span className="ml-auto font-bold tabular-nums text-text-primary">
