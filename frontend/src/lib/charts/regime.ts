@@ -14,7 +14,12 @@
  * whose labels are hidden (the raw day-count has no user-meaningful unit);
  * date context is surfaced per-segment in the tooltip.
  *
- * Empty/null flips → option with empty series (panel should hide).
+ * **Binary-state assumption:** the builder only recognises `"risk_on"` and
+ * `"risk_off"` states. Any period whose `state` is neither renders as a gap
+ * (both series carry value 0 for that category), which is visible as an empty
+ * bar slot. Unknown states are intentionally not collapsed or merged.
+ *
+ * Empty/null flips → returns `null` (caller should hide the panel entirely).
  */
 import type { EChartsOption, SeriesOption } from "echarts";
 
@@ -80,28 +85,25 @@ function derivePeriods(flips: RegimeFlip[], asOf: string): RegimePeriod[] {
  *
  * @param flips   Recent regime flip records from the API response.
  * @param colors  Design-token color bag.
- * @param asOf    The "as of" date used to close the last open period (ISO "YYYY-MM-DD").
+ * @param asOf    ISO date string ("YYYY-MM-DD") used to close the final
+ *                open-ended period (e.g. the API's `as_of` field). Falls back
+ *                to today's date when not supplied.
  *
- * @returns An EChartsOption ready to pass to `<EChart>`. When `flips` is
- *          empty the option carries empty series so the chart renders blank.
+ * @returns An EChartsOption ready to pass to `<EChart>`, or `null` when
+ *          `flips` is empty (caller should hide the panel entirely).
  */
 export function buildRegimeStripOption(
   flips: RegimeFlip[],
   colors: ChartColors,
   asOf?: string,
-): EChartsOption {
+): EChartsOption | null {
   // Fall back to today's ISO date if asOf is not supplied.
-  const anchor =
-    asOf ?? new Date().toISOString().slice(0, 10);
+  const anchor = asOf ?? new Date().toISOString().slice(0, 10);
 
   const periods = derivePeriods(flips, anchor);
 
   if (periods.length === 0) {
-    return {
-      animation: false,
-      backgroundColor: "transparent",
-      series: [],
-    };
+    return null;
   }
 
   // One series per period; all stacked on the single "regime" row.

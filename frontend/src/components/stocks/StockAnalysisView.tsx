@@ -12,14 +12,14 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ApiError,
   fetchStockAnalysis,
+  fetchStockHistory,
   isRangePreset,
-  RANGE_PRESETS,
+  type HistoryBar,
   type RangePreset,
   type StockAnalysis,
 } from "@/lib/api/client";
 import { buildCumulativeOption } from "@/lib/charts/cumulative";
 import { buildHistogramOption } from "@/lib/charts/histogram";
-import { buildPriceOption } from "@/lib/charts/price";
 import { buildRollingOption } from "@/lib/charts/rolling";
 import { chartColors, type ChartColors } from "@/lib/charts/theme";
 import {
@@ -29,7 +29,10 @@ import {
   formatPercent,
 } from "@/lib/format";
 import { EChart } from "@/components/charts/EChart";
+import { InteractiveChart } from "@/components/charts/InteractiveChart";
+import { AddToPortfolio } from "@/components/stocks/AddToPortfolio";
 import { NewsPanel } from "@/components/stocks/NewsPanel";
+import { useLiveTicks } from "@/lib/livefeed/useLiveTicks";
 import { Card, KpiTile, StatRow, valueTone } from "@/components/ui/panels";
 
 /** Rolling window in trading days — fixed at the backend default for now (F7 may add a control). */
@@ -58,6 +61,15 @@ export function StockAnalysisView({
     queryFn: ({ signal }) =>
       fetchStockAnalysis(ticker, { range, window: ROLLING_WINDOW }, signal),
     staleTime: 60 * 60 * 1000, // EOD data updates once per day; 1h prevents pointless refetches on range toggling
+    retry: (failureCount, err) =>
+      !(err instanceof ApiError && err.status >= 400 && err.status < 500) &&
+      failureCount < 2,
+  });
+
+  const history = useQuery({
+    queryKey: ["history", ticker],
+    queryFn: ({ signal }) => fetchStockHistory(ticker, 2520, signal),
+    staleTime: 60 * 60 * 1000,
     retry: (failureCount, err) =>
       !(err instanceof ApiError && err.status >= 400 && err.status < 500) &&
       failureCount < 2,
@@ -100,7 +112,15 @@ export function StockAnalysisView({
     return <LoadingSkeleton />;
   }
 
-  return <AnalysisContent data={data} colors={colors} range={range} onRangeChange={selectRange} />;
+  return (
+    <AnalysisContent
+      data={data}
+      colors={colors}
+      range={range}
+      onRangeChange={selectRange}
+      historyBars={history.data?.bars ?? []}
+    />
+  );
 }
 
 /* ── Loaded content ───────────────────────────────────────────────────────── */
@@ -110,18 +130,16 @@ function AnalysisContent({
   colors,
   range,
   onRangeChange,
+  historyBars,
 }: {
   data: StockAnalysis;
   colors: ChartColors;
   range: RangePreset;
   onRangeChange: (range: RangePreset) => void;
+  historyBars: HistoryBar[];
 }) {
   const { header, params, stats } = data;
 
-  const priceOption = useMemo(
-    () => buildPriceOption(data.candles, colors),
-    [data.candles, colors],
-  );
   const cumulativeOption = useMemo(
     () =>
       buildCumulativeOption(
@@ -156,10 +174,19 @@ function AnalysisContent({
     [data.histogram, colors],
   );
 
+  const { ticks, status: feedStatus } = useLiveTicks([header.ticker]);
+  const live = ticks[header.ticker];
+  const shownLast = live?.price ?? header.last_close;
+  // Baseline do live = header.last_close (último close do banco): durante o
+  // pregão é o close de ontem → variação de HOJE. Sem tick, EOD do payload.
+  const shownChange = live ? shownLast - header.last_close : header.change;
+  const shownChangePct =
+    live && header.last_close > 0 ? shownLast / header.last_close - 1 : header.change_pct;
+
   const changeTone =
-    header.change > 0
+    shownChange > 0
       ? "text-gain"
-      : header.change < 0
+      : shownChange < 0
         ? "text-loss"
         : "text-neutral-value";
 
@@ -178,40 +205,32 @@ function AnalysisContent({
           </div>
           <div className="mt-2 flex flex-wrap items-baseline gap-3 tabular-nums">
             <span className="text-[30px] font-bold text-text-primary">
-              {formatCurrency(header.last_close)}
+              {formatCurrency(shownLast)}
             </span>
             <span className={`text-[15px] font-bold ${changeTone}`}>
-              {formatCurrency(header.change, { signed: true })}{" "}
-              ({formatPercent(header.change_pct, 2, { signed: true })})
+              {formatCurrency(shownChange, { signed: true })}{" "}
+              ({formatPercent(shownChangePct, 2, { signed: true })})
             </span>
             <span className="border border-border bg-field px-[7px] py-[2px] text-[10.5px] text-text-muted">
-              EOD · {formatDate(header.as_of)}
+              {feedStatus === "live" && live ? (
+                <span className="text-gain">● LIVE</span>
+              ) : (
+                <>EOD · {formatDate(header.as_of)}</>
+              )}
             </span>
+            <AddToPortfolio ticker={header.ticker} />
           </div>
         </div>
+      </div>
 
-        {/* ── Range switcher (Carbon content switcher) ── */}
-        <div
-          role="group"
-          aria-label="Date range"
-          className="flex h-[34px] items-stretch border border-border-strong tabular-nums"
-        >
-          {RANGE_PRESETS.map((preset) => (
-            <button
-              key={preset}
-              type="button"
-              onClick={() => onRangeChange(preset)}
-              aria-pressed={preset === range}
-              className={`flex items-center border-r border-border px-3 text-[12px] transition-colors last:border-r-0 ${
-                preset === range
-                  ? "bg-accent font-bold text-on-accent"
-                  : "text-text-muted hover:bg-layer-hover hover:text-text-primary"
-              }`}
-            >
-              {preset}
-            </button>
-          ))}
-        </div>
+      {/* ── Interactive chart (IXChart + livefeed) ── */}
+      <div className="mb-px">
+        <InteractiveChart
+          symbol={header.ticker}
+          bars={historyBars}
+          range={range}
+          onRangeChange={onRangeChange}
+        />
       </div>
 
       {/* ── KPI tiles (Carbon gray-gap grid) ── */}
@@ -239,21 +258,6 @@ function AnalysisContent({
           tone="text-loss"
         />
         <KpiTile label="VaR 95 (1d)" value={formatPercent(stats.var_95)} />
-      </div>
-
-      {/* ── Price chart (candles + volume) ── */}
-      <div className="mb-px">
-        <Card
-          title="Price · OHLC + Volume"
-          actions={
-            <div className="flex gap-3.5 text-[10.5px] text-text-muted">
-              <ChartLegend swatch="line-accent" label="OHLC close" />
-              <ChartLegend swatch="square-grey" label="Volume" />
-            </div>
-          }
-        >
-          <EChart option={priceOption} className="h-[420px] w-full" />
-        </Card>
       </div>
 
       {/* ── Cumulative returns vs benchmark ── */}
@@ -344,12 +348,12 @@ function AnalysisContent({
 
 /* ── Presentational helpers ───────────────────────────────────────────────── */
 
-/** Small legend entry: 10×2px accent/grey line or 8×8px outlined square. */
+/** Small legend entry: 10×2px accent/grey line. */
 function ChartLegend({
   swatch,
   label,
 }: {
-  swatch: "line-accent" | "line-grey" | "square-grey";
+  swatch: "line-accent" | "line-grey";
   label: string;
 }) {
   return (
@@ -357,9 +361,6 @@ function ChartLegend({
       {swatch === "line-accent" && <span className="h-[2px] w-[10px] bg-accent" />}
       {swatch === "line-grey" && (
         <span className="h-[2px] w-[10px] bg-[var(--color-chart-bar-mute)]" />
-      )}
-      {swatch === "square-grey" && (
-        <span className="h-2 w-2 bg-[var(--color-chart-bar-mute)]" />
       )}
       {label}
     </span>

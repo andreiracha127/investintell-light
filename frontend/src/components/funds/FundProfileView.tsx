@@ -2,7 +2,8 @@
 
 /**
  * Fund profile (F8.2) — GET /funds/{id}: serif header with tags, KPI tiles,
- * 2y NAV chart (decimated server-side), top holdings (top-50-truncated
+ * interactive chart (ETF = OHLCV candles + live; mutual fund = NAV line),
+ * top holdings (top-50-truncated
  * N-PORT source, disclaimed) and the full precomputed risk-metric panel.
  * Every number is the mother-DB value with its source calc_date.
  */
@@ -10,12 +11,12 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-import { fetchFundProfile, type FundRisk } from "@/lib/api/client";
+import { fetchFundHistory, fetchFundProfile, type FundRisk, type RangePreset } from "@/lib/api/client";
 import { EChart } from "@/components/charts/EChart";
+import { InteractiveChart } from "@/components/charts/InteractiveChart";
 import { FundLookthroughSection } from "@/components/funds/FundLookthroughSection";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
 import { Card, KpiTile, StatRow } from "@/components/ui/panels";
-import { buildFundNavOption } from "@/lib/charts/fundnav";
 import {
   buildDrawdownOption,
   buildMonthlyReturnsOption,
@@ -86,13 +87,13 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     setHoldingsPage(0);
   }, [instrumentId]);
 
-  const navOption = useMemo(
-    () =>
-      profileQuery.data && colors
-        ? buildFundNavOption(profileQuery.data.nav, colors)
-        : null,
-    [profileQuery.data, colors],
-  );
+  const [range, setRange] = useState<RangePreset>("1Y");
+  const historyQuery = useQuery({
+    queryKey: ["fund-history", instrumentId],
+    queryFn: ({ signal }) => fetchFundHistory(instrumentId, 2520, signal),
+    staleTime: 60 * 60 * 1000,
+    retry: retryPolicy,
+  });
 
   // Both analytics charts share this gate, so compute it once: (ly - fy) * 12 + (lm - fm)
   // counts month boundaries crossed; 13 distinct calendar months = 12 month-steps.
@@ -216,15 +217,24 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
       {/* ── NAV chart + risk metrics ────────────────────────────────────── */}
       <div className="grid gap-4 lg:[grid-template-columns:2fr_1fr]">
         <div className="flex flex-col gap-4">
-          <Card title="NAV" subtitle="2y window, decimated server-side">
-            {fund.nav.length > 0 && navOption ? (
-              <EChart option={navOption} className="h-[300px] w-full" />
-            ) : (
+          {historyQuery.data && historyQuery.data.bars.length > 0 ? (
+            <InteractiveChart
+              key={historyQuery.data.mode}
+              symbol={historyQuery.data.ticker ?? ""}
+              bars={historyQuery.data.bars}
+              mode={historyQuery.data.mode}
+              range={range}
+              onRangeChange={setRange}
+            />
+          ) : (
+            <Card title={historyQuery.isPending ? "Loading chart…" : "NAV"}>
               <p className="py-8 text-center text-[13px] text-text-muted">
-                No NAV history in the synced window.
+                {historyQuery.isPending
+                  ? "Loading price history…"
+                  : "No price or NAV history in the synced window."}
               </p>
-            )}
-          </Card>
+            </Card>
+          )}
 
           {monthlyReturnsOption && (
             <Card title="Monthly returns" subtitle="month-end over month-end, 2y window">

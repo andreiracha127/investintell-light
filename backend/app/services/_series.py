@@ -53,6 +53,29 @@ async def select_adj_close_rows(
     return list(result.tuples().all())
 
 
+async def select_adj_ohlcv_rows(
+    session: AsyncSession, ticker: str, start: dt.date, end: dt.date
+) -> list[tuple[dt.date, float, float, float, float, int]]:
+    """Read (date, adj_open, adj_high, adj_low, adj_close, adj_volume) tuples for [start, end].
+
+    Adjusted, not raw: continuous across splits/dividends and anchored to the
+    present (Tiingo anchors the adjustment factor at the most recent price).
+    """
+    result = await session.execute(
+        select(
+            EodPrice.date,
+            EodPrice.adj_open,
+            EodPrice.adj_high,
+            EodPrice.adj_low,
+            EodPrice.adj_close,
+            EodPrice.adj_volume,
+        )
+        .where(EodPrice.ticker == ticker, EodPrice.date >= start, EodPrice.date <= end)
+        .order_by(EodPrice.date)
+    )
+    return list(result.tuples().all())
+
+
 def join_prices(series_by_ticker: Mapping[str, pd.Series]) -> pd.DataFrame:
     """Inner-join per-ticker adjusted-close series on their common dates.
 

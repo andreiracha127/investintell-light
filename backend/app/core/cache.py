@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 CACHED_GET_PREFIXES: tuple[str, ...] = (
     "/funds",
     "/macro/regime",
+    "/stocks/overview",
 )
 
 # Limite do cache em memória (entradas) — descarta o mais antigo ao exceder.

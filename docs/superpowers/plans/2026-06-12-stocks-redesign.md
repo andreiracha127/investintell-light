@@ -59,7 +59,7 @@
 
 ### Task 0: Branch
 
-- [ ] **Step 0.1:** A partir do HEAD atual de `investintell-light` (branch `feature/analytics-charts-echarts6`, que já contém o spec):
+- [x] **Step 0.1:** A partir do HEAD atual de `investintell-light` (branch `feature/analytics-charts-echarts6`, que já contém o spec):
 
 ```bash
 cd /e/investintell-light && git checkout -b feat/stocks-redesign
@@ -73,14 +73,14 @@ cd /e/investintell-light && git checkout -b feat/stocks-redesign
 - Create: `backend/alembic/versions/0011_universe_sector.py`
 - Modify: `backend/app/models/universe.py` (classe `UniverseConstituent`)
 
-- [ ] **Step 1.1: Verificar head atual do alembic**
+- [x] **Step 1.1: Verificar head atual do alembic**
 
 ```bash
 cd /e/investintell-light/backend && uv run alembic heads
 ```
 Expected: `0011` ainda não existe; head é `0010`. Se o head for outro, use-o em `down_revision`.
 
-- [ ] **Step 1.2: Criar a migration** — `backend/alembic/versions/0011_universe_sector.py`:
+- [x] **Step 1.2: Criar a migration** — `backend/alembic/versions/0011_universe_sector.py`:
 
 ```python
 """universe_constituents.sector — setor GICS por ticker
@@ -116,7 +116,7 @@ def downgrade() -> None:
     op.drop_column("universe_constituents", "sector")
 ```
 
-- [ ] **Step 1.3: Adicionar o campo ao ORM** — em `backend/app/models/universe.py`, dentro de `UniverseConstituent`, logo após o campo `name`:
+- [x] **Step 1.3: Adicionar o campo ao ORM** — em `backend/app/models/universe.py`, dentro de `UniverseConstituent`, logo após o campo `name`:
 
 ```python
     # Setor GICS (11 setores) via sec_cusip_ticker_map do data-lake —
@@ -124,14 +124,14 @@ def downgrade() -> None:
     sector: Mapped[str | None] = mapped_column(String, nullable=True)
 ```
 
-- [ ] **Step 1.4: Aplicar e validar**
+- [x] **Step 1.4: Aplicar e validar**
 
 ```bash
 cd /e/investintell-light/backend && uv run alembic upgrade head && uv run pytest tests/test_models.py -q
 ```
 Expected: migration aplica sem erro; testes de modelo passam.
 
-- [ ] **Step 1.5: Commit**
+- [x] **Step 1.5: Commit**
 
 ```bash
 cd /e/investintell-light && git add backend/alembic/versions/0011_universe_sector.py backend/app/models/universe.py && git commit -m "feat(backend): coluna sector em universe_constituents (GICS)"
@@ -146,7 +146,7 @@ cd /e/investintell-light && git add backend/alembic/versions/0011_universe_secto
 
 Sem teste automatizado (script batch fora do request path, padrão do repo — `sync_universe.py` e `backfill_universe_eod.py` também não têm); validação é o run real do Step 2.2.
 
-- [ ] **Step 2.1: Criar o script**
+- [x] **Step 2.1: Criar o script**
 
 ```python
 """Enrich universe_constituents.sector from the data-lake sec_cusip_ticker_map.
@@ -226,14 +226,14 @@ if __name__ == "__main__":
 
 Nota: `get_datalake_session` levanta `HTTPException` 503 se `DATALAKE_DB_URL` não estiver setada — em script isso aborta com traceback claro, aceitável (fail loud).
 
-- [ ] **Step 2.2: Rodar dry-run e run real**
+- [x] **Step 2.2: Rodar dry-run e run real**
 
 ```bash
 cd /e/investintell-light/backend && uv run python scripts/enrich_sectors.py --dry-run && uv run python scripts/enrich_sectors.py
 ```
 Expected: `sec_cusip_ticker_map: ~7000 tickers com setor` e `cobertura: >3500/~5000`.
 
-- [ ] **Step 2.3: Commit**
+- [x] **Step 2.3: Commit**
 
 ```bash
 cd /e/investintell-light && git add backend/scripts/enrich_sectors.py && git commit -m "feat(backend): enrich_sectors — GICS por ticker via sec_cusip_ticker_map"
@@ -248,7 +248,7 @@ cd /e/investintell-light && git add backend/scripts/enrich_sectors.py && git com
 - Create: `backend/app/services/market_overview.py`
 - Test: `backend/tests/test_market_overview_service.py`
 
-- [ ] **Step 3.1: Criar os schemas** — `backend/app/schemas/market.py`:
+- [x] **Step 3.1: Criar os schemas** — `backend/app/schemas/market.py`:
 
 ```python
 """Market overview / history schemas (Stocks redesign — landing /stocks)."""
@@ -311,7 +311,7 @@ class HistoryResponse(BaseModel):
     bars: list[HistoryBar]
 ```
 
-- [ ] **Step 3.2: Escrever os testes do ranking puro** — `backend/tests/test_market_overview_service.py`:
+- [x] **Step 3.2: Escrever os testes do ranking puro** — `backend/tests/test_market_overview_service.py`:
 
 ```python
 """Tests do ranking puro do market overview (sem DB)."""
@@ -407,14 +407,14 @@ def test_empty_rows_yield_empty_overview() -> None:
     assert out["gainers"] == [] and out["sectors"] == []
 ```
 
-- [ ] **Step 3.3: Rodar e ver falhar**
+- [x] **Step 3.3: Rodar e ver falhar**
 
 ```bash
 cd /e/investintell-light/backend && uv run pytest tests/test_market_overview_service.py -q
 ```
 Expected: FAIL — `ModuleNotFoundError: app.services.market_overview`.
 
-- [ ] **Step 3.4: Implementar o service** — `backend/app/services/market_overview.py`:
+- [x] **Step 3.4: Implementar o service** — `backend/app/services/market_overview.py`:
 
 ```python
 """Market overview assembly (landing /stocks).
@@ -601,14 +601,14 @@ def rank_overview(rows: list[OverviewRow]) -> RankedOverview:
     )
 ```
 
-- [ ] **Step 3.5: Rodar e ver passar**
+- [x] **Step 3.5: Rodar e ver passar**
 
 ```bash
 cd /e/investintell-light/backend && uv run pytest tests/test_market_overview_service.py -q
 ```
 Expected: 6 passed.
 
-- [ ] **Step 3.6: Commit**
+- [x] **Step 3.6: Commit**
 
 ```bash
 cd /e/investintell-light && git add backend/app/schemas/market.py backend/app/services/market_overview.py backend/tests/test_market_overview_service.py && git commit -m "feat(backend): service market_overview — ranking puro + readers SQL"
@@ -623,7 +623,7 @@ cd /e/investintell-light && git add backend/app/schemas/market.py backend/app/se
 - Modify: `backend/app/core/cache.py` (`CACHED_GET_PREFIXES`)
 - Test: `backend/tests/test_stocks_overview_route.py`
 
-- [ ] **Step 4.1: Escrever os testes da rota** — `backend/tests/test_stocks_overview_route.py` (padrão `test_macro_regime_route.py`: dependências sobrescritas, service monkeypatched, sem DB):
+- [x] **Step 4.1: Escrever os testes da rota** — `backend/tests/test_stocks_overview_route.py` (padrão `test_macro_regime_route.py`: dependências sobrescritas, service monkeypatched, sem DB):
 
 ```python
 """Tests de GET /stocks/overview (service stubado, sem DB/Tiingo)."""
@@ -718,14 +718,14 @@ async def test_overview_degrades_indices_when_tiingo_fails(
 
 Nota: `_ensure_eod_or_http_error` levanta `HTTPException` (não `TiingoError`) nos caminhos reais — o teste usa `TiingoError` para exercitar o catch amplo do degrade; a rota captura `HTTPException` E `TiingoError` (ver Step 4.3).
 
-- [ ] **Step 4.2: Rodar e ver falhar**
+- [x] **Step 4.2: Rodar e ver falhar**
 
 ```bash
 cd /e/investintell-light/backend && uv run pytest tests/test_stocks_overview_route.py -q
 ```
 Expected: FAIL — 404 (rota não existe).
 
-- [ ] **Step 4.3: Implementar a rota** — em `backend/app/api/routes/stocks.py`.
+- [x] **Step 4.3: Implementar a rota** — em `backend/app/api/routes/stocks.py`.
 
 Imports novos no topo (juntar aos existentes):
 
@@ -770,7 +770,7 @@ async def get_market_overview(
     return MarketOverviewResponse(universe_size=len(rows), indices=indices, **ranked)
 ```
 
-- [ ] **Step 4.4: Cachear o overview** — em `backend/app/core/cache.py`, estender a tupla:
+- [x] **Step 4.4: Cachear o overview** — em `backend/app/core/cache.py`, estender a tupla:
 
 ```python
 CACHED_GET_PREFIXES: tuple[str, ...] = (
@@ -782,14 +782,14 @@ CACHED_GET_PREFIXES: tuple[str, ...] = (
 
 CUIDADO: `/stocks/overview` é mais específico que `/stocks` de propósito — `/stocks/{ticker}/analysis` etc. NÃO devem entrar no cache de catálogo.
 
-- [ ] **Step 4.5: Rodar testes (rota + cache existente)**
+- [x] **Step 4.5: Rodar testes (rota + cache existente)**
 
 ```bash
 cd /e/investintell-light/backend && uv run pytest tests/test_stocks_overview_route.py tests/test_catalog_cache.py -q
 ```
 Expected: PASS (o autouse `_reset_catalog_cache` do conftest evita vazamento entre testes).
 
-- [ ] **Step 4.6: Commit**
+- [x] **Step 4.6: Commit**
 
 ```bash
 cd /e/investintell-light && git add backend/app/api/routes/stocks.py backend/app/core/cache.py backend/tests/test_stocks_overview_route.py && git commit -m "feat(backend): GET /stocks/overview — leaders, índices e setores com cache"
@@ -803,7 +803,7 @@ cd /e/investintell-light && git add backend/app/api/routes/stocks.py backend/app
 - Modify: `backend/app/api/routes/stocks.py`
 - Test: `backend/tests/test_stocks_history_route.py`
 
-- [ ] **Step 5.1: Escrever os testes** — `backend/tests/test_stocks_history_route.py`:
+- [x] **Step 5.1: Escrever os testes** — `backend/tests/test_stocks_history_route.py`:
 
 ```python
 """Tests de GET /stocks/{ticker}/history (selectors stubados, sem DB/Tiingo)."""
@@ -887,14 +887,14 @@ async def test_history_bars_validation() -> None:
     assert resp.status_code == 422
 ```
 
-- [ ] **Step 5.2: Rodar e ver falhar**
+- [x] **Step 5.2: Rodar e ver falhar**
 
 ```bash
 cd /e/investintell-light/backend && uv run pytest tests/test_stocks_history_route.py -q
 ```
 Expected: FAIL — 404/AttributeError (rota e selector não existem).
 
-- [ ] **Step 5.3: Implementar selector + rota** — em `backend/app/api/routes/stocks.py`, após `_select_ohlcv_rows`:
+- [x] **Step 5.3: Implementar selector + rota** — em `backend/app/api/routes/stocks.py`, após `_select_ohlcv_rows`:
 
 ```python
 async def _select_adj_ohlcv_rows(
@@ -960,14 +960,14 @@ async def get_stock_history(
     )
 ```
 
-- [ ] **Step 5.4: Rodar e ver passar (suíte backend inteira)**
+- [x] **Step 5.4: Rodar e ver passar (suíte backend inteira)**
 
 ```bash
 cd /e/investintell-light/backend && uv run pytest -q
 ```
 Expected: PASS (sem regressões).
 
-- [ ] **Step 5.5: Commit**
+- [x] **Step 5.5: Commit**
 
 ```bash
 cd /e/investintell-light && git add backend/app/api/routes/stocks.py backend/tests/test_stocks_history_route.py && git commit -m "feat(backend): GET /stocks/{ticker}/history — OHLCV ajustado p/ chart interativo"
@@ -982,14 +982,14 @@ cd /e/investintell-light && git add backend/app/api/routes/stocks.py backend/tes
 - Modify: `frontend/src/lib/api/api.d.ts` (gerado)
 - Modify: `frontend/src/lib/api/client.ts`
 
-- [ ] **Step 6.1: Regenerar contrato e tipos**
+- [x] **Step 6.1: Regenerar contrato e tipos**
 
 ```bash
 cd /e/investintell-light/backend && uv run python scripts/export_openapi.py && cd ../frontend && npm run types
 ```
 Expected: `api.d.ts` ganha `"/stocks/overview"` e `"/stocks/{ticker}/history"`.
 
-- [ ] **Step 6.2: Tipos + fetchers no client** — em `frontend/src/lib/api/client.ts`. Na seção de type aliases (seguir o padrão dos existentes, que derivam de `paths`):
+- [x] **Step 6.2: Tipos + fetchers no client** — em `frontend/src/lib/api/client.ts`. Na seção de type aliases (seguir o padrão dos existentes, que derivam de `paths`):
 
 ```ts
 type MarketOverviewOperation = paths["/stocks/overview"]["get"];
@@ -1026,14 +1026,14 @@ export function fetchStockHistory(
 
 (Se `paths` ainda não estiver importado no topo, adicione-o ao import de `./api` existente.)
 
-- [ ] **Step 6.3: Typecheck**
+- [x] **Step 6.3: Typecheck**
 
 ```bash
 cd /e/investintell-light/frontend && npm run typecheck
 ```
 Expected: PASS.
 
-- [ ] **Step 6.4: Commit**
+- [x] **Step 6.4: Commit**
 
 ```bash
 cd /e/investintell-light && git add backend/openapi.json frontend/src/lib/api/api.d.ts frontend/src/lib/api/client.ts && git commit -m "feat(frontend): tipos e fetchers de market overview e stock history"
@@ -1050,7 +1050,7 @@ cd /e/investintell-light && git add backend/openapi.json frontend/src/lib/api/ap
 - Create: `frontend/src/lib/ixchart/series.ts`
 - Test: `frontend/src/lib/ixchart/series.test.ts`
 
-- [ ] **Step 7.1: Instalar vitest e configurar**
+- [x] **Step 7.1: Instalar vitest e configurar**
 
 ```bash
 cd /e/investintell-light/frontend && npm install -D vitest
@@ -1074,7 +1074,7 @@ Em `frontend/package.json`, adicionar ao bloco `scripts`:
 "test": "vitest run"
 ```
 
-- [ ] **Step 7.2: Criar os tipos** — `frontend/src/lib/ixchart/types.ts`:
+- [x] **Step 7.2: Criar os tipos** — `frontend/src/lib/ixchart/types.ts`:
 
 ```ts
 /** Barra OHLCV — mesmo contrato do GET /stocks/{ticker}/history. */
@@ -1111,7 +1111,7 @@ export interface Tick {
 }
 ```
 
-- [ ] **Step 7.3: Escrever os testes** — `frontend/src/lib/ixchart/series.test.ts`:
+- [x] **Step 7.3: Escrever os testes** — `frontend/src/lib/ixchart/series.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -1194,14 +1194,14 @@ describe("formatters", () => {
 });
 ```
 
-- [ ] **Step 7.4: Rodar e ver falhar**
+- [x] **Step 7.4: Rodar e ver falhar**
 
 ```bash
 cd /e/investintell-light/frontend && npm run test
 ```
 Expected: FAIL — `Cannot find module './series'`.
 
-- [ ] **Step 7.5: Implementar** — `frontend/src/lib/ixchart/series.ts`. Port direto das funções do protótipo (`E:\investintell-datalake-workers\design\assets\chart-engine.js` linhas 93–155), com formatação en-US (a UI do app é em inglês) e tipos:
+- [x] **Step 7.5: Implementar** — `frontend/src/lib/ixchart/series.ts`. Port direto das funções do protótipo (`E:\investintell-datalake-workers\design\assets\chart-engine.js` linhas 93–155), com formatação en-US (a UI do app é em inglês) e tipos:
 
 ```ts
 /**
@@ -1307,14 +1307,14 @@ export const fmtD = (t: number): string => {
 export { MONTHS };
 ```
 
-- [ ] **Step 7.6: Rodar e ver passar**
+- [x] **Step 7.6: Rodar e ver passar**
 
 ```bash
 cd /e/investintell-light/frontend && npm run test && npm run typecheck
 ```
 Expected: PASS.
 
-- [ ] **Step 7.7: Commit**
+- [x] **Step 7.7: Commit**
 
 ```bash
 cd /e/investintell-light && git add frontend/vitest.config.ts frontend/package.json frontend/package-lock.json frontend/src/lib/ixchart/ && git commit -m "feat(frontend): ixchart series — resample/indicadores/formatadores puros + vitest"
@@ -1330,7 +1330,7 @@ cd /e/investintell-light && git add frontend/vitest.config.ts frontend/package.j
 
 O engine é um port MECÂNICO de `E:\investintell-datalake-workers\design\assets\chart-engine.js` (classe `Chart`, linhas 158–652). Sem teste unitário próprio (canvas/DOM); a verificação é typecheck + smoke visual da Task 13/15. As transformações são enumeradas abaixo — todo o resto é cópia literal.
 
-- [ ] **Step 8.1: Tokens** — `frontend/src/lib/ixchart/tokens.ts`:
+- [x] **Step 8.1: Tokens** — `frontend/src/lib/ixchart/tokens.ts`:
 
 ```ts
 /**
@@ -1382,7 +1382,7 @@ export function readIxTokens(): IxTokens {
 }
 ```
 
-- [ ] **Step 8.2: Engine** — `frontend/src/lib/ixchart/engine.ts`. Estrutura nova (escreva exatamente):
+- [x] **Step 8.2: Engine** — `frontend/src/lib/ixchart/engine.ts`. Estrutura nova (escreva exatamente):
 
 ```ts
 /**
@@ -1463,14 +1463,14 @@ Transformações sobre o código do protótipo (linhas 158–652 do `chart-engin
 9. Métodos copiados VERBATIM (apenas renames acima): `setPeriod`, `setType`, `setRange`, `toggleOverlay`, `togglePane`, `setScale`, `setTool`, `undoDrawing`, `clearDrawings`, `_rebuild`, `_resize`, `_layout`, `_xAt`, `_iAt`, `_priceTransform`, `render`, `_renderDrawings`, `_renderCrosshair`, `_dataPoint`, `_bindEvents`. A marca d'água `"investintell"` (linha 351) fica.
 10. `fmtD`/`fmtP`/`fmtV`/`niceTicks`/`resample`/`sma`/`rsi`/`MONTHS` vêm de `./series` (imports já no skeleton).
 
-- [ ] **Step 8.3: Typecheck + lint**
+- [x] **Step 8.3: Typecheck + lint**
 
 ```bash
 cd /e/investintell-light/frontend && npm run typecheck && npm run lint
 ```
 Expected: PASS (engine compila; nenhum consumer ainda).
 
-- [ ] **Step 8.4: Commit**
+- [x] **Step 8.4: Commit**
 
 ```bash
 cd /e/investintell-light && git add frontend/src/lib/ixchart/ && git commit -m "feat(frontend): port do engine IXChart (canvas) com tokens injetados e destroy()"
@@ -1485,7 +1485,7 @@ cd /e/investintell-light && git add frontend/src/lib/ixchart/ && git commit -m "
 - Create: `frontend/src/lib/livefeed/useLiveTicks.ts`
 - Test: `frontend/src/lib/livefeed/client.test.ts`
 
-- [ ] **Step 9.1: Teste do parser** — `frontend/src/lib/livefeed/client.test.ts`:
+- [x] **Step 9.1: Teste do parser** — `frontend/src/lib/livefeed/client.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -1513,14 +1513,14 @@ describe("parseTick", () => {
 });
 ```
 
-- [ ] **Step 9.2: Rodar e ver falhar**
+- [x] **Step 9.2: Rodar e ver falhar**
 
 ```bash
 cd /e/investintell-light/frontend && npm run test
 ```
 Expected: FAIL — `Cannot find module './client'`.
 
-- [ ] **Step 9.3: Implementar o cliente** — `frontend/src/lib/livefeed/client.ts`:
+- [x] **Step 9.3: Implementar o cliente** — `frontend/src/lib/livefeed/client.ts`:
 
 ```ts
 /**
@@ -1665,7 +1665,7 @@ export const subscribeTicks = (symbol: string, handler: TickHandler) =>
 export const onFeedStatus = (handler: StatusHandler) => feed.onStatus(handler);
 ```
 
-- [ ] **Step 9.4: Hook com throttle** — `frontend/src/lib/livefeed/useLiveTicks.ts`:
+- [x] **Step 9.4: Hook com throttle** — `frontend/src/lib/livefeed/useLiveTicks.ts`:
 
 ```ts
 "use client";
@@ -1728,14 +1728,14 @@ export function useLiveTicks(symbols: string[]): {
 }
 ```
 
-- [ ] **Step 9.5: Rodar testes + typecheck**
+- [x] **Step 9.5: Rodar testes + typecheck**
 
 ```bash
 cd /e/investintell-light/frontend && npm run test && npm run typecheck
 ```
 Expected: PASS.
 
-- [ ] **Step 9.6: Commit**
+- [x] **Step 9.6: Commit**
 
 ```bash
 cd /e/investintell-light && git add frontend/src/lib/livefeed/ && git commit -m "feat(frontend): cliente WS compartilhado do livefeed + useLiveTicks (sim ticks descartados)"
@@ -1748,7 +1748,7 @@ cd /e/investintell-light && git add frontend/src/lib/livefeed/ && git commit -m 
 **Files:**
 - Create: `frontend/src/components/charts/InteractiveChart.tsx`
 
-- [ ] **Step 10.1: Criar o componente**
+- [x] **Step 10.1: Criar o componente**
 
 ```tsx
 "use client";
@@ -2010,14 +2010,14 @@ export function InteractiveChart({
 }
 ```
 
-- [ ] **Step 10.2: Typecheck + lint**
+- [x] **Step 10.2: Typecheck + lint**
 
 ```bash
 cd /e/investintell-light/frontend && npm run typecheck && npm run lint
 ```
 Expected: PASS. (Os campos `overlays`/`panes` do engine são lidos aqui — eles são públicos na classe portada.)
 
-- [ ] **Step 10.3: Commit**
+- [x] **Step 10.3: Commit**
 
 ```bash
 cd /e/investintell-light && git add frontend/src/components/charts/InteractiveChart.tsx && git commit -m "feat(frontend): InteractiveChart — canvas IXChart com toolbar e live tick"
@@ -2030,7 +2030,7 @@ cd /e/investintell-light && git add frontend/src/components/charts/InteractiveCh
 **Files:**
 - Create: `frontend/src/components/stocks/AddToPortfolio.tsx`
 
-- [ ] **Step 11.1: Criar o componente**
+- [x] **Step 11.1: Criar o componente**
 
 ```tsx
 "use client";
@@ -2138,7 +2138,7 @@ export function AddToPortfolio({ ticker }: { ticker: string }) {
 
 Nota: `PortfolioListItem` tem `id`/`name` (CRUD F4) e `PositionBody` é `{ quantity }` — confirme os nomes exatos em `api.d.ts` após o regen da Task 6 e ajuste se o schema usar outro campo.
 
-- [ ] **Step 11.2: Typecheck + commit**
+- [x] **Step 11.2: Typecheck + commit**
 
 ```bash
 cd /e/investintell-light/frontend && npm run typecheck && cd .. && git add frontend/src/components/stocks/AddToPortfolio.tsx && git commit -m "feat(frontend): AddToPortfolio — popover de inclusão rápida em portfólio"
@@ -2156,7 +2156,7 @@ cd /e/investintell-light/frontend && npm run typecheck && cd .. && git add front
 - Create: `frontend/src/app/stocks/page.tsx`
 - Modify: `frontend/src/components/shell/AppShell.tsx`
 
-- [ ] **Step 12.1: IndexStrip** — `frontend/src/components/stocks/IndexStrip.tsx`:
+- [x] **Step 12.1: IndexStrip** — `frontend/src/components/stocks/IndexStrip.tsx`:
 
 ```tsx
 "use client";
@@ -2224,7 +2224,7 @@ export function IndexStrip({ indices }: { indices: IndexCard[] }) {
 }
 ```
 
-- [ ] **Step 12.2: LeadersTable** — `frontend/src/components/stocks/LeadersTable.tsx`:
+- [x] **Step 12.2: LeadersTable** — `frontend/src/components/stocks/LeadersTable.tsx`:
 
 ```tsx
 "use client";
@@ -2348,7 +2348,7 @@ export function LeadersTable({ overview }: { overview: MarketOverview }) {
 
 (Se `formatNumber` no `lib/format` tiver outra assinatura, use a existente — objetivo: volume inteiro com separador de milhar.)
 
-- [ ] **Step 12.3: SectorPanel** — `frontend/src/components/stocks/SectorPanel.tsx`:
+- [x] **Step 12.3: SectorPanel** — `frontend/src/components/stocks/SectorPanel.tsx`:
 
 ```tsx
 "use client";
@@ -2391,7 +2391,7 @@ export function SectorPanel({ sectors }: { sectors: SectorPerf[] }) {
 }
 ```
 
-- [ ] **Step 12.4: MarketOverview (composição)** — `frontend/src/components/stocks/MarketOverview.tsx`:
+- [x] **Step 12.4: MarketOverview (composição)** — `frontend/src/components/stocks/MarketOverview.tsx`:
 
 ```tsx
 "use client";
@@ -2465,7 +2465,7 @@ export function MarketOverview() {
 }
 ```
 
-- [ ] **Step 12.5: Rota** — `frontend/src/app/stocks/page.tsx`:
+- [x] **Step 12.5: Rota** — `frontend/src/app/stocks/page.tsx`:
 
 ```tsx
 import { MarketOverview } from "@/components/stocks/MarketOverview";
@@ -2477,7 +2477,7 @@ export default function StocksPage() {
 }
 ```
 
-- [ ] **Step 12.6: Nav** — em `frontend/src/components/shell/AppShell.tsx`, no primeiro item de `NAV_ITEMS`, trocar:
+- [x] **Step 12.6: Nav** — em `frontend/src/components/shell/AppShell.tsx`, no primeiro item de `NAV_ITEMS`, trocar:
 
 ```tsx
     href: "/stocks/AAPL",
@@ -2493,7 +2493,7 @@ por:
     label: "Stocks",
 ```
 
-- [ ] **Step 12.7: Typecheck + lint + commit**
+- [x] **Step 12.7: Typecheck + lint + commit**
 
 ```bash
 cd /e/investintell-light/frontend && npm run typecheck && npm run lint && cd .. && git add frontend/src/components/stocks/ frontend/src/app/stocks/page.tsx frontend/src/components/shell/AppShell.tsx && git commit -m "feat(frontend): landing /stocks — índices, market leaders e setores ao vivo"
@@ -2506,7 +2506,7 @@ cd /e/investintell-light/frontend && npm run typecheck && npm run lint && cd .. 
 **Files:**
 - Modify: `frontend/src/components/stocks/StockAnalysisView.tsx`
 
-- [ ] **Step 13.1: Query do history** — em `StockAnalysisView` (componente externo), junto da query existente:
+- [x] **Step 13.1: Query do history** — em `StockAnalysisView` (componente externo), junto da query existente:
 
 ```tsx
   const history = useQuery({
@@ -2523,7 +2523,7 @@ Imports novos: `fetchStockHistory` em `@/lib/api/client`; `InteractiveChart` de 
 
 Passe `historyBars={history.data?.bars ?? []}` para `AnalysisContent` (novo prop). O chart é renderizável assim que `history` chegar — não bloqueie a página no `isPending` do history (apenas do analysis, como hoje).
 
-- [ ] **Step 13.2: Header ao vivo** — em `AnalysisContent`, antes do `return`:
+- [x] **Step 13.2: Header ao vivo** — em `AnalysisContent`, antes do `return`:
 
 ```tsx
   const { ticks, status: feedStatus } = useLiveTicks([header.ticker]);
@@ -2549,7 +2549,7 @@ No bloco do header, substituir os três usos: `formatCurrency(header.last_close)
             <AddToPortfolio ticker={header.ticker} />
 ```
 
-- [ ] **Step 13.3: Chart no topo, range único** — em `AnalysisContent`:
+- [x] **Step 13.3: Chart no topo, range único** — em `AnalysisContent`:
 
 1. REMOVER o bloco `{/* ── Range switcher ── */}` inteiro do header (o controle agora vive na toolbar do chart — `onRangeChange` continua sendo o mesmo callback, que atualiza a URL e a query do analysis).
 2. REMOVER o bloco `{/* ── Price chart (candles + volume) ── */}` (o `Card` com `EChart option={priceOption}`), o `priceOption` `useMemo`, o import `buildPriceOption` e o swatch `square-grey` se ficar órfão.
@@ -2569,14 +2569,14 @@ No bloco do header, substituir os três usos: `formatCurrency(header.last_close)
 
 `AnalysisContent` ganha o prop `historyBars: HistoryBar[]` (tipo de `@/lib/api/client`; estruturalmente idêntico a `Bar` do engine).
 
-- [ ] **Step 13.4: Typecheck + lint + suíte**
+- [x] **Step 13.4: Typecheck + lint + suíte**
 
 ```bash
 cd /e/investintell-light/frontend && npm run typecheck && npm run lint && npm run test
 ```
 Expected: PASS.
 
-- [ ] **Step 13.5: Commit**
+- [x] **Step 13.5: Commit**
 
 ```bash
 cd /e/investintell-light && git add frontend/src/components/stocks/StockAnalysisView.tsx && git commit -m "feat(frontend): detalhe da ação — chart interativo no topo e header ao vivo"
@@ -2586,14 +2586,14 @@ cd /e/investintell-light && git add frontend/src/components/stocks/StockAnalysis
 
 ### Task 14: Verificação ponta-a-ponta
 
-- [ ] **Step 14.1: Suítes completas**
+- [x] **Step 14.1: Suítes completas**
 
 ```bash
 cd /e/investintell-light/backend && uv run pytest -q && cd ../frontend && npm run test && npm run typecheck && npm run lint
 ```
 Expected: tudo PASS.
 
-- [ ] **Step 14.2: Smoke do backend** (precisa de `TIINGO_TOKEN` e DB local com universo backfillado):
+- [x] **Step 14.2: Smoke do backend** (precisa de `TIINGO_TOKEN` e DB local com universo backfillado):
 
 ```bash
 cd /e/investintell-light/backend && uv run uvicorn app.main:app --port 8000 &
@@ -2603,7 +2603,7 @@ curl -s "http://localhost:8000/stocks/TSLA/history?bars=40" | head -c 400
 ```
 Expected: overview com `gainers`/`sectors` não-vazios (após Tasks 1–2 + backfill); history com 40 barras `{t,o,h,l,c,v}`.
 
-- [ ] **Step 14.3: Smoke visual** — com o backend de cima rodando:
+- [x] **Step 14.3: Smoke visual** — com o backend de cima rodando:
 
 ```bash
 cd /e/investintell-light/frontend && NEXT_PUBLIC_LIVEFEED_WS_URL=wss://livefeed-production-2c39.up.railway.app/stream npm run dev
@@ -2614,7 +2614,7 @@ Abrir no browser (Playwright MCP ou manual) e verificar:
 2. `http://localhost:3000/stocks/TSLA` — chart interativo abre direto (pan por arrasto, zoom de roda, crosshair com legenda OHLC, SMA20 ligada); botões de range atualizam chart E métricas abaixo; badge LIVE durante o pregão (fora dele, EOD — nunca preço simulado); KPIs/rolling/histograma/news preservados.
 3. Tema dark (toggle no header): o canvas re-monta com tokens escuros (o `<main>` é re-keyed pelo shell — confirmar que o chart re-renderiza com as cores novas).
 
-- [ ] **Step 14.4: Commit final + atualização do plano**
+- [x] **Step 14.4: Commit final + atualização do plano**
 
 Marcar checkboxes concluídos neste arquivo e:
 

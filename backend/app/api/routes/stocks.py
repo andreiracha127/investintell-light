@@ -34,13 +34,18 @@ from app.models.eod_price import EodPrice
 from app.models.instrument import Instrument
 from app.models.news_item import NewsItem
 from app.schemas.analysis import RangeKey, StockAnalysisResponse
+from app.schemas.market import HistoryBar, HistoryResponse, MarketOverviewResponse
 from app.schemas.news import NewsArticle, NewsResponse
 from app.schemas.prices import PricePoint, PriceSeriesResponse
+from app.services import market_overview
 from app.services._series import (
     RANGE_DAYS,
 )
 from app.services._series import (
     select_adj_close_rows as _select_adj_close_rows,
+)
+from app.services._series import (
+    select_adj_ohlcv_rows as _select_adj_ohlcv_rows,
 )
 from app.services._series import (
     select_date_bounds as _select_date_bounds,
@@ -75,6 +80,39 @@ async def _ensure_eod_or_http_error(
 ) -> None:
     """Thin wrapper — delegates to the shared canonical implementation in app.api._shared."""
     await ensure_eod_or_http_error(session, client, symbols, start, end)
+
+
+# ---------------------------------------------------------------------------
+# Market overview (landing /stocks)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/overview", response_model=MarketOverviewResponse)
+async def get_market_overview(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    client: Annotated[TiingoClient, Depends(get_tiingo_client)],
+) -> MarketOverviewResponse:
+    """Payload único da landing /stocks — leaders/setores das tabelas locais.
+
+    Leaders e setores leem eod_prices ⋈ universe_constituents (pipeline batch
+    F6.2); ficam tão frescos quanto o último backfill. Os 4 ETFs de índice são
+    painel SECUNDÁRIO: warm on-demand via ensure_eod, e falha da Tiingo degrada
+    para indices=[] com warning (degradação declarada, como o news stale).
+    """
+    indices: list = []
+    today = dt.date.today()
+    try:
+        await _ensure_eod_or_http_error(
+            session, client, list(market_overview.INDEX_TICKERS),
+            today - dt.timedelta(days=60), today,
+        )
+        indices = await market_overview.fetch_index_rows(session)
+    except (HTTPException, TiingoError) as exc:
+        logger.warning("Index strip degraded (ensure/fetch failed): %s", exc)
+
+    rows = await market_overview.fetch_overview_rows(session)
+    ranked = market_overview.rank_overview(rows)
+    return MarketOverviewResponse(universe_size=len(rows), indices=indices, **ranked)
 
 
 async def _select_price_rows(
@@ -158,6 +196,44 @@ async def _select_ohlcv_rows(
         .order_by(EodPrice.date)
     )
     return list(result.tuples().all())
+
+
+
+@router.get("/{ticker}/history", response_model=HistoryResponse)
+async def get_stock_history(
+    ticker: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    client: Annotated[TiingoClient, Depends(get_tiingo_client)],
+    bars: Annotated[
+        int, Query(ge=30, le=5000, description="Nº de barras diárias mais recentes.")
+    ] = 760,
+) -> HistoryResponse:
+    """OHLCV diário ajustado no contrato do chart interativo ({t,o,h,l,c,v}).
+
+    Resample semanal/mensal é client-side (engine). t = epoch ms UTC do pregão.
+    """
+    symbol = ticker.strip().upper()
+    today = dt.date.today()
+    # ~252 pregões/ano → 1.6 dias-calendário por barra cobre feriados com folga.
+    start = today - dt.timedelta(days=int(bars * 1.6) + 10)
+    await _ensure_eod_or_http_error(session, client, [symbol], start, today)
+
+    rows = await _select_adj_ohlcv_rows(session, symbol, start, today)
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"No price data available for {symbol}.")
+    rows = rows[-bars:]
+
+    def _ms(d: dt.date) -> int:
+        return int(dt.datetime(d.year, d.month, d.day, tzinfo=dt.UTC).timestamp() * 1000)
+
+    return HistoryResponse(
+        ticker=symbol,
+        count=len(rows),
+        bars=[
+            HistoryBar(t=_ms(d), o=o, h=h, l=lo, c=c, v=int(v or 0))
+            for d, o, h, lo, c, v in rows
+        ],
+    )
 
 
 async def _select_instrument_name(session: AsyncSession, ticker: str) -> str | None:

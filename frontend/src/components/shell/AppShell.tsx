@@ -50,9 +50,9 @@ function applySettings(s: Settings) {
 
 const NAV_ITEMS: { href: string; match: (p: string) => boolean; label: string; icon: React.ReactNode }[] = [
   {
-    href: "/stocks/AAPL",
+    href: "/stocks",
     match: (p) => p.startsWith("/stocks"),
-    label: "Stock Analysis",
+    label: "Stocks",
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
         <rect x="2" y="6" width="2.4" height="6" fill="currentColor" />

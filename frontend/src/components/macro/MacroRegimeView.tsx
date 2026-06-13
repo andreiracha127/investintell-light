@@ -15,10 +15,11 @@ import { useQuery } from "@tanstack/react-query";
 import { ApiError, fetchMacroRegime } from "@/lib/api/client";
 import { EChart } from "@/components/charts/EChart";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
-import { Card, KpiTile, PageTitle } from "@/components/ui/panels";
+import { Card, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
 import { buildRegimeStripOption } from "@/lib/charts/regime";
 import { chartColors, type ChartColors } from "@/lib/charts/theme";
 import { formatDate, formatNumber } from "@/lib/format";
+import type { EChartsOption } from "echarts";
 
 // ── State badge ────────────────────────────────────────────────────────────
 
@@ -72,7 +73,7 @@ export function MacroRegimeView() {
   });
 
   // All hooks before early returns.
-  const stripOption = useMemo(() => {
+  const stripOption = useMemo<EChartsOption | null>(() => {
     if (!query.data || !colors) return null;
     return buildRegimeStripOption(query.data.recent_flips, colors, query.data.as_of);
   }, [query.data, colors]);
@@ -168,9 +169,7 @@ export function MacroRegimeView() {
           value={distancePctDisplay}
           tone={
             signal.distance_pct !== null && signal.distance_pct !== undefined
-              ? signal.distance_pct >= 0
-                ? "text-gain"
-                : "text-loss"
+              ? valueTone(signal.distance_pct)
               : "text-text-primary"
           }
         />
@@ -185,8 +184,8 @@ export function MacroRegimeView() {
         <KpiTile label="As of" value={formatDate(data.as_of)} />
       </div>
 
-      {/* Timeline strip */}
-      {colors && stripOption && data.recent_flips.length > 0 && (
+      {/* Timeline strip — gated solely on stripOption (null when no periods). */}
+      {stripOption && (
         <Card title="Regime history">
           <EChart option={stripOption} className="h-[160px] w-full" />
         </Card>

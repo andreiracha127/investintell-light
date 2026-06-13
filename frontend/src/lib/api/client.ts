@@ -44,6 +44,26 @@ type RebalancePolicyOperation =
 type RebalancePreviewOperation =
   paths["/portfolios/{portfolio_id}/rebalance/preview"]["get"];
 
+type MarketOverviewOperation = paths["/stocks/overview"]["get"];
+export type MarketOverview =
+  MarketOverviewOperation["responses"]["200"]["content"]["application/json"];
+export type LeaderRow = MarketOverview["gainers"][number];
+export type IndexCard = MarketOverview["indices"][number];
+export type SectorPerf = MarketOverview["sectors"][number];
+
+type StockHistoryOperation = paths["/stocks/{ticker}/history"]["get"];
+export type StockHistory =
+  StockHistoryOperation["responses"]["200"]["content"]["application/json"];
+export type HistoryBar = StockHistory["bars"][number];
+
+type FundHistoryOperation = paths["/funds/{instrument_id}/history"]["get"];
+export type FundHistory =
+  FundHistoryOperation["responses"]["200"]["content"]["application/json"];
+
+type SymbolSearchOperation = paths["/search/symbols"]["get"];
+export type SymbolSearchResult =
+  SymbolSearchOperation["responses"]["200"]["content"]["application/json"][number];
+
 export type StockAnalysis =
   AnalysisOperation["responses"]["200"]["content"]["application/json"];
 export type AnalysisQuery = NonNullable<AnalysisOperation["parameters"]["query"]>;
@@ -321,6 +341,42 @@ export function fetchStockAnalysis(
   const qs = params.toString();
   return request<StockAnalysis>(
     `/stocks/${encodeURIComponent(ticker)}/analysis${qs ? `?${qs}` : ""}`,
+    signal,
+  );
+}
+
+export function fetchMarketOverview(signal?: AbortSignal): Promise<MarketOverview> {
+  return request<MarketOverview>("/stocks/overview", signal);
+}
+
+export function fetchStockHistory(
+  ticker: string,
+  bars = 2520,
+  signal?: AbortSignal,
+): Promise<StockHistory> {
+  return request<StockHistory>(
+    `/stocks/${encodeURIComponent(ticker)}/history?bars=${bars}`,
+    signal,
+  );
+}
+
+export function fetchFundHistory(
+  instrumentId: string,
+  bars = 2520,
+  signal?: AbortSignal,
+): Promise<FundHistory> {
+  return request<FundHistory>(
+    `/funds/${encodeURIComponent(instrumentId)}/history?bars=${bars}`,
+    signal,
+  );
+}
+
+export function fetchSymbolSearch(
+  q: string,
+  signal?: AbortSignal,
+): Promise<SymbolSearchResult[]> {
+  return request<SymbolSearchResult[]>(
+    `/search/symbols?q=${encodeURIComponent(q)}`,
     signal,
   );
 }
