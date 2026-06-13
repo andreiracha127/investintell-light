@@ -7,15 +7,9 @@
  * consistent). The frontend formats; the backend filters/sorts/paginates.
  */
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import {
-  fetchScreenResults,
-  fetchScreenResultsCsv,
-  type ResultsColumn,
-  type ResultsRow,
-} from "@/lib/api/client";
+import { fetchScreenResults, fetchScreenResultsCsv } from "@/lib/api/client";
 import {
   BUTTON_CLASS,
   ErrorPanel,
@@ -24,7 +18,9 @@ import {
   NO_DATA_NOTE,
   retryPolicy,
 } from "@/components/screener/shared";
-import { formatCompact, formatMetricValue } from "@/lib/format";
+import { DataGrid } from "@/components/ui/DataGrid";
+import { formatCompact } from "@/lib/format";
+import { screenResultsToGridOptions } from "@/lib/grid/gridOptions";
 
 const PAGE_SIZE = 25;
 type SortDir = "asc" | "desc";
@@ -97,15 +93,23 @@ export function ResultsTab({
     }
   };
 
-  const onSort = (code: string) => {
-    if (sort === code) {
-      setDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSort(code);
-      setDir("asc");
-    }
-    setPage(1);
-  };
+  const gridOptions = useMemo(
+    () =>
+      resultsQuery.data
+        ? screenResultsToGridOptions(
+            resultsQuery.data,
+            { sort, dir },
+            {
+              onSortChange: (columnId, order) => {
+                setSort(columnId);
+                setDir(order);
+                setPage(1);
+              },
+            },
+          )
+        : null,
+    [resultsQuery.data, sort, dir],
+  );
 
   if (resultsQuery.isPending) {
     return (
@@ -130,7 +134,7 @@ export function ResultsTab({
     );
   }
 
-  const { columns, rows, total } = resultsQuery.data;
+  const { total } = resultsQuery.data;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const firstRow = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const lastRow = Math.min(page * PAGE_SIZE, total);
@@ -187,76 +191,9 @@ export function ResultsTab({
       )}
 
       <div
-        className={`overflow-x-auto transition-opacity ${
-          resultsQuery.isFetching ? "opacity-60" : ""
-        }`}
+        className={`transition-opacity ${resultsQuery.isFetching ? "opacity-60" : ""}`}
       >
-        <table className="w-full min-w-[760px] border-collapse ix-fs tabular-nums lining-nums">
-          <thead>
-            <tr className="bg-field">
-              {columns.map((col) => {
-                const textCol = col.data_type === "string";
-                const active = sort === col.code;
-                return (
-                  <th
-                    key={col.code}
-                    className={`sticky top-0 whitespace-nowrap bg-field px-2.5 py-[9px] first:pl-[var(--ix-pad)] last:pr-[var(--ix-pad)] border-t border-t-border ${
-                      textCol ? "text-left" : "text-right"
-                    } ${
-                      active
-                        ? "border-b-2 border-b-accent font-bold text-accent"
-                        : "border-b border-b-border-strong font-semibold text-text-secondary"
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => onSort(col.code)}
-                      aria-label={`Sort by ${col.name}`}
-                      className={`whitespace-nowrap transition-colors ${
-                        active
-                          ? "font-bold text-accent"
-                          : "font-semibold hover:text-text-primary"
-                      }`}
-                    >
-                      {col.name}
-                      {active && (
-                        <span aria-hidden="true" className="ml-1">
-                          {dir === "asc" ? "▲" : "▼"}
-                        </span>
-                      )}
-                    </button>
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => (
-              <tr
-                key={typeof row.ticker === "string" ? row.ticker : i}
-                className={`border-b border-border transition-colors hover:bg-accent-wash ${
-                  i % 2 === 1 ? "bg-zebra" : ""
-                }`}
-              >
-                {columns.map((col) => (
-                  <ResultCell key={col.code} row={row} col={col} />
-                ))}
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td
-                  colSpan={Math.max(columns.length, 1)}
-                  className="py-6 text-center text-[13px] text-text-muted"
-                >
-                  {total === 0 && search !== ""
-                    ? `No matches for "${search}".`
-                    : "No matches — loosen the filters, or the metrics snapshot may not be computed yet."}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        {gridOptions && <DataGrid options={gridOptions} className="h-[560px] w-full" />}
       </div>
 
       <div className="flex flex-wrap items-center gap-2.5 border-t border-border px-[var(--ix-pad)] py-2.5 text-[12px] text-text-secondary">
@@ -310,45 +247,4 @@ function pageWindow(page: number, totalPages: number): number[] {
   const size = Math.min(5, totalPages);
   const start = Math.min(Math.max(1, page - 2), totalPages - size + 1);
   return Array.from({ length: size }, (_, i) => start + i);
-}
-
-const CELL_CLASS =
-  "ix-cell px-2.5 first:pl-[var(--ix-pad)] last:pr-[var(--ix-pad)]";
-
-function ResultCell({ row, col }: { row: ResultsRow; col: ResultsColumn }) {
-  const value = row[col.code];
-
-  if (col.code === "ticker" && typeof value === "string") {
-    return (
-      <td className={CELL_CLASS}>
-        <Link
-          href={`/stocks/${encodeURIComponent(value)}`}
-          className="font-bold text-accent hover:underline"
-        >
-          {value}
-        </Link>
-      </td>
-    );
-  }
-  if (col.data_type === "string") {
-    return (
-      <td className={`${CELL_CLASS} text-left text-text-secondary`}>
-        <span className="block truncate max-w-[260px]">
-          {value === null || value === undefined ? "—" : String(value)}
-        </span>
-      </td>
-    );
-  }
-  // Percent metrics read as variations — color by sign, Cockpit gain/loss.
-  const tone =
-    col.data_type === "percent" && typeof value === "number" && value !== 0
-      ? value > 0
-        ? "font-bold text-gain"
-        : "font-bold text-loss"
-      : "text-text-primary";
-  return (
-    <td className={`${CELL_CLASS} text-right tabular-nums ${tone}`}>
-      {typeof value === "number" ? formatMetricValue(value, col.data_type) : "—"}
-    </td>
-  );
 }
