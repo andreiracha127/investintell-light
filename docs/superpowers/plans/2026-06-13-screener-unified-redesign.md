@@ -1805,3 +1805,14 @@ Run `npm run dev --prefix frontend`, open `/screener`: empty state → add a met
 - **Placeholders:** none — every code step carries full code. Two intentional "verify against generated `api.d.ts`" notes in Task 3 (the openapi-typescript alias names) and one "confirm export command" — these are real lookups, not deferred work.
 - **Known risk:** Grid Pro `editMode`/`renderer:checkbox`/`events.afterEdit` API is taken from the repo's `positionsGridOptions.ts`/`universeGridOptions.ts` (grid-rollout) — confirm the exact `afterEdit` value semantics (empty-cell → null) when implementing Task 6; tests assert behavior.
 
+---
+
+## Deferred to a follow-up (phase 2)
+
+These design-spec items were intentionally NOT in the Tasks 1–13 scope and are deferred (no runtime impact on the shipped workspace):
+
+- **"Duplicate screen" action** in the `ScreenSwitcher` (design doc §"ScreenSwitcher", lines ~109/164). `ScreenerHeader` ships New / Rename / Delete; Duplicate (create a new screen seeded from the current screen's filters) is a follow-up.
+- **`aria-invalid` feedback on invalid bound entry** (design doc lines ~151/218/241). Invalid Min/Max input is currently dropped without committing (`parseBound` → `undefined` → no-op) but does not surface an `aria-invalid`/visual cue on the grid cell or the `DistributionPanel` inputs. Follow-up a11y polish.
+
+Component tests for the new orchestrators (`BuildPanel`, `ScreenerHeader`) were ADDED post-Task-13 (RTL + jsdom infra) and are no longer deferred.
+
