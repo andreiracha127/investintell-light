@@ -2098,9 +2098,9 @@ export interface components {
             constraints: components["schemas"]["ConstraintsIn"];
             /**
              * Window Days
-             * @default 730
+             * @default null
              */
-            window_days: number;
+            window_days?: number | null;
             /** Views */
             views?: (components["schemas"]["AbsoluteViewIn"] | components["schemas"]["RelativeViewIn"])[] | null;
             /**

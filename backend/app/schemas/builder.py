@@ -137,7 +137,9 @@ class OptimizeRequest(BaseModel):
     universe: UniverseSpecIn | None = None
     objective: Objective = "min_cvar"
     constraints: ConstraintsIn = ConstraintsIn()
-    window_days: Annotated[int, Field(ge=30, le=3650)] = 730
+    # None = use the FULL nav_timeseries history (the 2-year window gate is
+    # removed). An explicit int (30..3650 days) opts into a narrower window.
+    window_days: Annotated[int | None, Field(ge=30, le=3650)] = None
     # Views require every asset in the universe to have a known AUM (v1:
     # funds only — equities have no market cap in the builder yet).
     views: list[ViewIn] | None = None

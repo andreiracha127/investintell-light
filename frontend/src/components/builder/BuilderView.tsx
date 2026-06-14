@@ -123,7 +123,9 @@ export function BuilderView() {
   const [objective, setObjective] = useState<BuilderObjective>("min_cvar");
   const [capPct, setCapPct] = useState("25");
   const [minWeightPct, setMinWeightPct] = useState("");
-  const [windowDays, setWindowDays] = useState("730");
+  // Blank = full nav_timeseries history (backend default; the 2-year gate is
+  // removed). A typed value opts into a narrower estimation window.
+  const [windowDays, setWindowDays] = useState("");
 
   /* ── Advanced (views + BL model params) ────────────────────────────── */
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -174,6 +176,9 @@ export function BuilderView() {
   const tau = parseNum(tauText);
   // Blank cap = uncapped (null); a typed but non-numeric cap blocks the run.
   const capOk = capPct.trim() === "" || cap !== null;
+  // Blank window = full history (null → backend uses all of nav_timeseries);
+  // a typed but non-numeric window blocks the run (mirrors cap).
+  const windowOk = windowDays.trim() === "" || windowVal !== null;
   // δ/τ only drive the Black-Litterman utility objective; every other objective
   // ignores them, so a blank/edited value must not block those runs.
   const blParamsOk =
@@ -182,7 +187,7 @@ export function BuilderView() {
   const universeOk = universeCount === null || universeCount >= 2;
 
   const canRun =
-    windowVal !== null &&
+    windowOk &&
     capOk &&
     blParamsOk &&
     (mode === "simulate"
@@ -198,7 +203,7 @@ export function BuilderView() {
     const common = {
       objective,
       constraints,
-      window_days: windowVal as number,
+      window_days: windowVal,
       // Always send valid BL params; non-BL objectives fall back to defaults
       // (the backend schema validates δ>0, τ>0 regardless of objective).
       bl: {
@@ -309,11 +314,11 @@ export function BuilderView() {
               width="w-[140px]"
             />
             <NumField
-              label="Window (days)"
+              label="Window (days, opt.)"
               value={windowDays}
               onChange={setWindowDays}
-              placeholder="730"
-              width="w-[120px]"
+              placeholder="blank = full history"
+              width="w-[180px]"
             />
           </div>
           {objectiveDef && (

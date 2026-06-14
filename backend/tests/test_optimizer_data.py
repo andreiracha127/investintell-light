@@ -244,3 +244,68 @@ async def test_select_universe_funds_unknown_rank_column_raises() -> None:
             max_assets=5,
             today=_TODAY,
         )
+
+
+# ── window gate removal: default uses the FULL nav_timeseries history ─────────
+
+
+class _CaptureFundSession:
+    """Returns canned rows per fund and records EVERY compiled SQL string."""
+
+    def __init__(self, fund_rows: dict[uuid.UUID, list[tuple[Any, ...]]]) -> None:
+        self._fund_rows = fund_rows
+        self.sqls: list[str] = []
+
+    async def execute(self, stmt: Any) -> _FakeResult:
+        self.sqls.append(str(stmt).lower())
+        params = stmt.compile().params
+        for fund_id, rows in self._fund_rows.items():
+            if fund_id in params.values():
+                return _FakeResult(rows)
+        return _FakeResult([])
+
+
+async def test_load_aligned_returns_default_loads_full_history() -> None:
+    """Default (no window_days) loads ALL history — emits no nav_date floor."""
+    start = dt.date(2010, 1, 1)
+    session = _CaptureFundSession(
+        {_FUND_A: _nav_rows(450, start), _FUND_B: _nav_rows(450, start)}
+    )
+    await optimizer_data.load_aligned_returns(
+        session,  # type: ignore[arg-type]
+        [optimizer_data.FundAssetRef(id=_FUND_A), optimizer_data.FundAssetRef(id=_FUND_B)],
+        today=_TODAY,
+    )
+    assert session.sqls
+    assert all("nav_date >=" not in s for s in session.sqls)
+
+
+async def test_load_aligned_returns_explicit_window_applies_date_floor() -> None:
+    """An explicit window_days still floors nav_date (opt-in narrowing)."""
+    start = dt.date(2024, 7, 1)
+    session = _CaptureFundSession(
+        {_FUND_A: _nav_rows(450, start), _FUND_B: _nav_rows(450, start)}
+    )
+    await optimizer_data.load_aligned_returns(
+        session,  # type: ignore[arg-type]
+        [optimizer_data.FundAssetRef(id=_FUND_A), optimizer_data.FundAssetRef(id=_FUND_B)],
+        window_days=730,
+        today=_TODAY,
+    )
+    assert any("nav_date >=" in s for s in session.sqls)
+
+
+async def test_select_universe_funds_default_counts_full_history() -> None:
+    from app.services import funds_catalog
+
+    session = _CaptureSession([(_FUND_A, "AAA", "Alpha Fund")])
+    await optimizer_data.select_universe_funds(
+        session,  # type: ignore[arg-type]
+        funds_catalog.FundFilters(),
+        rank_by="sharpe_1y",
+        rank_dir="desc",
+        max_assets=5,
+        today=_TODAY,
+    )
+    # default = full history → the per-fund NAV coverage count has no date floor
+    assert "nav_date >=" not in session.sql

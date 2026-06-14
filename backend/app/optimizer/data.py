@@ -24,7 +24,10 @@ from app.models.eod_price import EodPrice
 from app.models.fund import Fund, FundNav, FundRiskLatest
 from app.services import funds_catalog
 
-DEFAULT_WINDOW_DAYS = 730
+# None = use the FULL nav_timeseries history (the 2-year window gate is removed;
+# nav_timeseries spans decades). Pass an explicit int to opt into a narrower
+# estimation window.
+DEFAULT_WINDOW_DAYS: int | None = None
 MIN_COMMON_OBS = 400
 
 
@@ -72,13 +75,14 @@ def _fund_return_series(rows: list[tuple[dt.date, float | None, float | None]]) 
 
 
 async def _load_fund_returns(
-    session: AsyncSession, ref: FundAssetRef, since: dt.date
+    session: AsyncSession, ref: FundAssetRef, since: dt.date | None
 ) -> pd.Series:
-    result = await session.execute(
-        select(FundNav.nav_date, FundNav.nav, FundNav.return_1d)
-        .where(FundNav.instrument_id == ref.id, FundNav.nav_date >= since)
-        .order_by(FundNav.nav_date)
+    stmt = select(FundNav.nav_date, FundNav.nav, FundNav.return_1d).where(
+        FundNav.instrument_id == ref.id
     )
+    if since is not None:
+        stmt = stmt.where(FundNav.nav_date >= since)
+    result = await session.execute(stmt.order_by(FundNav.nav_date))
     rows = [
         (nav_date, float(nav) if nav is not None else None, float(r1d) if r1d is not None else None)
         for nav_date, nav, r1d in result.all()
@@ -89,13 +93,12 @@ async def _load_fund_returns(
 
 
 async def _load_equity_returns(
-    session: AsyncSession, ref: EquityAssetRef, since: dt.date
+    session: AsyncSession, ref: EquityAssetRef, since: dt.date | None
 ) -> pd.Series:
-    result = await session.execute(
-        select(EodPrice.date, EodPrice.adj_close)
-        .where(EodPrice.ticker == ref.ticker, EodPrice.date >= since)
-        .order_by(EodPrice.date)
-    )
+    stmt = select(EodPrice.date, EodPrice.adj_close).where(EodPrice.ticker == ref.ticker)
+    if since is not None:
+        stmt = stmt.where(EodPrice.date >= since)
+    result = await session.execute(stmt.order_by(EodPrice.date))
     rows = result.all()
     if not rows:
         raise ValueError(f"unknown asset or no price history in window: {ref.label}")
@@ -112,7 +115,7 @@ async def _load_equity_returns(
 async def load_aligned_returns(
     session: AsyncSession,
     assets: list[AssetRef],
-    window_days: int = DEFAULT_WINDOW_DAYS,
+    window_days: int | None = DEFAULT_WINDOW_DAYS,
     today: dt.date | None = None,
 ) -> pd.DataFrame:
     """T×n daily-return frame (columns = asset labels, index = common dates).
@@ -126,10 +129,10 @@ async def load_aligned_returns(
     duplicates = sorted({label for label in labels if labels.count(label) > 1})
     if duplicates:
         raise ValueError(f"duplicate assets in request: {', '.join(duplicates)}")
-    if window_days < 1:
+    if window_days is not None and window_days < 1:
         raise ValueError(f"window_days must be >= 1, got {window_days}")
     today = today or dt.date.today()
-    since = today - dt.timedelta(days=window_days)
+    since = None if window_days is None else today - dt.timedelta(days=window_days)
 
     series: dict[str, pd.Series] = {}
     for ref in assets:
@@ -140,9 +143,10 @@ async def load_aligned_returns(
 
     frame = pd.DataFrame(series).dropna()
     if len(frame) < MIN_COMMON_OBS:
+        window_desc = "the full history" if window_days is None else f"the last {window_days} days"
         raise ValueError(
             f"insufficient common history: {len(frame)} overlapping observations across the "
-            f"{len(assets)} assets in the last {window_days} days "
+            f"{len(assets)} assets in {window_desc} "
             f"(minimum {MIN_COMMON_OBS}) — widen the window or drop the short-history assets"
         )
     return frame
@@ -179,7 +183,7 @@ async def select_universe_funds(
     max_assets: int,
     require_aum: bool = False,
     include_ids: Sequence[str] | None = None,
-    window_days: int = DEFAULT_WINDOW_DAYS,
+    window_days: int | None = DEFAULT_WINDOW_DAYS,
     min_obs: int = MIN_COMMON_OBS,
     today: dt.date | None = None,
 ) -> list[UniverseFund]:
@@ -195,11 +199,14 @@ async def select_universe_funds(
     weights are always computable on the result.
     """
     today = today or dt.date.today()
-    since = today - dt.timedelta(days=window_days)
+    since = None if window_days is None else today - dt.timedelta(days=window_days)
 
+    nav_count_where = [FundNav.nav.is_not(None)]
+    if since is not None:
+        nav_count_where.append(FundNav.nav_date >= since)
     nav_counts = (
         select(FundNav.instrument_id, func.count().label("n"))
-        .where(FundNav.nav_date >= since, FundNav.nav.is_not(None))
+        .where(*nav_count_where)
         .group_by(FundNav.instrument_id)
         .subquery()
     )
