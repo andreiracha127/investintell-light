@@ -113,6 +113,17 @@ class FilterBody(BaseModel):
         return self
 
 
+class FilterReorder(BaseModel):
+    """Body for PATCH /screener/screens/{id}/filters/reorder.
+
+    Must list EXACTLY the screen's current filter codes, in the desired order.
+    """
+
+    metric_codes: list[str] = Field(
+        description="All of the screen's current filter metric codes, in the new order."
+    )
+
+
 class ScreenFilterOut(BaseModel):
     """One persisted filter row."""
 

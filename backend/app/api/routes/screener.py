@@ -31,6 +31,7 @@ from app.schemas.screener import (
     BuildResponse,
     DistributionOut,
     FilterBody,
+    FilterReorder,
     FilterUpdateResponse,
     MetricDefOut,
     ResultsColumnOut,
@@ -201,6 +202,27 @@ async def delete_filter(
         headline_count=headline_count,
         available_count=available_count,
     )
+
+
+@router.patch("/screens/{screen_id}/filters/reorder", response_model=ScreenOut)
+async def reorder_filters(
+    screen_id: int, payload: FilterReorder, session: SessionDep
+) -> ScreenOut:
+    """Reorder a screen's filters; position drives the Results column order."""
+    screen = await _screen_or_404(session, screen_id)
+    requested = list(payload.metric_codes)
+    existing = {f.metric_code for f in screen.filters}
+    if len(requested) != len(set(requested)):
+        raise HTTPException(
+            status_code=422, detail="Duplicate metric codes in reorder payload."
+        )
+    if set(requested) != existing:
+        raise HTTPException(
+            status_code=422,
+            detail="Reorder payload must list exactly the screen's current filter codes.",
+        )
+    await screener_service.reorder_filters(session, screen_id, requested)
+    return ScreenOut.model_validate(await _screen_or_404(session, screen_id))
 
 
 # ---------------------------------------------------------------------------
