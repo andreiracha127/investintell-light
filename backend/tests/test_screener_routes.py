@@ -542,6 +542,49 @@ async def test_build_screen_404(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.status_code == 404
 
 
+async def test_build_all_returns_every_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_get_screen(
+        monkeypatch,
+        _screen(filters=[_filter("pe_ratio", position=0), _filter("market_cap", position=1)]),
+    )
+    _stub_metric_values(monkeypatch, [float(v) for v in range(1, 30)])
+    _stub_count(monkeypatch, 7)
+    _stub_available_count(monkeypatch, 29)
+
+    async with _client() as ac:
+        response = await ac.get("/screener/screens/1/build")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["headline_count"] == 7
+    codes = [m["metric_code"] for m in body["metrics"]]
+    assert codes == ["pe_ratio", "market_cap"]  # position order
+    for metric in body["metrics"]:
+        assert metric["available_count"] == 29
+        assert metric["distribution"] is not None
+
+
+async def test_build_all_empty_screen_has_no_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_get_screen(monkeypatch, _screen(filters=[]))
+    _stub_count(monkeypatch, 0)
+
+    async with _client() as ac:
+        response = await ac.get("/screener/screens/1/build")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["headline_count"] == 0
+    assert body["metrics"] == []
+
+
+async def test_build_all_screen_404(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_get_screen(monkeypatch, None)
+    async with _client() as ac:
+        response = await ac.get("/screener/screens/9/build")
+
+    assert response.status_code == 404
+
+
 # ---------------------------------------------------------------------------
 # GET results (+ CSV)
 # ---------------------------------------------------------------------------
