@@ -58,6 +58,7 @@ export function applyFilterResponse(
   queryClient.setQueryData(["screen", screenId], resp.screen);
   queryClient.invalidateQueries({ queryKey: ["screens"] });
   queryClient.invalidateQueries({ queryKey: ["screen-results", screenId] });
+  queryClient.invalidateQueries({ queryKey: ["screen-build", screenId] }); // batch build (sparklines + panel)
 }
 
 export function ErrorPanel({
