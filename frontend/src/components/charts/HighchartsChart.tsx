@@ -39,7 +39,16 @@ export function HighchartsChart({
     let disposed = false;
     const el = containerRef.current;
     if (!el) return;
-    void import("highcharts").then((mod) => {
+    void (async () => {
+      // Use the ESM build so the Core modules below register on the SAME
+      // Highcharts instance (the UMD `highcharts/modules/*` bundles expect a
+      // global and do not self-register under ESM).
+      const mod = await import("highcharts/esm/highcharts.js");
+      // Register Core modules consumed by hc/* builders before any chart is
+      // created: heatmap (also provides colorAxis, used by correlation +
+      // monthly-returns) and xrange (regime strip).
+      await import("highcharts/esm/modules/heatmap.js");
+      await import("highcharts/esm/modules/xrange.js");
       if (disposed || !containerRef.current) return;
       const Highcharts = mod.default;
       // Apply the token-driven Graphite theme globally before creating.
@@ -51,7 +60,7 @@ export function HighchartsChart({
       }
       chartRef.current = chart;
       onReadyRef.current?.(chart);
-    });
+    })();
     const observer = new ResizeObserver(() => chartRef.current?.reflow());
     observer.observe(el);
     return () => {
