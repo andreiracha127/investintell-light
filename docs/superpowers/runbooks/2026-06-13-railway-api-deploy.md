@@ -22,6 +22,13 @@
 1. Deploy; confirm `/health` 200 in Railway logs.
 2. Smoke: GET /funds, GET /stocks/SPY/timeseries?range=1Y with a valid InsForge JWT on a protected route.
 3. Point the frontend API base at the Railway domain; decommission the InsForge compute service.
+4. Regenerate the frontend API types so they match the slimmed contract: `FundRiskOut`
+   dropped 15 always-null asset-class analytics fields (scoring_model, empirical_duration,
+   credit_beta, …). Run the OpenAPI export + the frontend codegen
+   (`backend/scripts/export_openapi.py` → regenerate `frontend/src/.../api.d.ts`) and
+   commit the updated `backend/openapi.json` + `api.d.ts`. The frontend still compiles
+   without this (the dropped fields were optional and always null), so it is non-blocking,
+   but keep the generated client in sync.
 
 ## Tiger DDL rollback (if needed)
 Run backend/db/ddl/2026-06-13_dynamic_catalog.sql is additive. To roll back:

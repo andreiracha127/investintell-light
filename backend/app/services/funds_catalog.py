@@ -187,7 +187,7 @@ _ITEM_COLUMNS: tuple[tuple[str, InstrumentedAttribute[Any]], ...] = (
 
 
 def _base_select(*columns: Any) -> Select[Any]:
-    """SELECT *columns* over funds LEFT JOIN fund_risk_latest."""
+    """SELECT *columns* over funds_v LEFT JOIN fund_risk_latest_mv (via repointed models)."""
     return (
         select(*columns)
         .select_from(Fund)
