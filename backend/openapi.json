@@ -184,6 +184,68 @@
         }
       }
     },
+    "/stocks/{ticker}/timeseries": {
+      "get": {
+        "tags": [
+          "stocks"
+        ],
+        "summary": "Get Stock Timeseries",
+        "description": "Adjusted OHLC + volume in Highcharts Stock arrays; granularity by range.\n\n<=1Y serves daily (raw hypertable), 1-5Y weekly CAGG, >5Y monthly CAGG \u2014\nthe downsample happens in the DB, never in Python. Always warms raw daily\nfirst so every interval reads off a fresh cache.",
+        "operationId": "get_stock_timeseries_stocks__ticker__timeseries_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1M",
+                "6M",
+                "1Y",
+                "5Y",
+                "MAX"
+              ],
+              "type": "string",
+              "description": "Visible range preset.",
+              "default": "1Y",
+              "title": "Range"
+            },
+            "description": "Visible range preset."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OhlcSeriesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/stocks/{ticker}/analysis": {
       "get": {
         "tags": [
@@ -394,7 +456,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -434,7 +501,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/portfolios/{portfolio_id}": {
@@ -445,6 +517,11 @@
         "summary": "Get Portfolio",
         "description": "One portfolio with its positions (sorted by ticker).",
         "operationId": "get_portfolio_portfolios__portfolio_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "portfolio_id",
@@ -486,6 +563,11 @@
         "summary": "Patch Portfolio",
         "description": "Partially update name and/or cash.",
         "operationId": "patch_portfolio_portfolios__portfolio_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "portfolio_id",
@@ -537,6 +619,11 @@
         "summary": "Delete Portfolio",
         "description": "Delete a portfolio; its positions cascade away at the DB level.",
         "operationId": "delete_portfolio_portfolios__portfolio_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "portfolio_id",
@@ -573,6 +660,11 @@
         "summary": "Put Position",
         "description": "Upsert one position.\n\nINSERT path validates the ticker against Tiingo (and warms the EOD cache);\nthe UPDATE path deliberately does NOT re-ensure \u2014 the ticker was already\nvalidated when the position was created.\n\nF8.6b: the body optionally carries basis/commission/trade_date (manual\nfill registration). Fields absent from the body keep the stored values\non UPDATE; on INSERT basis defaults to 'reference'.",
         "operationId": "put_position_portfolios__portfolio_id__positions__ticker__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "portfolio_id",
@@ -633,6 +725,11 @@
         "summary": "Delete Position",
         "description": "Delete one position; 404 covers both a missing portfolio and a missing ticker.",
         "operationId": "delete_position_portfolios__portfolio_id__positions__ticker__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "portfolio_id",
@@ -678,6 +775,11 @@
         "summary": "Get Portfolio Overview",
         "description": "Render-ready position table with P&L and column-header aggregates (D6).\n\nLast/prev closes come from the two most recent eod_prices rows per ticker;\nthe EOD ensure runs first so stale tickers are refreshed.  An empty\nportfolio is a legitimate 200 with zeroed/null aggregates.",
         "operationId": "get_portfolio_overview_portfolios__portfolio_id__overview_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "portfolio_id",
@@ -721,6 +823,11 @@
         "summary": "Get Portfolio News",
         "description": "Aggregated news across all portfolio tickers, newest first.\n\nStaleness is checked per ticker but all stale tickers are refreshed with\nONE combined Tiingo call (see ``ensure_news``).  Degrade path mirrors\nGET /stocks/{ticker}/news exactly: refresh failure with cached articles\nserves them with ``stale=true``; with an empty cache it fails loud.",
         "operationId": "get_portfolio_news_portfolios__portfolio_id__news_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "portfolio_id",
@@ -778,6 +885,11 @@
         "summary": "Get Portfolio Lookthrough",
         "description": "Exposi\u00e7\u00e3o consolidada do portf\u00f3lio atravessando os fundos (Frente C).\n\nDB-first: pesos v\u00eam dos pre\u00e7os/NAVs j\u00e1 sincronizados localmente (sem\nensure Tiingo \u2014 posi\u00e7\u00e3o sem pre\u00e7o local \u00e9 409 expl\u00edcito) e as exposi\u00e7\u00f5es\nv\u00eam das tabelas materializadas pelo worker ``nport_lookthrough`` no\ndata-lake. Posi\u00e7\u00f5es n\u00e3o atravessadas (a\u00e7\u00f5es, fundos sem materializa\u00e7\u00e3o)\nficam EXPL\u00cdCITAS em ``unexpanded`` \u2014 nunca somem silenciosamente.",
         "operationId": "get_portfolio_lookthrough_portfolios__portfolio_id__lookthrough_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "portfolio_id",
@@ -2227,6 +2339,69 @@
         }
       }
     },
+    "/funds/{instrument_id}/timeseries": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Fund Timeseries",
+        "description": "Fund NAV line in Highcharts arrays; granularity by range.\n\n<=1Y serves daily (raw nav_timeseries), 1-5Y weekly CAGG, >5Y monthly CAGG \u2014\nthe downsample happens in the DB, never in Python.",
+        "operationId": "get_fund_timeseries_funds__instrument_id__timeseries_get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instrument Id"
+            }
+          },
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1M",
+                "6M",
+                "1Y",
+                "5Y",
+                "MAX"
+              ],
+              "type": "string",
+              "description": "Visible range preset.",
+              "default": "1Y",
+              "title": "Range"
+            },
+            "description": "Visible range preset."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LineSeriesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/builder/optimize": {
       "post": {
         "tags": [
@@ -2308,7 +2483,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/macro/regime": {
@@ -2341,6 +2521,11 @@
         "summary": "Get Rebalance Policy",
         "description": "Pol\u00edtica salva do portf\u00f3lio; 404 quando nenhuma foi configurada.",
         "operationId": "get_rebalance_policy_portfolios__portfolio_id__rebalance_policy_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "portfolio_id",
@@ -2382,6 +2567,11 @@
         "summary": "Put Rebalance Policy",
         "description": "Cria/atualiza a pol\u00edtica (upsert por portfolio_id).",
         "operationId": "put_rebalance_policy_portfolios__portfolio_id__rebalance_policy_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "portfolio_id",
@@ -2435,6 +2625,11 @@
         "summary": "Get Rebalance Preview",
         "description": "Avalia\u00e7\u00e3o on-demand: decis\u00e3o + drifts + proposta + turnover (advisory).",
         "operationId": "get_rebalance_preview_portfolios__portfolio_id__rebalance_preview_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "portfolio_id",
@@ -4239,18 +4434,39 @@
             "title": "Currency"
           },
           "synced_at": {
-            "type": "string",
-            "format": "date-time",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Synced At"
           },
           "source_calc_date": {
-            "type": "string",
-            "format": "date",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Source Calc Date"
           },
           "source_nav_max_date": {
-            "type": "string",
-            "format": "date",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Source Nav Max Date"
           },
           "risk": {
@@ -4683,171 +4899,6 @@
               }
             ],
             "title": "Equity Correlation 252D"
-          },
-          "scoring_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scoring Model"
-          },
-          "empirical_duration": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Empirical Duration"
-          },
-          "empirical_duration_r2": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Empirical Duration R2"
-          },
-          "credit_beta": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Credit Beta"
-          },
-          "credit_beta_r2": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Credit Beta R2"
-          },
-          "yield_proxy_12m": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Yield Proxy 12M"
-          },
-          "duration_adj_drawdown_1y": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Duration Adj Drawdown 1Y"
-          },
-          "seven_day_net_yield": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Seven Day Net Yield"
-          },
-          "fed_funds_rate_at_calc": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fed Funds Rate At Calc"
-          },
-          "nav_per_share_mmf": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Nav Per Share Mmf"
-          },
-          "pct_weekly_liquid": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pct Weekly Liquid"
-          },
-          "weighted_avg_maturity_days": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Weighted Avg Maturity Days"
-          },
-          "crisis_alpha_score": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Crisis Alpha Score"
-          },
-          "inflation_beta": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Inflation Beta"
-          },
-          "inflation_beta_r2": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Inflation Beta R2"
           }
         },
         "type": "object",
@@ -4883,22 +4934,7 @@
           "elite_flag",
           "downside_capture_1y",
           "upside_capture_1y",
-          "equity_correlation_252d",
-          "scoring_model",
-          "empirical_duration",
-          "empirical_duration_r2",
-          "credit_beta",
-          "credit_beta_r2",
-          "yield_proxy_12m",
-          "duration_adj_drawdown_1y",
-          "seven_day_net_yield",
-          "fed_funds_rate_at_calc",
-          "nav_per_share_mmf",
-          "pct_weekly_liquid",
-          "weighted_avg_maturity_days",
-          "crisis_alpha_score",
-          "inflation_beta",
-          "inflation_beta_r2"
+          "equity_correlation_252d"
         ],
         "title": "FundRiskOut",
         "description": "The full precomputed risk snapshot (latest calc_date in the source)."
@@ -5229,6 +5265,41 @@
           "low_52w"
         ],
         "title": "LeaderRow"
+      },
+      "LineSeriesResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "interval": {
+            "type": "string",
+            "enum": [
+              "daily",
+              "weekly",
+              "monthly"
+            ],
+            "title": "Interval"
+          },
+          "series": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Series"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "interval",
+          "series"
+        ],
+        "title": "LineSeriesResponse",
+        "description": "Single line series for Highcharts Stock: [[t_ms, value], ...]."
       },
       "LookthroughSummaryOut": {
         "properties": {
@@ -5667,6 +5738,52 @@
         ],
         "title": "NewsResponse",
         "description": "News articles for one ticker, newest first.\n\n``stale`` is True when the Tiingo refresh failed but cached articles were\nserved \u2014 a declared degradation, never a silent fallback."
+      },
+      "OhlcSeriesResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "interval": {
+            "type": "string",
+            "enum": [
+              "daily",
+              "weekly",
+              "monthly"
+            ],
+            "title": "Interval"
+          },
+          "ohlc": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Ohlc"
+          },
+          "volume": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Volume"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "interval",
+          "ohlc",
+          "volume"
+        ],
+        "title": "OhlcSeriesResponse",
+        "description": "OHLC + volume series for Highcharts Stock."
       },
       "OptimizeRequest": {
         "properties": {
@@ -8634,6 +8751,12 @@
           "weight"
         ],
         "title": "WeightOut"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
       }
     }
   }

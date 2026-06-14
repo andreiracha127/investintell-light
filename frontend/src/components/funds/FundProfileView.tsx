@@ -441,22 +441,14 @@ function HoldingsPager({
 type RiskRow = { label: string; value: string; detail?: string };
 
 /**
- * Which analytics block applies to this fund. Driven by the risk worker's
- * `scoring_model` (equity / fixed_income / cash / alternatives); falls back
- * to the fund's type/asset class when the snapshot predates the field.
+ * Which analytics block applies to this fund. Derived from the fund's type and
+ * asset class (the risk worker's `scoring_model` was an always-null field,
+ * removed from FundRiskOut in the Tiger/dynamic-catalog migration).
  */
 function riskClass(
-  scoringModel: string | null,
   fundType: string,
   assetClass: string | null,
 ): "equity" | "fixed_income" | "cash" | "alternatives" {
-  const model = (scoringModel ?? "").toLowerCase();
-  if (model.includes("fixed") || model.includes("bond")) return "fixed_income";
-  if (model.includes("cash") || model.includes("mmf") || model.includes("money"))
-    return "cash";
-  if (model.includes("alt")) return "alternatives";
-  if (model.includes("equity")) return "equity";
-  // Fallbacks for rows synced before scoring_model existed.
   if (fundType === "mmf") return "cash";
   const cls = (assetClass ?? "").toLowerCase();
   if (cls.includes("fixed") || cls.includes("bond")) return "fixed_income";
@@ -510,13 +502,14 @@ function RiskRows({
     { label: "CVaR 99 EVT", value: pct(risk.cvar_99_evt) },
   ];
 
-  const cls = riskClass(risk.scoring_model, fundType, assetClass);
+  const cls = riskClass(fundType, assetClass);
 
-  const r2 = (value: number | null | undefined) =>
-    value !== null && value !== undefined
-      ? { detail: `R² ${formatNumber(value, 2)}` }
-      : {};
-
+  // Benchmark-relative analytics (alpha/beta/IR/TE/capture/correlation) come
+  // from the risk worker's OLS vs. the fund's mapped benchmark. The former
+  // asset-class-specific rows (empirical duration, credit beta, MMF 7-day yield,
+  // crisis alpha, inflation beta, …) were always-null in the source and were
+  // dropped from FundRiskOut in the Tiger/dynamic-catalog migration, so
+  // fixed-income and cash funds no longer carry a bespoke block.
   const byClass: Record<typeof cls, RiskRow[]> = {
     equity: [
       { label: "Alpha 1Y", value: pct(risk.alpha_1y) },
@@ -529,45 +522,10 @@ function RiskRows({
       { label: "Upside capture 1Y", value: num(risk.upside_capture_1y, 1) },
       { label: "Equity corr. 252d", value: num(risk.equity_correlation_252d) },
     ],
-    fixed_income: [
-      {
-        label: "Empirical duration",
-        value: num(risk.empirical_duration),
-        ...r2(risk.empirical_duration_r2),
-      },
-      {
-        label: "Credit beta",
-        value: num(risk.credit_beta),
-        ...r2(risk.credit_beta_r2),
-      },
-      { label: "Yield proxy 12M", value: pct(risk.yield_proxy_12m) },
-      {
-        label: "Duration-adj. drawdown 1Y",
-        value: pct(risk.duration_adj_drawdown_1y),
-      },
-    ],
-    cash: [
-      { label: "7-day net yield", value: pct(risk.seven_day_net_yield) },
-      {
-        label: "Weighted avg maturity",
-        value:
-          risk.weighted_avg_maturity_days !== null &&
-          risk.weighted_avg_maturity_days !== undefined
-            ? `${formatNumber(risk.weighted_avg_maturity_days, 0)} days`
-            : "—",
-      },
-      { label: "Weekly liquid assets", value: pct(risk.pct_weekly_liquid) },
-      { label: "NAV per share", value: num(risk.nav_per_share_mmf, 4) },
-      { label: "Fed funds at calc", value: pct(risk.fed_funds_rate_at_calc) },
-    ],
+    fixed_income: [],
+    cash: [],
     alternatives: [
       { label: "Equity corr. 252d", value: num(risk.equity_correlation_252d) },
-      { label: "Crisis alpha score", value: num(risk.crisis_alpha_score) },
-      {
-        label: "Inflation beta",
-        value: num(risk.inflation_beta),
-        ...r2(risk.inflation_beta_r2),
-      },
       { label: "Downside capture 1Y", value: num(risk.downside_capture_1y, 1) },
       { label: "Upside capture 1Y", value: num(risk.upside_capture_1y, 1) },
     ],
@@ -593,10 +551,14 @@ function RiskRows({
       {common.map((row) => (
         <StatRow key={row.label} label={row.label} value={row.value} detail={row.detail} />
       ))}
-      <RiskGroupHeader>{RISK_CLASS_TITLE[cls]}</RiskGroupHeader>
-      {byClass[cls].map((row) => (
-        <StatRow key={row.label} label={row.label} value={row.value} detail={row.detail} />
-      ))}
+      {byClass[cls].length > 0 && (
+        <>
+          <RiskGroupHeader>{RISK_CLASS_TITLE[cls]}</RiskGroupHeader>
+          {byClass[cls].map((row) => (
+            <StatRow key={row.label} label={row.label} value={row.value} detail={row.detail} />
+          ))}
+        </>
+      )}
       <RiskGroupHeader>Peer comparison</RiskGroupHeader>
       {peers.map((row) => (
         <StatRow key={row.label} label={row.label} value={row.value} detail={row.detail} />
