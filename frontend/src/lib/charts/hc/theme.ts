@@ -56,6 +56,40 @@ export function highchartsTheme(colors: ChartColors): Options {
         upLineColor: colors.gain,
       },
     },
+    rangeSelector: {
+      buttonTheme: {
+        fill: "none",
+        stroke: colors.grid,
+        style: { color: colors.textSecondary, fontWeight: "normal" },
+        states: {
+          hover: { fill: colors.accentWash, style: { color: colors.accent } },
+          select: { fill: colors.accent, style: { color: colors.textOnAccent } },
+        },
+      },
+      inputStyle: { color: colors.text },
+      inputBoxBorderColor: colors.grid,
+      labelStyle: { color: colors.textMuted },
+    },
+    navigator: {
+      maskFill: `${colors.accent}26`,
+      outlineColor: colors.grid,
+      handles: { backgroundColor: colors.surface, borderColor: colors.barMute },
+      series: { color: colors.barMute, lineColor: colors.barMute },
+      xAxis: {
+        gridLineColor: colors.grid,
+        labels: { style: { color: colors.textMuted } },
+      },
+    },
+    scrollbar: {
+      barBackgroundColor: colors.barMute,
+      barBorderColor: colors.grid,
+      buttonBackgroundColor: colors.surface,
+      buttonBorderColor: colors.grid,
+      buttonArrowColor: colors.textMuted,
+      trackBackgroundColor: colors.surface,
+      trackBorderColor: colors.grid,
+      rifleColor: colors.textMuted,
+    },
     credits: { enabled: false },
   };
 }

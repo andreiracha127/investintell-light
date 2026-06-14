@@ -38,4 +38,15 @@ describe("highchartsTheme", () => {
     expect(t.title?.text).toBeUndefined();
     expect(t.title?.style?.color).toBe(TEST_COLORS.text);
   });
+
+  it("themes the Stock rangeSelector, navigator and scrollbar with graphite tokens", () => {
+    const t = highchartsTheme(TEST_COLORS);
+    expect(t.rangeSelector?.buttonTheme?.states?.select?.fill).toBe(TEST_COLORS.accent);
+    expect(
+      (t.rangeSelector?.labelStyle as { color?: string } | undefined)?.color,
+    ).toBe(TEST_COLORS.textMuted);
+    expect(t.navigator?.outlineColor).toBe(TEST_COLORS.grid);
+    expect(t.navigator?.maskFill).toContain(TEST_COLORS.accent);
+    expect(t.scrollbar?.barBackgroundColor).toBe(TEST_COLORS.barMute);
+  });
 });
