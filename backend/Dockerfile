@@ -23,4 +23,6 @@ COPY app ./app
 COPY scripts ./scripts
 
 EXPOSE 8000
-CMD ["uv", "run", "--no-sync", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Shell form so ${PORT} expands at runtime: Railway injects a dynamic $PORT;
+# Fly/local fall back to 8000. (Exec form would pass "$PORT" literally.)
+CMD uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}

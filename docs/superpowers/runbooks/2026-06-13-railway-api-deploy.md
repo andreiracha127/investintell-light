@@ -1,58 +1,68 @@
 # Runbook — Deploy FastAPI to Railway (api service)
 
+## STATUS: EXECUTED 2026-06-14
+The flip is live. The Railway `api` service serves the catalog/timeseries +
+authenticated user routes from Tiger; the legacy InsForge `investintell-api`
+compute is stopped; the Vercel frontend points at Railway; the snapshot tables
+are renamed `*_deprecated`. Concrete values below reflect what was applied.
+
+- Railway service: `api` (id 6c7ae990-2751-466e-89d0-5b94c72f4679), project
+  `investintell-light` (f8f11e07-409d-45c0-835e-3338bef02ead), env `production`.
+- Public URL: https://api-production-2b6d.up.railway.app
+- Deployed via `railway up` (tarball; no GitHub remote). Railway reads
+  `backend/railway.toml` (dockerfile builder, healthcheck `/health`); the
+  Dockerfile CMD is shell-form so it binds Railway's `$PORT`.
+
 ## Prereqs
-- Railway project `investintell-light` (id f8f11e07-409d-45c0-835e-3338bef02ead), env `production`.
-- Tiger `t83f4np6x4` reachable from Railway us-west.
+- Railway project `investintell-light`, env `production`.
+- Tiger `t83f4np6x4` (`tsdb` db, `public` schema) reachable from Railway.
 
-## Create the service
-1. New service → Deploy from repo (backend/ root) → set `railway_config_file = railway.api.toml`.
-2. Region: us-west (co-locate with Tiger us-west-2).
-
-## Env vars (NEVER commit these)
-- DATABASE_URL = <Tiger DSN, public schema>            # postgres://…?sslmode=require
-- DATALAKE_DB_URL = <same Tiger DSN>                    # look-through reads
-- INSFORGE_ISSUER = <InsForge token issuer>             # e.g. https://<project>.insforge.app
-- INSFORGE_JWKS_URL = <issuer>/.well-known/jwks.json    # discovered in Phase 1
-- INSFORGE_AUDIENCE = <InsForge audience/api id>
-- CORS_ALLOW_ORIGINS = ["https://www.investintell.com","https://investintell.com"]
+## Env vars (NEVER commit these — set on the Railway service)
+- DATABASE_URL    = postgresql+asyncpg://…@t83f4np6x4…:33132/tsdb?ssl=require
+  # MUST be pre-normalized: the main engine (app/core/db.py) does NOT translate
+  # the DSN. Use the `+asyncpg` driver and `ssl=require` (NOT libpq `sslmode=`).
+- DATALAKE_DB_URL = postgresql://…@t83f4np6x4…:33132/tsdb?sslmode=require
+  # raw libpq form is fine here — app/core/datalake.py normalizes it.
+- INSFORGE_JWT_SECRET = <InsForge JWT_SECRET>  # HS256 shared secret (NOT JWKS)
+  # InsForge issues HS256 tokens signed with this shared secret (no JWKS, no
+  # iss/aud). auth.py verifies signature + exp + sub locally. Source of truth:
+  # `npx @insforge/cli secrets get JWT_SECRET`.
+- CORS_ALLOW_ORIGINS = ["https://jgpu5cz3.insforge.site","https://www.investintell.com","https://investintell.com","http://localhost:3000","http://127.0.0.1:3000"]
+  # The production frontend origin is the Vercel app jgpu5cz3.insforge.site.
 - TIINGO_TOKEN = <token>
-- REDIS_URL = <optional>
+- REDIS_URL = <optional; unset → in-process memory cache, fail-open>
 
-## Deploy / flip (HUMAN-DRIVEN — not automated by this migration)
-1. Deploy; confirm `/health` 200 in Railway logs.
-2. Smoke: GET /funds, GET /stocks/SPY/timeseries?range=1Y with a valid InsForge JWT on a protected route.
-3. Point the frontend API base at the Railway domain; decommission the InsForge compute service.
-4. Regenerate the frontend API types so they match the slimmed contract: `FundRiskOut`
-   dropped 15 always-null asset-class analytics fields (scoring_model, empirical_duration,
-   credit_beta, …). Run the OpenAPI export + the frontend codegen
-   (`backend/scripts/export_openapi.py` → regenerate `frontend/src/.../api.d.ts`) and
-   commit the updated `backend/openapi.json` + `api.d.ts`. The frontend still compiles
-   without this (the dropped fields were optional and always null), so it is non-blocking,
-   but keep the generated client in sync.
+## Deploy / flip — executed sequence (the safe order; renames MUST be last)
+1. Deploy + confirm `/health` 200 (Railway health-gates on it).
+2. Smoke: GET /funds, GET /stocks/SPY/timeseries?range=1Y (public); GET
+   /portfolios with a valid HS256 token → 200, without → 401.
+3. Point the frontend at Railway: `deployments env set NEXT_PUBLIC_API_URL
+   <railway-url>` + `deployments deploy frontend --env {…}` (Vercel rebuild —
+   NEXT_PUBLIC_* are baked at build time).
+4. Decommission the legacy API: `compute stop <investintell-api id>` (reversible
+   via `compute start`). Auth/login stays up — it is the InsForge backend, not
+   this compute.
+5. ONLY NOW rename the snapshot tables (they break the legacy reader the instant
+   they run; the Railway API reads the dynamic views, unaffected):
+     ALTER TABLE IF EXISTS funds            RENAME TO funds_deprecated;
+     ALTER TABLE IF EXISTS fund_risk_latest RENAME TO fund_risk_latest_deprecated;
+     ALTER TABLE IF EXISTS fund_nav         RENAME TO fund_nav_deprecated;
+     ALTER TABLE IF EXISTS fund_holdings    RENAME TO fund_holdings_deprecated;
+     ALTER TABLE IF EXISTS fund_classes     RENAME TO fund_classes_deprecated;
 
-## Tiger DDL rollback (if needed)
-Run backend/db/ddl/2026-06-13_dynamic_catalog.sql is additive. To roll back:
-  DROP MATERIALIZED VIEW IF EXISTS cagg_eod_weekly, cagg_eod_monthly, cagg_nav_weekly, fund_risk_latest_mv CASCADE;
-  DROP VIEW IF EXISTS funds_v, fund_holdings_v, fund_classes_v CASCADE;
+## Rollback
+- API: `compute start <investintell-api id>` + revert `NEXT_PUBLIC_API_URL` to the
+  InsForge endpoint + redeploy frontend.
+- Tables: `ALTER TABLE <x>_deprecated RENAME TO <x>;` (reverse of step 5).
+- Additive Tiger objects: DROP MATERIALIZED VIEW IF EXISTS cagg_eod_weekly,
+  cagg_eod_monthly, cagg_nav_weekly, fund_risk_latest_mv CASCADE; DROP VIEW IF
+  EXISTS funds_v, fund_holdings_v, fund_classes_v CASCADE;
 
-Phase-4 staged rename (`fund_nav → fund_nav_deprecated`) is SAFE to execute at
-flip time: after Task 4.3 the `fund_nav` snapshot is fully unread — the FundNav
-ORM model reads the live `nav_timeseries` hypertable directly, and nothing in
-app/ references the `fund_nav` table name anymore.
-
-## Worker coordination (Phase 4) — REQUIRED, not optional
-`fund_risk_latest_mv` is a PLAIN materialized view: it does NOT auto-refresh.
-Until it is refreshed it keeps serving the calc that was current when it was
-last populated, so EVERY fund risk metric the API returns (GET /funds,
-/funds/{id}, screener) silently goes stale after the daily risk calc runs.
-
-REQUIRED: the `risk_metrics` worker (repo `investintell-datalake-workers`) MUST
-run the following as the LAST step of its daily job, AFTER it commits the new
-fund_risk_metrics rows:
+## Worker coordination — DONE
+`fund_risk_latest_mv` is a PLAIN materialized view (no auto-refresh). The
+`risk_metrics` worker (repo `investintell-datalake-workers`, branch
+`feat/risk-metrics-mv-refresh`) now runs, as the last step of a successful daily
+run, in a fresh autocommit connection OUTSIDE the advisory lock:
   REFRESH MATERIALIZED VIEW CONCURRENTLY fund_risk_latest_mv;
-(CONCURRENTLY needs the unique index `fund_risk_latest_mv_pk` on instrument_id,
-created by 2026-06-13_dynamic_catalog.sql — already in place.)
-
-This repo (investintell-light) CANNOT make that change; it must be applied in
-investintell-datalake-workers. If the worker run cannot refresh, run the REFRESH
-manually after the calc — the MV is the API's sole source of fund risk metrics.
+(CONCURRENTLY needs the unique index `fund_risk_latest_mv_pk`, already in place.)
+That branch must be merged + the worker redeployed for the refresh to run in prod.
