@@ -1,0 +1,16 @@
+# Railway deploy config for the FastAPI API service (always-on uvicorn).
+# Read automatically by Railway at the upload root. The Light's single Railway
+# service is this API; the retired fund-catalog-sync cron no longer ships here
+# (see the dynamic-catalog migration). Overrides the Dockerfile CMD so uvicorn
+# binds Railway's injected $PORT and the platform health-gates on /health.
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+# No startCommand: the Dockerfile CMD (shell form) binds uvicorn to $PORT.
+# Setting a startCommand here would be run without a shell, so $PORT would not
+# expand ("Invalid value for '--port': '$PORT'").
+[deploy]
+restartPolicyType = "always"
+healthcheckPath = "/health"
+healthcheckTimeout = 120

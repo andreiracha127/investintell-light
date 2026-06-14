@@ -94,6 +94,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/stocks/{ticker}/timeseries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stock Timeseries
+         * @description Adjusted OHLC + volume in Highcharts Stock arrays; granularity by range.
+         *
+         *     <=1Y serves daily (raw hypertable), 1-5Y weekly CAGG, >5Y monthly CAGG —
+         *     the downsample happens in the DB, never in Python. Always warms raw daily
+         *     first so every interval reads off a fresh cache.
+         */
+        get: operations["get_stock_timeseries_stocks__ticker__timeseries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/stocks/{ticker}/analysis": {
         parameters: {
             query?: never;
@@ -691,6 +715,29 @@ export interface paths {
          *     NAV de fund_nav com o=h=l=c=nav, v=0.
          */
         get: operations["get_fund_history_funds__instrument_id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/funds/{instrument_id}/timeseries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fund Timeseries
+         * @description Fund NAV line in Highcharts arrays; granularity by range.
+         *
+         *     <=1Y serves daily (raw nav_timeseries), 1-5Y weekly CAGG, >5Y monthly CAGG —
+         *     the downsample happens in the DB, never in Python.
+         */
+        get: operations["get_fund_timeseries_funds__instrument_id__timeseries_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1624,21 +1671,12 @@ export interface components {
             domicile: string | null;
             /** Currency */
             currency: string | null;
-            /**
-             * Synced At
-             * Format: date-time
-             */
-            synced_at: string;
-            /**
-             * Source Calc Date
-             * Format: date
-             */
-            source_calc_date: string;
-            /**
-             * Source Nav Max Date
-             * Format: date
-             */
-            source_nav_max_date: string;
+            /** Synced At */
+            synced_at: string | null;
+            /** Source Calc Date */
+            source_calc_date: string | null;
+            /** Source Nav Max Date */
+            source_nav_max_date: string | null;
             risk: components["schemas"]["FundRiskOut"] | null;
             /** Nav */
             nav: components["schemas"]["FundNavPoint"][];
@@ -1736,36 +1774,6 @@ export interface components {
             upside_capture_1y: number | null;
             /** Equity Correlation 252D */
             equity_correlation_252d: number | null;
-            /** Scoring Model */
-            scoring_model: string | null;
-            /** Empirical Duration */
-            empirical_duration: number | null;
-            /** Empirical Duration R2 */
-            empirical_duration_r2: number | null;
-            /** Credit Beta */
-            credit_beta: number | null;
-            /** Credit Beta R2 */
-            credit_beta_r2: number | null;
-            /** Yield Proxy 12M */
-            yield_proxy_12m: number | null;
-            /** Duration Adj Drawdown 1Y */
-            duration_adj_drawdown_1y: number | null;
-            /** Seven Day Net Yield */
-            seven_day_net_yield: number | null;
-            /** Fed Funds Rate At Calc */
-            fed_funds_rate_at_calc: number | null;
-            /** Nav Per Share Mmf */
-            nav_per_share_mmf: number | null;
-            /** Pct Weekly Liquid */
-            pct_weekly_liquid: number | null;
-            /** Weighted Avg Maturity Days */
-            weighted_avg_maturity_days: number | null;
-            /** Crisis Alpha Score */
-            crisis_alpha_score: number | null;
-            /** Inflation Beta */
-            inflation_beta: number | null;
-            /** Inflation Beta R2 */
-            inflation_beta_r2: number | null;
         };
         /** FundsListResponse */
         FundsListResponse: {
@@ -1891,6 +1899,21 @@ export interface components {
             high_52w: number;
             /** Low 52W */
             low_52w: number;
+        };
+        /**
+         * LineSeriesResponse
+         * @description Single line series for Highcharts Stock: [[t_ms, value], ...].
+         */
+        LineSeriesResponse: {
+            /** Id */
+            id: string;
+            /**
+             * Interval
+             * @enum {string}
+             */
+            interval: "daily" | "weekly" | "monthly";
+            /** Series */
+            series: number[][];
         };
         /**
          * LookthroughSummaryOut
@@ -2034,6 +2057,23 @@ export interface components {
             stale: boolean;
             /** Items */
             items: components["schemas"]["NewsArticle"][];
+        };
+        /**
+         * OhlcSeriesResponse
+         * @description OHLC + volume series for Highcharts Stock.
+         */
+        OhlcSeriesResponse: {
+            /** Id */
+            id: string;
+            /**
+             * Interval
+             * @enum {string}
+             */
+            interval: "daily" | "weekly" | "monthly";
+            /** Ohlc */
+            ohlc: number[][];
+            /** Volume */
+            volume: number[][];
         };
         /**
          * OptimizeRequest
@@ -3601,6 +3641,40 @@ export interface operations {
             };
         };
     };
+    get_stock_timeseries_stocks__ticker__timeseries_get: {
+        parameters: {
+            query?: {
+                /** @description Visible range preset. */
+                range?: "1M" | "6M" | "1Y" | "5Y" | "MAX";
+            };
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OhlcSeriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_stock_analysis_stocks__ticker__analysis_get: {
         parameters: {
             query?: {
@@ -4669,6 +4743,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FundHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_timeseries_funds__instrument_id__timeseries_get: {
+        parameters: {
+            query?: {
+                /** @description Visible range preset. */
+                range?: "1M" | "6M" | "1Y" | "5Y" | "MAX";
+            };
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LineSeriesResponse"];
                 };
             };
             /** @description Validation Error */

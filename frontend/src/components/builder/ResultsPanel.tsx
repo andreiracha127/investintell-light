@@ -164,7 +164,7 @@ export function ResultsPanel({
   // Data-freshness tag for the reference-price note (max NAV date synced).
   const staleness = profileQueries.reduce<string | null>(
     (acc, q) =>
-      q.data && (!acc || q.data.source_nav_max_date > acc)
+      q.data?.source_nav_max_date && (!acc || q.data.source_nav_max_date > acc)
         ? q.data.source_nav_max_date
         : acc,
     null,

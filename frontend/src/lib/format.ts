@@ -68,7 +68,8 @@ export function formatMetricValue(value: number, dataType: string): string {
 }
 
 /** Format an ISO date string (YYYY-MM-DD) as "Jun 10, 2026" (UTC-safe). */
-export function formatDate(isoDate: string): string {
+export function formatDate(isoDate: string | null | undefined): string {
+  if (!isoDate) return "—";
   return new Intl.DateTimeFormat("en-US", {
     year: "numeric",
     month: "short",

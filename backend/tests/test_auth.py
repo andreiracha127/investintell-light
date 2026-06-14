@@ -1,117 +1,110 @@
-"""Tests for InsForge JWT verification (app/core/auth.py)."""
+"""Tests for InsForge JWT verification (app/core/auth.py) — HS256 shared secret.
+
+InsForge issues HS256 access tokens signed with a shared JWT_SECRET (no JWKS,
+no iss/aud claims — confirmed against the live backend). ``verify_bearer``
+authenticates them locally: HMAC signature + ``exp`` + ``sub`` are enforced;
+``iss``/``aud`` are NOT (InsForge does not set them). Algorithm is pinned to
+HS256 so ``none``/asymmetric-confusion tokens are rejected.
+"""
+import base64
+import json
 import time
 import uuid
-from types import SimpleNamespace
 
 import jwt
 import pytest
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
 
 from app.core.config import Settings
 
-
-def test_settings_expose_insforge_auth_fields() -> None:
-    s = Settings(
-        insforge_issuer="https://proj.insforge.app",
-        insforge_jwks_url="https://proj.insforge.app/.well-known/jwks.json",
-        insforge_audience="investintell-light",
-    )
-    assert s.insforge_issuer == "https://proj.insforge.app"
-    assert s.insforge_jwks_url.endswith("/jwks.json")
-    assert s.insforge_audience == "investintell-light"
+_SECRET = "test-insforge-shared-secret-aebf0123456789"
 
 
-_ISSUER = "https://proj.insforge.app"
-_AUD = "investintell-light"
+def test_settings_expose_insforge_jwt_secret() -> None:
+    s = Settings(insforge_jwt_secret=_SECRET)
+    assert s.insforge_jwt_secret == _SECRET
 
 
-@pytest.fixture
-def rsa_keys() -> tuple[bytes, bytes]:
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    private_pem = key.private_bytes(
-        serialization.Encoding.PEM,
-        serialization.PrivateFormat.PKCS8,
-        serialization.NoEncryption(),
-    )
-    public_pem = key.public_key().public_bytes(
-        serialization.Encoding.PEM,
-        serialization.PublicFormat.SubjectPublicKeyInfo,
-    )
-    return private_pem, public_pem
-
-
-def _make_token(private_pem: bytes, **overrides: object) -> str:
+def _make_token(secret: str = _SECRET, **overrides: object) -> str:
     payload: dict[str, object] = {
         "sub": str(uuid.uuid4()),
-        "iss": _ISSUER,
-        "aud": _AUD,
+        "email": "u@insforge.com",
+        "role": "authenticated",
+        "iat": int(time.time()),
         "exp": int(time.time()) + 3600,
-        "org_id": "org-123",
     }
     payload.update(overrides)
-    return jwt.encode(payload, private_pem, algorithm="RS256")
+    return jwt.encode(payload, secret, algorithm="HS256")
 
 
-def _patch_jwks(monkeypatch: pytest.MonkeyPatch, public_pem: bytes) -> None:
+def _patch_secret(monkeypatch: pytest.MonkeyPatch, secret: str | None = _SECRET) -> None:
     import app.core.auth as auth
 
-    # Patch the settings accessor (and the JWKS client) at the seam so
-    # verify_bearer sees the test issuer/audience without mutating the process
-    # env or the lru_cache — monkeypatch reverts both after the test, so no
-    # cached config leaks into the rest of the suite.
-    test_settings = Settings(
-        insforge_issuer=_ISSUER,
-        insforge_jwks_url=_ISSUER + "/.well-known/jwks.json",
-        insforge_audience=_AUD,
-    )
-    monkeypatch.setattr(auth, "get_settings", lambda: test_settings)
-    monkeypatch.setattr(
-        auth,
-        "_get_jwks_client",
-        lambda: SimpleNamespace(
-            get_signing_key_from_jwt=lambda token: SimpleNamespace(key=public_pem)
-        ),
-    )
+    # Patch the settings accessor at the seam so verify_bearer sees the test
+    # secret without mutating process env / the lru_cache (reverts after test).
+    monkeypatch.setattr(auth, "get_settings", lambda: Settings(insforge_jwt_secret=secret))
 
 
-async def test_valid_token_returns_claims(
-    monkeypatch: pytest.MonkeyPatch, rsa_keys: tuple[bytes, bytes]
-) -> None:
+async def test_valid_hs256_token_returns_claims(monkeypatch: pytest.MonkeyPatch) -> None:
     import app.core.auth as auth
 
-    private_pem, public_pem = rsa_keys
-    _patch_jwks(monkeypatch, public_pem)
-    user = await auth.verify_bearer(_make_token(private_pem, sub="u-1"))
+    _patch_secret(monkeypatch)
+    user = await auth.verify_bearer(_make_token(sub="u-1"))
     assert user.sub == "u-1"
-    assert user.org_id == "org-123"
+    assert user.claims["role"] == "authenticated"
 
 
-async def test_expired_token_is_401(
-    monkeypatch: pytest.MonkeyPatch, rsa_keys: tuple[bytes, bytes]
-) -> None:
+async def test_expired_token_is_401(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi import HTTPException
 
     import app.core.auth as auth
 
-    private_pem, public_pem = rsa_keys
-    _patch_jwks(monkeypatch, public_pem)
-    token = _make_token(private_pem, exp=int(time.time()) - 10)
+    _patch_secret(monkeypatch)
+    token = _make_token(exp=int(time.time()) - 10)
     with pytest.raises(HTTPException) as exc:
         await auth.verify_bearer(token)
     assert exc.value.status_code == 401
 
 
-async def test_wrong_audience_is_401(
-    monkeypatch: pytest.MonkeyPatch, rsa_keys: tuple[bytes, bytes]
-) -> None:
+async def test_bad_signature_is_401(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi import HTTPException
 
     import app.core.auth as auth
 
-    private_pem, public_pem = rsa_keys
-    _patch_jwks(monkeypatch, public_pem)
-    token = _make_token(private_pem, aud="some-other-api")
+    _patch_secret(monkeypatch)  # server trusts _SECRET
+    forged = _make_token(secret="a-different-secret-of-sufficient-length-xyz", sub="attacker")
     with pytest.raises(HTTPException) as exc:
-        await auth.verify_bearer(token)
+        await auth.verify_bearer(forged)
     assert exc.value.status_code == 401
+
+
+async def test_alg_none_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unsigned (alg=none) token must never authenticate (alg pinned HS256)."""
+    from fastapi import HTTPException
+
+    import app.core.auth as auth
+
+    _patch_secret(monkeypatch)
+
+    def _b64(obj: dict) -> str:
+        return base64.urlsafe_b64encode(json.dumps(obj).encode()).rstrip(b"=").decode()
+
+    unsigned = (
+        _b64({"alg": "none", "typ": "JWT"})
+        + "."
+        + _b64({"sub": "u-1", "exp": int(time.time()) + 3600})
+        + "."
+    )
+    with pytest.raises(HTTPException) as exc:
+        await auth.verify_bearer(unsigned)
+    assert exc.value.status_code == 401
+
+
+async def test_missing_secret_is_503(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi import HTTPException
+
+    import app.core.auth as auth
+
+    _patch_secret(monkeypatch, secret=None)
+    with pytest.raises(HTTPException) as exc:
+        await auth.verify_bearer(_make_token())
+    assert exc.value.status_code == 503
