@@ -110,3 +110,8 @@
   from { background: var(--color-loss-muted); }
   to { background: transparent; }
 }
+
+/* Distribution sparkline (filters grid cell). */
+.hcg-theme-graphite .ix-spark { display: inline-block; vertical-align: middle; }
+.hcg-theme-graphite .ix-spark-bar { fill: var(--color-chart-bar-mute); }
+.hcg-theme-graphite .ix-spark-on { fill: var(--color-accent); }
