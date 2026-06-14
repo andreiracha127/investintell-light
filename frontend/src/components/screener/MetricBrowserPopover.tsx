@@ -24,7 +24,11 @@ export function MetricBrowserPopover({
     const filtered = needle === "" ? catalog : catalog.filter((m) =>
       m.name.toLowerCase().includes(needle) || m.code.toLowerCase().includes(needle) || m.abbreviation.toLowerCase().includes(needle));
     const map = new Map<string, MetricDef[]>();
-    for (const m of filtered) (map.get(m.category) ?? map.set(m.category, []).get(m.category)!).push(m);
+    for (const m of filtered) {
+      const group = map.get(m.category);
+      if (group) group.push(m);
+      else map.set(m.category, [m]);
+    }
     return [...map.entries()];
   }, [catalog, search]);
 

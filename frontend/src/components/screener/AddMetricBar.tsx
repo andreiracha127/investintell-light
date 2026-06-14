@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { MetricDef } from "@/lib/api/client";
 import { INPUT_CLASS, BUTTON_CLASS } from "@/components/screener/shared";
@@ -21,6 +21,7 @@ export function AddMetricBar({
   const [browsing, setBrowsing] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
+  // NOTE: mouse + Escape only for now; full keyboard combobox nav (↑/↓/Enter, aria roles) deferred — see builder/AssetSearchAdd.tsx for the template when wired.
   // Typeahead suggestions: not-yet-selected metrics matching the query.
   const suggestions = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -33,8 +34,31 @@ export function AddMetricBar({
 
   const add = (code: string) => { onToggleMetric(code); setQuery(""); };
 
+  // Dismiss the dropdown/popover on an outside click (role="dialog" contract).
+  const open = browsing || suggestions.length > 0;
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) {
+        setBrowsing(false);
+        setQuery("");
+      }
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [open]);
+
   return (
-    <div ref={wrapRef} className="relative flex flex-wrap items-center gap-2 bg-surface-2 border-b border-border px-[var(--ix-pad)] py-2.5">
+    <div
+      ref={wrapRef}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          setBrowsing(false);
+          setQuery("");
+        }
+      }}
+      className="relative flex flex-wrap items-center gap-2 bg-surface-2 border-b border-border px-[var(--ix-pad)] py-2.5"
+    >
       <span className="ix-label m-0">Add metric</span>
       <div className="relative w-[280px]">
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a metric…  (P/E, ROE, Beta…)"
