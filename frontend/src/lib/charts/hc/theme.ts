@@ -30,8 +30,8 @@ export function highchartsTheme(colors: ChartColors): Options {
     },
     title: { style: { color: colors.text } },
     subtitle: { style: { color: colors.textSecondary } },
-    xAxis: axis,
-    yAxis: axis,
+    xAxis: { ...axis },
+    yAxis: { ...axis },
     legend: {
       itemStyle: { color: colors.text },
       itemHoverStyle: { color: colors.accent },

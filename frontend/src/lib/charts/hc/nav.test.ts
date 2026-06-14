@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildHcNavOption } from "@/lib/charts/hc/nav";
 import { TEST_COLORS } from "@/lib/charts/hc/__fixtures__/colors";
 import type { SeriesPoint } from "@/lib/api/client";
+import { formatCurrency } from "@/lib/format";
 
 const NAV: SeriesPoint[] = [
   ["2024-01-01", 100],
@@ -28,5 +29,24 @@ describe("buildHcNavOption", () => {
     const opt = buildHcNavOption([], TEST_COLORS);
     const series = opt.series?.[0] as { data?: number[] };
     expect(series.data).toEqual([]);
+  });
+
+  it("formats the y-axis labels as currency", () => {
+    const opt = buildHcNavOption(NAV, TEST_COLORS);
+    const yAxis = opt.yAxis as {
+      labels?: { formatter?: (this: { value: number }) => string };
+    };
+    const out = yAxis.labels!.formatter!.call({ value: 1234.5 });
+    expect(out).toBe(formatCurrency(1234.5));
+  });
+
+  it("formats the tooltip with the date and the currency value", () => {
+    const opt = buildHcNavOption(NAV, TEST_COLORS);
+    const tooltip = opt.tooltip as {
+      formatter?: (this: { x: string; y: number }) => string;
+    };
+    const out = tooltip.formatter!.call({ x: "2024-01-02", y: 101.5 });
+    expect(out).toContain("2024-01-02");
+    expect(out).toContain(formatCurrency(101.5));
   });
 });
