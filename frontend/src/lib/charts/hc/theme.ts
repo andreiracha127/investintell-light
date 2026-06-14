@@ -28,7 +28,8 @@ export function highchartsTheme(colors: ChartColors): Options {
       animation: false,
       style: { fontFamily: SANS },
     },
-    title: { style: { color: colors.text } },
+    // text:undefined disables Highcharts' built-in default "Chart title".
+    title: { text: undefined, style: { color: colors.text } },
     subtitle: { style: { color: colors.textSecondary } },
     xAxis: { ...axis },
     yAxis: { ...axis },

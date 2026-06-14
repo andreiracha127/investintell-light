@@ -31,4 +31,11 @@ describe("highchartsTheme", () => {
   it("disables credits", () => {
     expect(highchartsTheme(TEST_COLORS).credits?.enabled).toBe(false);
   });
+
+  it("suppresses the default chart title", () => {
+    const t = highchartsTheme(TEST_COLORS);
+    expect(t.title).toBeDefined();
+    expect(t.title?.text).toBeUndefined();
+    expect(t.title?.style?.color).toBe(TEST_COLORS.text);
+  });
 });
