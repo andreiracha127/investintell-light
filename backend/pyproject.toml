@@ -18,6 +18,7 @@ dependencies = [
     "cvxpy>=1.9.1",
     "scikit-learn>=1.9.0",
     "redis>=8.0.0",
+    "pyjwt[crypto]>=2.9",
 ]
 
 [dependency-groups]

@@ -21,6 +21,7 @@ from types import SimpleNamespace
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.core.auth import CurrentUser, get_current_user
 from app.core.datalake import get_optional_datalake_session
 from app.core.db import get_session
 from app.main import create_app
@@ -152,6 +153,9 @@ def _client() -> AsyncClient:
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
     app.dependency_overrides[get_optional_datalake_session] = lambda: None
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        sub="u-1", org_id=None, claims={}
+    )
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 

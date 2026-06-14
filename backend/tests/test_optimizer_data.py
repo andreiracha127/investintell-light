@@ -165,9 +165,10 @@ async def test_select_universe_funds_maps_rows_and_joins_history() -> None:
     assert [u.id for u in out] == [_FUND_A, _FUND_B]
     assert out[0].ticker == "AAA"
     assert out[0].name == "Alpha Fund"
-    # The history guard joins fund_nav; require_aum adds the positive-AUM guard.
-    # (">" renders as a bound param, so match the column-comparison prefix.)
-    assert "fund_nav" in session.sql
+    # The history guard joins nav_timeseries (FundNav repointed, Task 4.3);
+    # require_aum adds the positive-AUM guard. (">" renders as a bound param, so
+    # match the column-comparison prefix.)
+    assert "nav_timeseries" in session.sql
     assert "aum_usd is not null" in session.sql
     assert "aum_usd >" in session.sql
 
@@ -187,7 +188,7 @@ async def test_select_universe_funds_without_require_aum_omits_aum_guard() -> No
     )
     # Negative pairing: the AUM guard must NOT be present when not required.
     assert "aum_usd is not null" not in session.sql
-    assert "fund_nav" in session.sql
+    assert "nav_timeseries" in session.sql
 
 
 async def test_select_universe_funds_include_ids_restricts_candidates() -> None:

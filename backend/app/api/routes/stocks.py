@@ -37,6 +37,7 @@ from app.schemas.analysis import RangeKey, StockAnalysisResponse
 from app.schemas.market import HistoryBar, HistoryResponse, MarketOverviewResponse
 from app.schemas.news import NewsArticle, NewsResponse
 from app.schemas.prices import PricePoint, PriceSeriesResponse
+from app.schemas.timeseries import OhlcSeriesResponse
 from app.services import market_overview
 from app.services._series import (
     RANGE_DAYS,
@@ -56,6 +57,14 @@ from app.services.stock_analysis import (
     build_adj_close_series,
     build_price_frame,
     lookback_pad_days,
+)
+from app.services.timeseries import (
+    range_start,
+    resolve_interval,
+    to_ms_ohlc,
+)
+from app.services.timeseries import (
+    select_eod_ohlc as _select_eod_ohlc_impl,
 )
 from app.tiingo.client import TiingoClient
 from app.tiingo.exceptions import TiingoError
@@ -80,6 +89,11 @@ async def _ensure_eod_or_http_error(
 ) -> None:
     """Thin wrapper — delegates to the shared canonical implementation in app.api._shared."""
     await ensure_eod_or_http_error(session, client, symbols, start, end)
+
+
+# Module-level alias so tests can monkeypatch the DB read independently of the
+# service module's own binding.
+_select_eod_ohlc = _select_eod_ohlc_impl
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +248,36 @@ async def get_stock_history(
             for d, o, h, lo, c, v in rows
         ],
     )
+
+
+@router.get("/{ticker}/timeseries", response_model=OhlcSeriesResponse)
+async def get_stock_timeseries(
+    ticker: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    client: Annotated[TiingoClient, Depends(get_tiingo_client)],
+    range_: Annotated[
+        RangeKey, Query(alias="range", description="Visible range preset.")
+    ] = "1Y",
+) -> OhlcSeriesResponse:
+    """Adjusted OHLC + volume in Highcharts Stock arrays; granularity by range.
+
+    <=1Y serves daily (raw hypertable), 1-5Y weekly CAGG, >5Y monthly CAGG —
+    the downsample happens in the DB, never in Python. Always warms raw daily
+    first so every interval reads off a fresh cache.
+    """
+    symbol = ticker.strip().upper()
+    today = dt.date.today()
+    interval = resolve_interval(range_)
+    start = range_start(range_, today)
+    # Warm raw daily before any read (keeps the cache fresh for all intervals).
+    await _ensure_eod_or_http_error(
+        session, client, [symbol], start or (today - dt.timedelta(days=3650)), today
+    )
+    rows = await _select_eod_ohlc(session, symbol, interval, start)
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"No price data for {symbol}.")
+    ohlc, volume = to_ms_ohlc(rows)
+    return OhlcSeriesResponse(id=symbol, interval=interval, ohlc=ohlc, volume=volume)
 
 
 async def _select_instrument_name(session: AsyncSession, ticker: str) -> str | None:

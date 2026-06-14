@@ -1,18 +1,23 @@
 """
 ORM models for the local fund universe (F8.1).
 
-All four tables are read-only copies of mother-DB data, written ONLY by the
-fund sync (scripts/sync_funds.py via app/sync/funds.py) — never in any
-request path:
+All read-only; the fund snapshots are retired in favour of dynamic
+VIEWs/MVs on Tiger (db/ddl/2026-06-13_dynamic_catalog.sql) derived live from
+the source tables — never written in any request path:
 
-- `funds` — identity + classification + fees, one row per eligible
-  instrument_id (criterion: dispatch F8 §3 F8.1-2).
-- `fund_risk_latest` — snapshot of the latest fund_risk_metrics calc_date
-  per instrument (precomputed in the mother DB; the Light NEVER recomputes).
-- `fund_nav` — rolling daily NAV window (2 years + 30 days).
-- `fund_holdings` — latest N-PORT report per series, ranked by pct_of_nav.
-  Sem truncamento (Frente C): a fonte é 100% dos holdings; a exposição
-  consolidada vem do look-through materializado no data-lake.
+- `funds_v` — identity + classification + fees, one row per eligible
+  instrument_id (criterion: dispatch F8 §3 F8.1-2). Dynamic VIEW.
+- `fund_risk_latest_mv` — latest fund_risk_metrics calc_date per instrument
+  (precomputed; the Light NEVER recomputes). Materialized view.
+- `nav_timeseries` — live daily NAV hypertable (the FundNav model reads it
+  directly; the `fund_nav` snapshot is retired — Task 4.3).
+- `fund_holdings_v` — latest N-PORT report per series, ranked by pct_of_nav.
+  Dynamic VIEW; uncapped (the source is 100% of holdings — the profile route
+  display-caps to top-50; the consolidated exposure comes from the data-lake
+  look-through).
+- `fund_classes_v` — share classes (DISTINCT ON class_id, latest period).
+  Dynamic VIEW keyed by series_id (no instrument_id — readers resolve
+  series→instrument through funds_v).
 """
 
 import uuid
@@ -23,7 +28,6 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
-    ForeignKey,
     Integer,
     Numeric,
     String,
@@ -35,7 +39,13 @@ from app.models.base import Base
 
 
 class Fund(Base):
-    __tablename__ = "funds"
+    # Dynamic catalog VIEW (db/ddl/2026-06-13_dynamic_catalog.sql) — a faithful
+    # SQL port of the retired sync_funds.py `funds` snapshot, derived live from
+    # instrument_identity / sec_* / fund_risk_metrics / nav_timeseries on Tiger.
+    # A view has no sync markers, so synced_at / source_calc_date /
+    # source_nav_max_date are NOT columns here; the catalog service derives
+    # staleness from the risk MV + NAV (Task 2.4 finalizes the staleness source).
+    __tablename__ = "funds_v"
 
     # Canonical mother-DB instrument UUID (instrument_identity.instrument_id).
     instrument_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
@@ -84,38 +94,31 @@ class Fund(Base):
     domicile: Mapped[str | None] = mapped_column(String, nullable=True)
     currency: Mapped[str | None] = mapped_column(String, nullable=True)
 
-    # Staleness fields (dispatch §3 F8.1-4) — exposed via the API in F8.2.
-    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    # Latest fund_risk_metrics.calc_date in the source at sync time.
-    source_calc_date: Mapped[date] = mapped_column(Date, nullable=False)
-    # Latest nav_timeseries.nav_date in the source at sync time.
-    source_nav_max_date: Mapped[date] = mapped_column(Date, nullable=False)
-
 
 class FundClass(Base):
-    """Share-class catalog (F8.6b) — synced from sec_fund_classes.
+    """Share-class catalog (F8.6b) — dynamic VIEW over sec_fund_classes.
 
     The mother DB prices ONE instrument per fund series (a representative
     class, e.g. AGTHX for the Growth Fund of America); the remaining classes
     have NO NAV of their own in the source. Pricing/analysis of ANY class
     ticker therefore uses the series NAV (the representative class) as a
     PROXY — a documented approximation, also disclosed in the UI.
+
+    Now backed by the fund_classes_v VIEW (db/ddl/2026-06-13_dynamic_catalog.sql,
+    Task 2.5): DISTINCT ON (class_id) over sec_fund_classes, latest period per
+    class. A class links to a fund via series_id — there is NO instrument_id
+    column; readers resolve series→instrument through funds_v (the Fund model).
     """
 
-    __tablename__ = "fund_classes"
+    __tablename__ = "fund_classes_v"
 
     # SEC class id ('C000...') — globally unique in the source.
     class_id: Mapped[str] = mapped_column(String, primary_key=True)
 
-    # Series instrument the class belongs to (the NAV proxy anchor).
-    instrument_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid,
-        ForeignKey("funds.instrument_id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-
-    series_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Series the class belongs to (the NAV proxy anchor, joins to
+    # funds_v.series_id). The source always carries it; nullable kept for the
+    # ORM since a view has no NOT NULL enforcement.
+    series_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     class_name: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Class ticker (e.g. RGAGX) — NOT NULL by the sync filter; indexed because
@@ -133,13 +136,13 @@ class FundClass(Base):
 
 
 class FundRiskLatest(Base):
-    __tablename__ = "fund_risk_latest"
+    # MV-backed (Tiger fund_risk_latest_mv): DISTINCT ON (instrument_id) of the
+    # global (organization_id IS NULL) fund_risk_metrics, latest calc_date per
+    # fund. Read-only; replaces the sync_funds.py snapshot. A MV is not a FK
+    # target, so instrument_id is a plain PK (no ForeignKey to funds).
+    __tablename__ = "fund_risk_latest_mv"
 
-    instrument_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid,
-        ForeignKey("funds.instrument_id", ondelete="CASCADE"),
-        primary_key=True,
-    )
+    instrument_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
 
     calc_date: Mapped[date] = mapped_column(Date, nullable=False)
 
@@ -177,36 +180,22 @@ class FundRiskLatest(Base):
     upside_capture_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     equity_correlation_252d: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
 
-    # Class-specific analytics (risk_calc per-class passes in the mother DB).
-    # scoring_model says which pass produced the row: equity / fixed_income /
-    # cash / alternatives — the UI shows only the block that applies.
-    scoring_model: Mapped[str | None] = mapped_column(String, nullable=True)
-    # Fixed income
-    empirical_duration: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    empirical_duration_r2: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    credit_beta: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    credit_beta_r2: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    yield_proxy_12m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    duration_adj_drawdown_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    # Cash / money market
-    seven_day_net_yield: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    fed_funds_rate_at_calc: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    nav_per_share_mmf: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    pct_weekly_liquid: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    weighted_avg_maturity_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Alternatives
-    crisis_alpha_score: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    inflation_beta: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    inflation_beta_r2: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-
 
 class FundNav(Base):
-    __tablename__ = "fund_nav"
+    # Repointed (Task 4.3) to the LIVE nav_timeseries hypertable — the fund_nav
+    # snapshot is retired (its sync was deleted in Task 4.2 and nothing writes it
+    # anymore). nav_timeseries is a strict superset of the snapshot columns and is
+    # UNIQUE on (instrument_id, nav_date), so the existing readers (optimizer
+    # returns/eligibility, builder spots, portfolio latest-2) behave identically
+    # without dedup. The class name stays FundNav (internal; renaming is out of
+    # scope) — only the backing table changed.
+    __tablename__ = "nav_timeseries"
 
     # Composite PK doubles as the (instrument_id, nav_date) lookup index.
+    # nav_timeseries is a hypertable (not a FK target), so this is a plain PK
+    # column (no ForeignKey).
     instrument_id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
-        ForeignKey("funds.instrument_id", ondelete="CASCADE"),
         primary_key=True,
     )
     nav_date: Mapped[date] = mapped_column(Date, primary_key=True)
@@ -217,7 +206,10 @@ class FundNav(Base):
 
 
 class FundHolding(Base):
-    __tablename__ = "fund_holdings"
+    # Dynamic VIEW (fund_holdings_v, db/ddl/2026-06-13_dynamic_catalog.sql,
+    # Task 2.5): latest N-PORT report per series, ranked by pct_of_nav desc.
+    # gics_sector is NULL::text in the source view (no resolved GICS column).
+    __tablename__ = "fund_holdings_v"
 
     # Keyed by series (not instrument): share classes share one portfolio.
     # No FK to funds — series_id is not unique there (multi-class series).

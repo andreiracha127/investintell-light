@@ -17,6 +17,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import get_current_user
 from app.core.db import get_session
 from app.schemas.builder import (
     OptimizeRequest,
@@ -50,7 +51,12 @@ async def optimize(payload: OptimizeRequest, session: SessionDep) -> OptimizeRes
         ) from exc
 
 
-@router.post("/save", response_model=SaveResponse, status_code=201)
+@router.post(
+    "/save",
+    response_model=SaveResponse,
+    status_code=201,
+    dependencies=[Depends(get_current_user)],
+)
 async def save(payload: SaveRequest, session: SessionDep) -> SaveResponse:
     """Persist a builder proposal as a real portfolio (F8.5 + F8.6b).
 

@@ -1,8 +1,8 @@
 """Fund universe endpoints (F8.2): navigable list, full profile and CSV.
 
-DB-only contract: every read is served from the local F8.1 snapshot tables
-(`funds`, `fund_risk_latest`, `fund_nav`, `fund_holdings`) — these routes
-NEVER talk to the mother DB or Tiingo. Routes are thin: SQL, the sort
+DB-only contract: every read is served from the local catalog sources
+(`funds_v`, `fund_risk_latest_mv`, `nav_timeseries`, `fund_holdings`) — these
+routes NEVER talk to the mother DB or Tiingo. Routes are thin: SQL, the sort
 whitelist and the pure CSV/decimation helpers live in
 ``app.services.funds_catalog``.
 
@@ -19,7 +19,7 @@ automatic classifier has known errors — every response carries the fixed
 ETF exception: GET /funds/{id}/history may warm eod_prices via the sanctioned
 ingestion path (app.api._shared.ensure_eod_or_http_error) — ETFs trade like
 stocks and reuse the stocks OHLCV series; on Tiingo failure it degrades to
-the local fund_nav series (mode "nav").
+the local nav_timeseries series (mode "nav").
 """
 
 import datetime as dt
@@ -28,14 +28,14 @@ import uuid
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import select
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._shared import ensure_eod_or_http_error
 from app.core.datalake import get_datalake_session
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
-from app.models.fund import Fund, FundNav
+from app.models.fund import Fund
 from app.schemas.funds import (
     FundClassOut,
     FundHoldingItem,
@@ -53,10 +53,20 @@ from app.schemas.lookthrough import (
     build_dimensions,
 )
 from app.schemas.market import FundHistoryResponse, HistoryBar
+from app.schemas.timeseries import LineSeriesResponse
 from app.services import funds_catalog as catalog
 from app.services import lookthrough
 from app.services._series import select_adj_ohlcv_rows as _select_adj_ohlcv_rows_impl
 from app.services.screener import render_csv
+from app.services.timeseries import (
+    RangeKey,
+    range_start,
+    resolve_interval,
+    to_ms_pairs,
+)
+from app.services.timeseries import (
+    select_nav_line as _select_nav_line_impl,
+)
 from app.tiingo.client import TiingoClient
 from app.tiingo.exceptions import TiingoError
 
@@ -67,6 +77,7 @@ logger = logging.getLogger(__name__)
 # Module-level aliases so tests can monkeypatch them directly on this module.
 _ensure_eod_or_http_error = ensure_eod_or_http_error
 _select_adj_ohlcv_rows = _select_adj_ohlcv_rows_impl
+_select_nav_line = _select_nav_line_impl
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 DatalakeDep = Annotated[AsyncSession, Depends(get_datalake_session)]
@@ -272,9 +283,11 @@ async def get_fund_profile(
         inception_date=fund.inception_date,
         domicile=fund.domicile,
         currency=fund.currency,
-        synced_at=fund.synced_at,
-        source_calc_date=fund.source_calc_date,
-        source_nav_max_date=fund.source_nav_max_date,
+        # funds_v (a VIEW) carries no sync markers; the catalog service derives
+        # and attaches these on the fund instance (Task 2.4 finalizes staleness).
+        synced_at=getattr(fund, "synced_at", None),
+        source_calc_date=getattr(fund, "source_calc_date", None),
+        source_nav_max_date=getattr(fund, "source_nav_max_date", None),
         risk=FundRiskOut.model_validate(profile.risk) if profile.risk else None,
         nav=[FundNavPoint(date=d, nav=v) for d, v in profile.nav],
         holdings=FundHoldingsOut(
@@ -355,16 +368,19 @@ async def _get_fund(session: AsyncSession, instrument_id: uuid.UUID) -> Fund | N
 async def _select_nav_rows(
     session: AsyncSession, instrument_id: uuid.UUID, start: dt.date, end: dt.date
 ) -> list[tuple[dt.date, float]]:
-    """(nav_date, nav) em [start, end], ASC, NAVs nulos descartados."""
+    """(nav_date, nav) em [start, end], ASC, NAVs nulos descartados.
+
+    Lê a hypertable bruta ``nav_timeseries`` (Task 2.4), não o snapshot
+    ``fund_nav`` aposentado; mesmo shape de retorno.
+    """
     result = await session.execute(
-        select(FundNav.nav_date, FundNav.nav)
-        .where(
-            FundNav.instrument_id == instrument_id,
-            FundNav.nav_date >= start,
-            FundNav.nav_date <= end,
-            FundNav.nav.is_not(None),
-        )
-        .order_by(FundNav.nav_date)
+        text(
+            "SELECT nav_date, nav FROM nav_timeseries "
+            "WHERE instrument_id = :iid AND nav_date >= :start "
+            "AND nav_date <= :end AND nav IS NOT NULL "
+            "ORDER BY nav_date"
+        ),
+        {"iid": str(instrument_id), "start": start, "end": end},
     )
     return [(d, float(v)) for d, v in result.all()]
 
@@ -429,4 +445,30 @@ async def get_fund_history(
         mode="nav",
         count=len(nav_rows),
         bars=[HistoryBar(t=_ms(d), o=v, h=v, l=v, c=v, v=0) for d, v in nav_rows],
+    )
+
+
+@router.get("/funds/{instrument_id}/timeseries", response_model=LineSeriesResponse)
+async def get_fund_timeseries(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    range_: Annotated[
+        RangeKey, Query(alias="range", description="Visible range preset.")
+    ] = "1Y",
+) -> LineSeriesResponse:
+    """Fund NAV line in Highcharts arrays; granularity by range.
+
+    <=1Y serves daily (raw nav_timeseries), 1-5Y weekly CAGG, >5Y monthly CAGG —
+    the downsample happens in the DB, never in Python.
+    """
+    today = dt.date.today()
+    interval = resolve_interval(range_)
+    start = range_start(range_, today)
+    rows = await _select_nav_line(session, str(instrument_id), interval, start)
+    if not rows:
+        raise HTTPException(
+            status_code=404, detail=f"No NAV history for fund {instrument_id}."
+        )
+    return LineSeriesResponse(
+        id=str(instrument_id), interval=interval, series=to_ms_pairs(rows)
     )

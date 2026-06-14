@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.core.auth import CurrentUser, get_current_user
 from app.core.db import get_session
 from app.main import create_app
 from app.schemas.portfolios import PortfolioCreate
@@ -30,6 +31,9 @@ _FUND_ID_2 = uuid.UUID("00000000-0000-0000-0000-000000000002")
 def _client() -> AsyncClient:
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        sub="u-1", org_id=None, claims={}
+    )
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 

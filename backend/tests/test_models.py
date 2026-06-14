@@ -395,3 +395,130 @@ def test_screen_filters_bounds_nullable_position_not_null() -> None:
     position = _col("screen_filters", "position")
     assert position.nullable is False
     assert position.server_default is not None
+
+
+# ---------------------------------------------------------------------------
+# positions / portfolios execution columns (migration 0007)
+# Ported from the retired test_funds_sync.py (Task 4.2) — these assert live
+# model/migration contracts unrelated to the deleted fund sync.
+# ---------------------------------------------------------------------------
+
+def test_positions_execution_columns() -> None:
+    """Migration 0007: positions.basis/commission/trade_date + checks."""
+    from sqlalchemy import CheckConstraint
+
+    table = _table("positions")
+    basis = table.c["basis"]
+    assert basis.nullable is False
+    assert basis.server_default is not None
+    assert basis.server_default.arg == "reference"  # type: ignore[union-attr]
+    assert table.c["commission"].nullable is True
+    assert table.c["trade_date"].nullable is True
+    checks = {c.name for c in table.constraints if isinstance(c, CheckConstraint)}
+    assert {"ck_positions_basis", "ck_positions_commission_non_negative"} <= checks
+
+
+def test_portfolios_origin_column() -> None:
+    """Migration 0007: portfolios.origin with the manual|builder check."""
+    from sqlalchemy import CheckConstraint
+
+    table = _table("portfolios")
+    origin = table.c["origin"]
+    assert origin.nullable is False
+    assert origin.server_default is not None
+    assert origin.server_default.arg == "manual"  # type: ignore[union-attr]
+    checks = {c.name for c in table.constraints if isinstance(c, CheckConstraint)}
+    assert "ck_portfolios_origin" in checks
+
+
+# ---------------------------------------------------------------------------
+# Fund universe models (Tasks 2.2-2.5, 4.3) — funds_v / fund_risk_latest_mv /
+# nav_timeseries / fund_holdings_v / fund_classes_v.
+# Ported from the retired test_funds_sync.py (Task 4.2): these assert the live
+# ORM model contracts (Base.metadata), independent of the deleted fund sync.
+# ---------------------------------------------------------------------------
+
+def test_fund_tables_registered() -> None:
+    # funds_v / fund_risk_latest_mv / fund_holdings_v / fund_classes_v are now
+    # dynamic VIEWs/MVs (Tasks 2.2-2.5); FundNav is repointed to the live
+    # nav_timeseries hypertable (Task 4.3) — the fund_nav snapshot is retired.
+    for name in (
+        "funds_v", "fund_risk_latest_mv", "nav_timeseries",
+        "fund_holdings_v", "fund_classes_v",
+    ):
+        assert name in Base.metadata.tables
+
+
+def test_funds_pk_and_columns() -> None:
+    # Fund is now the dynamic VIEW funds_v (Task 2.3): instrument_id is the PK;
+    # the staleness columns (synced_at / source_calc_date / source_nav_max_date)
+    # were dropped (a view has no sync markers — the catalog service derives
+    # staleness from the risk MV + NAV instead).
+    table = _table("funds_v")
+    assert [c.name for c in table.primary_key.columns] == ["instrument_id"]
+    for col in ("synced_at", "source_calc_date", "source_nav_max_date"):
+        assert col not in table.c, col
+    for col in ("series_id", "name", "fund_type", "strategy_label"):
+        assert table.c[col].nullable is False, col
+
+
+def test_funds_filter_columns_are_indexed() -> None:
+    # The model still declares index=True on the filter columns; these Index
+    # objects live in metadata for the funds_v-mapped class (the physical view
+    # ignores them, but the ORM contract is preserved for consistency).
+    indexed = {c.name for idx in _table("funds_v").indexes for c in idx.columns}
+    assert {"series_id", "fund_type", "strategy_label"} <= indexed
+
+
+def test_fund_classes_pk_fk_and_columns() -> None:
+    """FundClass model lockstep. Now the fund_classes_v VIEW (Task 2.5) keyed by
+    series_id — the instrument_id column was DROPPED (a class links to a fund via
+    series_id; readers resolve series→instrument through funds_v). A view cannot
+    be a FK target, so there are no foreign keys."""
+    table = _table("fund_classes_v")
+    assert [c.name for c in table.primary_key.columns] == ["class_id"]
+    assert not table.foreign_keys
+    assert "instrument_id" not in table.c
+    assert table.c["ticker"].nullable is False
+    assert table.c["synced_at"].nullable is False
+    assert table.c["synced_at"].type.timezone is True  # type: ignore[attr-defined]
+    for col in ("series_id", "class_name", "expense_ratio", "source_period_end"):
+        assert table.c[col].nullable is True, col
+    indexed = {c.name for idx in table.indexes for c in idx.columns}
+    assert {"ticker", "series_id"} <= indexed
+
+
+def test_fund_risk_latest_pk_and_metric_lockstep() -> None:
+    # Now MV-backed (fund_risk_latest_mv): a materialized view is not a FK
+    # target, so instrument_id is a plain PK with NO ForeignKey to funds.
+    table = _table("fund_risk_latest_mv")
+    assert [c.name for c in table.primary_key.columns] == ["instrument_id"]
+    assert not table.foreign_keys
+    # Every metric column (model columns minus the PK + calc_date) is nullable —
+    # the mother DB has per-metric gaps. (RISK_METRIC_COLUMNS lived in the
+    # deleted sync module; derive the metric set from the model instead.)
+    assert table.c["calc_date"].nullable is False
+    metric_cols = {c.name for c in table.c} - {"instrument_id", "calc_date"}
+    assert metric_cols, "fund_risk_latest_mv must declare metric columns"
+    for col in metric_cols:
+        assert table.c[col].nullable is True, col
+
+
+def test_fund_nav_composite_pk_and_no_fk() -> None:
+    # FundNav is repointed to the live nav_timeseries hypertable (Task 4.3); a
+    # hypertable is not a FK target, so instrument_id stays a plain composite-PK
+    # column (with nav_date) and NO ForeignKey.
+    table = _table("nav_timeseries")
+    assert [c.name for c in table.primary_key.columns] == ["instrument_id", "nav_date"]
+    assert not table.foreign_keys
+
+
+def test_fund_holdings_composite_pk_and_no_truncation_flag() -> None:
+    # FundHolding is now the fund_holdings_v VIEW (Task 2.5); the ORM identity
+    # PK (series_id, report_date, rank) is unchanged.
+    table = _table("fund_holdings_v")
+    assert [c.name for c in table.primary_key.columns] == [
+        "series_id", "report_date", "rank",
+    ]
+    # Frente C: o flag is_top50_truncated foi aposentado (migration 0008).
+    assert "is_top50_truncated" not in table.c

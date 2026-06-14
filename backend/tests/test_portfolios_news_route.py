@@ -15,6 +15,7 @@ from sqlalchemy.dialects import postgresql
 
 from app.api.routes import portfolios
 from app.api.routes.portfolios import build_news_overlap_select
+from app.core.auth import CurrentUser, get_current_user
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
 from app.main import create_app
@@ -53,6 +54,9 @@ def _client() -> AsyncClient:
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
     app.dependency_overrides[get_tiingo_client] = lambda: object()
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        sub="u-1", org_id=None, claims={}
+    )
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 

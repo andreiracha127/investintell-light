@@ -19,12 +19,16 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, fields
 from typing import Any, cast
 
-from sqlalchemy import ColumnElement, Select, func, or_, select
+from sqlalchemy import ColumnElement, Select, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
-from app.models.fund import Fund, FundClass, FundHolding, FundNav, FundRiskLatest
-from app.sync.funds import UNCLASSIFIED_LABEL
+from app.models.fund import Fund, FundClass, FundHolding, FundRiskLatest
+
+# Canonical strategy label for funds the mother-DB cascade could not classify.
+# (Was sourced from the now-retired app.sync.funds; this service is its sole
+# runtime consumer — used by the strategy filter below.)
+UNCLASSIFIED_LABEL = "Unclassified"
 
 # Hard cap on the CSV export — bounded output, no pagination (screener parity).
 CSV_HARD_CAP = 5000
@@ -183,7 +187,7 @@ _ITEM_COLUMNS: tuple[tuple[str, InstrumentedAttribute[Any]], ...] = (
 
 
 def _base_select(*columns: Any) -> Select[Any]:
-    """SELECT *columns* over funds LEFT JOIN fund_risk_latest."""
+    """SELECT *columns* over funds_v LEFT JOIN fund_risk_latest_mv (via repointed models)."""
     return (
         select(*columns)
         .select_from(Fund)
@@ -252,18 +256,31 @@ async def fetch_funds(
 
 
 async def fetch_staleness(session: AsyncSession) -> Staleness:
-    """MAX(synced_at), MAX(source_calc_date), MAX(source_nav_max_date)."""
-    row = (
-        await session.execute(
-            select(
-                func.max(Fund.synced_at),
-                func.max(Fund.source_calc_date),
-                func.max(Fund.source_nav_max_date),
-            )
-        )
-    ).one()
+    """Global data-freshness markers, derived from the dynamic sources.
+
+    The retired sync snapshot carried per-row synced_at/source_calc_date/
+    source_nav_max_date; the funds_v VIEW has none, so staleness is read live:
+    - source_calc_date  = MAX(fund_risk_latest_mv.calc_date)
+    - source_nav_max_date = MAX(nav_timeseries.nav_date)  (raw hypertable, 2.4)
+    - synced_at         = the view is "as fresh as the read" → query time, but
+      only when the universe is non-empty (None on an empty catalog, matching
+      the previous empty-table contract).
+    """
+    source_calc_date = await session.scalar(select(func.max(FundRiskLatest.calc_date)))
+    source_nav_max_date = cast(
+        "dt.date | None",
+        await session.scalar(text("SELECT max(nav_date) FROM nav_timeseries")),
+    )
+    fund_count = int(
+        await session.scalar(select(func.count()).select_from(Fund)) or 0
+    )
+    has_universe = fund_count > 0 and (
+        source_calc_date is not None or source_nav_max_date is not None
+    )
     return Staleness(
-        synced_at=row[0], source_calc_date=row[1], source_nav_max_date=row[2]
+        synced_at=dt.datetime.now(dt.UTC) if has_universe else None,
+        source_calc_date=source_calc_date,
+        source_nav_max_date=source_nav_max_date,
     )
 
 
@@ -314,8 +331,28 @@ def csv_rows(rows: Sequence[dict[str, Any]]) -> list[dict[str, str | float | Non
 
 
 # ---------------------------------------------------------------------------
-# NAV decimation (pure — unit-tested)
+# NAV series read (raw nav_timeseries hypertable) + decimation (pure)
 # ---------------------------------------------------------------------------
+
+
+def build_nav_series_select(instrument_id: uuid.UUID, start: dt.date) -> Select[Any]:
+    """NAV (nav_date, nav) for one fund from the raw nav_timeseries hypertable.
+
+    Reads the timeseries directly (Task 2.4) instead of the retired fund_nav
+    snapshot. Bound params (no user input reaches SQL text); date-sorted; NULL
+    NAVs dropped so the chart shows real prints only.
+    """
+    return (
+        select(text("nav_date"), text("nav"))
+        .select_from(text("nav_timeseries"))
+        .where(
+            text("instrument_id = :iid"),
+            text("nav_date >= :start"),
+            text("nav IS NOT NULL"),
+        )
+        .order_by(text("nav_date"))
+        .params(iid=str(instrument_id), start=start)
+    )
 
 
 def decimate_nav(
@@ -371,21 +408,18 @@ async def fetch_fund_profile(
         return None
     risk = await session.get(FundRiskLatest, instrument_id)
 
-    max_nav_date = await session.scalar(
-        select(func.max(FundNav.nav_date)).where(
-            FundNav.instrument_id == instrument_id
-        )
+    max_nav_date = cast(
+        "dt.date | None",
+        await session.scalar(
+            text("SELECT max(nav_date) FROM nav_timeseries WHERE instrument_id = :iid"),
+            {"iid": str(instrument_id)},
+        ),
     )
     nav: list[tuple[dt.date, float | None]] = []
     if max_nav_date is not None:
         window_start = max_nav_date - dt.timedelta(days=NAV_WINDOW_DAYS)
         result = await session.execute(
-            select(FundNav.nav_date, FundNav.nav)
-            .where(
-                FundNav.instrument_id == instrument_id,
-                FundNav.nav_date >= window_start,
-            )
-            .order_by(FundNav.nav_date)
+            build_nav_series_select(instrument_id, window_start)
         )
         raw = [
             (cast("dt.date", nav_date), float(value) if value is not None else None)
@@ -419,17 +453,27 @@ async def fetch_fund_profile(
         reported = [float(h.pct_of_nav) for h in holdings if h.pct_of_nav is not None]
         pct_total = sum(reported) if reported else None
 
+    # FundClass (fund_classes_v) is keyed by series_id — a class links to a
+    # fund via the series, not the instrument. Resolve through the loaded fund.
     classes = list(
         (
             await session.execute(
                 select(FundClass)
-                .where(FundClass.instrument_id == instrument_id)
+                .where(FundClass.series_id == fund.series_id)
                 .order_by(
                     FundClass.expense_ratio.asc().nulls_last(), FundClass.ticker
                 )
             )
         ).scalars()
     )
+
+    # funds_v has no sync markers; derive the per-fund staleness the route
+    # exposes from the dynamic sources (risk MV calc_date + latest NAV date).
+    # Attached on the instance so the route serializes them unchanged (Task 2.4
+    # finalizes the staleness source).
+    fund.synced_at = dt.datetime.now(dt.UTC)  # type: ignore[attr-defined]
+    fund.source_calc_date = risk.calc_date if risk is not None else None  # type: ignore[attr-defined]
+    fund.source_nav_max_date = max_nav_date  # type: ignore[attr-defined]
 
     return FundProfile(
         fund=fund,
