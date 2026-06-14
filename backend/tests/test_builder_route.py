@@ -329,7 +329,7 @@ async def test_optimize_universe_with_include_instrument_ids_prunes(
         monkeypatch,
         [
             optimizer_data.UniverseFund(id=fid, ticker=f"TIC{i}", name=f"Fund {i}")
-            for i, fid in zip((0, 2), kept)
+            for i, fid in zip((0, 2), kept, strict=True)
         ],
     )
     payload = {
