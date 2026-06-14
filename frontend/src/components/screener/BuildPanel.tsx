@@ -69,29 +69,27 @@ export function BuildPanel({
     else if (activeCode === null || !filterCodes.has(activeCode)) setActiveCode(filters[0].metric_code);
   }, [filters, filterCodes, activeCode]);
 
-  const reportSaving = (s: SaveStatus) => onSaveStatus(s);
-
   const putMutation = useMutation({
     mutationFn: ({ code, body }: { code: string; body: FilterBody }) => putScreenFilter(screenId as number, code, body),
-    onMutate: () => reportSaving("saving"),
-    onSuccess: (resp) => { applyFilterResponse(queryClient, screenId as number, resp); onHeadline(resp.headline_count); reportSaving("idle"); },
-    onError: () => reportSaving("error"),
+    onMutate: () => onSaveStatus("saving"),
+    onSuccess: (resp) => { applyFilterResponse(queryClient, screenId as number, resp); onHeadline(resp.headline_count); onSaveStatus("idle"); },
+    onError: () => onSaveStatus("error"),
   });
   const removeMutation = useMutation({
     mutationFn: (code: string) => deleteScreenFilter(screenId as number, code),
-    onMutate: () => reportSaving("saving"),
-    onSuccess: (resp) => { applyFilterResponse(queryClient, screenId as number, resp); onHeadline(resp.headline_count); reportSaving("idle"); },
-    onError: () => reportSaving("error"),
+    onMutate: () => onSaveStatus("saving"),
+    onSuccess: (resp) => { applyFilterResponse(queryClient, screenId as number, resp); onHeadline(resp.headline_count); onSaveStatus("idle"); },
+    onError: () => onSaveStatus("error"),
   });
   const reorderMutation = useMutation({
     mutationFn: (codes: string[]) => reorderScreenFilters(screenId as number, codes),
-    onMutate: () => reportSaving("saving"),
+    onMutate: () => onSaveStatus("saving"),
     onSuccess: (s) => {
       queryClient.setQueryData(["screen", s.id], s);
       queryClient.invalidateQueries({ queryKey: ["screen-results", s.id] });
-      reportSaving("idle");
+      onSaveStatus("idle");
     },
-    onError: () => reportSaving("error"),
+    onError: () => onSaveStatus("error"),
   });
 
   // Add (or toggle off) a metric. Lazy-creates an "Untitled screen" on first add.
@@ -99,7 +97,7 @@ export function BuildPanel({
     async (code: string) => {
       if (filterCodes.has(code)) { removeMutation.mutate(code); return; }
       try {
-        reportSaving("saving");
+        onSaveStatus("saving");
         let id = screenId;
         if (id === null) {
           const created = await createScreen({ name: "Untitled screen" });
@@ -112,10 +110,10 @@ export function BuildPanel({
         applyFilterResponse(queryClient, id, resp);
         onHeadline(resp.headline_count);
         setActiveCode(code);
-        reportSaving("idle");
-      } catch { reportSaving("error"); }
+        onSaveStatus("idle");
+      } catch { onSaveStatus("error"); }
     },
-    [filterCodes, screenId, queryClient, onScreenCreated, onHeadline, removeMutation],
+    [filterCodes, screenId, queryClient, onScreenCreated, onHeadline, onSaveStatus, removeMutation],
   );
 
   const editBound = useCallback(

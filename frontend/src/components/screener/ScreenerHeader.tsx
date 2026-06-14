@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { createScreen, deleteScreen, patchScreen, type ScreenListItem } from "@/lib/api/client";
 import { BUTTON_CLASS, BUTTON_PRIMARY_CLASS, INPUT_CLASS } from "@/components/screener/shared";
@@ -32,6 +32,16 @@ export function ScreenerHeader({
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState("");
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [menuOpen]);
 
   const invalidateList = () => queryClient.invalidateQueries({ queryKey: ["screens"] });
 
@@ -59,7 +69,13 @@ export function ScreenerHeader({
     <header className="sticky top-0 z-10 bg-surface-1 border-b border-border">
       <div className="mx-auto flex max-w-[1360px] flex-wrap items-center gap-2.5 px-[var(--ix-pad)] py-2.5">
         {/* Screen switcher */}
-        <div className="relative">
+        <div
+          ref={menuRef}
+          className="relative"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setMenuOpen(false);
+          }}
+        >
           {renaming && selected ? (
             <input autoFocus value={draftName} onChange={(e) => setDraftName(e.target.value)}
               onKeyDown={(e) => {
