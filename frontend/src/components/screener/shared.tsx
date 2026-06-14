@@ -47,8 +47,8 @@ export const NO_DATA_NOTE = "No metric data yet — run the metrics job.";
 /**
  * Fold a filter PUT/DELETE response into the cache: the returned screen is
  * the new truth for ["screen", id]; the screens list (filter_count) and any
- * cached results pages are stale. Build-distribution cache updates are the
- * caller's job (PUT primes it, DELETE removes it).
+ * cached results pages are stale. This also invalidates the batch-build cache
+ * (["screen-build", id]) that feeds the sparklines + distribution panel.
  */
 export function applyFilterResponse(
   queryClient: QueryClient,
