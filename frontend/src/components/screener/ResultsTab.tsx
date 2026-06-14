@@ -72,8 +72,8 @@ export function ResultsTab({
   });
 
   useEffect(() => {
-    onHeadline(resultsQuery.total ?? null);
-  }, [resultsQuery.total, onHeadline]);
+    onHeadline(resultsQuery.isPending ? null : resultsQuery.total);
+  }, [resultsQuery.isPending, resultsQuery.total, onHeadline]);
 
   const { lastPage, pages, total, loadedCount } = resultsQuery;
   // Feed the grid a ScreenResults whose `.rows` is ALL loaded rows (columns are

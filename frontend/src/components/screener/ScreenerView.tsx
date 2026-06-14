@@ -39,6 +39,7 @@ export function ScreenerView() {
   const [headline, setHeadline] = useState<number | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const screensQuery = useQuery({ queryKey: ["screens"], queryFn: ({ signal }) => fetchScreens(signal), staleTime: 60_000, retry: retryPolicy });
   const screens = screensQuery.data;
@@ -70,13 +71,17 @@ export function ScreenerView() {
   const onExport = async () => {
     if (selectedId === null) return;
     setExporting(true);
+    setExportError(null);
     try {
+      // Header export uses default ordering — the Results tab's local sort/search isn't shared here.
       const blob = await fetchScreenResultsCsv(selectedId, { dir: "asc" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = `${(selected?.name ?? "screen").replace(/[^\w.-]+/g, "_")}-results.csv`;
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : String(err));
     } finally { setExporting(false); }
   };
 
@@ -91,6 +96,11 @@ export function ScreenerView() {
     <div className="flex flex-col pb-10">
       <ScreenerHeader screens={screens ?? []} selected={selected} onSelect={setSelectedId}
         headline={headline} saveStatus={saveStatus} onReset={onReset} onExport={onExport} exporting={exporting} />
+      {exportError && (
+        <p role="alert" className="mx-auto w-full max-w-[1360px] px-[var(--ix-pad)] pt-2 text-[12px] text-loss break-words">
+          Export failed: {exportError}
+        </p>
+      )}
 
       <div className="mx-auto w-full max-w-[1360px] px-[var(--ix-pad)]">
         <div role="tablist" aria-label="Screener views" className="mt-3 flex">
