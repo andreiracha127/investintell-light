@@ -33,7 +33,7 @@ import {
   type Screen,
   type ScreenFilter,
 } from "@/lib/api/client";
-import { EChart } from "@/components/charts/EChart";
+import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import {
   applyFilterResponse,
   ErrorPanel,
@@ -42,7 +42,7 @@ import {
   NO_DATA_NOTE,
   retryPolicy,
 } from "@/components/screener/shared";
-import { buildDistributionOption } from "@/lib/charts/distribution";
+import { buildHcDistributionOption } from "@/lib/charts/hc/distribution";
 import { chartColors, type ChartColors } from "@/lib/charts/theme";
 import { formatCompact } from "@/lib/format";
 import { parseDecimal } from "@/lib/parse";
@@ -222,7 +222,7 @@ function FilterCard({
   const option = useMemo(
     () =>
       distribution && colors
-        ? buildDistributionOption(
+        ? buildHcDistributionOption(
             distribution,
             { min: filter.min_value, max: filter.max_value },
             metric?.data_type ?? "float",
@@ -282,7 +282,7 @@ function FilterCard({
           {NO_DATA_NOTE}
         </p>
       ) : option ? (
-        <EChart option={option} className="h-[140px]" />
+        <HighchartsChart options={option} className="h-[140px]" />
       ) : (
         <p className="h-[140px] flex items-center justify-center bg-zebra text-[13px] text-text-muted">
           No companies in this band.

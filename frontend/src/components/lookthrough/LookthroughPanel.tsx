@@ -16,9 +16,9 @@
  */
 import { useEffect, useMemo, useState } from "react";
 
-import { EChart } from "@/components/charts/EChart";
+import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { Card, KpiTile } from "@/components/ui/panels";
-import { buildExposureBarsOption } from "@/lib/charts/lookthrough";
+import { buildHcExposureBarsOption } from "@/lib/charts/hc/lookthrough";
 import { type ChartColors } from "@/lib/charts/theme";
 import { formatDate, formatNumber } from "@/lib/format";
 import type { ExposureItem, LookthroughSummary } from "@/lib/api/client";
@@ -63,7 +63,7 @@ function ExposureCharts({
   dimensions: Record<string, ExposureItem[]>;
   activeDim: string;
   onDimChange: (dim: string) => void;
-  exposureOption: ReturnType<typeof buildExposureBarsOption>;
+  exposureOption: ReturnType<typeof buildHcExposureBarsOption>;
 }) {
   const dimKeys = Object.keys(dimensions);
   if (dimKeys.length === 0) return null;
@@ -101,7 +101,7 @@ function ExposureCharts({
       </div>
 
       {activeItems.length > 0 ? (
-        <EChart option={exposureOption} className="h-[320px] w-full" />
+        <HighchartsChart options={exposureOption} className="h-[320px] w-full" />
       ) : (
         <p className="py-8 text-center text-[13px] text-text-muted">
           No exposure data for this dimension.
@@ -154,7 +154,7 @@ export function LookthroughPanel({
   }, [dimensions, activeDim]);
 
   const exposureOption = useMemo(
-    () => buildExposureBarsOption(dimensions[activeDim] ?? [], colors),
+    () => buildHcExposureBarsOption(dimensions[activeDim] ?? [], colors),
     [dimensions, activeDim, colors],
   );
 

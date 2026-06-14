@@ -36,9 +36,10 @@ import {
   formatPercent,
 } from "@/lib/format";
 import { parseDecimal } from "@/lib/parse";
-import { buildAllocationOption, type AllocationSlice } from "@/lib/charts/allocation";
+import { type AllocationSlice } from "@/lib/charts/allocation";
+import { buildHcAllocationOption } from "@/lib/charts/hc/allocation";
 import { chartColors, type ChartColors } from "@/lib/charts/theme";
-import { EChart } from "@/components/charts/EChart";
+import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { DataGrid } from "@/components/ui/DataGrid";
 import { positionsToGridOptions, POSITION_COLS } from "@/lib/grid/positionsGridOptions";
 import { flashClassForDir, FLASH_UP, FLASH_DOWN } from "@/lib/grid/liveFlash";
@@ -658,15 +659,15 @@ function AllocationPanel({
   }, [positions, aggregates.cash]);
 
   const total = slices.reduce((sum, slice) => sum + slice.value, 0);
-  const option = useMemo(
-    () => buildAllocationOption(slices, colors),
+  const options = useMemo(
+    () => buildHcAllocationOption(slices, colors),
     [slices, colors],
   );
 
   return (
     <Card title="Allocation">
       <div className="flex flex-wrap items-center gap-[18px]">
-        <EChart option={option} className="h-[150px] w-[150px] shrink-0" />
+        <HighchartsChart options={options} className="h-[150px] w-[150px] shrink-0" />
         <div className="flex min-w-[150px] max-w-[260px] flex-1 flex-col gap-1.5 tabular-nums">
           {slices.map((slice, i) => (
             <div

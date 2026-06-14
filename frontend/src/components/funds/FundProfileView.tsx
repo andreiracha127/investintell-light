@@ -12,15 +12,15 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { fetchFundHistory, fetchFundProfile, type FundRisk, type RangePreset } from "@/lib/api/client";
-import { EChart } from "@/components/charts/EChart";
+import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { InteractiveChart } from "@/components/charts/InteractiveChart";
 import { FundLookthroughSection } from "@/components/funds/FundLookthroughSection";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
 import { Card, KpiTile, StatRow } from "@/components/ui/panels";
 import {
-  buildDrawdownOption,
-  buildMonthlyReturnsOption,
-} from "@/lib/charts/performance";
+  buildHcDrawdownOption,
+  buildHcMonthlyReturnsOption,
+} from "@/lib/charts/hc/performance";
 import { chartColors, type ChartColors } from "@/lib/charts/theme";
 import {
   formatCompact,
@@ -116,7 +116,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     if (!profileQuery.data || !colors) return null;
     if (navSpanMonthSteps < 12) return null;
     const cells = monthlyReturns(profileQuery.data.nav);
-    return buildMonthlyReturnsOption(cells, colors);
+    return buildHcMonthlyReturnsOption(cells, colors);
   }, [profileQuery.data, colors, navSpanMonthSteps]);
 
   // Drawdown chart — same 13-distinct-month gate as the heatmap above.
@@ -124,7 +124,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     if (!profileQuery.data || !colors) return null;
     if (navSpanMonthSteps < 12) return null;
     const dd = drawdownSeries(profileQuery.data.nav);
-    return buildDrawdownOption(dd, colors);
+    return buildHcDrawdownOption(dd, colors);
   }, [profileQuery.data, colors, navSpanMonthSteps]);
 
   if (profileQuery.isPending) {
@@ -238,13 +238,13 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
 
           {monthlyReturnsOption && (
             <Card title="Monthly returns" subtitle="month-end over month-end, 2y window">
-              <EChart option={monthlyReturnsOption} className="h-[220px] w-full" />
+              <HighchartsChart options={monthlyReturnsOption} className="h-[220px] w-full" />
             </Card>
           )}
 
           {drawdownOption && (
             <Card title="Drawdown" subtitle="running peak-to-trough, 2y window">
-              <EChart option={drawdownOption} className="h-[180px] w-full" />
+              <HighchartsChart options={drawdownOption} className="h-[180px] w-full" />
             </Card>
           )}
 

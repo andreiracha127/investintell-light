@@ -19,10 +19,10 @@ import {
   type OptimizeResponse,
 } from "@/lib/api/client";
 import { parseDecimal } from "@/lib/parse";
-import { buildAllocationOption } from "@/lib/charts/allocation";
+import { buildHcAllocationOption } from "@/lib/charts/hc/allocation";
 import type { ChartColors } from "@/lib/charts/theme";
 import { formatNumber, formatPercent } from "@/lib/format";
-import { EChart } from "@/components/charts/EChart";
+import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { Card, KpiTile, valueTone } from "@/components/ui/panels";
 import {
   BUTTON_CLASS,
@@ -246,7 +246,7 @@ export function ResultsPanel({
   const proposedDonut = useMemo(
     () =>
       colors
-        ? buildAllocationOption(
+        ? buildHcAllocationOption(
             rows.map((r) => ({ name: r.ticker, value: r.weight })),
             colors,
           )
@@ -256,7 +256,7 @@ export function ResultsPanel({
   const currentDonut = useMemo(
     () =>
       colors && base
-        ? buildAllocationOption(
+        ? buildHcAllocationOption(
             [...base.weights.entries()].map(([key, weight]) => ({
               name: key.replace(/^equity:/, ""),
               value: weight,
@@ -609,9 +609,9 @@ export function ResultsPanel({
         <Card title={currentDonut ? "Allocation — current vs proposed" : "Allocation — proposed"}>
           <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]">
             {currentDonut && (
-              <Donut title={`Current — ${base?.name ?? ""}`} option={currentDonut} />
+              <Donut title={`Current — ${base?.name ?? ""}`} options={currentDonut} />
             )}
-            <Donut title="Proposed" option={proposedDonut} />
+            <Donut title="Proposed" options={proposedDonut} />
           </div>
         </Card>
       )}
@@ -646,17 +646,17 @@ function Th({ align, children }: { align: "left" | "right"; children?: React.Rea
 
 function Donut({
   title,
-  option,
+  options,
 }: {
   title: string;
-  option: NonNullable<ReturnType<typeof buildAllocationOption>>;
+  options: NonNullable<ReturnType<typeof buildHcAllocationOption>>;
 }) {
   return (
     <div className="bg-surface-2 px-2 py-2">
       <div className="mb-1 text-center text-[10px] font-bold uppercase tracking-[0.08em] text-text-muted">
         {title}
       </div>
-      <EChart option={option} className="h-[240px] w-full" />
+      <HighchartsChart options={options} className="h-[240px] w-full" />
     </div>
   );
 }
