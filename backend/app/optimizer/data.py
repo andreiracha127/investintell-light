@@ -12,6 +12,7 @@ This module performs I/O only — all math lives in ``engine`` /
 
 import datetime as dt
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -177,6 +178,7 @@ async def select_universe_funds(
     rank_dir: str,
     max_assets: int,
     require_aum: bool = False,
+    include_ids: Sequence[str] | None = None,
     window_days: int = DEFAULT_WINDOW_DAYS,
     min_obs: int = MIN_COMMON_OBS,
     today: dt.date | None = None,
@@ -209,6 +211,8 @@ async def select_universe_funds(
     if require_aum:
         conditions.append(Fund.aum_usd.is_not(None))
         conditions.append(Fund.aum_usd > 0)
+    if include_ids:
+        conditions.append(Fund.instrument_id.in_(list(include_ids)))
 
     stmt = (
         select(Fund.instrument_id, Fund.ticker, Fund.name)

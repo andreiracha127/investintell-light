@@ -7,20 +7,23 @@
  * with the same filters) shows how big the matching set is before running.
  */
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { fetchFunds } from "@/lib/api/client";
 import { Card } from "@/components/ui/panels";
+import { DataGrid } from "@/components/ui/DataGrid";
 import {
   FIELD_LABEL_CLASS,
   INPUT_CLASS,
   retryPolicy,
 } from "@/components/screener/shared";
 import { formatNumber } from "@/lib/format";
+import { universePreviewToGridOptions } from "@/lib/grid/universeGridOptions";
 
 import {
   RANK_BY_LABELS,
   universeDraftToCountQuery,
+  universeDraftToPreviewQuery,
   type UniverseDraft,
   type UniverseRankBy,
 } from "./assets";
@@ -44,11 +47,15 @@ export function FundUniverseCard({
   draft,
   setDraft,
   onCount,
+  onSelectionChange,
 }: {
   draft: UniverseDraft;
   setDraft: (updater: (prev: UniverseDraft) => UniverseDraft) => void;
   /** Report the matching-fund count up so the parent can gate the run. */
   onCount: (count: number | null) => void;
+  /** Report the kept fund ids when the user prunes the previewed top-N; an
+   * empty array means "keep all" (full top-N — send no explicit list). */
+  onSelectionChange: (ids: string[]) => void;
 }) {
   const countQuery = useQuery({
     queryKey: ["builder-universe-count", universeDraftToCountQuery(draft)],
@@ -65,6 +72,63 @@ export function FundUniverseCard({
 
   const patch = (p: Partial<UniverseDraft>) => setDraft((prev) => ({ ...prev, ...p }));
   const effectiveN = total !== null ? Math.min(draft.maxAssets, total) : draft.maxAssets;
+
+  /* ── Top-N preview (same filters + rank, larger page) ───────────────── */
+  const previewQuery = useQuery({
+    queryKey: ["builder-universe-preview", universeDraftToPreviewQuery(draft, effectiveN)],
+    queryFn: ({ signal }) =>
+      fetchFunds(universeDraftToPreviewQuery(draft, effectiveN), signal),
+    enabled: effectiveN >= 2,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+    retry: retryPolicy,
+  });
+  const previewFunds = useMemo(
+    () => previewQuery.data?.items ?? [],
+    [previewQuery.data?.items],
+  );
+  const previewIds = useMemo(
+    () =>
+      previewFunds
+        .map((f) => (f as { instrument_id?: string | null }).instrument_id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0),
+    [previewFunds],
+  );
+
+  // Default-select ALL preview ids whenever the previewed id-set changes
+  // (new filters/rank/N → start from "all kept").
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const previewKey = previewIds.join("|");
+  useEffect(() => {
+    setSelected(new Set(previewIds));
+    // previewKey captures the id-set identity; previewIds is derived from it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewKey]);
+
+  const onToggle = useCallback((id: string, checked: boolean) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  // Lift the kept ids: distinguish "all kept" (report [] → full top-N) from a
+  // valid pruned subset (>=2 and strictly fewer than the preview).
+  useEffect(() => {
+    const pruned =
+      selected.size >= 2 && selected.size < previewFunds.length
+        ? previewIds.filter((id) => selected.has(id))
+        : [];
+    onSelectionChange(pruned);
+  }, [selected, previewFunds.length, previewIds, onSelectionChange]);
+
+  const previewOptions = useMemo(
+    () => universePreviewToGridOptions(previewFunds, selected, { onToggle }),
+    [previewFunds, selected, onToggle],
+  );
+  const keptCount = previewFunds.length === 0 ? 0 : selected.size;
 
   return (
     <Card title="Fund universe" subtitle="filter &amp; rank — no manual tickers">
@@ -162,6 +226,22 @@ export function FundUniverseCard({
           </>
         )}
       </p>
+
+      {effectiveN >= 2 && (
+        <div className="mt-3">
+          <div className="mb-1.5 flex items-center justify-between">
+            <span className={FIELD_LABEL_CLASS}>
+              Preview — uncheck funds to exclude them
+            </span>
+            <span className="ix-fs tabular-nums text-text-muted">
+              {keptCount === previewFunds.length
+                ? `all ${previewFunds.length} kept`
+                : `${keptCount} of ${previewFunds.length} kept`}
+            </span>
+          </div>
+          <DataGrid options={previewOptions} className="h-[360px] w-full" />
+        </div>
+      )}
     </Card>
   );
 }

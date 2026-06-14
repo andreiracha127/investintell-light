@@ -8519,6 +8519,22 @@
             "minimum": 2.0,
             "title": "Max Assets",
             "default": 30
+          },
+          "include_instrument_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 50,
+                "minItems": 2
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Instrument Ids"
           }
         },
         "type": "object",

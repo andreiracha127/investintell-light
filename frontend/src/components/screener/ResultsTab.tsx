@@ -2,11 +2,15 @@
 
 /**
  * Wizard Tab 3 — server-driven results table: dynamic columns from the
- * response, header-click sorting, prefix search, paging (25/page) and CSV
- * export (fetch + blob through the typed client so base-URL handling stays
- * consistent). The frontend formats; the backend filters/sorts/paginates.
+ * response, header-click sorting, prefix search, infinite-windowed scrolling
+ * and CSV export (fetch + blob through the typed client so base-URL handling
+ * stays consistent). The frontend formats; the backend filters/sorts/pages.
+ *
+ * Scope (Task C): rows load incrementally as the user scrolls the virtualized
+ * grid near the bottom; a "Load more" button is the always-present a11y +
+ * safety-net fallback (works regardless of grid internals). Sort/search live
+ * in the query key, so changing either resets the infinite query to page 1.
  */
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
 import { fetchScreenResults, fetchScreenResultsCsv } from "@/lib/api/client";
@@ -16,13 +20,18 @@ import {
   INPUT_CLASS,
   isSnapshotMissing,
   NO_DATA_NOTE,
-  retryPolicy,
 } from "@/components/screener/shared";
 import { DataGrid } from "@/components/ui/DataGrid";
+import { GridSkeleton } from "@/components/ui/GridSkeleton";
+import { LoadMoreFooter } from "@/components/ui/LoadMoreFooter";
 import { formatCompact } from "@/lib/format";
 import { screenResultsToGridOptions } from "@/lib/grid/gridOptions";
+import {
+  useGridInfiniteScroll,
+  useInfiniteGrid,
+} from "@/lib/grid/useInfiniteGrid";
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 100;
 type SortDir = "asc" | "desc";
 
 export function ResultsTab({
@@ -36,21 +45,19 @@ export function ResultsTab({
   const [dir, setDir] = useState<SortDir>("asc");
   const [searchText, setSearchText] = useState("");
   const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
 
-  // Debounce the server-side search; a search change restarts at page 1
-  // (separate effect so state updaters stay pure).
+  // Debounce the server-side search. A search change re-keys the infinite
+  // query below, which resets it to page 1 automatically (no page state).
   useEffect(() => {
     const timer = setTimeout(() => setSearch(searchText.trim()), 300);
     return () => clearTimeout(timer);
   }, [searchText]);
-  useEffect(() => {
-    setPage(1);
-  }, [search]);
 
-  const resultsQuery = useQuery({
-    queryKey: ["screen-results", screenId, sort ?? "", dir, search, page],
-    queryFn: ({ signal }) =>
+  // Infinite-windowed loader: sort/dir/search live in the key, so any change
+  // restarts at page 1. Virtualization renders only the visible window.
+  const resultsQuery = useInfiniteGrid({
+    queryKey: ["screen-results", screenId, sort ?? "", dir, search],
+    fetchPage: (page, signal) =>
       fetchScreenResults(
         screenId,
         {
@@ -62,9 +69,7 @@ export function ResultsTab({
         },
         signal,
       ),
-    placeholderData: keepPreviousData,
-    staleTime: 30_000,
-    retry: retryPolicy,
+    countOf: (p) => p.rows.length,
   });
 
   const [exporting, setExporting] = useState(false);
@@ -93,31 +98,42 @@ export function ResultsTab({
     }
   };
 
+  const { lastPage, pages, total, loadedCount } = resultsQuery;
+  // Feed the grid a ScreenResults whose `.rows` is ALL loaded rows (columns are
+  // stable across pages, so the last page's metadata is canonical).
+  const mergedRows = useMemo(
+    () => pages.flatMap((p) => p.rows),
+    [pages],
+  );
   const gridOptions = useMemo(
     () =>
-      resultsQuery.data
+      lastPage
         ? screenResultsToGridOptions(
-            resultsQuery.data,
+            { ...lastPage, rows: mergedRows },
             { sort, dir },
             {
               onSortChange: (columnId, order) => {
                 setSort(columnId);
                 setDir(order);
-                setPage(1);
               },
             },
           )
         : null,
-    [resultsQuery.data, sort, dir],
+    [lastPage, mergedRows, sort, dir],
   );
+
+  // Automatic near-bottom trigger; the "Load more" button is the fallback.
+  const onGridReady = useGridInfiniteScroll({
+    hasNextPage: resultsQuery.hasNextPage,
+    isFetchingNextPage: resultsQuery.isFetchingNextPage,
+    fetchNextPage: resultsQuery.fetchNextPage,
+  });
 
   if (resultsQuery.isPending) {
     return (
-      <div
-        aria-busy="true"
-        aria-label="Loading screen results"
-        className="h-[320px] bg-surface-2 animate-pulse"
-      />
+      <div aria-busy="true" aria-label="Loading screen results">
+        <GridSkeleton className="h-[320px]" />
+      </div>
     );
   }
   if (resultsQuery.isError) {
@@ -128,16 +144,11 @@ export function ResultsTab({
     ) : (
       <ErrorPanel
         title="Failed to load results"
-        message={resultsQuery.error.message}
+        message={resultsQuery.error?.message ?? "Unknown error"}
         onRetry={() => resultsQuery.refetch()}
       />
     );
   }
-
-  const { total } = resultsQuery.data;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const firstRow = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const lastRow = Math.min(page * PAGE_SIZE, total);
 
   return (
     <section className="bg-surface-2 border border-border">
@@ -193,58 +204,27 @@ export function ResultsTab({
       <div
         className={`transition-opacity ${resultsQuery.isFetching ? "opacity-60" : ""}`}
       >
-        {gridOptions && <DataGrid options={gridOptions} className="h-[560px] w-full" />}
+        {gridOptions && (
+          <DataGrid
+            options={gridOptions}
+            className="h-[560px] w-full"
+            onReady={onGridReady}
+            emptyMessage={
+              total === 0 && search
+                ? `No matches for "${search}".`
+                : "No matches — loosen the filters, or the metrics snapshot may not be computed yet."
+            }
+          />
+        )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2.5 border-t border-border px-[var(--ix-pad)] py-2.5 text-[12px] text-text-secondary">
-        <span className="tabular-nums">
-          {total === 0 ? "0 rows" : `${firstRow}–${lastRow} of ${formatCompact(total)}`}
-        </span>
-        <div className="ml-auto flex items-center gap-px">
-          <button
-            type="button"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1 || resultsQuery.isFetching}
-            aria-label="Previous page"
-            className="h-[30px] w-8 bg-field border border-border-strong text-text-secondary hover:bg-layer-hover transition-colors disabled:cursor-not-allowed disabled:text-text-muted disabled:hover:bg-field"
-          >
-            ‹
-          </button>
-          {pageWindow(page, totalPages).map((p) => (
-            <button
-              key={p}
-              type="button"
-              onClick={() => setPage(p)}
-              disabled={resultsQuery.isFetching}
-              aria-label={`Page ${p}`}
-              aria-current={p === page ? "page" : undefined}
-              className={`flex h-[30px] items-center px-3 tabular-nums transition-colors ${
-                p === page
-                  ? "bg-accent border border-accent font-bold text-on-accent"
-                  : "bg-field border border-border-strong text-text-secondary hover:bg-layer-hover"
-              }`}
-            >
-              {p}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages || resultsQuery.isFetching}
-            aria-label="Next page"
-            className="h-[30px] w-8 bg-field border border-border-strong text-text-secondary hover:bg-layer-hover transition-colors disabled:cursor-not-allowed disabled:text-text-muted disabled:hover:bg-field"
-          >
-            ›
-          </button>
-        </div>
-      </div>
+      <LoadMoreFooter
+        loaded={loadedCount}
+        total={total}
+        hasNextPage={resultsQuery.hasNextPage}
+        isFetchingNextPage={resultsQuery.isFetchingNextPage}
+        onLoadMore={resultsQuery.fetchNextPage}
+      />
     </section>
   );
-}
-
-/** Up to 5 page numbers centered on the current page — presentation only. */
-function pageWindow(page: number, totalPages: number): number[] {
-  const size = Math.min(5, totalPages);
-  const start = Math.min(Math.max(1, page - 2), totalPages - size + 1);
-  return Array.from({ length: size }, (_, i) => start + i);
 }

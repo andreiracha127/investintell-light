@@ -3,32 +3,42 @@
 /**
  * Funds universe (F8.2) — server-driven dense table over GET /funds:
  * filter panel (search debounce, type/asset-class selects, free-text
- * strategy, numeric bounds), header-click sorting, square pagination and
- * CSV export. The frontend formats; the backend filters/sorts/paginates —
- * every metric is the mother-DB value (never recomputed here).
+ * strategy, numeric bounds), header-click sorting, infinite-windowed
+ * scrolling and CSV export. The frontend formats; the backend
+ * filters/sorts/pages — every metric is the mother-DB value (never
+ * recomputed here).
+ *
+ * Scope (Task C): rows load incrementally as the user scrolls the virtualized
+ * grid near the bottom; a "Load more" button is the always-present a11y +
+ * safety-net fallback. Filters/sort live in the query key, so any change resets
+ * the infinite query to page 1.
  */
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   fetchFunds,
   fetchFundsCsv,
-  type FundListItem,
   type FundsList,
   type FundsQuery,
 } from "@/lib/api/client";
+import { DataGrid } from "@/components/ui/DataGrid";
+import { GridSkeleton } from "@/components/ui/GridSkeleton";
+import { LoadMoreFooter } from "@/components/ui/LoadMoreFooter";
+import { fundsListToGridOptions } from "@/lib/grid/fundsGridOptions";
+import {
+  useGridInfiniteScroll,
+  useInfiniteGrid,
+} from "@/lib/grid/useInfiniteGrid";
 import { PageTitle } from "@/components/ui/panels";
 import {
   BUTTON_CLASS,
   ErrorPanel,
   FIELD_LABEL_CLASS,
   INPUT_CLASS,
-  retryPolicy,
 } from "@/components/screener/shared";
-import { formatCompact, formatDate, formatNumber, formatPercent } from "@/lib/format";
+import { formatCompact, formatDate } from "@/lib/format";
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 100;
 type SortDir = "asc" | "desc";
 
 type FundType = NonNullable<FundsQuery["fund_type"]>;
@@ -45,34 +55,6 @@ const ASSET_CLASSES: { value: AssetClass; label: string }[] = [
   { value: "fixed_income", label: "Fixed income" },
   { value: "cash", label: "Cash" },
   { value: "alternatives", label: "Alternatives" },
-];
-
-const TYPE_TAG: Record<string, string> = {
-  etf: "ETF",
-  mutual_fund: "MF",
-  mmf: "MMF",
-};
-
-// Backend stores the raw enum (equity/fixed_income/...); the table must show
-// the same labels the filter dropdown uses.
-const ASSET_CLASS_LABEL: Record<string, string> = Object.fromEntries(
-  ASSET_CLASSES.map((a) => [a.value, a.label]),
-);
-
-/** Sortable table columns — code is the backend whitelist column. */
-const COLUMNS: { code: string; label: string; numeric: boolean }[] = [
-  { code: "ticker", label: "Ticker", numeric: false },
-  { code: "name", label: "Name", numeric: false },
-  { code: "fund_type", label: "Type", numeric: false },
-  { code: "strategy_label", label: "Strategy", numeric: false },
-  { code: "asset_class", label: "Asset class", numeric: false },
-  { code: "aum_usd", label: "AUM", numeric: true },
-  { code: "expense_ratio", label: "Expense", numeric: true },
-  { code: "return_1y", label: "Return 1Y", numeric: true },
-  { code: "volatility_1y", label: "Vol 1Y", numeric: true },
-  { code: "sharpe_1y", label: "Sharpe 1Y", numeric: true },
-  { code: "peer_sharpe_pctl", label: "Peer pctl", numeric: true },
-  { code: "elite_flag", label: "Elite", numeric: true },
 ];
 
 /** Parse a non-empty numeric input; invalid/blank -> undefined (no filter). */
@@ -96,9 +78,9 @@ export function FundsView() {
   const [volMaxPct, setVolMaxPct] = useState("");
   const [sort, setSort] = useState("aum_usd");
   const [dir, setDir] = useState<SortDir>("desc");
-  const [page, setPage] = useState(1);
 
-  // Debounce free-text filters; any filter change restarts at page 1.
+  // Debounce free-text filters; the debounced values feed the query key below,
+  // so any filter change restarts the infinite query at page 1.
   useEffect(() => {
     const timer = setTimeout(() => {
       setSearch(searchText.trim());
@@ -126,17 +108,14 @@ export function FundsView() {
     dir,
   };
   const filterKey = JSON.stringify(query);
-  useEffect(() => {
-    setPage(1);
-  }, [filterKey]);
 
-  const fundsQuery = useQuery({
-    queryKey: ["funds", filterKey, page],
-    queryFn: ({ signal }) =>
+  // Infinite-windowed loader: filters/sort live in the key, so any change
+  // restarts at page 1. Virtualization renders only the visible window.
+  const fundsQuery = useInfiniteGrid({
+    queryKey: ["funds", filterKey],
+    fetchPage: (page, signal) =>
       fetchFunds({ ...query, page, page_size: PAGE_SIZE }, signal),
-    placeholderData: keepPreviousData,
-    staleTime: 30_000,
-    retry: retryPolicy,
+    countOf: (p) => p.items.length,
   });
 
   const [exporting, setExporting] = useState(false);
@@ -161,21 +140,30 @@ export function FundsView() {
     }
   };
 
-  const onSort = (code: string) => {
-    if (sort === code) {
-      setDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSort(code);
-      setDir(code === "ticker" || code === "name" ? "asc" : "desc");
-    }
-    setPage(1);
-  };
+  // The grid toggles internally and reports the resulting order via afterSort;
+  // we just apply it (which re-keys the query → resets to page 1). Setters are
+  // stable, so [] deps are correct.
+  const onSortChange = useCallback((code: string, nextDir: SortDir) => {
+    setSort(code);
+    setDir(nextDir);
+  }, []);
 
-  const data = fundsQuery.data;
-  const meta = data
-    ? `${formatCompact(data.total)} funds${
-        data.staleness.source_calc_date
-          ? ` · data as of ${formatDate(data.staleness.source_calc_date)}`
+  // Merge all loaded pages' items; the last page carries canonical metadata
+  // (total, staleness, classification_note).
+  const lastPage = fundsQuery.lastPage;
+  const mergedItems = useMemo(
+    () => fundsQuery.pages.flatMap((p) => p.items),
+    [fundsQuery.pages],
+  );
+  const mergedData = useMemo<FundsList | undefined>(
+    () => (lastPage ? { ...lastPage, items: mergedItems } : undefined),
+    [lastPage, mergedItems],
+  );
+
+  const meta = lastPage
+    ? `${formatCompact(lastPage.total)} funds${
+        lastPage.staleness.source_calc_date
+          ? ` · data as of ${formatDate(lastPage.staleness.source_calc_date)}`
           : ""
       }`
     : "—";
@@ -268,26 +256,26 @@ export function FundsView() {
 
       {/* ── Table ───────────────────────────────────────────────────────── */}
       {fundsQuery.isPending ? (
-        <div
-          aria-busy="true"
-          aria-label="Loading funds"
-          className="h-[420px] bg-surface-2 animate-pulse"
-        />
+        <div aria-busy="true" aria-label="Loading funds">
+          <GridSkeleton className="h-[420px]" />
+        </div>
       ) : fundsQuery.isError ? (
         <ErrorPanel
           title="Failed to load funds"
-          message={fundsQuery.error.message}
+          message={fundsQuery.error?.message ?? "Unknown error"}
           onRetry={() => fundsQuery.refetch()}
         />
-      ) : data === undefined ? null : (
+      ) : mergedData === undefined ? null : (
         <FundsTable
-          data={data}
-          page={page}
-          setPage={setPage}
+          data={mergedData}
+          loadedCount={fundsQuery.loadedCount}
           sort={sort}
           dir={dir}
-          onSort={onSort}
+          onSortChange={onSortChange}
           isFetching={fundsQuery.isFetching}
+          hasNextPage={fundsQuery.hasNextPage}
+          isFetchingNextPage={fundsQuery.isFetchingNextPage}
+          fetchNextPage={fundsQuery.fetchNextPage}
           exporting={exporting}
           exportError={exportError}
           onExport={() => void exportCsv()}
@@ -325,31 +313,43 @@ function BoundField({
 
 function FundsTable({
   data,
-  page,
-  setPage,
+  loadedCount,
   sort,
   dir,
-  onSort,
+  onSortChange,
   isFetching,
+  hasNextPage,
+  isFetchingNextPage,
+  fetchNextPage,
   exporting,
   exportError,
   onExport,
 }: {
   data: FundsList;
-  page: number;
-  setPage: (updater: (p: number) => number) => void;
+  loadedCount: number;
   sort: string;
   dir: SortDir;
-  onSort: (code: string) => void;
+  onSortChange: (code: string, dir: SortDir) => void;
   isFetching: boolean;
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  fetchNextPage: () => void;
   exporting: boolean;
   exportError: string | null;
   onExport: () => void;
 }) {
-  const { items, total } = data;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const firstRow = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const lastRow = Math.min(page * PAGE_SIZE, total);
+  const { total } = data;
+  const gridOptions = useMemo(
+    () => fundsListToGridOptions(data, { sort, dir }, { onSortChange }),
+    [data, sort, dir, onSortChange],
+  );
+
+  // Automatic near-bottom trigger; the "Load more" button is the fallback.
+  const onGridReady = useGridInfiniteScroll({
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  });
 
   return (
     <section className="bg-surface-2 border border-border">
@@ -379,201 +379,28 @@ function FundsTable({
         </p>
       )}
 
-      <div className={`overflow-x-auto transition-opacity ${isFetching ? "opacity-60" : ""}`}>
-        <table className="w-full min-w-[1080px] border-collapse ix-fs tabular-nums lining-nums">
-          <thead>
-            <tr className="bg-field">
-              {COLUMNS.map((col) => {
-                const active = sort === col.code;
-                return (
-                  <th
-                    key={col.code}
-                    className={`sticky top-0 whitespace-nowrap bg-field px-2.5 py-[9px] first:pl-[var(--ix-pad)] last:pr-[var(--ix-pad)] border-t border-t-border ${
-                      col.numeric ? "text-right" : "text-left"
-                    } ${
-                      active
-                        ? "border-b-2 border-b-accent font-bold text-accent"
-                        : "border-b border-b-border-strong font-semibold text-text-secondary"
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => onSort(col.code)}
-                      aria-label={`Sort by ${col.label}`}
-                      className={`whitespace-nowrap transition-colors ${
-                        active ? "font-bold text-accent" : "font-semibold hover:text-text-primary"
-                      }`}
-                    >
-                      {col.label}
-                      {active && (
-                        <span aria-hidden="true" className="ml-1">
-                          {dir === "asc" ? "▲" : "▼"}
-                        </span>
-                      )}
-                    </button>
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((fund, i) => (
-              <FundRow key={fund.instrument_id} fund={fund} zebra={i % 2 === 1} />
-            ))}
-            {items.length === 0 && (
-              <tr>
-                <td colSpan={COLUMNS.length} className="py-6 text-center text-[13px] text-text-muted">
-                  No funds match the current filters.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      <div className={`transition-opacity ${isFetching ? "opacity-60" : ""}`}>
+        <DataGrid
+          options={gridOptions}
+          className="h-[600px] w-full"
+          onReady={onGridReady}
+          emptyMessage="No funds match the current filters."
+        />
       </div>
 
-      <div className="flex flex-wrap items-center gap-2.5 border-t border-border px-[var(--ix-pad)] py-2.5 text-[12px] text-text-secondary">
-        <span className="tabular-nums">
-          {total === 0 ? "0 rows" : `${firstRow}–${lastRow} of ${formatCompact(total)}`}
-        </span>
-        <span className="text-[11px] text-text-muted">{data.classification_note}</span>
-        <div className="ml-auto flex items-center gap-px">
-          <button
-            type="button"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1 || isFetching}
-            aria-label="Previous page"
-            className="h-[30px] w-8 bg-field border border-border-strong text-text-secondary hover:bg-layer-hover transition-colors disabled:cursor-not-allowed disabled:text-text-muted disabled:hover:bg-field"
-          >
-            ‹
-          </button>
-          {pageWindow(page, totalPages).map((p) => (
-            <button
-              key={p}
-              type="button"
-              onClick={() => setPage(() => p)}
-              disabled={isFetching}
-              aria-label={`Page ${p}`}
-              aria-current={p === page ? "page" : undefined}
-              className={`flex h-[30px] items-center px-3 tabular-nums transition-colors ${
-                p === page
-                  ? "bg-accent border border-accent font-bold text-on-accent"
-                  : "bg-field border border-border-strong text-text-secondary hover:bg-layer-hover"
-              }`}
-            >
-              {p}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages || isFetching}
-            aria-label="Next page"
-            className="h-[30px] w-8 bg-field border border-border-strong text-text-secondary hover:bg-layer-hover transition-colors disabled:cursor-not-allowed disabled:text-text-muted disabled:hover:bg-field"
-          >
-            ›
-          </button>
-        </div>
-      </div>
+      {data.classification_note && (
+        <p className="border-t border-border px-[var(--ix-pad)] py-2 text-[11px] text-text-muted">
+          {data.classification_note}
+        </p>
+      )}
+
+      <LoadMoreFooter
+        loaded={loadedCount}
+        total={total}
+        hasNextPage={hasNextPage}
+        isFetchingNextPage={isFetchingNextPage}
+        onLoadMore={fetchNextPage}
+      />
     </section>
-  );
-}
-
-/** Up to 5 page numbers centered on the current page — presentation only. */
-function pageWindow(page: number, totalPages: number): number[] {
-  const size = Math.min(5, totalPages);
-  const start = Math.min(Math.max(1, page - 2), totalPages - size + 1);
-  return Array.from({ length: size }, (_, i) => start + i);
-}
-
-const CELL_CLASS = "ix-cell px-2.5 first:pl-[var(--ix-pad)] last:pr-[var(--ix-pad)]";
-
-function signTone(value: number): string {
-  if (value > 0) return "font-bold text-gain";
-  if (value < 0) return "font-bold text-loss";
-  return "text-text-primary";
-}
-
-function FundRow({ fund, zebra }: { fund: FundListItem; zebra: boolean }) {
-  const href = `/funds/${encodeURIComponent(fund.instrument_id)}`;
-  return (
-    <tr
-      className={`border-b border-border transition-colors hover:bg-accent-wash ${
-        zebra ? "bg-zebra" : ""
-      }`}
-    >
-      <td className={CELL_CLASS}>
-        <Link href={href} className="font-bold text-accent hover:underline">
-          {fund.ticker ?? "—"}
-        </Link>
-      </td>
-      <td className={`${CELL_CLASS} text-left`}>
-        <Link href={href} className="text-text-primary no-underline hover:underline">
-          <span className="block max-w-[280px] truncate">{fund.name}</span>
-        </Link>
-      </td>
-      <td className={`${CELL_CLASS} text-left`}>
-        <span className="inline-flex h-[18px] items-center border border-border-strong bg-field px-1.5 text-[10px] font-bold uppercase tracking-[0.05em] text-text-secondary">
-          {TYPE_TAG[fund.fund_type] ?? fund.fund_type}
-        </span>
-      </td>
-      <td className={`${CELL_CLASS} text-left text-text-secondary`}>
-        <span className="block max-w-[200px] truncate">{fund.strategy_label}</span>
-      </td>
-      <td className={`${CELL_CLASS} text-left text-text-secondary`}>
-        {fund.asset_class
-          ? (ASSET_CLASS_LABEL[fund.asset_class] ?? fund.asset_class)
-          : "—"}
-      </td>
-      <td className={`${CELL_CLASS} text-right`}>
-        {fund.aum_usd !== null ? `$${formatCompact(fund.aum_usd)}` : "—"}
-      </td>
-      <td className={`${CELL_CLASS} text-right`}>
-        {fund.expense_ratio !== null ? formatPercent(fund.expense_ratio) : "—"}
-      </td>
-      <td
-        className={`${CELL_CLASS} text-right ${
-          fund.return_1y !== null ? signTone(fund.return_1y) : "text-text-primary"
-        }`}
-      >
-        {fund.return_1y !== null ? formatPercent(fund.return_1y, 2, { signed: true }) : "—"}
-      </td>
-      <td className={`${CELL_CLASS} text-right`}>
-        {fund.volatility_1y !== null ? formatPercent(fund.volatility_1y) : "—"}
-      </td>
-      <td className={`${CELL_CLASS} text-right`}>
-        {fund.sharpe_1y !== null ? formatNumber(fund.sharpe_1y) : "—"}
-      </td>
-      <td className={`${CELL_CLASS} text-right`}>
-        {fund.peer_sharpe_pctl !== null ? (
-          <span className="inline-flex items-center justify-end gap-1.5">
-            <span className="relative inline-block h-[4px] w-[52px] bg-field border border-border">
-              <span
-                className="absolute inset-y-0 left-0 bg-accent"
-                style={{ width: `${Math.min(100, Math.max(0, fund.peer_sharpe_pctl))}%` }}
-              />
-            </span>
-            <span className="w-[26px] text-right">{formatNumber(fund.peer_sharpe_pctl, 0)}</span>
-          </span>
-        ) : (
-          "—"
-        )}
-      </td>
-      <td className={`${CELL_CLASS} text-right`}>
-        {fund.elite_flag ? (
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 16 16"
-            fill="none"
-            aria-label="Elite fund"
-            className="inline text-accent"
-          >
-            <path d="M2.5 8.5L6.5 12.5L13.5 4" stroke="currentColor" strokeWidth="2" />
-          </svg>
-        ) : (
-          <span className="text-text-muted">—</span>
-        )}
-      </td>
-    </tr>
   );
 }

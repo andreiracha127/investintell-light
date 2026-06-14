@@ -128,12 +128,18 @@ function universeFilters(draft: UniverseDraft): {
   };
 }
 
-export function universeDraftToSpec(draft: UniverseDraft): BuilderUniverseSpec {
+export function universeDraftToSpec(
+  draft: UniverseDraft,
+  includeIds?: readonly string[],
+): BuilderUniverseSpec {
   return {
     ...universeFilters(draft),
     rank_by: draft.rankBy,
     rank_dir: draft.rankDir,
     max_assets: draft.maxAssets,
+    ...(includeIds && includeIds.length >= 2
+      ? { include_instrument_ids: [...includeIds] }
+      : {}),
   };
 }
 
@@ -145,6 +151,21 @@ export function universeDraftToCountQuery(draft: UniverseDraft): FundsQuery {
     dir: draft.rankDir,
     page: 1,
     page_size: 1,
+  };
+}
+
+/** A /funds query that fetches the top-`pageSize` ranked funds the optimizer
+ * would run over — same filters + rank as the count query, larger page. */
+export function universeDraftToPreviewQuery(
+  draft: UniverseDraft,
+  pageSize: number,
+): FundsQuery {
+  return {
+    ...universeFilters(draft),
+    sort: draft.rankBy,
+    dir: draft.rankDir,
+    page: 1,
+    page_size: pageSize,
   };
 }
 

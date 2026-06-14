@@ -115,6 +115,9 @@ export function BuilderView() {
   /* ── Fund universe ─────────────────────────────────────────────────── */
   const [universeDraft, setUniverseDraft] = useState<UniverseDraft>(defaultUniverseDraft);
   const [universeCount, setUniverseCount] = useState<number | null>(null);
+  // Kept fund ids when the user prunes the previewed top-N; [] = keep all
+  // (send no explicit list → backend uses the full top-N).
+  const [universeKeptIds, setUniverseKeptIds] = useState<string[]>([]);
 
   /* ── Constraints & objective ───────────────────────────────────────── */
   const [objective, setObjective] = useState<BuilderObjective>("min_cvar");
@@ -204,7 +207,10 @@ export function BuilderView() {
       },
     };
     if (mode === "universe") {
-      mutation.mutate({ ...common, universe: universeDraftToSpec(universeDraft) });
+      mutation.mutate({
+        ...common,
+        universe: universeDraftToSpec(universeDraft, universeKeptIds),
+      });
       return;
     }
     const completed = apiViews.filter((v): v is BuilderViewIn => v !== null);
@@ -267,6 +273,7 @@ export function BuilderView() {
             draft={universeDraft}
             setDraft={setUniverseDraft}
             onCount={setUniverseCount}
+            onSelectionChange={setUniverseKeptIds}
           />
         )}
 

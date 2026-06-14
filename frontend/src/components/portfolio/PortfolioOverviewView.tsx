@@ -14,7 +14,8 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Grid } from "@highcharts/grid-pro";
 
 import {
   createPortfolio,
@@ -24,7 +25,6 @@ import {
   fetchPortfolios,
   patchPortfolio,
   putPosition,
-  type OverviewPosition,
   type PortfolioListItem,
   type PortfolioOverview,
   type PositionBody,
@@ -39,6 +39,10 @@ import { parseDecimal } from "@/lib/parse";
 import { buildAllocationOption, type AllocationSlice } from "@/lib/charts/allocation";
 import { chartColors, type ChartColors } from "@/lib/charts/theme";
 import { EChart } from "@/components/charts/EChart";
+import { DataGrid } from "@/components/ui/DataGrid";
+import { positionsToGridOptions, POSITION_COLS } from "@/lib/grid/positionsGridOptions";
+import { flashClassForDir, FLASH_UP, FLASH_DOWN } from "@/lib/grid/liveFlash";
+import { useLiveTicks } from "@/lib/livefeed/useLiveTicks";
 import { Card, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
 import { retryPolicy } from "@/components/screener/shared";
 import { PortfolioNewsPanel } from "@/components/portfolio/PortfolioNewsPanel";
@@ -55,10 +59,6 @@ const BUTTON_CLASS =
   "h-[28px] px-3 bg-field border border-border-strong text-[12px] " +
   "text-text-secondary hover:bg-layer-hover hover:text-text-primary " +
   "transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
-
-/** Display a share count without fake precision: 8 -> "8", 8.5 -> "8.50". */
-const formatShares = (quantity: number) =>
-  formatNumber(quantity, Number.isInteger(quantity) ? 0 : 2);
 
 export function PortfolioOverviewView() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -694,13 +694,6 @@ function AllocationPanel({
 
 /* ── Positions table ──────────────────────────────────────────────────────── */
 
-const TH_BASE =
-  "sticky top-0 bg-field px-2.5 py-2 ix-fs font-semibold " +
-  "text-text-secondary border-b border-border-strong whitespace-nowrap";
-// Tailwind class conflicts (text-left vs text-right) resolve by stylesheet
-// order, not attribute order — keep alignment out of the shared base.
-const TH_CLASS = `${TH_BASE} text-right`;
-
 function PositionsTable({
   overview,
   portfolioId,
@@ -736,6 +729,88 @@ function PositionsTable({
 
   const rowError = editMutation.error ?? removeMutation.error;
 
+  // Wire the grid's pure edit/remove callbacks to the mutations. Invalid edits
+  // never persist; they re-fetch the overview so the grid reverts the cell to
+  // the server value.
+  const gridOptions = useMemo(
+    () =>
+      positionsToGridOptions(overview, {
+        onEditShares: (ticker, value) => {
+          if (Number.isFinite(value) && value > 0) {
+            const pos = positions.find((p) => p.ticker === ticker);
+            editMutation.mutate({
+              ticker,
+              body: { quantity: value, acq_price: pos?.acq_price ?? null },
+            });
+          } else {
+            queryClient.invalidateQueries({
+              queryKey: ["overview", portfolioId],
+            });
+          }
+        },
+        onEditCost: (ticker, value) => {
+          if (value === null || (Number.isFinite(value) && value > 0)) {
+            const pos = positions.find((p) => p.ticker === ticker);
+            if (pos) {
+              editMutation.mutate({
+                ticker,
+                body: { quantity: pos.quantity, acq_price: value },
+              });
+            }
+          } else {
+            queryClient.invalidateQueries({
+              queryKey: ["overview", portfolioId],
+            });
+          }
+        },
+        onRemove: (ticker) => removeMutation.mutate(ticker),
+      }),
+    [overview, positions, portfolioId, editMutation, removeMutation, queryClient],
+  );
+
+  // ── Live price ticks (path: targeted DOM flash) ──────────────────────────
+  // Subscribe to the rendered positions' tickers. The hook degrades to a no-op
+  // ("off") without a configured feed, so this is silent when no WS is set.
+  const tickers = useMemo(() => positions.map((p) => p.ticker), [positions]);
+  const { ticks, status: feedStatus } = useLiveTicks(tickers);
+
+  // The live Grid instance, captured via DataGrid's onReady. We update the
+  // "Last" cell DOM directly instead of re-running positionsToGridOptions +
+  // grid.update(), which would clobber an in-progress Pro cell edit (cost /
+  // shares). Positions render NON-virtualized, so every row is in viewport.rows.
+  const gridRef = useRef<Grid | null>(null);
+  // Bumped whenever DataGrid re-fires onReady (after create AND after every
+  // update()). Adding it to the live-tick effect deps re-flushes the current
+  // ticks onto a (re)built viewport — otherwise grid.update() (overview
+  // refetch, or a cost/shares edit re-memoizing gridOptions) rebuilds the
+  // cells and lastFormatter reverts "Last" to the EOD close until the next
+  // tick. It also covers the case where the grid becomes ready after the first
+  // tick batch arrives. setGridEpoch only fires inside onReady (a grid-lib
+  // callback), never during render, so there's no render loop.
+  const [gridEpoch, setGridEpoch] = useState(0);
+
+  useEffect(() => {
+    const vp = gridRef.current?.viewport;
+    if (!vp) return;
+    for (const row of vp.rows) {
+      const sym = String(row.getCell(POSITION_COLS.ticker)?.value ?? "");
+      const tick = ticks[sym];
+      if (!tick) continue;
+      const el = row.getCell(POSITION_COLS.last)?.htmlElement;
+      if (!el) continue;
+      el.textContent = formatCurrency(tick.price);
+      const cls = flashClassForDir(tick.dir);
+      if (!cls) continue;
+      // Re-trigger the CSS animation on rapid ticks: drop both flash classes,
+      // force a reflow, then add the current one.
+      el.classList.remove(FLASH_UP, FLASH_DOWN);
+      void el.offsetWidth; // reflow
+      el.classList.add(cls);
+    }
+  }, [ticks, gridEpoch]);
+
+  const liveActive = feedStatus === "live" && Object.keys(ticks).length > 0;
+
   return (
     <section className="border border-border bg-surface-2">
       <div className="px-[var(--ix-pad)] py-3">
@@ -747,93 +822,36 @@ function PositionsTable({
         </h2>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] border-collapse ix-fs tabular-nums">
-          <thead>
-            <tr className="align-top">
-              <th className={`${TH_BASE} text-left pl-[var(--ix-pad)]`}>
-                Ticker
-              </th>
-              <th className={TH_CLASS}>Last</th>
-              <th className={TH_CLASS}>Change</th>
-              <th className={TH_CLASS}>Cost</th>
-              <th className={TH_CLASS}>Shares</th>
-              {/* Aggregates live IN the column headers (Tiingo pattern, D6). */}
-              <th className={TH_CLASS}>
-                P&amp;L
-                <span
-                  className={`block text-[11px] font-bold tabular-nums ${
-                    aggregates.total_pnl !== null
-                      ? valueTone(aggregates.total_pnl)
-                      : "text-text-muted"
-                  }`}
-                >
-                  {aggregates.total_pnl !== null
-                    ? formatCurrency(aggregates.total_pnl, { signed: true })
-                    : "—"}
-                  {aggregates.total_pnl_pct !== null &&
-                    ` (${formatPercent(aggregates.total_pnl_pct, 2, { signed: true })})`}
-                </span>
-              </th>
-              <th className={TH_CLASS}>
-                Mkt Value
-                <span className="block text-[11px] font-bold tabular-nums text-text-primary">
-                  {formatCurrency(aggregates.total_market_value)}
-                </span>
-              </th>
-              <th
-                className={`${TH_CLASS} w-[36px] pr-[var(--ix-pad)]`}
-                aria-label="Row actions"
-              />
-            </tr>
-          </thead>
-          <tbody>
-            <AddPositionRow
-              pending={addMutation.isPending}
-              error={addMutation.error?.message ?? null}
-              onAdd={async (ticker, body) => {
-                try {
-                  await addMutation.mutateAsync({ ticker, body });
-                  return true;
-                } catch {
-                  // Not a swallow: the failure is surfaced via
-                  // addMutation.error inside the Add row; the boolean only
-                  // tells the row whether to clear its inputs.
-                  return false;
-                }
-              }}
-              onDirty={() => addMutation.reset()}
-            />
-            {positions.map((position, index) => (
-              <PositionRow
-                key={position.ticker}
-                position={position}
-                zebra={index % 2 === 1}
-                pending={
-                  (editMutation.isPending &&
-                    editMutation.variables?.ticker === position.ticker) ||
-                  (removeMutation.isPending &&
-                    removeMutation.variables === position.ticker)
-                }
-                onEdit={(body) =>
-                  editMutation.mutate({ ticker: position.ticker, body })
-                }
-                onRemove={() => removeMutation.mutate(position.ticker)}
-              />
-            ))}
-            {positions.length === 0 && (
-              <tr>
-                <td
-                  colSpan={8}
-                  className="py-4 text-center text-[13px] text-text-muted"
-                >
-                  No positions yet — add one above.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      <AddPositionRowForm
+        pending={addMutation.isPending}
+        error={addMutation.error?.message ?? null}
+        onAdd={async (ticker, body) => {
+          try {
+            await addMutation.mutateAsync({ ticker, body });
+            return true;
+          } catch {
+            // Not a swallow: the failure is surfaced via addMutation.error in
+            // the form; the boolean only tells the form whether to clear inputs.
+            return false;
+          }
+        }}
+        onDirty={() => addMutation.reset()}
+      />
+      <div className="border-t border-border">
+        <DataGrid
+          options={gridOptions}
+          className="min-h-[120px] w-full"
+          onReady={(g) => {
+            gridRef.current = g;
+            setGridEpoch((n) => n + 1);
+          }}
+        />
       </div>
+      {positions.length === 0 && (
+        <p className="py-4 text-center text-[13px] text-text-muted">
+          No positions yet — add one above.
+        </p>
+      )}
 
       {rowError && (
         <p
@@ -844,11 +862,15 @@ function PositionsTable({
         </p>
       )}
 
-      {/* Footer: EOD tag + cash + total value */}
+      {/* Footer: LIVE/EOD badge + cash + total value */}
       <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 border-t border-border px-[var(--ix-pad)] py-2.5 text-[12px] text-text-secondary">
-        {aggregates.as_of && (
+        {(liveActive || aggregates.as_of) && (
           <span className="border border-border bg-field px-[7px] py-[2px] text-[10px] text-text-muted">
-            EOD · {formatDate(aggregates.as_of)}
+            {liveActive ? (
+              <span className="text-gain">● LIVE</span>
+            ) : (
+              <>EOD · {formatDate(aggregates.as_of!)}</>
+            )}
           </span>
         )}
         <span className="tabular-nums">Cash: {formatCurrency(aggregates.cash)}</span>
@@ -860,7 +882,12 @@ function PositionsTable({
   );
 }
 
-function AddPositionRow({
+/**
+ * Add-position form. The grid does not host a native editable "add" row, so
+ * this lives as a contiguous field row above the grid (same panel, 1px rule),
+ * preserving the original UX. Same validation/submit logic as before.
+ */
+function AddPositionRowForm({
   pending,
   error,
   onAdd,
@@ -899,28 +926,34 @@ function AddPositionRow({
   };
 
   return (
-    <>
-      <tr className="border-b border-border bg-zebra">
-        <td className="ix-cell pl-[var(--ix-pad)] pr-2.5">
+    <div className="border-b border-border bg-zebra px-[var(--ix-pad)] py-2.5">
+      <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
+        <label className="flex flex-col gap-1">
+          <span className="ix-fs text-text-muted">Ticker</span>
           <input
             value={ticker}
             onChange={(e) => {
               setTicker(e.target.value.toUpperCase());
               onDirty();
             }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submit();
+            }}
             placeholder="TICKER"
             aria-label="New position ticker"
             className={`w-[110px] uppercase ${INPUT_CLASS}`}
           />
-        </td>
-        <td className="px-2.5" />
-        <td className="px-2.5" />
-        <td className="px-2.5 text-right">
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="ix-fs text-text-muted">Cost</span>
           <input
             value={cost}
             onChange={(e) => {
               setCost(e.target.value);
               onDirty();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submit();
             }}
             placeholder="Cost (opt.)"
             aria-label="New position acquisition price (optional)"
@@ -931,8 +964,9 @@ function AddPositionRow({
                 : ""
             }`}
           />
-        </td>
-        <td className="px-2.5 text-right">
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="ix-fs text-text-muted">Shares</span>
           <input
             value={shares}
             onChange={(e) => {
@@ -951,177 +985,21 @@ function AddPositionRow({
                 : ""
             }`}
           />
-        </td>
-        <td className="px-2.5" />
-        <td className="px-2.5 text-right">
-          <button
-            type="button"
-            onClick={submit}
-            disabled={!canAdd}
-            className={BUTTON_CLASS}
-          >
-            {pending ? "Adding…" : "Add"}
-          </button>
-        </td>
-        <td className="pr-[var(--ix-pad)]" />
-      </tr>
-      {error && (
-        <tr className="border-b border-border">
-          <td colSpan={8} className="px-[var(--ix-pad)] py-1.5">
-            <p role="alert" className="break-words text-[12px] text-loss">
-              {error}
-            </p>
-          </td>
-        </tr>
-      )}
-    </>
-  );
-}
-
-function PositionRow({
-  position,
-  zebra,
-  pending,
-  onEdit,
-  onRemove,
-}: {
-  position: OverviewPosition;
-  zebra: boolean;
-  pending: boolean;
-  onEdit: (body: PositionBody) => void;
-  onRemove: () => void;
-}) {
-  const changeTone =
-    position.change !== null ? valueTone(position.change) : "text-text-muted";
-  const pnlTone =
-    position.pnl !== null ? valueTone(position.pnl) : "text-text-muted";
-
-  return (
-    <tr
-      className={`border-b border-border last:border-b-0 hover:bg-accent-wash ${
-        zebra ? "bg-zebra" : ""
-      }`}
-    >
-      <td className="ix-cell pl-[var(--ix-pad)] pr-2.5">
-        <Link
-          href={`/stocks/${encodeURIComponent(position.ticker)}`}
-          className="font-bold text-accent hover:text-accent-strong transition-colors"
-        >
-          {position.ticker}
-        </Link>
-        {position.name && (
-          <span className="block max-w-[220px] truncate text-[10px] text-text-muted">
-            {position.name}
-          </span>
-        )}
-      </td>
-      <td className="ix-cell px-2.5 text-right tabular-nums text-text-primary">
-        {formatCurrency(position.last_close)}
-      </td>
-      <td className={`ix-cell px-2.5 text-right tabular-nums ${changeTone}`}>
-        {position.change !== null && position.change_pct !== null ? (
-          <>
-            {formatCurrency(position.change, { signed: true })}
-            <span className="block text-[11px]">
-              {formatPercent(position.change_pct, 2, { signed: true })}
-            </span>
-          </>
-        ) : (
-          "—"
-        )}
-      </td>
-      <td className="ix-cell px-2.5 text-right">
-        <span className="inline-flex items-center justify-end gap-1.5">
-          {/* F8.6b basis flag: EXEC = real fill incl. commissions defines the
-              cost basis; REF = spot/NAV reference (analysis-grade). */}
-          <span
-            aria-label={`cost basis: ${position.basis}`}
-            title={
-              position.basis === "executed"
-                ? `Executed fill${
-                    position.commission !== null
-                      ? ` — commission ${formatCurrency(position.commission)}`
-                      : ""
-                  }${
-                    position.trade_date !== null
-                      ? ` on ${formatDate(position.trade_date)}`
-                      : ""
-                  }`
-                : "Reference price (spot/NAV) — not a real fill"
-            }
-            className={`border px-[4px] py-[1px] text-[9px] font-bold tracking-[0.05em] ${
-              position.basis === "executed"
-                ? "border-accent text-accent"
-                : "border-border text-text-muted"
-            }`}
-          >
-            {position.basis === "executed" ? "EXEC" : "REF"}
-          </span>
-          <EditableValue
-            display={
-              position.acq_price !== null
-                ? formatCurrency(position.acq_price)
-                : "—"
-            }
-            tone="text-text-secondary"
-            initialText={position.acq_price !== null ? String(position.acq_price) : ""}
-            ariaLabel={`acquisition price for ${position.ticker}`}
-            parse={parseCost}
-            onSave={(acqPrice) =>
-              onEdit({ quantity: position.quantity, acq_price: acqPrice })
-            }
-            pending={pending}
-          />
-        </span>
-        {position.commission !== null && (
-          <span className="block text-[10px] text-text-muted tabular-nums">
-            incl. comm. {formatCurrency(position.commission)}
-          </span>
-        )}
-      </td>
-      <td className="ix-cell px-2.5 text-right">
-        <EditableValue
-          display={formatShares(position.quantity)}
-          tone="text-text-secondary"
-          initialText={String(position.quantity)}
-          ariaLabel={`share count for ${position.ticker}`}
-          parse={parseShares}
-          onSave={(quantity) => {
-            // parseShares never yields null; the guard keeps types honest.
-            if (quantity !== null) {
-              onEdit({ quantity, acq_price: position.acq_price });
-            }
-          }}
-          pending={pending}
-        />
-      </td>
-      <td className={`ix-cell px-2.5 text-right font-bold tabular-nums ${pnlTone}`}>
-        {position.pnl !== null && position.pnl_pct !== null ? (
-          <>
-            {formatCurrency(position.pnl, { signed: true })}
-            <span className="block text-[11px] font-normal">
-              {formatPercent(position.pnl_pct, 2, { signed: true })}
-            </span>
-          </>
-        ) : (
-          "—"
-        )}
-      </td>
-      <td className="ix-cell px-2.5 text-right font-bold tabular-nums text-text-primary">
-        {formatCurrency(position.market_value)}
-      </td>
-      <td className="ix-cell pl-2 pr-[var(--ix-pad)] text-right">
+        </label>
         <button
           type="button"
-          onClick={onRemove}
-          disabled={pending}
-          aria-label={`Remove position ${position.ticker}`}
-          title={`Remove ${position.ticker}`}
-          className="px-1.5 py-0.5 text-text-muted hover:bg-layer-hover hover:text-loss transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          onClick={submit}
+          disabled={!canAdd}
+          className={BUTTON_CLASS}
         >
-          ×
+          {pending ? "Adding…" : "Add"}
         </button>
-      </td>
-    </tr>
+      </div>
+      {error && (
+        <p role="alert" className="mt-1.5 break-words text-[12px] text-loss">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }

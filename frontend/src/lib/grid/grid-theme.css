@@ -51,3 +51,62 @@
 .hcg-theme-graphite .ix-grid-cell-text {
   text-align: left;
 }
+
+/* Funds cell renderers (used by fundsGridOptions formatters). */
+.hcg-theme-graphite .ix-grid-link {
+  font-weight: 700;
+  color: var(--color-accent);
+}
+.hcg-theme-graphite .ix-grid-link:hover { text-decoration: underline; }
+.hcg-theme-graphite .ix-grid-link-plain { color: var(--color-text-primary); text-decoration: none; }
+.hcg-theme-graphite .ix-grid-link-plain:hover { text-decoration: underline; }
+.hcg-theme-graphite .ix-grid-trunc {
+  display: inline-block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+.hcg-theme-graphite .ix-grid-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-field);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+.hcg-theme-graphite .ix-grid-elite { color: var(--color-accent); font-weight: 700; }
+
+/* Portfolio positions cell renderers. */
+.hcg-theme-graphite .ix-grid-sub { display: block; font-size: 11px; }
+.hcg-theme-graphite .ix-grid-name { display: block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--color-text-muted); }
+.hcg-theme-graphite .ix-grid-basis { display: inline-block; border: 1px solid var(--color-border-strong); padding: 1px 4px; font-size: 9px; font-weight: 700; letter-spacing: 0.05em; color: var(--color-text-muted); }
+.hcg-theme-graphite .ix-grid-basis-exec { border-color: var(--color-accent); color: var(--color-accent); }
+.hcg-theme-graphite .ix-grid-comm { display: block; font-size: 10px; color: var(--color-text-muted); }
+.hcg-theme-graphite .ix-grid-remove { cursor: pointer; color: var(--color-text-muted); }
+.hcg-theme-graphite .ix-grid-remove:hover { color: var(--color-loss); }
+.hcg-theme-graphite .ix-grid-editable { text-decoration: underline dotted var(--color-text-muted); text-underline-offset: 3px; }
+
+/* Universe-preview include checkbox column: centered toggle. */
+.hcg-theme-graphite .ix-grid-cell-check { text-align: center; }
+.hcg-theme-graphite .ix-grid-cell-check input[type="checkbox"] { accent-color: var(--color-accent); cursor: pointer; }
+
+/* Live-tick flash on the "Last" cell: a brief gain/loss bg tint that fades
+   out. Uses an animation (not a transition) so it auto-resets; the component
+   removes + re-adds the class (with a reflow) to re-trigger it on each tick. */
+.hcg-theme-graphite .ix-grid-flash-up { animation: ix-grid-flash-up 0.6s ease-out; }
+.hcg-theme-graphite .ix-grid-flash-down { animation: ix-grid-flash-down 0.6s ease-out; }
+@keyframes ix-grid-flash-up {
+  from { background: var(--color-gain-muted); }
+  to { background: transparent; }
+}
+@keyframes ix-grid-flash-down {
+  from { background: var(--color-loss-muted); }
+  to { background: transparent; }
+}

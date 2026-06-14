@@ -137,9 +137,11 @@ class _CaptureSession:
     def __init__(self, rows: list[tuple[Any, ...]]) -> None:
         self._rows = rows
         self.sql: str = ""
+        self.bound_params: dict[str, Any] = {}
 
     async def execute(self, stmt: Any) -> _FakeResult:
         self.sql = str(stmt).lower()
+        self.bound_params = dict(stmt.compile().params)
         return _FakeResult(self._rows)
 
 
@@ -186,6 +188,46 @@ async def test_select_universe_funds_without_require_aum_omits_aum_guard() -> No
     # Negative pairing: the AUM guard must NOT be present when not required.
     assert "aum_usd is not null" not in session.sql
     assert "fund_nav" in session.sql
+
+
+async def test_select_universe_funds_include_ids_restricts_candidates() -> None:
+    from app.services import funds_catalog
+
+    # The session returns only the two requested funds; the discriminating
+    # assertion is that the statement carries an instrument_id IN (...) guard
+    # bound to exactly those two ids (so a broader filter match is pruned).
+    rows = [(_FUND_A, "AAA", "Alpha Fund"), (_FUND_B, "BBB", "Beta Fund")]
+    session = _CaptureSession(rows)
+    out = await optimizer_data.select_universe_funds(
+        session,  # type: ignore[arg-type]
+        funds_catalog.FundFilters(fund_type="etf"),
+        rank_by="sharpe_1y",
+        rank_dir="desc",
+        max_assets=50,
+        include_ids=[str(_FUND_A), str(_FUND_B)],
+        today=_TODAY,
+    )
+    assert [u.id for u in out] == [_FUND_A, _FUND_B]
+    # The IN guard restricts to the pruned set (renders as an IN clause).
+    assert "instrument_id in" in session.sql
+    assert str(_FUND_A) in str(session.bound_params)
+    assert str(_FUND_B) in str(session.bound_params)
+
+
+async def test_select_universe_funds_without_include_ids_omits_in_guard() -> None:
+    from app.services import funds_catalog
+
+    session = _CaptureSession([(_FUND_A, "AAA", "Alpha Fund")])
+    await optimizer_data.select_universe_funds(
+        session,  # type: ignore[arg-type]
+        funds_catalog.FundFilters(),
+        rank_by="sharpe_1y",
+        rank_dir="asc",
+        max_assets=5,
+        today=_TODAY,
+    )
+    # Negative pairing: no pruning list → no instrument_id IN guard.
+    assert "instrument_id in" not in session.sql
 
 
 async def test_select_universe_funds_unknown_rank_column_raises() -> None:
