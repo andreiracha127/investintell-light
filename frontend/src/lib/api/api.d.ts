@@ -544,6 +544,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/screener/screens/{screen_id}/filters/reorder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Reorder Filters
+         * @description Reorder a screen's filters; position drives the Results column order.
+         */
+        patch: operations["reorder_filters_screener_screens__screen_id__filters_reorder_patch"];
+        trace?: never;
+    };
     "/screener/screens/{screen_id}/build/{metric_code}": {
         parameters: {
             query?: never;
@@ -560,6 +580,29 @@ export interface paths {
          *     never pixel heights.
          */
         get: operations["build_metric_screener_screens__screen_id__build__metric_code__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/screener/screens/{screen_id}/build": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Build All
+         * @description Every filter's universe distribution + the live headline count, one round-trip.
+         *
+         *     Feeds the Build panel's per-row sparklines and the active-row distribution
+         *     in a single request (vs. one GET /build/{metric_code} per filter).
+         */
+        get: operations["build_all_screener_screens__screen_id__build_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1167,6 +1210,20 @@ export interface components {
             ][];
         };
         /**
+         * BuildAllResponse
+         * @description GET /screener/screens/{id}/build — every filter's distribution in one round-trip.
+         *
+         *     headline_count honors ALL filters (the live match count); each metric's
+         *     distribution is the universe-wide histogram (null when the snapshot has no
+         *     data for it), feeding the per-row sparklines and the active-row panel.
+         */
+        BuildAllResponse: {
+            /** Headline Count */
+            headline_count: number;
+            /** Metrics */
+            metrics: components["schemas"]["MetricBuildOut"][];
+        };
+        /**
          * BuildResponse
          * @description GET /screener/screens/{id}/build/{metric_code}.
          */
@@ -1457,6 +1514,19 @@ export interface components {
              * @description Upper bound; null = unbounded.
              */
             max_value?: number | null;
+        };
+        /**
+         * FilterReorder
+         * @description Body for PATCH /screener/screens/{id}/filters/reorder.
+         *
+         *     Must list EXACTLY the screen's current filter codes, in the desired order.
+         */
+        FilterReorder: {
+            /**
+             * Metric Codes
+             * @description All of the screen's current filter metric codes, in the new order.
+             */
+            metric_codes: string[];
         };
         /**
          * FilterUpdateResponse
@@ -1996,6 +2066,17 @@ export interface components {
             sectors: components["schemas"]["SectorPerf"][];
         };
         /**
+         * MetricBuildOut
+         * @description One filter's distribution + availability for the batch build payload.
+         */
+        MetricBuildOut: {
+            /** Metric Code */
+            metric_code: string;
+            distribution: components["schemas"]["DistributionOut"] | null;
+            /** Available Count */
+            available_count: number;
+        };
+        /**
          * MetricDefOut
          * @description One catalog metric — ``code`` is the screener_metrics column name.
          */
@@ -2096,10 +2177,7 @@ export interface components {
              *     }
              */
             constraints: components["schemas"]["ConstraintsIn"];
-            /**
-             * Window Days
-             * @default null
-             */
+            /** Window Days */
             window_days?: number | null;
             /** Views */
             views?: (components["schemas"]["AbsoluteViewIn"] | components["schemas"]["RelativeViewIn"])[] | null;
@@ -4458,6 +4536,41 @@ export interface operations {
             };
         };
     };
+    reorder_filters_screener_screens__screen_id__filters_reorder_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                screen_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FilterReorder"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScreenOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     build_metric_screener_screens__screen_id__build__metric_code__get: {
         parameters: {
             query?: never;
@@ -4477,6 +4590,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BuildResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    build_all_screener_screens__screen_id__build_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                screen_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildAllResponse"];
                 };
             };
             /** @description Validation Error */

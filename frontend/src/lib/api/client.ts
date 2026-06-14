@@ -26,6 +26,8 @@ type ScreenPath = paths["/screener/screens/{screen_id}"];
 type ScreenFilterPath = paths["/screener/screens/{screen_id}/filters/{metric_code}"];
 type ScreenBuildOperation =
   paths["/screener/screens/{screen_id}/build/{metric_code}"]["get"];
+type ScreenBuildAllOperation = paths["/screener/screens/{screen_id}/build"]["get"];
+type ScreenReorderOperation = paths["/screener/screens/{screen_id}/filters/reorder"]["patch"];
 type ScreenResultsOperation = paths["/screener/screens/{screen_id}/results"]["get"];
 type ScreenResultsCsvOperation =
   paths["/screener/screens/{screen_id}/results.csv"]["get"];
@@ -142,6 +144,11 @@ export type FilterUpdateResponse =
 export type Distribution = NonNullable<FilterUpdateResponse["distribution"]>;
 export type BuildResponse =
   ScreenBuildOperation["responses"]["200"]["content"]["application/json"];
+export type BuildAll =
+  ScreenBuildAllOperation["responses"]["200"]["content"]["application/json"];
+export type MetricBuild = BuildAll["metrics"][number];
+export type FilterReorderBody =
+  ScreenReorderOperation["requestBody"]["content"]["application/json"];
 export type ScreenResults =
   ScreenResultsOperation["responses"]["200"]["content"]["application/json"];
 export type ResultsColumn = ScreenResults["columns"][number];
@@ -607,6 +614,24 @@ export function fetchBuildMetric(
   return request<BuildResponse>(
     `/screener/screens/${screenId}/build/${encodeURIComponent(metricCode)}`,
     signal,
+  );
+}
+
+export function fetchScreenBuildAll(
+  screenId: number,
+  signal?: AbortSignal,
+): Promise<BuildAll> {
+  return request<BuildAll>(`/screener/screens/${screenId}/build`, signal);
+}
+
+export function reorderScreenFilters(
+  screenId: number,
+  metricCodes: string[],
+): Promise<Screen> {
+  return request<Screen>(
+    `/screener/screens/${screenId}/filters/reorder`,
+    undefined,
+    { method: "PATCH", json: { metric_codes: metricCodes } satisfies FilterReorderBody },
   );
 }
 

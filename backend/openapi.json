@@ -1425,6 +1425,59 @@
         }
       }
     },
+    "/screener/screens/{screen_id}/filters/reorder": {
+      "patch": {
+        "tags": [
+          "screener"
+        ],
+        "summary": "Reorder Filters",
+        "description": "Reorder a screen's filters; position drives the Results column order.",
+        "operationId": "reorder_filters_screener_screens__screen_id__filters_reorder_patch",
+        "parameters": [
+          {
+            "name": "screen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Screen Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FilterReorder"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScreenOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/screener/screens/{screen_id}/build/{metric_code}": {
       "get": {
         "tags": [
@@ -1460,6 +1513,49 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuildResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/screener/screens/{screen_id}/build": {
+      "get": {
+        "tags": [
+          "screener"
+        ],
+        "summary": "Build All",
+        "description": "Every filter's universe distribution + the live headline count, one round-trip.\n\nFeeds the Build panel's per-row sparklines and the active-row distribution\nin a single request (vs. one GET /build/{metric_code} per filter).",
+        "operationId": "build_all_screener_screens__screen_id__build_get",
+        "parameters": [
+          {
+            "name": "screen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Screen Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildAllResponse"
                 }
               }
             }
@@ -3199,6 +3295,28 @@
         "title": "BetaResponse",
         "description": "Scatter + regression of two pseudo-assets' daily returns."
       },
+      "BuildAllResponse": {
+        "properties": {
+          "headline_count": {
+            "type": "integer",
+            "title": "Headline Count"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/MetricBuildOut"
+            },
+            "type": "array",
+            "title": "Metrics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "headline_count",
+          "metrics"
+        ],
+        "title": "BuildAllResponse",
+        "description": "GET /screener/screens/{id}/build \u2014 every filter's distribution in one round-trip.\n\nheadline_count honors ALL filters (the live match count); each metric's\ndistribution is the universe-wide histogram (null when the snapshot has no\ndata for it), feeding the per-row sparklines and the active-row panel."
+      },
       "BuildResponse": {
         "properties": {
           "distribution": {
@@ -3764,6 +3882,24 @@
         "type": "object",
         "title": "FilterBody",
         "description": "Bounds for PUT /screener/screens/{id}/filters/{metric_code}.\n\nBoth bounds null is legitimate: the metric is selected (results column,\nNULL exclusion) without numeric constraints."
+      },
+      "FilterReorder": {
+        "properties": {
+          "metric_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Metric Codes",
+            "description": "All of the screen's current filter metric codes, in the new order."
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric_codes"
+        ],
+        "title": "FilterReorder",
+        "description": "Body for PATCH /screener/screens/{id}/filters/reorder.\n\nMust list EXACTLY the screen's current filter codes, in the desired order."
       },
       "FilterUpdateResponse": {
         "properties": {
@@ -5601,6 +5737,36 @@
         ],
         "title": "MarketOverviewResponse"
       },
+      "MetricBuildOut": {
+        "properties": {
+          "metric_code": {
+            "type": "string",
+            "title": "Metric Code"
+          },
+          "distribution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DistributionOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "available_count": {
+            "type": "integer",
+            "title": "Available Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric_code",
+          "distribution",
+          "available_count"
+        ],
+        "title": "MetricBuildOut",
+        "description": "One filter's distribution + availability for the batch build payload."
+      },
       "MetricDefOut": {
         "properties": {
           "code": {
@@ -5847,11 +6013,17 @@
             }
           },
           "window_days": {
-            "type": "integer",
-            "maximum": 3650.0,
-            "minimum": 30.0,
-            "title": "Window Days",
-            "default": 730
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 3650.0,
+                "minimum": 30.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Days"
           },
           "views": {
             "anyOf": [
