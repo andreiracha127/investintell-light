@@ -1,21 +1,21 @@
 "use client";
 
 /**
- * Wizard Tab 3 — server-driven results table: dynamic columns from the
- * response, header-click sorting, prefix search, infinite-windowed scrolling
- * and CSV export (fetch + blob through the typed client so base-URL handling
- * stays consistent). The frontend formats; the backend filters/sorts/pages.
+ * Results tab — server-driven results table: dynamic columns from the
+ * response, header-click sorting, prefix search and infinite-windowed
+ * scrolling. The frontend formats; the backend filters/sorts/pages. The match
+ * count and CSV export live in the persistent ScreenerHeader, so this tab only
+ * reports its total upward via `onHeadline`.
  *
- * Scope (Task C): rows load incrementally as the user scrolls the virtualized
- * grid near the bottom; a "Load more" button is the always-present a11y +
- * safety-net fallback (works regardless of grid internals). Sort/search live
- * in the query key, so changing either resets the infinite query to page 1.
+ * Rows load incrementally as the user scrolls the virtualized grid near the
+ * bottom; a "Load more" button is the always-present a11y + safety-net fallback
+ * (works regardless of grid internals). Sort/search live in the query key, so
+ * changing either resets the infinite query to page 1.
  */
 import { useEffect, useMemo, useState } from "react";
 
-import { fetchScreenResults, fetchScreenResultsCsv } from "@/lib/api/client";
+import { fetchScreenResults } from "@/lib/api/client";
 import {
-  BUTTON_CLASS,
   ErrorPanel,
   INPUT_CLASS,
   isSnapshotMissing,
@@ -24,7 +24,6 @@ import {
 import { DataGrid } from "@/components/ui/DataGrid";
 import { GridSkeleton } from "@/components/ui/GridSkeleton";
 import { LoadMoreFooter } from "@/components/ui/LoadMoreFooter";
-import { formatCompact } from "@/lib/format";
 import { screenResultsToGridOptions } from "@/lib/grid/gridOptions";
 import {
   useGridInfiniteScroll,
@@ -36,10 +35,10 @@ type SortDir = "asc" | "desc";
 
 export function ResultsTab({
   screenId,
-  screenName,
+  onHeadline,
 }: {
   screenId: number;
-  screenName: string;
+  onHeadline: (count: number | null) => void;
 }) {
   const [sort, setSort] = useState<string | undefined>(undefined);
   const [dir, setDir] = useState<SortDir>("asc");
@@ -72,31 +71,9 @@ export function ResultsTab({
     countOf: (p) => p.rows.length,
   });
 
-  const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
-  const exportCsv = async () => {
-    setExporting(true);
-    setExportError(null);
-    try {
-      const blob = await fetchScreenResultsCsv(screenId, {
-        ...(sort !== undefined && { sort }),
-        dir,
-        ...(search !== "" && { search }),
-      });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `${screenName.replace(/[^\w.-]+/g, "_")}-results.csv`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      setExportError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setExporting(false);
-    }
-  };
+  useEffect(() => {
+    onHeadline(resultsQuery.total ?? null);
+  }, [resultsQuery.total, onHeadline]);
 
   const { lastPage, pages, total, loadedCount } = resultsQuery;
   // Feed the grid a ScreenResults whose `.rows` is ALL loaded rows (columns are
@@ -153,53 +130,17 @@ export function ResultsTab({
   return (
     <section className="bg-surface-2 border border-border">
       <div className="flex flex-wrap items-center gap-2.5 px-[var(--ix-pad)] py-3">
-        <h2 className="ix-label m-0">Results</h2>
-        <span className="inline-flex h-[22px] items-center bg-accent-wash border border-accent px-2 tabular-nums text-[11px] font-bold text-accent">
-          {formatCompact(total)} matches
-        </span>
-        <div className="relative ml-auto w-[200px]">
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 16 16"
-            fill="none"
-            aria-hidden="true"
-            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted"
-          >
+        <div className="relative w-[220px]">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted">
             <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.4" />
             <path d="M11 11l4 4" stroke="currentColor" strokeWidth="1.4" />
           </svg>
-          <input
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            placeholder="Search ticker / name…"
-            aria-label="Search results by ticker or name"
-            className={`w-full pl-[30px] ${INPUT_CLASS} text-[12px]`}
-          />
+          <input value={searchText} onChange={(e) => setSearchText(e.target.value)}
+            placeholder="Search ticker / name…" aria-label="Search results by ticker or name"
+            className={`w-full pl-[30px] ${INPUT_CLASS} text-[12px]`} />
         </div>
-        <button
-          type="button"
-          onClick={() => void exportCsv()}
-          disabled={exporting}
-          aria-label="Export results as CSV"
-          className={`${BUTTON_CLASS} inline-flex items-center gap-[7px] text-[12px]`}
-        >
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path
-              d="M8 1v9M4.5 7L8 10.5 11.5 7M2 14h12"
-              stroke="currentColor"
-              strokeWidth="1.3"
-            />
-          </svg>
-          {exporting ? "Exporting…" : "Export CSV"}
-        </button>
       </div>
-
-      {exportError && (
-        <p role="alert" className="px-[var(--ix-pad)] pb-2 text-[12px] text-loss break-words">
-          {exportError}
-        </p>
-      )}
 
       <div
         className={`transition-opacity ${resultsQuery.isFetching ? "opacity-60" : ""}`}
