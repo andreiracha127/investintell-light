@@ -28,6 +28,11 @@ Run backend/db/ddl/2026-06-13_dynamic_catalog.sql is additive. To roll back:
   DROP MATERIALIZED VIEW IF EXISTS cagg_eod_weekly, cagg_eod_monthly, cagg_nav_weekly, fund_risk_latest_mv CASCADE;
   DROP VIEW IF EXISTS funds_v, fund_holdings_v, fund_classes_v CASCADE;
 
+Phase-4 staged rename (`fund_nav → fund_nav_deprecated`) is SAFE to execute at
+flip time: after Task 4.3 the `fund_nav` snapshot is fully unread — the FundNav
+ORM model reads the live `nav_timeseries` hypertable directly, and nothing in
+app/ references the `fund_nav` table name anymore.
+
 ## Worker coordination (Phase 4) — REQUIRED, not optional
 `fund_risk_latest_mv` is a PLAIN materialized view: it does NOT auto-refresh.
 Until it is refreshed it keeps serving the calc that was current when it was

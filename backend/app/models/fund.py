@@ -9,7 +9,8 @@ the source tables — never written in any request path:
   instrument_id (criterion: dispatch F8 §3 F8.1-2). Dynamic VIEW.
 - `fund_risk_latest_mv` — latest fund_risk_metrics calc_date per instrument
   (precomputed; the Light NEVER recomputes). Materialized view.
-- `fund_nav` — rolling daily NAV window (2 years + 30 days).
+- `nav_timeseries` — live daily NAV hypertable (the FundNav model reads it
+  directly; the `fund_nav` snapshot is retired — Task 4.3).
 - `fund_holdings_v` — latest N-PORT report per series, ranked by pct_of_nav.
   Dynamic VIEW; uncapped (the source is 100% of holdings — the profile route
   display-caps to top-50; the consolidated exposure comes from the data-lake
@@ -181,11 +182,18 @@ class FundRiskLatest(Base):
 
 
 class FundNav(Base):
-    __tablename__ = "fund_nav"
+    # Repointed (Task 4.3) to the LIVE nav_timeseries hypertable — the fund_nav
+    # snapshot is retired (its sync was deleted in Task 4.2 and nothing writes it
+    # anymore). nav_timeseries is a strict superset of the snapshot columns and is
+    # UNIQUE on (instrument_id, nav_date), so the existing readers (optimizer
+    # returns/eligibility, builder spots, portfolio latest-2) behave identically
+    # without dedup. The class name stays FundNav (internal; renaming is out of
+    # scope) — only the backing table changed.
+    __tablename__ = "nav_timeseries"
 
     # Composite PK doubles as the (instrument_id, nav_date) lookup index.
-    # Fund is now a VIEW (funds_v); a view cannot be a FK target, so this is a
-    # plain PK column (no ForeignKey to funds).
+    # nav_timeseries is a hypertable (not a FK target), so this is a plain PK
+    # column (no ForeignKey).
     instrument_id: Mapped[uuid.UUID] = mapped_column(
         Uuid,
         primary_key=True,

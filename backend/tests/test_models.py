@@ -432,17 +432,18 @@ def test_portfolios_origin_column() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Fund universe models (Tasks 2.2-2.5) — funds_v / fund_risk_latest_mv /
-# fund_nav / fund_holdings_v / fund_classes_v.
+# Fund universe models (Tasks 2.2-2.5, 4.3) — funds_v / fund_risk_latest_mv /
+# nav_timeseries / fund_holdings_v / fund_classes_v.
 # Ported from the retired test_funds_sync.py (Task 4.2): these assert the live
 # ORM model contracts (Base.metadata), independent of the deleted fund sync.
 # ---------------------------------------------------------------------------
 
 def test_fund_tables_registered() -> None:
     # funds_v / fund_risk_latest_mv / fund_holdings_v / fund_classes_v are now
-    # dynamic VIEWs/MVs (Tasks 2.2-2.5); fund_nav is still a physical table.
+    # dynamic VIEWs/MVs (Tasks 2.2-2.5); FundNav is repointed to the live
+    # nav_timeseries hypertable (Task 4.3) — the fund_nav snapshot is retired.
     for name in (
-        "funds_v", "fund_risk_latest_mv", "fund_nav",
+        "funds_v", "fund_risk_latest_mv", "nav_timeseries",
         "fund_holdings_v", "fund_classes_v",
     ):
         assert name in Base.metadata.tables
@@ -504,9 +505,10 @@ def test_fund_risk_latest_pk_and_metric_lockstep() -> None:
 
 
 def test_fund_nav_composite_pk_and_no_fk() -> None:
-    # Fund is now the funds_v VIEW (Task 2.3): a view cannot be a FK target, so
-    # fund_nav.instrument_id is a plain composite-PK column with NO ForeignKey.
-    table = _table("fund_nav")
+    # FundNav is repointed to the live nav_timeseries hypertable (Task 4.3); a
+    # hypertable is not a FK target, so instrument_id stays a plain composite-PK
+    # column (with nav_date) and NO ForeignKey.
+    table = _table("nav_timeseries")
     assert [c.name for c in table.primary_key.columns] == ["instrument_id", "nav_date"]
     assert not table.foreign_keys
 
