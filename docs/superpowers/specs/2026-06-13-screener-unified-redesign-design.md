@@ -1,6 +1,6 @@
 # Spec — Screener unificado (base do Plano 6): do wizard ao workspace Build | Results
 
-**Data:** 2026-06-13 · **Status:** aprovado (brainstorming com companion visual)
+**Data:** 2026-06-13 · **Status:** aprovado (brainstorming com companion visual; decisões de escopo fechadas)
 **Continua:** Plano 1 (`highcharts-grid-foundation-screener` — Grid Pro já no `ResultsTab`)
 **Base para:** Plano 6 (implementação, `docs/superpowers/plans/`)
 **Referência de UX:** Barchart Stocks Screener (`viewName=filter_view`) — HTML real analisado.
@@ -32,6 +32,8 @@ os quatro problemas levantados em `frontend/src/components/screener/`:
 | 4 | **Layout do Build** | **Grid full-width + painel de distribuição inferior fixo** (a linha selecionada mostra histograma + presets + bounds embaixo; o grid não "pula"). **Largura controlada/centralizada**: histograma em bloco `max-width ~560px`, container do workspace centralizado no limite atual (`max-w-[1360px]`). |
 | 5 | **Empty state** | **Inline coaching** — sem tela intermediária; o Build já aberto, vazio, com dicas + os 3 micro-passos. |
 | 6 | **Add-a-metric** | **Typeahead "Find a metric…" + popover "Browse by category"** (categorias/sub-categorias do catálogo; checkbox = adiciona, auto-save; já-adicionadas marcadas). |
+| 7 | **Reorder de filtros** | **Incluído no Plano 6** — novo endpoint `PATCH .../filters/reorder`; o `☰` define a ordem das colunas em `Results`. |
+| 8 | **Sparklines** | **Endpoint build em lote** `GET /screens/{id}/build` — uma requisição alimenta os sparklines (todas as linhas) e o painel de distribuição. |
 
 ### Padrões do Barchart incorporados (e o que fica de fora)
 
@@ -147,8 +149,8 @@ consumido por `BuildPanel` via o `DataGrid` existente. Colunas:
   A **regra percent** do `BuildTab` é preservada e centralizada num helper
   (`toDisplayText`/`parseBound`): métricas `data_type === "percent"` exibem/entram 0–100 e enviam
   fração; demais passam raw. `""` = unbounded (null); inválido = sem commit (`aria-invalid`).
-- **Sparkline:** renderer gera barras a partir da `Distribution` do filtro, com a banda
-  selecionada em `--color-accent`. Reusa o cache `["screen-build", screenId, code]` (ver fluxo).
+- **Sparkline:** renderer gera barras a partir da `Distribution` do filtro (do endpoint em lote
+  `GET /screens/{id}/build`), com a banda selecionada em `--color-accent`.
 - **Reorder / Seleção:** recursos Pro (`rows.selection`, row drag). O reorder grava a nova ordem
   de `position`, que é exatamente a ordem das colunas em `Results` (`result_columns` =
   `ticker + name + métricas em position order`).
@@ -185,10 +187,10 @@ partem as invalidações.
   fiação de cache é a mesma.
 - **Contagem ao vivo** (`MatchCount`): vem do `headline_count` das respostas PUT/DELETE (e do
   build no open). Sai do corpo do `BuildTab` para o `ScreenerHeader`.
-- **Distribuições:** `["screen-build", screenId, code]` por filtro — **mantido**. Hoje cada
-  `FilterCard` já dispara essa query; no novo, ela alimenta tanto o **sparkline** da linha quanto
-  o `DistributionPanel` da linha ativa (mesmo dado, cache compartilhado). *Recomendado* um
-  endpoint em lote (ver Backend) para evitar N requisições quando há muitos filtros.
+- **Distribuições:** passam a vir de um **endpoint em lote** (`GET /screens/{id}/build`, ver
+  Backend) numa única query (`["screen-build", screenId]`), alimentando tanto os **sparklines**
+  (todas as linhas) quanto o `DistributionPanel` (linha ativa). Substitui o padrão atual de uma
+  `["screen-build", id, code]` por `FilterCard`.
 - **Adição de métrica** (popover/typeahead): mesma semântica do toggle atual —
   `putScreenFilter(code, {min:null,max:null})` ("selecionada, sem corte") e prime do
   `["screen-build", …]` no `onSuccess` (como hoje em `SelectMetricsTab`).
@@ -217,16 +219,18 @@ partem as invalidações.
 
 ## Backend (investintell-light, FastAPI)
 
-Núcleo já suporta o redesign (auto-save, contagem, distribuição, CSV). Duas adições:
+Núcleo já suporta o redesign (auto-save, contagem, distribuição, CSV). Duas adições **confirmadas
+para o Plano 6**:
 
-1. **Reorder de filtros** *(necessário para o `☰`)* — hoje `upsert_filter` define `position` no
-   append e não há rota de reordenação. Adicionar `PATCH /screens/{id}/filters/reorder` recebendo
-   a lista de `metric_code` na nova ordem (revalida contra o screen; reescreve `position`).
-   Retorna `ScreenOut`. *Alternativa:* adiar o reorder para fase 2 (entregar o grid editável sem
-   drag).
-2. **Build em lote** *(recomendado p/ os sparklines)* — `GET /screens/{id}/build` devolvendo
-   `{metric_code: BuildResponse}` de todos os filtros numa requisição. *Alternativa:* reusar
-   `GET /screens/{id}/build/{code}` por filtro (como hoje), aceitando N requisições.
+1. **Reorder de filtros** *(habilita o `☰`)* — `upsert_filter` hoje define `position` no append e
+   não há rota de reordenação. Adicionar `PATCH /screens/{id}/filters/reorder` recebendo a lista de
+   `metric_code` na nova ordem (revalida contra o screen; reescreve `position` numa transação);
+   retorna `ScreenOut`. É o que torna o `☰` = ordem das colunas em `Results`
+   (`result_columns` lê os filtros em ordem de `position`).
+2. **Build em lote** — `GET /screens/{id}/build` devolvendo `{metric_code: BuildResponse}` de todos
+   os filtros do screen numa requisição. O `BuildPanel` consome uma vez e distribui para os
+   sparklines (todas as linhas) e o painel de distribuição (linha ativa), evitando N requisições.
+   O `build/{code}` por métrica permanece para refetch pontual.
 
 Nenhuma mudança no contrato de `results`/`results.csv`. Regenerar tipos
 (`openapi-typescript`) após as adições.
