@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist_Mono } from "next/font/google";
 import "./globals.css";
+import "@carbon/styles/css/styles.min.css";
 import { Providers } from "./providers";
 import { AppShell } from "@/components/shell/AppShell";
 
