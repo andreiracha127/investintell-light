@@ -285,3 +285,22 @@ def test_zero_volatility_negative_mean_is_minus_inf() -> None:
     res = robust_sharpe(np.array([0.0] * 40, dtype=float), rf_rate=0.01)
     assert res.sharpe_traditional == float("-inf")
     assert res.degraded_reason == "zero_volatility"
+
+
+# --- package export -----------------------------------------------------------
+
+
+def test_exported_from_app_analytics() -> None:
+    """robust_sharpe and RobustSharpeResult are importable from app.analytics."""
+    import app.analytics as analytics
+
+    assert hasattr(analytics, "robust_sharpe")
+    assert hasattr(analytics, "RobustSharpeResult")
+    assert "robust_sharpe" in analytics.__all__
+    assert "RobustSharpeResult" in analytics.__all__
+
+    from app.analytics import RobustSharpeResult as RS
+    from app.analytics import robust_sharpe as rs
+
+    res = rs(_normal_returns(120), rf_rate=0.0)
+    assert isinstance(res, RS)

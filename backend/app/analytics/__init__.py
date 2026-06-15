@@ -38,6 +38,10 @@ from app.analytics.risk import (
     historical_var,
     max_drawdown,
 )
+from app.analytics.robust_sharpe import (
+    RobustSharpeResult,
+    robust_sharpe,
+)
 from app.analytics.rolling import (
     rolling_beta,
     rolling_correlation,
@@ -50,6 +54,7 @@ __all__ = [
     "DrawdownResult",
     "Histogram",
     "MIN_IN_RANGE_RETURNS",
+    "RobustSharpeResult",
     "align_returns",
     "annualized_volatility",
     "asset_returns_frame",
@@ -67,6 +72,7 @@ __all__ = [
     "portfolio_returns",
     "return_histogram",
     "risk_contributions",
+    "robust_sharpe",
     "rolling_beta",
     "rolling_correlation",
     "rolling_volatility",
