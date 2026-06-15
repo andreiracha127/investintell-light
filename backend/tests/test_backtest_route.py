@@ -105,6 +105,15 @@ async def test_bl_utility_rejected_with_422(monkeypatch: pytest.MonkeyPatch) -> 
     assert "bl_utility is not backtestable" in response.json()["detail"]
 
 
+async def test_max_return_cvar_rejected_with_422(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_returns(monkeypatch)
+    payload = {"assets": [_fund(0), _fund(1)], "objective": "max_return_cvar"}
+    async with _client() as client:
+        response = await client.post("/backtest/walk-forward", json=payload)
+    assert response.status_code == 422
+    assert "is not backtestable" in response.json()["detail"]
+
+
 async def test_bad_n_splits_is_pydantic_422() -> None:
     payload = {"assets": [_fund(0), _fund(1)], "n_splits": 1}
     async with _client() as client:

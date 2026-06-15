@@ -42,15 +42,23 @@ def _solve_fn_for(
 
     Wraps ``app.optimizer.engine`` so each call re-optimizes on the fold's TRAIN
     matrix. ``min_cvar`` solves on the raw scenarios (Rockafellar-Uryasev); the
-    covariance objectives shrink Sigma with Ledoit-Wolf first. BL objectives
-    (``bl_utility``) are rejected up-front — backtests are mu-free. Each engine
-    solver returns a ``(weights, status)`` tuple, so the closure keeps weights.
+    covariance objectives shrink Sigma with Ledoit-Wolf first. The two
+    BL-posterior-mu objectives (``bl_utility`` and ``max_return_cvar``) are
+    rejected up-front — both maximize Black-Litterman posterior returns formed
+    with hindsight views, so backtests are mu-free. Each engine solver returns a
+    ``(weights, status)`` tuple, so the closure keeps weights.
     """
     if objective == "bl_utility":
         raise BacktestError(
             "bl_utility is not backtestable: Black-Litterman views are formed "
             "with hindsight; backtest a mu-free objective (min_cvar/min_vol/erc/"
             "max_diversification/equal_weight)"
+        )
+    if objective == "max_return_cvar":
+        raise BacktestError(
+            "max_return_cvar is not backtestable: it maximizes Black-Litterman "
+            "posterior returns formed with hindsight views; backtest a mu-free "
+            "objective (min_cvar/min_vol/erc/max_diversification/equal_weight)"
         )
 
     def solve(train: np.ndarray) -> np.ndarray:
@@ -71,7 +79,7 @@ def _solve_fn_for(
             weights, _ = engine.solve_equal_weight(
                 train.shape[1], cap=cap, min_weight=min_weight
             )
-        else:  # pragma: no cover - Objective Literal + bl_utility guard above
+        else:  # pragma: no cover - all Objective Literal members handled above
             raise BacktestError(f"unknown objective: {objective}")
         return weights
 

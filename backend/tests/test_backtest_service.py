@@ -65,6 +65,11 @@ def test_solve_fn_bl_utility_is_rejected() -> None:
         _solve_fn_for("bl_utility", cap=0.25, min_weight=None)
 
 
+def test_solve_fn_max_return_cvar_is_rejected() -> None:
+    with pytest.raises(BacktestError, match="max_return_cvar is not backtestable"):
+        _solve_fn_for("max_return_cvar", cap=0.25, min_weight=None)
+
+
 async def test_run_min_cvar_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_returns(monkeypatch)
     # cap=0.5 is required for feasibility: the engine guard rejects the default
