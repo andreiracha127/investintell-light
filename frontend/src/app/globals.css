@@ -1,3 +1,6 @@
+@layer theme, base, carbon, components, utilities;
+
+@import "@carbon/styles/css/styles.min.css" layer(carbon);
 @import "tailwindcss";
 
 /*
@@ -10,6 +13,12 @@
   Theme/accent/density switch via data attributes on <html>:
     data-theme="light|dark"  data-accent="oxblood|blue|teal"
     data-density="compact|comfortable"
+*/
+
+/*
+  Carbon ships both global reset styles and component classes. Keep it above
+  Tailwind base so Carbon components render, but below utilities and Cockpit
+  base styles so the app tokens and ix-* utilities remain authoritative.
 */
 
 /* ── Tailwind 4 CSS-first token definitions ────────────────────────────── */

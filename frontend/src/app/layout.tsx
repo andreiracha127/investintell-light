@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Geist_Mono } from "next/font/google";
 import "./globals.css";
-import "@carbon/styles/css/styles.min.css";
 import { Providers } from "./providers";
 import { AppShell } from "@/components/shell/AppShell";
 import { CarbonThemeBridge } from "@/components/shell/CarbonThemeBridge";
@@ -35,7 +34,7 @@ export default function RootLayout({
       data-density="compact"
       suppressHydrationWarning
     >
-      <body className={`${geistMono.variable} antialiased`}>
+      <body className={`${geistMono.variable} bg-surface-0 font-sans text-text-primary antialiased`}>
         <script dangerouslySetInnerHTML={{ __html: SETTINGS_SCRIPT }} />
         <Providers>
           <CarbonThemeBridge>
