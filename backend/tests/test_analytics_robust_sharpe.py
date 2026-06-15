@@ -76,3 +76,72 @@ def test_periods_per_year_scales_traditional_sharpe() -> None:
     assert daily.sharpe_traditional == pytest.approx(
         monthly.sharpe_traditional / math.sqrt(12) * math.sqrt(252)
     )
+
+
+# --- Cornish-Fisher adjustment direction -------------------------------------
+
+
+def _left_tailed_returns() -> np.ndarray:
+    """T=80 series with mild NEGATIVE skew (downside outliers)."""
+    rng = np.random.default_rng(5)
+    body = rng.standard_normal(78) * 0.02 + 0.008
+    return np.concatenate([body, [-0.08, -0.10]])
+
+
+def _right_tailed_returns() -> np.ndarray:
+    """T=80 series with mild POSITIVE skew (upside outliers)."""
+    rng = np.random.default_rng(5)
+    body = rng.standard_normal(78) * 0.02 + 0.008
+    return np.concatenate([body, [0.10, 0.12]])
+
+
+def test_negative_skew_penalizes_cf_sharpe() -> None:
+    """Left-tail risk inflates the CF sigma, so CF Sharpe < traditional Sharpe.
+
+    skew(_left_tailed_returns()) ~ -1.31 (verified), z_cf ~ -1.88 (still
+    negative, NOT clamped), so the comparison reflects the genuine CF math.
+    """
+    res = robust_sharpe(_left_tailed_returns(), rf_rate=0.0)
+    assert res.skewness < 0
+    assert res.sharpe_cornish_fisher < res.sharpe_traditional
+
+
+def test_positive_skew_rewards_cf_sharpe() -> None:
+    """Right-tail upside shrinks the CF sigma, so CF Sharpe > traditional.
+
+    skew(_right_tailed_returns()) ~ +1.90 (verified) so |skew|>1.5 auto-routes
+    the CI to jackknife, but z_cf ~ -0.90 stays negative (NOT clamped) so the
+    CF point estimate is the genuine expansion; only the CI method differs.
+    """
+    res = robust_sharpe(_right_tailed_returns(), rf_rate=0.0)
+    assert res.skewness > 0
+    assert res.sharpe_cornish_fisher > res.sharpe_traditional
+
+
+def test_symmetric_returns_cf_close_to_traditional() -> None:
+    """Near-symmetric mesokurtic series: CF Sharpe ~ traditional Sharpe."""
+    rng = np.random.default_rng(11)
+    r = rng.normal(0.0, 0.03, 200)
+    res = robust_sharpe(r, rf_rate=0.0)
+    assert res.sharpe_cornish_fisher == pytest.approx(res.sharpe_traditional, rel=0.25)
+
+
+# --- non-monotonic Cornish-Fisher clamp --------------------------------------
+
+
+def test_cornish_fisher_non_monotonic_clamp() -> None:
+    """Extreme positive skew/kurtosis makes z_CF >= 0 (the quantile expansion
+    is non-monotonic). The module clamps sigma_CF to keep CF Sharpe finite and
+    flags the result as degraded with reason 'cornish_fisher_non_monotonic'."""
+    # 39 flat points + one huge positive outlier => skew ~ 6.33, excess kurt ~ 40
+    # (verified). std is nonzero (the outlier), so the zero-vol guard does not
+    # fire; T=40 >= 36 so CF is computed and z_cf ~ +1.71 >= 0 triggers the clamp.
+    arr = np.array([0.01] * 39 + [2.0], dtype=float)
+    res = robust_sharpe(arr, rf_rate=0.0)
+    assert res.n_observations == 40
+    assert res.degraded is True
+    assert res.degraded_reason == "cornish_fisher_non_monotonic"
+    # CF Sharpe stays finite despite the clamp.
+    assert math.isfinite(res.sharpe_cornish_fisher)
+    # Traditional Sharpe is still reported and finite.
+    assert math.isfinite(res.sharpe_traditional)

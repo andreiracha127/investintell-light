@@ -179,7 +179,15 @@ def robust_sharpe(
     # Cornish-Fisher adjusted Sharpe via modified-VaR scaling of sigma.
     z = float(stats.norm.ppf(alpha_cf))
     z_cf = _cornish_fisher_z(z, skew, excess_kurt)
-    sigma_cf = (z_cf / z) * std_returns
+    # z (left tail) is negative; z_cf must stay negative for sigma_cf > 0. If
+    # extreme skew/kurtosis pushes it non-negative, the quantile expansion is
+    # non-monotonic — clamp z_cf to a small negative multiple of z and flag.
+    cf_non_monotonic = z_cf >= 0.0
+    if cf_non_monotonic:
+        z_cf_clamped = -0.01 * abs(z)
+        sigma_cf = (z_cf_clamped / z) * std_returns
+    else:
+        sigma_cf = (z_cf / z) * std_returns
     sr_cf = mean / sigma_cf * sqrt_ann
 
     # Closed-form (Opdyke) CI.
@@ -199,6 +207,6 @@ def robust_sharpe(
         excess_kurtosis=excess_kurt,
         n_observations=T,
         ci_method=method,
-        degraded=False,
-        degraded_reason=None,
+        degraded=cf_non_monotonic,
+        degraded_reason="cornish_fisher_non_monotonic" if cf_non_monotonic else None,
     )
