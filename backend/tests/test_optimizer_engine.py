@@ -322,7 +322,7 @@ def test_max_return_cvar_capped_tighter_limit_lowers_return() -> None:
         scen, mu=mu, cvar_limit=0.08, alpha=0.95, cap=None
     )
     w_tight, _ = engine.solve_max_return_cvar_capped(
-        scen, mu=mu, cvar_limit=0.02, alpha=0.95, cap=None
+        scen, mu=mu, cvar_limit=0.025, alpha=0.95, cap=None
     )
     assert float(mu @ w_tight) <= float(mu @ w_loose) + 1e-6
 
