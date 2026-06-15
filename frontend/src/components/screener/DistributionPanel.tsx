@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type { MetricBuild, MetricDef, ScreenFilter } from "@/lib/api/client";
-import { EChart } from "@/components/charts/EChart";
+import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { FIELD_LABEL_CLASS } from "@/components/screener/shared";
-import { buildDistributionOption } from "@/lib/charts/distribution";
+import { buildHcDistributionOption } from "@/lib/charts/hc/distribution";
 import { chartColors, type ChartColors } from "@/lib/charts/theme";
 import { formatCompact } from "@/lib/format";
 import { parseBound, toDisplayText } from "@/lib/screener/bounds";
@@ -47,7 +47,7 @@ export function DistributionPanel({
   const option = useMemo(
     () =>
       dist && colors
-        ? buildDistributionOption(dist, { min: filter.min_value, max: filter.max_value }, metric.data_type, colors)
+        ? buildHcDistributionOption(dist, { min: filter.min_value, max: filter.max_value }, metric.data_type, colors)
         : null,
     [dist, colors, filter.min_value, filter.max_value, metric.data_type],
   );
@@ -85,7 +85,7 @@ export function DistributionPanel({
         {/* Histogram — width-controlled so it never stretches on wide screens */}
         <div className="w-full max-w-[560px]">
           {option ? (
-            <EChart option={option} className="h-[150px]" />
+            <HighchartsChart options={option} className="h-[150px]" />
           ) : (
             <p className="h-[150px] flex items-center justify-center bg-zebra text-[13px] text-text-muted">
               No metric data yet — run the metrics job.

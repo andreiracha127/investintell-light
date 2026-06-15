@@ -31,6 +31,9 @@ importers:
       echarts:
         specifier: ^6
         version: 6.1.0
+      highcharts:
+        specifier: ^13.0.0
+        version: 13.0.0
       next:
         specifier: 15.5.19
         version: 15.5.19(@babel/core@7.29.7)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)(sass@1.101.0)
@@ -1853,6 +1856,17 @@ packages:
   hasown@2.0.4:
     resolution: {integrity: sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A==}
     engines: {node: '>= 0.4'}
+
+  highcharts@13.0.0:
+    resolution: {integrity: sha512-AoFXei9hSnVXo8X5PmXzSiNXwPMgA+NzyN35uRRy0N1XwbJbRI1laTCaaFci9QB9Wyv9ZFWlgF0xzgivavJpDA==}
+    peerDependencies:
+      jspdf: ^4.1.0
+      svg2pdf.js: ^2.7.0
+    peerDependenciesMeta:
+      jspdf:
+        optional: true
+      svg2pdf.js:
+        optional: true
 
   html-encoding-sniffer@4.0.0:
     resolution: {integrity: sha512-Y22oTqIU4uuPgEemfz7NDJz6OeKf12Lsu+QC+s3BVpda64lTiMYCyGwg5ki4vFxkMwQdeZDl2adZoqUgdFuTgQ==}
@@ -4876,6 +4890,8 @@ snapshots:
   hasown@2.0.4:
     dependencies:
       function-bind: 1.1.2
+
+  highcharts@13.0.0: {}
 
   html-encoding-sniffer@4.0.0:
     dependencies:

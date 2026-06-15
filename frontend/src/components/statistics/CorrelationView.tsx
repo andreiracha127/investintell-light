@@ -14,10 +14,10 @@ import {
   type CorrelationRequest,
   type CorrelationResponse,
 } from "@/lib/api/client";
-import { buildRollingOption } from "@/lib/charts/rolling";
+import { buildHcRollingOption } from "@/lib/charts/hc/rolling";
 import { chartColors, type ChartColors } from "@/lib/charts/theme";
 import { formatNumber } from "@/lib/format";
-import { EChart } from "@/components/charts/EChart";
+import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { Card, KpiTile } from "@/components/ui/panels";
 import {
   AssetRefPicker,
@@ -122,7 +122,7 @@ function Results({
 
   const rollingOption = useMemo(
     () =>
-      buildRollingOption(data.series, pairLabel, colors, {
+      buildHcRollingOption(data.series, pairLabel, colors, {
         yMin: -1,
         yMax: 1,
       }),
@@ -146,7 +146,7 @@ function Results({
       </div>
 
       <Card title="Rolling Correlation" subtitle={pairLabel}>
-        <EChart option={rollingOption} className="h-[400px] w-full" />
+        <HighchartsChart options={rollingOption} className="h-[400px] w-full" />
       </Card>
     </div>
   );

@@ -27,12 +27,12 @@ import {
   type RangePreset,
 } from "@/lib/api/client";
 import { parseDecimal } from "@/lib/parse";
-import { buildAllocationOption } from "@/lib/charts/allocation";
-import { buildRiskContributionsOption } from "@/lib/charts/contributions";
-import { buildCumulativeOption } from "@/lib/charts/cumulative";
-import { buildHeatmapOption } from "@/lib/charts/heatmap";
-import { buildHistogramOption } from "@/lib/charts/histogram";
-import { buildNavOption } from "@/lib/charts/nav";
+import { buildHcAllocationOption } from "@/lib/charts/hc/allocation";
+import { buildHcRiskContributionsOption } from "@/lib/charts/hc/contributions";
+import { buildHcCumulativeOption } from "@/lib/charts/hc/cumulative";
+import { buildHcHeatmapOption } from "@/lib/charts/hc/heatmap";
+import { buildHcHistogramOption } from "@/lib/charts/hc/histogram";
+import { buildHcNavOption } from "@/lib/charts/hc/nav";
 import { chartColors, type ChartColors } from "@/lib/charts/theme";
 import {
   formatCurrency,
@@ -40,7 +40,7 @@ import {
   formatNumber,
   formatPercent,
 } from "@/lib/format";
-import { EChart } from "@/components/charts/EChart";
+import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { Card, PageTitle, StatRow, valueTone } from "@/components/ui/panels";
 
 interface PositionRow {
@@ -372,7 +372,7 @@ function Results({
 
   const allocationOption = useMemo(
     () =>
-      buildAllocationOption(
+      buildHcAllocationOption(
         allocation.positions.map((position) => ({
           name: position.ticker,
           value: position.weight,
@@ -382,12 +382,12 @@ function Results({
     [allocation.positions, colors],
   );
   const navOption = useMemo(
-    () => buildNavOption(data.nav, colors),
+    () => buildHcNavOption(data.nav, colors),
     [data.nav, colors],
   );
   const comparisonOption = useMemo(
     () =>
-      buildCumulativeOption(
+      buildHcCumulativeOption(
         {
           asset: data.benchmark_comparison.portfolio,
           benchmark: data.benchmark_comparison.benchmark,
@@ -399,15 +399,15 @@ function Results({
     [data.benchmark_comparison, params.benchmark, colors],
   );
   const heatmapOption = useMemo(
-    () => buildHeatmapOption(data.correlation_matrix, colors),
+    () => buildHcHeatmapOption(data.correlation_matrix, colors),
     [data.correlation_matrix, colors],
   );
   const contributionsOption = useMemo(
-    () => buildRiskContributionsOption(data.risk_contributions, colors),
+    () => buildHcRiskContributionsOption(data.risk_contributions, colors),
     [data.risk_contributions, colors],
   );
   const histogramOption = useMemo(
-    () => buildHistogramOption(data.histogram, colors),
+    () => buildHcHistogramOption(data.histogram, colors),
     [data.histogram, colors],
   );
 
@@ -429,8 +429,8 @@ function Results({
       <div className="grid gap-px bg-border lg:grid-cols-2">
         <Card title="Allocation">
           <div className="flex flex-wrap items-center gap-[18px]">
-            <EChart
-              option={allocationOption}
+            <HighchartsChart
+              options={allocationOption}
               className="h-[170px] w-[170px] shrink-0"
             />
             <div className="flex min-w-[170px] flex-1 flex-col gap-1.5 tabular-nums">
@@ -523,7 +523,7 @@ function Results({
         }
         actions={<LineLegend entries={[{ label: "NAV", color: colors.accent }]} />}
       >
-        <EChart option={navOption} className="h-[300px] w-full" />
+        <HighchartsChart options={navOption} className="h-[300px] w-full" />
       </Card>
 
       {/* ── Vs benchmark ── */}
@@ -538,22 +538,22 @@ function Results({
           />
         }
       >
-        <EChart option={comparisonOption} className="h-[300px] w-full" />
+        <HighchartsChart options={comparisonOption} className="h-[300px] w-full" />
       </Card>
 
       {/* ── Correlation + risk contributions ── */}
       <div className="grid gap-px bg-border lg:grid-cols-2">
         <Card title="Correlation Matrix">
-          <EChart option={heatmapOption} className="h-[360px] w-full" />
+          <HighchartsChart options={heatmapOption} className="h-[360px] w-full" />
         </Card>
         <Card title="Risk Contributions">
-          <EChart option={contributionsOption} className="h-[360px] w-full" />
+          <HighchartsChart options={contributionsOption} className="h-[360px] w-full" />
         </Card>
       </div>
 
       {/* ── Distribution ── */}
       <Card title="Daily Return Distribution">
-        <EChart option={histogramOption} className="h-[280px] w-full" />
+        <HighchartsChart options={histogramOption} className="h-[280px] w-full" />
       </Card>
     </div>
   );
