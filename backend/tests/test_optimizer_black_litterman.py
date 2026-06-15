@@ -288,3 +288,55 @@ def test_solve_bl_robust_rejects_bad_confidence() -> None:
     sigma = np.diag([0.04, 0.04])
     with _pytest.raises(_OptErr, match="confidence"):
         _bl.solve_bl_robust(mu, sigma, cap=None, confidence=1.5)
+
+
+# ── T3F-4: volatility-target SOCP ────────────────────────────────────────────
+
+
+def test_solve_bl_vol_target_caps_realized_volatility() -> None:
+    mu = np.array([0.12, 0.08, 0.05])
+    sigma = np.diag([0.09, 0.04, 0.01])  # vols 0.30, 0.20, 0.10
+    target = 0.15
+    weights, status = _bl.solve_bl_vol_target(mu, sigma, vol_target=target, cap=None)
+    assert status == "optimal"
+    realized = float(np.sqrt(weights @ sigma @ weights))
+    assert realized <= target + 1e-4
+    assert abs(float(weights.sum()) - 1.0) < 1e-6
+
+
+def test_solve_bl_vol_target_tilts_toward_high_mu_when_slack() -> None:
+    """With a generous vol cap, the optimizer loads the highest-μ asset more
+    than equal weight."""
+    mu = np.array([0.20, 0.05, 0.05])
+    sigma = np.diag([0.04, 0.04, 0.04])
+    weights, _ = _bl.solve_bl_vol_target(mu, sigma, vol_target=0.19, cap=None)
+    assert weights[0] > 1.0 / 3.0
+
+
+def test_solve_bl_vol_target_infeasible_when_target_below_floor_vol() -> None:
+    mu = np.array([0.10, 0.10])
+    sigma = np.diag([0.04, 0.04])  # every long-only portfolio has vol 0.2
+    with _pytest.raises(_OptErr, match="infeasible|vol_target"):
+        _bl.solve_bl_vol_target(mu, sigma, vol_target=0.05, cap=None)
+
+
+def test_solve_bl_vol_target_rejects_nonpositive_target() -> None:
+    mu = np.array([0.1, 0.1])
+    sigma = np.diag([0.04, 0.04])
+    with _pytest.raises(_OptErr, match="vol_target must be > 0"):
+        _bl.solve_bl_vol_target(mu, sigma, vol_target=0.0, cap=None)
+
+
+def test_solve_bl_vol_target_rejects_mu_shape_mismatch() -> None:
+    mu = np.array([0.1, 0.1, 0.1])
+    sigma = np.diag([0.04, 0.04])
+    with _pytest.raises(_OptErr, match="mu has shape"):
+        _bl.solve_bl_vol_target(mu, sigma, vol_target=0.3, cap=None)
+
+
+def test_solve_bl_vol_target_respects_cap() -> None:
+    mu = np.array([0.30, 0.05, 0.05, 0.05])
+    sigma = np.diag([0.04, 0.04, 0.04, 0.04])
+    weights, status = _bl.solve_bl_vol_target(mu, sigma, vol_target=0.19, cap=0.4)
+    assert status == "optimal"
+    assert (weights <= 0.4 + 1e-6).all()
