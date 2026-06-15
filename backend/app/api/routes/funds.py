@@ -32,10 +32,17 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._shared import ensure_eod_or_http_error
+from app.core.config import get_settings
 from app.core.datalake import get_datalake_session
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
 from app.models.fund import Fund
+from app.schemas.fund_analysis import (
+    FundAnalysisResponse,
+    FundHoldingsTopResponse,
+    FundPeersResponse,
+    FundScatterResponse,
+)
 from app.schemas.funds import (
     FundClassOut,
     FundHoldingItem,
@@ -54,8 +61,8 @@ from app.schemas.lookthrough import (
 )
 from app.schemas.market import FundHistoryResponse, HistoryBar
 from app.schemas.timeseries import LineSeriesResponse
+from app.services import fund_analysis, lookthrough
 from app.services import funds_catalog as catalog
-from app.services import lookthrough
 from app.services._series import select_adj_ohlcv_rows as _select_adj_ohlcv_rows_impl
 from app.services.screener import render_csv
 from app.services.timeseries import (
@@ -252,6 +259,17 @@ async def list_funds_csv(
     )
 
 
+@router.get("/funds/scatter", response_model=FundScatterResponse)
+async def get_funds_scatter(
+    session: SessionDep,
+    limit: Annotated[
+        int, Query(ge=1, le=500, description="Maximum funds returned.")
+    ] = 250,
+) -> FundScatterResponse:
+    """Columnar risk/return scatter payload for the funds landing page."""
+    return await fund_analysis.fetch_funds_scatter(session, limit=limit)
+
+
 @router.get("/funds/{instrument_id}", response_model=FundProfileResponse)
 async def get_fund_profile(
     instrument_id: uuid.UUID, session: SessionDep
@@ -299,6 +317,76 @@ async def get_fund_profile(
         # priced with the series NAV as a proxy.
         classes=[FundClassOut.model_validate(c) for c in profile.classes],
     )
+
+
+@router.get(
+    "/funds/{instrument_id}/analysis",
+    response_model=FundAnalysisResponse,
+)
+async def get_fund_analysis(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    range_: Annotated[
+        RangeKey,
+        Query(alias="range", description="Visible-range preset; MAX = full NAV history."),
+    ] = "1Y",
+    window: Annotated[
+        int, Query(ge=10, le=252, description="Rolling window in NAV days (10..252).")
+    ] = 252,
+) -> FundAnalysisResponse:
+    """Render-ready analysis payload for one fund NAV series."""
+    try:
+        payload = await fund_analysis.fetch_fund_analysis(
+            session,
+            instrument_id,
+            range_key=range_,
+            window=window,
+            max_points=get_settings().price_series_max_points,
+        )
+    except fund_analysis.FundAnalysisError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Fund {instrument_id} not found.")
+    return payload
+
+
+@router.get(
+    "/funds/{instrument_id}/holdings/top",
+    response_model=FundHoldingsTopResponse,
+)
+async def get_fund_holdings_top(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    datalake: DatalakeDep,
+    limit: Annotated[
+        int, Query(ge=1, le=50, description="Maximum top holdings returned.")
+    ] = 25,
+) -> FundHoldingsTopResponse:
+    """Top holdings and sector breakdown for one fund."""
+    payload = await fund_analysis.fetch_fund_holdings_top(
+        session, datalake, instrument_id, limit=limit
+    )
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Fund {instrument_id} not found.")
+    return payload
+
+
+@router.get(
+    "/funds/{instrument_id}/peers",
+    response_model=FundPeersResponse,
+)
+async def get_fund_peers(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    limit: Annotated[
+        int, Query(ge=1, le=50, description="Maximum peer rows returned.")
+    ] = 10,
+) -> FundPeersResponse:
+    """Peer cohort by fund strategy/risk classification."""
+    payload = await fund_analysis.fetch_fund_peers(session, instrument_id, limit=limit)
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Fund {instrument_id} not found.")
+    return payload
 
 
 @router.get(

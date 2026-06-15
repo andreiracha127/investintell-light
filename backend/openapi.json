@@ -2267,6 +2267,54 @@
         }
       }
     },
+    "/funds/scatter": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Funds Scatter",
+        "description": "Columnar risk/return scatter payload for the funds landing page.",
+        "operationId": "get_funds_scatter_funds_scatter_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "description": "Maximum funds returned.",
+              "default": 250,
+              "title": "Limit"
+            },
+            "description": "Maximum funds returned."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundScatterResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/funds/{instrument_id}": {
       "get": {
         "tags": [
@@ -2294,6 +2342,199 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/FundProfileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/funds/{instrument_id}/analysis": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Fund Analysis",
+        "description": "Render-ready analysis payload for one fund NAV series.",
+        "operationId": "get_fund_analysis_funds__instrument_id__analysis_get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instrument Id"
+            }
+          },
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1M",
+                "6M",
+                "1Y",
+                "5Y",
+                "MAX"
+              ],
+              "type": "string",
+              "description": "Visible-range preset; MAX = full NAV history.",
+              "default": "1Y",
+              "title": "Range"
+            },
+            "description": "Visible-range preset; MAX = full NAV history."
+          },
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 252,
+              "minimum": 10,
+              "description": "Rolling window in NAV days (10..252).",
+              "default": 252,
+              "title": "Window"
+            },
+            "description": "Rolling window in NAV days (10..252)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundAnalysisResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/funds/{instrument_id}/holdings/top": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Fund Holdings Top",
+        "description": "Top holdings and sector breakdown for one fund.",
+        "operationId": "get_fund_holdings_top_funds__instrument_id__holdings_top_get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instrument Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "description": "Maximum top holdings returned.",
+              "default": 25,
+              "title": "Limit"
+            },
+            "description": "Maximum top holdings returned."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundHoldingsTopResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/funds/{instrument_id}/peers": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Fund Peers",
+        "description": "Peer cohort by fund strategy/risk classification.",
+        "operationId": "get_fund_peers_funds__instrument_id__peers_get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instrument Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "description": "Maximum peer rows returned.",
+              "default": 10,
+              "title": "Limit"
+            },
+            "description": "Maximum peer rows returned."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundPeersResponse"
                 }
               }
             }
@@ -3936,6 +4177,274 @@
         "title": "FilterUpdateResponse",
         "description": "PUT/DELETE filter response \u2014 one round-trip powers the Build UI.\n\n``distribution`` is null (rather than failing the successful write with\n422) when the metric has zero non-NULL rows in the snapshot.\n``available_count`` exposes the non-NULL count so the UI can distinguish\n\"0 matches\" from \"no data\" without relying solely on the 422 path."
       },
+      "FundAnalysisHeader": {
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instrument Id"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "last_nav": {
+            "type": "number",
+            "title": "Last Nav"
+          },
+          "prev_nav": {
+            "type": "number",
+            "title": "Prev Nav"
+          },
+          "change": {
+            "type": "number",
+            "title": "Change",
+            "description": "last_nav - prev_nav, in NAV units."
+          },
+          "change_pct": {
+            "type": "number",
+            "title": "Change Pct",
+            "description": "One-period NAV change as a decimal fraction."
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date",
+            "title": "As Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "instrument_id",
+          "ticker",
+          "name",
+          "last_nav",
+          "prev_nav",
+          "change",
+          "change_pct",
+          "as_of"
+        ],
+        "title": "FundAnalysisHeader",
+        "description": "Render-ready fund header values from NAV history."
+      },
+      "FundAnalysisParams": {
+        "properties": {
+          "range": {
+            "type": "string",
+            "enum": [
+              "1M",
+              "6M",
+              "1Y",
+              "5Y",
+              "MAX"
+            ],
+            "title": "Range",
+            "description": "Requested range preset."
+          },
+          "window": {
+            "type": "integer",
+            "title": "Window",
+            "description": "Rolling window length in trading/NAV days."
+          },
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date",
+            "description": "Resolved visible-range start date."
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date",
+            "description": "Latest NAV date used by the analysis."
+          }
+        },
+        "type": "object",
+        "required": [
+          "range",
+          "window",
+          "start_date",
+          "end_date"
+        ],
+        "title": "FundAnalysisParams",
+        "description": "Echo of the resolved fund-analysis request parameters."
+      },
+      "FundAnalysisResponse": {
+        "properties": {
+          "params": {
+            "$ref": "#/components/schemas/FundAnalysisParams"
+          },
+          "header": {
+            "$ref": "#/components/schemas/FundAnalysisHeader"
+          },
+          "growth_of_100": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Growth Of 100",
+            "description": "[date, value] growth series rebased to 100.0."
+          },
+          "monthly_returns": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Monthly Returns",
+            "description": "[month_end, monthly return] points as decimal fractions."
+          },
+          "rolling_volatility": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Rolling Volatility",
+            "description": "[date, annualized volatility] points as decimal fractions."
+          },
+          "rolling_sharpe": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Rolling Sharpe",
+            "description": "[date, rolling Sharpe] points using zero risk-free rate."
+          },
+          "drawdown": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Drawdown",
+            "description": "[date, underwater drawdown] points as negative decimal fractions."
+          },
+          "histogram": {
+            "$ref": "#/components/schemas/HistogramOut"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/FundAnalysisStats"
+          }
+        },
+        "type": "object",
+        "required": [
+          "params",
+          "header",
+          "growth_of_100",
+          "monthly_returns",
+          "rolling_volatility",
+          "rolling_sharpe",
+          "drawdown",
+          "histogram",
+          "stats"
+        ],
+        "title": "FundAnalysisResponse",
+        "description": "Single-call payload for the fund Performance dossier tab."
+      },
+      "FundAnalysisStats": {
+        "properties": {
+          "annualized_volatility": {
+            "type": "number",
+            "title": "Annualized Volatility"
+          },
+          "var_95": {
+            "type": "number",
+            "title": "Var 95"
+          },
+          "cvar_95": {
+            "type": "number",
+            "title": "Cvar 95"
+          },
+          "total_return": {
+            "type": "number",
+            "title": "Total Return"
+          },
+          "max_drawdown": {
+            "$ref": "#/components/schemas/DrawdownOut"
+          },
+          "best_day": {
+            "$ref": "#/components/schemas/DatedValue"
+          },
+          "worst_day": {
+            "$ref": "#/components/schemas/DatedValue"
+          }
+        },
+        "type": "object",
+        "required": [
+          "annualized_volatility",
+          "var_95",
+          "cvar_95",
+          "total_return",
+          "max_drawdown",
+          "best_day",
+          "worst_day"
+        ],
+        "title": "FundAnalysisStats",
+        "description": "Point statistics over in-range daily NAV returns only."
+      },
       "FundClassOut": {
         "properties": {
           "class_id": {
@@ -4179,6 +4688,67 @@
         "title": "FundHoldingsOut",
         "description": "Latest N-PORT report for the fund's series (full, untruncated source).\n\nThe profile still serves a display-capped list (HOLDINGS_CAP); the\nconsolidated exposure lives in GET /funds/{id}/lookthrough (Frente C)."
       },
+      "FundHoldingsTopResponse": {
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instrument Id"
+          },
+          "series_id": {
+            "type": "string",
+            "title": "Series Id"
+          },
+          "report_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Date"
+          },
+          "top_holdings": {
+            "items": {
+              "$ref": "#/components/schemas/FundTopHolding"
+            },
+            "type": "array",
+            "title": "Top Holdings"
+          },
+          "sector_breakdown": {
+            "items": {
+              "$ref": "#/components/schemas/FundSectorExposure"
+            },
+            "type": "array",
+            "title": "Sector Breakdown"
+          },
+          "pct_of_nav_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pct Of Nav Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "instrument_id",
+          "series_id",
+          "report_date",
+          "top_holdings",
+          "sector_breakdown",
+          "pct_of_nav_total"
+        ],
+        "title": "FundHoldingsTopResponse",
+        "description": "Top holdings plus sector breakdown for one fund series."
+      },
       "FundListItem": {
         "properties": {
           "instrument_id": {
@@ -4412,6 +4982,158 @@
         ],
         "title": "FundNavPoint",
         "description": "One decimated NAV observation (last 2 years, ~260 points)."
+      },
+      "FundPeerItem": {
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instrument Id"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "strategy_label": {
+            "type": "string",
+            "title": "Strategy Label"
+          },
+          "expense_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expense Ratio"
+          },
+          "return_1y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return 1Y"
+          },
+          "volatility_1y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volatility 1Y"
+          },
+          "sharpe_1y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe 1Y"
+          },
+          "max_drawdown_1y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown 1Y"
+          },
+          "cvar_95_12m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cvar 95 12M"
+          },
+          "is_target": {
+            "type": "boolean",
+            "title": "Is Target"
+          }
+        },
+        "type": "object",
+        "required": [
+          "instrument_id",
+          "ticker",
+          "name",
+          "strategy_label",
+          "expense_ratio",
+          "return_1y",
+          "volatility_1y",
+          "sharpe_1y",
+          "max_drawdown_1y",
+          "cvar_95_12m",
+          "is_target"
+        ],
+        "title": "FundPeerItem",
+        "description": "Peer row for the Peers dossier tab."
+      },
+      "FundPeersResponse": {
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instrument Id"
+          },
+          "cohort_label": {
+            "type": "string",
+            "title": "Cohort Label"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FundPeerItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "classification_note": {
+            "type": "string",
+            "title": "Classification Note",
+            "default": "Labels da fonte podem conter erros do classificador autom\u00e1tico"
+          }
+        },
+        "type": "object",
+        "required": [
+          "instrument_id",
+          "cohort_label",
+          "count",
+          "items"
+        ],
+        "title": "FundPeersResponse",
+        "description": "Funds in the same peer cohort as the target fund."
       },
       "FundProfileResponse": {
         "properties": {
@@ -5074,6 +5796,254 @@
         ],
         "title": "FundRiskOut",
         "description": "The full precomputed risk snapshot (latest calc_date in the source)."
+      },
+      "FundScatterResponse": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "instrument_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Instrument Ids"
+          },
+          "names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Names"
+          },
+          "tickers": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Tickers"
+          },
+          "expected_returns": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Expected Returns"
+          },
+          "volatilities": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Volatilities"
+          },
+          "tail_risks": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Tail Risks"
+          },
+          "strategies": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Strategies"
+          },
+          "classification_note": {
+            "type": "string",
+            "title": "Classification Note",
+            "default": "Labels da fonte podem conter erros do classificador autom\u00e1tico"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "instrument_ids",
+          "names",
+          "tickers",
+          "expected_returns",
+          "volatilities",
+          "tail_risks",
+          "strategies"
+        ],
+        "title": "FundScatterResponse",
+        "description": "Columnar risk/return scatter payload for the funds landing page."
+      },
+      "FundSectorExposure": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "direct_pct": {
+            "type": "number",
+            "title": "Direct Pct"
+          },
+          "indirect_pct": {
+            "type": "number",
+            "title": "Indirect Pct"
+          },
+          "total_pct": {
+            "type": "number",
+            "title": "Total Pct"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "lookthrough",
+              "holdings"
+            ],
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "direct_pct",
+          "indirect_pct",
+          "total_pct",
+          "source"
+        ],
+        "title": "FundSectorExposure",
+        "description": "Sector exposure for Holdings tab bars/donut."
+      },
+      "FundTopHolding": {
+        "properties": {
+          "rank": {
+            "type": "integer",
+            "title": "Rank"
+          },
+          "issuer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issuer Name"
+          },
+          "cusip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cusip"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "asset_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Class"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          },
+          "gics_sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gics Sector"
+          },
+          "sector_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector Label"
+          },
+          "market_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Value"
+          },
+          "pct_of_nav": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pct Of Nav"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rank",
+          "issuer_name",
+          "cusip",
+          "isin",
+          "asset_class",
+          "sector",
+          "gics_sector",
+          "sector_label",
+          "market_value",
+          "pct_of_nav"
+        ],
+        "title": "FundTopHolding",
+        "description": "Top holding row enriched with a display sector label."
       },
       "FundsListResponse": {
         "properties": {

@@ -695,6 +695,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/funds/scatter": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Funds Scatter
+         * @description Columnar risk/return scatter payload for the funds landing page.
+         */
+        get: operations["get_funds_scatter_funds_scatter_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/funds/{instrument_id}": {
         parameters: {
             query?: never;
@@ -709,6 +729,66 @@ export interface paths {
          *     consolidated exposure lives in /funds/{id}/lookthrough).
          */
         get: operations["get_fund_profile_funds__instrument_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/funds/{instrument_id}/analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fund Analysis
+         * @description Render-ready analysis payload for one fund NAV series.
+         */
+        get: operations["get_fund_analysis_funds__instrument_id__analysis_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/funds/{instrument_id}/holdings/top": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fund Holdings Top
+         * @description Top holdings and sector breakdown for one fund.
+         */
+        get: operations["get_fund_holdings_top_funds__instrument_id__holdings_top_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/funds/{instrument_id}/peers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fund Peers
+         * @description Peer cohort by fund strategy/risk classification.
+         */
+        get: operations["get_fund_peers_funds__instrument_id__peers_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1549,6 +1629,136 @@ export interface components {
             available_count: number;
         };
         /**
+         * FundAnalysisHeader
+         * @description Render-ready fund header values from NAV history.
+         */
+        FundAnalysisHeader: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Ticker */
+            ticker: string | null;
+            /** Name */
+            name: string;
+            /** Last Nav */
+            last_nav: number;
+            /** Prev Nav */
+            prev_nav: number;
+            /**
+             * Change
+             * @description last_nav - prev_nav, in NAV units.
+             */
+            change: number;
+            /**
+             * Change Pct
+             * @description One-period NAV change as a decimal fraction.
+             */
+            change_pct: number;
+            /**
+             * As Of
+             * Format: date
+             */
+            as_of: string;
+        };
+        /**
+         * FundAnalysisParams
+         * @description Echo of the resolved fund-analysis request parameters.
+         */
+        FundAnalysisParams: {
+            /**
+             * Range
+             * @description Requested range preset.
+             * @enum {string}
+             */
+            range: "1M" | "6M" | "1Y" | "5Y" | "MAX";
+            /**
+             * Window
+             * @description Rolling window length in trading/NAV days.
+             */
+            window: number;
+            /**
+             * Start Date
+             * Format: date
+             * @description Resolved visible-range start date.
+             */
+            start_date: string;
+            /**
+             * End Date
+             * Format: date
+             * @description Latest NAV date used by the analysis.
+             */
+            end_date: string;
+        };
+        /**
+         * FundAnalysisResponse
+         * @description Single-call payload for the fund Performance dossier tab.
+         */
+        FundAnalysisResponse: {
+            params: components["schemas"]["FundAnalysisParams"];
+            header: components["schemas"]["FundAnalysisHeader"];
+            /**
+             * Growth Of 100
+             * @description [date, value] growth series rebased to 100.0.
+             */
+            growth_of_100: [
+                string,
+                number
+            ][];
+            /**
+             * Monthly Returns
+             * @description [month_end, monthly return] points as decimal fractions.
+             */
+            monthly_returns: [
+                string,
+                number
+            ][];
+            /**
+             * Rolling Volatility
+             * @description [date, annualized volatility] points as decimal fractions.
+             */
+            rolling_volatility: [
+                string,
+                number
+            ][];
+            /**
+             * Rolling Sharpe
+             * @description [date, rolling Sharpe] points using zero risk-free rate.
+             */
+            rolling_sharpe: [
+                string,
+                number
+            ][];
+            /**
+             * Drawdown
+             * @description [date, underwater drawdown] points as negative decimal fractions.
+             */
+            drawdown: [
+                string,
+                number
+            ][];
+            histogram: components["schemas"]["HistogramOut"];
+            stats: components["schemas"]["FundAnalysisStats"];
+        };
+        /**
+         * FundAnalysisStats
+         * @description Point statistics over in-range daily NAV returns only.
+         */
+        FundAnalysisStats: {
+            /** Annualized Volatility */
+            annualized_volatility: number;
+            /** Var 95 */
+            var_95: number;
+            /** Cvar 95 */
+            cvar_95: number;
+            /** Total Return */
+            total_return: number;
+            max_drawdown: components["schemas"]["DrawdownOut"];
+            best_day: components["schemas"]["DatedValue"];
+            worst_day: components["schemas"]["DatedValue"];
+        };
+        /**
          * FundClassOut
          * @description One share class of the fund's series (F8.6b).
          *
@@ -1626,6 +1836,27 @@ export interface components {
             pct_of_nav_total: number | null;
         };
         /**
+         * FundHoldingsTopResponse
+         * @description Top holdings plus sector breakdown for one fund series.
+         */
+        FundHoldingsTopResponse: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Series Id */
+            series_id: string;
+            /** Report Date */
+            report_date: string | null;
+            /** Top Holdings */
+            top_holdings: components["schemas"]["FundTopHolding"][];
+            /** Sector Breakdown */
+            sector_breakdown: components["schemas"]["FundSectorExposure"][];
+            /** Pct Of Nav Total */
+            pct_of_nav_total: number | null;
+        };
+        /**
          * FundListItem
          * @description One row of the funds table: identity + headline risk metrics.
          */
@@ -1698,6 +1929,59 @@ export interface components {
             date: string;
             /** Nav */
             nav: number | null;
+        };
+        /**
+         * FundPeerItem
+         * @description Peer row for the Peers dossier tab.
+         */
+        FundPeerItem: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Ticker */
+            ticker: string | null;
+            /** Name */
+            name: string;
+            /** Strategy Label */
+            strategy_label: string;
+            /** Expense Ratio */
+            expense_ratio: number | null;
+            /** Return 1Y */
+            return_1y: number | null;
+            /** Volatility 1Y */
+            volatility_1y: number | null;
+            /** Sharpe 1Y */
+            sharpe_1y: number | null;
+            /** Max Drawdown 1Y */
+            max_drawdown_1y: number | null;
+            /** Cvar 95 12M */
+            cvar_95_12m: number | null;
+            /** Is Target */
+            is_target: boolean;
+        };
+        /**
+         * FundPeersResponse
+         * @description Funds in the same peer cohort as the target fund.
+         */
+        FundPeersResponse: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Cohort Label */
+            cohort_label: string;
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["FundPeerItem"][];
+            /**
+             * Classification Note
+             * @default Labels da fonte podem conter erros do classificador automático
+             */
+            classification_note: string;
         };
         /**
          * FundProfileResponse
@@ -1844,6 +2128,80 @@ export interface components {
             upside_capture_1y: number | null;
             /** Equity Correlation 252D */
             equity_correlation_252d: number | null;
+        };
+        /**
+         * FundScatterResponse
+         * @description Columnar risk/return scatter payload for the funds landing page.
+         */
+        FundScatterResponse: {
+            /** Count */
+            count: number;
+            /** Instrument Ids */
+            instrument_ids: string[];
+            /** Names */
+            names: string[];
+            /** Tickers */
+            tickers: (string | null)[];
+            /** Expected Returns */
+            expected_returns: number[];
+            /** Volatilities */
+            volatilities: number[];
+            /** Tail Risks */
+            tail_risks: number[];
+            /** Strategies */
+            strategies: string[];
+            /**
+             * Classification Note
+             * @default Labels da fonte podem conter erros do classificador automático
+             */
+            classification_note: string;
+        };
+        /**
+         * FundSectorExposure
+         * @description Sector exposure for Holdings tab bars/donut.
+         */
+        FundSectorExposure: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Direct Pct */
+            direct_pct: number;
+            /** Indirect Pct */
+            indirect_pct: number;
+            /** Total Pct */
+            total_pct: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "lookthrough" | "holdings";
+        };
+        /**
+         * FundTopHolding
+         * @description Top holding row enriched with a display sector label.
+         */
+        FundTopHolding: {
+            /** Rank */
+            rank: number;
+            /** Issuer Name */
+            issuer_name: string | null;
+            /** Cusip */
+            cusip: string | null;
+            /** Isin */
+            isin: string | null;
+            /** Asset Class */
+            asset_class: string | null;
+            /** Sector */
+            sector: string | null;
+            /** Gics Sector */
+            gics_sector: string | null;
+            /** Sector Label */
+            sector_label: string | null;
+            /** Market Value */
+            market_value: number | null;
+            /** Pct Of Nav */
+            pct_of_nav: number | null;
         };
         /** FundsListResponse */
         FundsListResponse: {
@@ -4802,6 +5160,38 @@ export interface operations {
             };
         };
     };
+    get_funds_scatter_funds_scatter_get: {
+        parameters: {
+            query?: {
+                /** @description Maximum funds returned. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundScatterResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_fund_profile_funds__instrument_id__get: {
         parameters: {
             query?: never;
@@ -4820,6 +5210,110 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FundProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_analysis_funds__instrument_id__analysis_get: {
+        parameters: {
+            query?: {
+                /** @description Visible-range preset; MAX = full NAV history. */
+                range?: "1M" | "6M" | "1Y" | "5Y" | "MAX";
+                /** @description Rolling window in NAV days (10..252). */
+                window?: number;
+            };
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundAnalysisResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_holdings_top_funds__instrument_id__holdings_top_get: {
+        parameters: {
+            query?: {
+                /** @description Maximum top holdings returned. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundHoldingsTopResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_peers_funds__instrument_id__peers_get: {
+        parameters: {
+            query?: {
+                /** @description Maximum peer rows returned. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundPeersResponse"];
                 };
             };
             /** @description Validation Error */
