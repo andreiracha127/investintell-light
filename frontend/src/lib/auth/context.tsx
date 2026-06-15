@@ -17,10 +17,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const { data } = await insforge.auth.getCurrentUser();
-      if (cancelled) return;
-      const u = data?.user;
-      dispatch({ type: "resolved", user: u ? ({ id: u.id, email: u.email } as AuthUser) : null });
+      try {
+        const { data } = await insforge.auth.getCurrentUser();
+        if (cancelled) return;
+        const u = data?.user;
+        dispatch({ type: "resolved", user: u ? ({ id: u.id, email: u.email } as AuthUser) : null });
+      } catch {
+        if (!cancelled) dispatch({ type: "resolved", user: null });
+      }
     })();
     return () => { cancelled = true; };
   }, []);

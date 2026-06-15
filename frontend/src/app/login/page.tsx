@@ -7,7 +7,9 @@ import { useAuth } from "@/lib/auth/context";
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get("next") || "/";
+  const rawNext = params.get("next") || "/";
+  // Prevent post-auth open redirect: only allow same-origin relative paths.
+  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/";
   const { signIn } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

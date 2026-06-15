@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { createServerClient, setAuthCookies } from "@insforge/sdk/ssr";
 
 export async function POST(request: Request) {
-  const body = await request.json();
+  let body: { email: string; password: string };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "BAD_REQUEST", message: "Invalid request body" }, { status: 400 });
+  }
   const client = createServerClient();
   const { data, error } = await client.auth.signInWithPassword(body);
 
