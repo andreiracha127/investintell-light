@@ -375,6 +375,8 @@ def solve_min_cvar(
     cap: float | None = DEFAULT_CAP,
     min_weight: float | None = None,
     bounds: BoundsBundle | None = None,
+    current_weights: np.ndarray | None = None,
+    turnover_lambda: float = 0.0,
     ret_floor: float | None = None,
     mu: np.ndarray | None = None,
 ) -> tuple[np.ndarray, str]:
@@ -402,6 +404,20 @@ def solve_min_cvar(
             "min_cvar: ret_floor requires an explicit mu vector (BL posterior) — "
             "historical means are never estimated here (gate G5)"
         )
+    if turnover_lambda < 0:
+        raise OptimizerError(f"min_cvar: turnover_lambda must be >= 0, got {turnover_lambda}")
+    w0: np.ndarray | None = None
+    if turnover_lambda > 0:
+        if current_weights is None:
+            raise OptimizerError(
+                "min_cvar: turnover_lambda requires current_weights (the existing "
+                "portfolio allocation to penalize trading away from)"
+            )
+        w0 = np.asarray(current_weights, dtype=float).ravel()
+        if w0.shape != (n,):
+            raise OptimizerError(
+                f"min_cvar: current_weights has shape {w0.shape}, expected ({n},)"
+            )
 
     w = cp.Variable(n)
     z = cp.Variable()
@@ -417,5 +433,10 @@ def solve_min_cvar(
         if mu_arr.shape != (n,):
             raise OptimizerError(f"min_cvar: mu has shape {mu_arr.shape}, expected ({n},)")
         cons.append(mu_arr @ w >= ret_floor)
-    problem = cp.Problem(cp.Minimize(cvar), cons)
+
+    objective_expr = cvar
+    if turnover_lambda > 0 and w0 is not None:
+        objective_expr = cvar + turnover_lambda * cp.norm1(w - w0)
+
+    problem = cp.Problem(cp.Minimize(objective_expr), cons)
     return _finalize(problem, w, "min_cvar")

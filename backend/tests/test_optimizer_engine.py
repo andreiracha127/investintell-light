@@ -257,3 +257,41 @@ def test_min_cvar_with_bounds_block_budget_binds() -> None:
     )
     _assert_valid(weights, status)
     assert weights[0] + weights[1] <= 0.20 + 1e-6
+
+
+# ── T2C-3: L1 turnover penalty ──────────────────────────────────────────────
+
+
+def test_min_cvar_turnover_penalty_pulls_toward_current() -> None:
+    scenarios = _random_scenarios(t=600, n=4, seed=7)
+    current = np.array([0.25, 0.25, 0.25, 0.25])
+    w_free, _ = engine.solve_min_cvar(scenarios, cap=None)
+    w_sticky, status = engine.solve_min_cvar(
+        scenarios, cap=None, current_weights=current, turnover_lambda=5.0
+    )
+    _assert_valid(w_sticky, status)
+    assert np.abs(w_sticky - current).sum() < np.abs(w_free - current).sum()
+
+
+def test_min_cvar_turnover_zero_lambda_matches_unpenalized() -> None:
+    scenarios = _random_scenarios(t=600, n=4, seed=7)
+    current = np.array([0.10, 0.20, 0.30, 0.40])
+    w0, _ = engine.solve_min_cvar(scenarios, cap=None)
+    w1, _ = engine.solve_min_cvar(
+        scenarios, cap=None, current_weights=current, turnover_lambda=0.0
+    )
+    np.testing.assert_allclose(w0, w1, atol=1e-4)
+
+
+def test_min_cvar_turnover_requires_current_weights() -> None:
+    scenarios = _random_scenarios(t=200, n=3)
+    with pytest.raises(engine.OptimizerError, match="turnover_lambda requires"):
+        engine.solve_min_cvar(scenarios, turnover_lambda=1.0)
+
+
+def test_min_cvar_turnover_current_weights_shape_checked() -> None:
+    scenarios = _random_scenarios(t=200, n=3)
+    with pytest.raises(engine.OptimizerError, match="current_weights"):
+        engine.solve_min_cvar(
+            scenarios, current_weights=np.array([0.5, 0.5]), turnover_lambda=1.0
+        )
