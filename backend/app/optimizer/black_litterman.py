@@ -314,3 +314,68 @@ def solve_bl_utility(
     objective = cp.Maximize(mu_arr @ w - (delta / 2.0) * cp.quad_form(w, cp.psd_wrap(sigma_ann)))
     problem = cp.Problem(objective, base_constraints(w, cap, min_weight))
     return _finalize(problem, w, "bl_utility")
+
+
+def _kappa_from_chi2(
+    confidence: float, n: int, uncertainty_level: float | None
+) -> float:
+    """Ellipsoid radius κ = √(chi2.ppf(confidence, df=n)), optionally scaled.
+
+    The (1-confidence) ellipsoidal confidence region of a μ estimate has
+    half-width √(χ²_{n}(confidence)) in the Σ-metric (legacy
+    optimizer_service lines 1471-1472). ``uncertainty_level`` (>0) linearly
+    rescales the radius; None ⇒ 1.0.
+    """
+    from scipy.stats import chi2
+
+    if not 0 < confidence < 1:
+        raise OptimizerError(f"bl_robust: confidence must be in (0, 1), got {confidence}")
+    if n < 1:
+        raise OptimizerError("bl_robust: n must be >= 1")
+    kappa = float(np.sqrt(chi2.ppf(confidence, df=n)))
+    if uncertainty_level is not None:
+        if uncertainty_level <= 0:
+            raise OptimizerError(
+                f"bl_robust: uncertainty_level must be > 0, got {uncertainty_level}"
+            )
+        kappa *= float(uncertainty_level)
+    return kappa
+
+
+def solve_bl_robust(
+    mu_ann: np.ndarray,
+    sigma_ann: np.ndarray,
+    cap: float | None = None,
+    min_weight: float | None = None,
+    confidence: float = 0.95,
+    uncertainty_level: float | None = None,
+) -> tuple[np.ndarray, str]:
+    """Robust max-return under ellipsoidal μ-uncertainty (SOCP).
+
+        max  μᵀw − κ·‖Lᵀw‖₂      s.t. long-only, sum(w)=1, optional cap/min
+
+    where L = cholesky(Σ) and κ = √(chi2.ppf(confidence, df=n)) scaled by
+    ``uncertainty_level``. Gate G5: μ is the BL posterior (or π) — never a
+    sample mean. Ported from legacy optimizer_service Phase-2 robust RU.
+
+    Infeasibility / non-optimal solve raise ``OptimizerError`` (→ 422).
+    """
+    sigma_ann = _validate_sigma(sigma_ann, "bl_robust")
+    mu_arr = np.asarray(mu_ann, dtype=float).ravel()
+    n = sigma_ann.shape[0]
+    if mu_arr.shape != (n,):
+        raise OptimizerError(f"bl_robust: mu has shape {mu_arr.shape}, expected ({n},)")
+    _check_constraint_params(n, cap, min_weight)
+
+    try:
+        chol = np.linalg.cholesky(sigma_ann)
+    except np.linalg.LinAlgError:
+        eigvals, eigvecs = np.linalg.eigh(sigma_ann)
+        floored = np.maximum(eigvals, 1e-12)
+        chol = eigvecs @ np.diag(np.sqrt(floored))
+
+    kappa = _kappa_from_chi2(confidence, n, uncertainty_level)
+    w = cp.Variable(n)
+    objective = cp.Maximize(mu_arr @ w - kappa * cp.norm(chol.T @ w, 2))
+    problem = cp.Problem(objective, base_constraints(w, cap, min_weight))
+    return _finalize(problem, w, "bl_robust", cap=cap, min_weight=min_weight)
