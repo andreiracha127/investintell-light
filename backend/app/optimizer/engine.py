@@ -440,3 +440,129 @@ def solve_min_cvar(
 
     problem = cp.Problem(cp.Minimize(objective_expr), cons)
     return _finalize(problem, w, "min_cvar")
+
+
+def _realized_cvar(
+    weights: np.ndarray, scenarios: np.ndarray, alpha: float
+) -> float:
+    """Empirical CVaR_α (loss-space, positive = loss) of realized weights.
+
+    Exact Rockafellar-Uryasev estimator (port of the legacy
+    ``ru_cvar_lp.realized_cvar_from_weights``): the LP optimum at the k-th
+    worst loss. Used as the post-solve verifier for the CVaR-constraint path,
+    where the in-LP (z, slack) auxiliaries only UPPER-BOUND the CVaR and can
+    over-estimate, so the cap is re-checked on the realized weights. Uses
+    ``np.partition`` (no sample mean) — gate G5 structural guard safe.
+    """
+    weights = np.asarray(weights, dtype=float).ravel()
+    scenarios = np.asarray(scenarios, dtype=float)
+    t = scenarios.shape[0]
+    if t == 0:
+        raise OptimizerError("scenarios must have at least one row")
+    if not 0 < alpha < 1:
+        raise OptimizerError(f"alpha must be in (0, 1), got {alpha}")
+    losses = -scenarios @ weights
+    k = max(int(np.ceil(np.round((1.0 - alpha) * t, 8))), 1)
+    var_threshold = float(np.partition(losses, -k)[-k])
+    u = np.maximum(losses - var_threshold, 0.0)
+    return float(var_threshold + u.sum() / ((1.0 - alpha) * t))
+
+
+_SOLVER_LADDER = (cp.CLARABEL, cp.SCS)
+
+
+def _solve_with_ladder(
+    problem: cp.Problem, w: cp.Variable, label: str
+) -> tuple[np.ndarray, str]:
+    """Solve trying CLARABEL then SCS (legacy optimizer_service ladder).
+
+    Accepts ``optimal`` and ``optimal_inaccurate`` (SCS often returns the
+    latter on a feasible problem). Any other terminal status across BOTH
+    solvers is a fail-loud ``OptimizerError``. Reimplements ``_finalize``'s
+    noise cleanup / sum=1 verification because ``_finalize`` calls
+    ``problem.solve()`` with no solver argument.
+    """
+    last_status = "no_solver_ran"
+    for solver in _SOLVER_LADDER:
+        try:
+            problem.solve(solver=solver)
+        except cp.error.SolverError:
+            continue
+        last_status = str(problem.status)
+        if last_status in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE) and w.value is not None:
+            weights = np.asarray(w.value, dtype=float).ravel()
+            weights[np.abs(weights) < 1e-10] = 0.0
+            if (weights < -_WEIGHT_ATOL).any():
+                continue
+            weights = np.clip(weights, 0.0, None)
+            total = float(weights.sum())
+            if total <= 0 or abs(total - 1.0) > 1e-3:
+                continue
+            return weights / total, "optimal"
+    raise OptimizerError(
+        f"{label}: no solver in {list(_SOLVER_LADDER)} produced a usable "
+        f"solution (last status '{last_status}')"
+    )
+
+
+def solve_max_return_cvar_capped(
+    scenarios: np.ndarray,
+    mu: np.ndarray,
+    cvar_limit: float,
+    alpha: float = DEFAULT_CVAR_ALPHA,
+    cap: float | None = DEFAULT_CAP,
+    min_weight: float | None = None,
+    bounds: BoundsBundle | None = None,
+    cvar_tol: float = 1e-4,
+) -> tuple[np.ndarray, str]:
+    """Max-return s.t. CVaR_α(w) ≤ ``cvar_limit`` (Rockafellar-Uryasev cap).
+
+        max  μᵀw      s.t.  z + 1/((1−α)·T)·Σ max(−rₜᵀw − z, 0) ≤ cvar_limit,
+                            long-only, sum(w)=1, caps/min/blocks.
+
+    Gate G5: ``mu`` (annualized expected returns) is REQUIRED and never
+    estimated here — by contract it is the Black-Litterman posterior. The
+    in-LP CVaR auxiliaries only upper-bound the realized CVaR, so the solved
+    weights are re-verified with ``_realized_cvar``; a breach beyond
+    ``cvar_tol`` fails loud. Solver ladder: CLARABEL then SCS.
+    """
+    scenarios = np.asarray(scenarios, dtype=float)
+    if scenarios.ndim != 2:
+        raise OptimizerError(f"scenarios must be T×n, got ndim={scenarios.ndim}")
+    if not np.isfinite(scenarios).all():
+        raise OptimizerError("scenarios contain NaN/inf")
+    t, n = scenarios.shape
+    if t < 10:
+        raise OptimizerError(f"max_return_cvar requires at least 10 scenarios, got {t}")
+    if not 0 < alpha < 1:
+        raise OptimizerError(f"alpha must be in (0, 1), got {alpha}")
+    if mu is None:
+        raise OptimizerError(
+            "max_return_cvar: mu is required (BL posterior) — historical means are "
+            "never estimated here (gate G5)"
+        )
+    mu_arr = np.asarray(mu, dtype=float).ravel()
+    if mu_arr.shape != (n,):
+        raise OptimizerError(f"max_return_cvar: mu has shape {mu_arr.shape}, expected ({n},)")
+    if cvar_limit <= 0:
+        raise OptimizerError(f"max_return_cvar: cvar_limit must be > 0, got {cvar_limit}")
+
+    w = cp.Variable(n)
+    z = cp.Variable()
+    losses = -scenarios @ w
+    cvar_expr = z + cp.sum(cp.pos(losses - z)) / ((1 - alpha) * t)
+    if bounds is not None:
+        cons = bounds_constraints(w, bounds.cap_vec, bounds.min_vec, bounds.blocks)
+    else:
+        _check_constraint_params(n, cap, min_weight)
+        cons = base_constraints(w, cap, min_weight)
+    cons.append(cvar_expr <= cvar_limit)
+    problem = cp.Problem(cp.Maximize(mu_arr @ w), cons)
+    weights, status = _solve_with_ladder(problem, w, "max_return_cvar")
+    realized = _realized_cvar(weights, scenarios, alpha)
+    if realized > cvar_limit + cvar_tol:
+        raise OptimizerError(
+            f"max_return_cvar: solved weights realize CVaR {realized:.6f} > limit "
+            f"{cvar_limit} (tol {cvar_tol}) — the solver returned an inaccurate point"
+        )
+    return weights, status

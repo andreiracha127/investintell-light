@@ -295,3 +295,55 @@ def test_min_cvar_turnover_current_weights_shape_checked() -> None:
         engine.solve_min_cvar(
             scenarios, current_weights=np.array([0.5, 0.5]), turnover_lambda=1.0
         )
+
+
+# ── T2C-5: CVaR-as-constraint max-return ────────────────────────────────────
+
+
+def _mu_and_scenarios(n: int = 4, t: int = 600, seed: int = 3):
+    rng = np.random.default_rng(seed)
+    vols = np.array([0.010, 0.012, 0.020, 0.030])[:n]
+    scen = rng.normal(0.0, 1.0, size=(t, n)) * vols
+    mu = np.array([0.04, 0.06, 0.10, 0.14])[:n]
+    return mu, scen
+
+
+def test_max_return_cvar_capped_optimal_and_caps() -> None:
+    mu, scen = _mu_and_scenarios()
+    w, status = engine.solve_max_return_cvar_capped(
+        scen, mu=mu, cvar_limit=0.05, alpha=0.95, cap=0.5
+    )
+    _assert_valid(w, status, cap=0.5)
+
+
+def test_max_return_cvar_capped_tighter_limit_lowers_return() -> None:
+    mu, scen = _mu_and_scenarios()
+    w_loose, _ = engine.solve_max_return_cvar_capped(
+        scen, mu=mu, cvar_limit=0.08, alpha=0.95, cap=None
+    )
+    w_tight, _ = engine.solve_max_return_cvar_capped(
+        scen, mu=mu, cvar_limit=0.02, alpha=0.95, cap=None
+    )
+    assert float(mu @ w_tight) <= float(mu @ w_loose) + 1e-6
+
+
+def test_max_return_cvar_capped_realized_cvar_within_limit() -> None:
+    mu, scen = _mu_and_scenarios()
+    limit = 0.03
+    w, _ = engine.solve_max_return_cvar_capped(
+        scen, mu=mu, cvar_limit=limit, alpha=0.95, cap=None
+    )
+    realized = engine._realized_cvar(w, scen, alpha=0.95)
+    assert realized <= limit + 1e-4
+
+
+def test_max_return_cvar_capped_requires_mu() -> None:
+    _, scen = _mu_and_scenarios()
+    with pytest.raises(engine.OptimizerError, match="mu"):
+        engine.solve_max_return_cvar_capped(scen, mu=None, cvar_limit=0.05)  # type: ignore[arg-type]
+
+
+def test_max_return_cvar_capped_rejects_nonpositive_limit() -> None:
+    mu, scen = _mu_and_scenarios()
+    with pytest.raises(engine.OptimizerError, match="cvar_limit"):
+        engine.solve_max_return_cvar_capped(scen, mu=mu, cvar_limit=0.0)
