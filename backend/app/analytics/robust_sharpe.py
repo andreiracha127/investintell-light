@@ -108,7 +108,7 @@ def _opdyke_variance(sr_period: float, skew: float, excess_kurt: float, T: int) 
     ) / T
 
 
-def _jackknife_se(excess_returns: "NDArray[Any]", periods_per_year: int) -> float:
+def _jackknife_se(excess_returns: NDArray[Any], periods_per_year: int) -> float:
     """Leave-one-out (Quenouille) jackknife SE for the *annualized* Sharpe.
 
     SE = sqrt((T - 1) * var_pop), where var_pop is the population variance of
@@ -138,7 +138,7 @@ def _jackknife_se(excess_returns: "NDArray[Any]", periods_per_year: int) -> floa
 
 
 def robust_sharpe(
-    returns: "NDArray[Any]",
+    returns: NDArray[Any],
     rf_rate: float | None,
     ci_method: str = "closed_form",
     alpha_cf: float = 0.05,
