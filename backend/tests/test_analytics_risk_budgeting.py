@@ -284,6 +284,7 @@ def test_implied_returns_reject_nonfinite_excess_inputs() -> None:
 
 # ── public surface + gate G5 structural guard ────────────────────────────────
 
+import ast  # noqa: E402
 import inspect  # noqa: E402
 import pathlib  # noqa: E402
 
@@ -321,3 +322,15 @@ def test_g5_no_sample_mean_of_scenarios_in_source() -> None:
     # The two sanctioned ES-kernel means must be present.
     assert "tail_assets.mean(axis=0)" in source
     assert "port[mask].mean()" in source
+    # CEILING (defense in depth): strip the module docstring (which echoes both
+    # kernel calls in prose) and assert the EXECUTABLE code contains exactly the
+    # two sanctioned .mean( calls AND NOTHING ELSE. A denylist alone is too weak:
+    # an unsanctioned column mean under any other spelling (e.g. data.mean(axis=0),
+    # returns.mean(), tail.mean()) would slip past it but is caught here.
+    tree = ast.parse(source)
+    module_doc = ast.get_docstring(tree, clean=False) or ""
+    code_only = source.replace(module_doc, "", 1)
+    assert code_only.count(".mean(") == 2, (
+        "risk_budgeting must contain exactly the two sanctioned ES-kernel .mean( "
+        "calls (tail_assets.mean(axis=0), port[mask].mean()) and nothing else"
+    )
