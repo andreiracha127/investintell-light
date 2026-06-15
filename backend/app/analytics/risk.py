@@ -19,6 +19,14 @@ from app.analytics.returns import align_returns
 
 _MIN_TAIL_POINTS = 10
 
+# Canonical annual risk-free rate (matches the worker risk_metrics rf handling
+# and the legacy return_statistics_service.DEFAULT_RISK_FREE_RATE = 0.04). Used
+# when a request carries no explicit rate.
+DEFAULT_RISK_FREE_RATE = 0.04
+
+# Risk-adjusted ratios need a meaningful sample; reuse the tail-points floor.
+_MIN_RATIO_POINTS = _MIN_TAIL_POINTS
+
 
 @dataclass(frozen=True)
 class DrawdownResult:
@@ -59,6 +67,36 @@ def annualized_volatility(returns: pd.Series, periods_per_year: int = 252) -> fl
     reject_nan(returns, "annualized_volatility")
     vol = float(returns.std(ddof=1, skipna=False)) * math.sqrt(periods_per_year)
     return vol
+
+
+def sharpe_ratio(
+    returns: pd.Series,
+    risk_free_rate: float = DEFAULT_RISK_FREE_RATE,
+    periods_per_year: int = 252,
+) -> float:
+    """Annualized Sharpe ratio of a daily return series.
+
+    ``excess = returns - risk_free_rate / periods_per_year``; the ratio is
+    ``mean(excess) / std(excess, ddof=1) * sqrt(periods_per_year)`` — the
+    canonical arithmetic-mean daily-excess form used by the risk_metrics
+    worker and the legacy return_statistics_service. Inputs and ``risk_free_rate``
+    are decimal fractions (0.04 = 4%), never 0-100; the result is unitless.
+
+    Raises:
+        ValueError: if fewer than 10 returns are supplied, the input contains
+            NaN/inf values, or the excess-return volatility is 0 (Sharpe
+            undefined for a constant series).
+    """
+    if len(returns) < _MIN_RATIO_POINTS:
+        raise ValueError(
+            f"sharpe_ratio requires at least {_MIN_RATIO_POINTS} returns, got {len(returns)}"
+        )
+    reject_nan(returns, "sharpe_ratio")
+    excess = returns.to_numpy(dtype=float) - risk_free_rate / periods_per_year
+    if float(np.ptp(excess)) == 0:
+        raise ValueError("sharpe_ratio is undefined: zero volatility (constant series)")
+    vol = float(np.std(excess, ddof=1))
+    return float(np.mean(excess) / vol * math.sqrt(periods_per_year))
 
 
 def historical_var(returns: pd.Series, confidence: float = 0.95) -> float:

@@ -28,6 +28,7 @@ from app.analytics.risk import (
     _MIN_TAIL_POINTS as MIN_IN_RANGE_RETURNS,
 )
 from app.analytics.risk import (
+    DEFAULT_RISK_FREE_RATE,
     BestWorst,
     DrawdownResult,
     annualized_volatility,
@@ -38,6 +39,7 @@ from app.analytics.risk import (
     historical_var,
     max_drawdown,
     realized_cvar,
+    sharpe_ratio,
 )
 from app.analytics.rolling import (
     rolling_beta,
@@ -48,6 +50,7 @@ from app.analytics.rolling import (
 __all__ = [
     "BestWorst",
     "DEFAULT_INITIAL_NAV",
+    "DEFAULT_RISK_FREE_RATE",
     "DrawdownResult",
     "Histogram",
     "MIN_IN_RANGE_RETURNS",
@@ -69,6 +72,7 @@ __all__ = [
     "realized_cvar",
     "return_histogram",
     "risk_contributions",
+    "sharpe_ratio",
     "rolling_beta",
     "rolling_correlation",
     "rolling_volatility",

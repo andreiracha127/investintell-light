@@ -323,3 +323,46 @@ def test_realized_cvar_bad_confidence_raises() -> None:
 def test_realized_cvar_nan_input_raises() -> None:
     with pytest.raises(ValueError, match="NaN"):
         realized_cvar(_dated([0.01, np.nan, -0.02] + [0.0] * 7))
+
+
+# --- Sharpe ratio (T1A-1) ----------------------------------------------------
+
+from app.analytics import DEFAULT_RISK_FREE_RATE, sharpe_ratio  # noqa: E402
+
+
+def test_sharpe_ratio_matches_manual_formula() -> None:
+    """sharpe = mean(excess)/std(excess, ddof=1) * sqrt(252), excess = r - rf/252."""
+    returns = _random_returns(252, seed=11)
+    rf = 0.04
+    excess = returns.to_numpy(dtype=float) - rf / 252
+    expected = float(np.mean(excess) / np.std(excess, ddof=1) * math.sqrt(252))
+    assert sharpe_ratio(returns, risk_free_rate=rf) == pytest.approx(expected, rel=1e-12)
+
+
+def test_sharpe_ratio_default_rf_is_canonical() -> None:
+    assert DEFAULT_RISK_FREE_RATE == 0.04
+    returns = _random_returns(252, seed=12)
+    assert sharpe_ratio(returns) == pytest.approx(
+        sharpe_ratio(returns, risk_free_rate=0.04), rel=1e-12
+    )
+
+
+def test_sharpe_ratio_higher_for_higher_mean() -> None:
+    base = _random_returns(252, seed=13)
+    shifted = base + 0.001  # shift mean up, same vol
+    assert sharpe_ratio(shifted) > sharpe_ratio(base)
+
+
+def test_sharpe_ratio_short_input_raises() -> None:
+    with pytest.raises(ValueError, match="at least 10"):
+        sharpe_ratio(_dated([0.01] * 9))
+
+
+def test_sharpe_ratio_zero_vol_raises() -> None:
+    with pytest.raises(ValueError, match="zero volatility|undefined"):
+        sharpe_ratio(_dated([0.01] * 30))
+
+
+def test_sharpe_ratio_nan_input_raises() -> None:
+    with pytest.raises(ValueError, match="NaN"):
+        sharpe_ratio(_dated([0.01, np.nan, 0.02] * 5))
