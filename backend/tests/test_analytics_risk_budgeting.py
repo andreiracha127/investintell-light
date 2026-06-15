@@ -280,3 +280,44 @@ def test_implied_returns_reject_nonfinite_excess_inputs() -> None:
         rb.etl_implied_returns(
             w, scen, portfolio_return_ann=0.08, risk_free_rate=np.inf
         )
+
+
+# ── public surface + gate G5 structural guard ────────────────────────────────
+
+import inspect  # noqa: E402
+import pathlib  # noqa: E402
+
+
+def test_public_symbols_exported_from_analytics() -> None:
+    import app.analytics as analytics
+
+    for name in (
+        "variance_risk_budget",
+        "etl_risk_budget",
+        "portfolio_starr",
+        "sharpe_implied_returns",
+        "etl_implied_returns",
+        "VarianceRiskBudget",
+        "EtlRiskBudget",
+    ):
+        assert hasattr(analytics, name), f"{name} not exported from app.analytics"
+        assert name in analytics.__all__, f"{name} missing from app.analytics.__all__"
+
+
+def test_g5_no_sample_mean_of_scenarios_in_source() -> None:
+    """Gate G5: risk_budgeting never estimates a mean OF A SCENARIO COLUMN.
+
+    The ES tail mean (tail_assets.mean(axis=0) / port[mask].mean()) is the
+    legitimate Euler ES kernel, not an expected-return estimate. The forbidden
+    patterns are a 'historical mean' helper, or a full-column scenario mean
+    feeding an implied/expected return. We assert the only two .mean( calls in
+    the module are the two sanctioned ES-kernel calls.
+    """
+    source = pathlib.Path(inspect.getfile(rb)).read_text(encoding="utf-8")
+    assert "historical_mean" not in source.lower()
+    assert "scenarios.mean(" not in source
+    assert "scen.mean(" not in source
+    assert "np.average" not in source
+    # The two sanctioned ES-kernel means must be present.
+    assert "tail_assets.mean(axis=0)" in source
+    assert "port[mask].mean()" in source
