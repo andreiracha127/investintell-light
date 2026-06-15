@@ -5,11 +5,14 @@ import pandas as pd
 import pytest
 
 from app.analytics import (
+    down_proficiency_ratio,
     geometric_mean_monthly,
     jensen_alpha,
     omega_ratio,
+    r_squared,
     sterling_ratio,
     treynor_ratio,
+    up_proficiency_ratio,
 )
 
 
@@ -105,3 +108,58 @@ def test_treynor_requires_min_months() -> None:
     bench = _daily(210, seed=8)
     with pytest.raises(ValueError, match="at least 12"):
         treynor_ratio(daily, bench)
+
+
+def test_proficiency_ratios_hit_rate() -> None:
+    """Up = fraction of benchmark-UP months the fund beat the benchmark;
+    Down = same over benchmark-DOWN months. Both are decimal fractions in [0,1]."""
+    daily = _daily(504, seed=11)
+    bench = _daily(504, seed=12)
+    from app.analytics import to_monthly_returns
+
+    r = to_monthly_returns(daily)
+    bm = to_monthly_returns(bench)
+    n = min(len(r), len(bm))
+    rv = r.to_numpy()[:n]
+    bv = bm.to_numpy()[:n]
+    up_mask = bv >= 0
+    down_mask = bv < 0
+    exp_up = float(np.sum(rv[up_mask] > bv[up_mask]) / np.sum(up_mask))
+    exp_down = float(np.sum(rv[down_mask] > bv[down_mask]) / np.sum(down_mask))
+    assert up_proficiency_ratio(daily, bench) == pytest.approx(exp_up, abs=1e-9)
+    assert down_proficiency_ratio(daily, bench) == pytest.approx(exp_down, abs=1e-9)
+    assert 0.0 <= up_proficiency_ratio(daily, bench) <= 1.0
+    assert 0.0 <= down_proficiency_ratio(daily, bench) <= 1.0
+
+
+def test_r_squared_is_correlation_squared() -> None:
+    daily = _daily(504, seed=13)
+    bench = _daily(504, seed=14)
+    from app.analytics import correlation, to_monthly_returns
+
+    r = to_monthly_returns(daily)
+    bm = to_monthly_returns(bench)
+    n = min(len(r), len(bm))
+    corr = correlation(r.iloc[:n], bm.iloc[:n])
+    assert r_squared(daily, bench) == pytest.approx(corr**2, abs=1e-9)
+    assert 0.0 <= r_squared(daily, bench) <= 1.0
+
+
+def test_proficiency_requires_min_months() -> None:
+    daily = _daily(210, seed=15)   # 10 months
+    bench = _daily(210, seed=16)
+    with pytest.raises(ValueError, match="at least 12"):
+        up_proficiency_ratio(daily, bench)
+
+
+def test_up_proficiency_no_up_months_raises() -> None:
+    """A benchmark that is never up over the aligned months -> undefined up-ratio.
+    The benchmark VARIES day to day (nonzero monthly variance) but every month
+    compounds negative, so the up-months guard fires, not a variance guard."""
+    idx = pd.date_range("2020-01-01", periods=12 * 21, freq="B")
+    daily = pd.Series(np.full(12 * 21, 0.001), index=idx)
+    rng = np.random.default_rng(99)
+    bench_vals = -np.abs(rng.normal(0.002, 0.001, 12 * 21)) - 0.0005  # every day < 0
+    bench = pd.Series(bench_vals, index=idx)
+    with pytest.raises(ValueError, match="no benchmark-up months"):
+        up_proficiency_ratio(daily, bench)

@@ -66,11 +66,14 @@ from app.analytics.robust_sharpe import (
 )
 from app.analytics.return_statistics import (
     ReturnStatistics,
+    down_proficiency_ratio,
     geometric_mean_monthly,
     jensen_alpha,
     omega_ratio,
+    r_squared,
     sterling_ratio,
     treynor_ratio,
+    up_proficiency_ratio,
 )
 from app.analytics.rolling import (
     rolling_annualized_return,
@@ -104,6 +107,7 @@ __all__ = [
     "correlation_matrix",
     "cumulative_return_series",
     "diversification_ratio",
+    "down_proficiency_ratio",
     "drawdown_episodes",
     "effective_number_of_bets",
     "enb_from_contributions",
@@ -120,6 +124,7 @@ __all__ = [
     "portfolio_nav",
     "portfolio_returns",
     "portfolio_starr",
+    "r_squared",
     "realized_cvar",
     "return_histogram",
     "risk_contributions",
@@ -136,6 +141,7 @@ __all__ = [
     "to_monthly_returns",
     "total_return",
     "treynor_ratio",
+    "up_proficiency_ratio",
     "variance_risk_budget",
     "weight_series",
     "weights_to_quantities",

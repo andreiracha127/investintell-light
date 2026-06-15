@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 
 from app.analytics.returns import align_returns, to_monthly_returns
-from app.analytics.risk import beta, max_drawdown
+from app.analytics.risk import beta, correlation, max_drawdown
 
 _MIN_DAYS_ONE_YEAR = 252
 _MIN_MONTHS_REGRESSION = 12
@@ -157,6 +157,86 @@ def jensen_alpha(
         np.mean(rv) - rf_monthly - beta_m * (np.mean(bm) - rf_monthly)
     )
     return monthly_alpha * _MONTHS_PER_YEAR
+
+
+def _aligned_monthly(
+    daily_returns: pd.Series, benchmark_returns: pd.Series
+) -> tuple[np.ndarray, np.ndarray]:
+    """Aligned monthly return arrays (no beta). Internal helper for proficiency.
+
+    Raises:
+        ValueError: if fewer than 12 common months.
+    """
+    r = to_monthly_returns(daily_returns)
+    bm = to_monthly_returns(benchmark_returns)
+    ar, abm = align_returns(r, bm)
+    if len(ar) < _MIN_MONTHS_REGRESSION:
+        raise ValueError(
+            f"requires at least {_MIN_MONTHS_REGRESSION} common months, got {len(ar)}"
+        )
+    return ar.to_numpy(dtype=float), abm.to_numpy(dtype=float)
+
+
+def up_proficiency_ratio(
+    daily_returns: pd.Series, benchmark_returns: pd.Series
+) -> float:
+    """Fraction of benchmark-UP months in which the fund beat the benchmark.
+
+    Decimal fraction in [0, 1] (0.6 = beat the benchmark in 60% of up months).
+
+    Raises:
+        ValueError: if fewer than 12 common months, NaN input, or there are no
+            benchmark-up months (ratio undefined).
+    """
+    rv, bm = _aligned_monthly(daily_returns, benchmark_returns)
+    up_mask = bm >= 0.0
+    n_up = int(np.sum(up_mask))
+    if n_up == 0:
+        raise ValueError("up_proficiency_ratio is undefined: no benchmark-up months")
+    return float(np.sum(rv[up_mask] > bm[up_mask]) / n_up)
+
+
+def down_proficiency_ratio(
+    daily_returns: pd.Series, benchmark_returns: pd.Series
+) -> float:
+    """Fraction of benchmark-DOWN months in which the fund beat the benchmark.
+
+    Decimal fraction in [0, 1].
+
+    Raises:
+        ValueError: if fewer than 12 common months, NaN input, or there are no
+            benchmark-down months (ratio undefined).
+    """
+    rv, bm = _aligned_monthly(daily_returns, benchmark_returns)
+    down_mask = bm < 0.0
+    n_down = int(np.sum(down_mask))
+    if n_down == 0:
+        raise ValueError(
+            "down_proficiency_ratio is undefined: no benchmark-down months"
+        )
+    return float(np.sum(rv[down_mask] > bm[down_mask]) / n_down)
+
+
+def r_squared(daily_returns: pd.Series, benchmark_returns: pd.Series) -> float:
+    """R-squared of the monthly fund-vs-benchmark regression.
+
+    Equals the square of the Pearson correlation of the aligned monthly series
+    (R² = ρ² for a single-factor OLS), in [0, 1].
+
+    Raises:
+        ValueError: if fewer than 12 common months, NaN input, or either
+            monthly series has zero variance (correlation undefined).
+    """
+    r = to_monthly_returns(daily_returns)
+    bm = to_monthly_returns(benchmark_returns)
+    ar, abm = align_returns(r, bm)
+    if len(ar) < _MIN_MONTHS_REGRESSION:
+        raise ValueError(
+            f"r_squared requires at least {_MIN_MONTHS_REGRESSION} common "
+            f"months, got {len(ar)}"
+        )
+    rho = correlation(ar, abm)
+    return rho * rho
 
 
 @dataclass(frozen=True)
