@@ -67,6 +67,17 @@ Objective = Literal[
     "bl_utility", "max_return_cvar",
 ]
 
+Mandate = Literal[
+    "conservative",
+    "defensive",
+    "moderate_conservative",
+    "moderate",
+    "balanced",
+    "moderate_aggressive",
+    "aggressive",
+    "growth",
+]
+
 # Candidate-universe selection vocabulary — mirrors the GET /funds filters and
 # sort whitelist so a universe optimization reuses the same catalog semantics.
 FundTypeFilter = Literal["etf", "mmf", "mutual_fund"]
@@ -166,6 +177,9 @@ class OptimizeRequest(BaseModel):
     # funds only — equities have no market cap in the builder yet).
     views: list[ViewIn] | None = None
     bl: BLParamsIn = BLParamsIn()
+    # Optional investor mandate; resolves the BL risk-aversion (delta) ladder.
+    # An explicit bl.delta override still wins (see app.optimizer.mandate).
+    mandate: Mandate | None = None
     # L1 turnover penalty λ·‖w − w₀‖₁ on the min_cvar objective. Requires
     # ``current_weights`` (asset-label -> decimal fraction, label scheme
     # 'fund:<uuid>' / 'equity:<TICKER>'). v1: honoured only by min_cvar.

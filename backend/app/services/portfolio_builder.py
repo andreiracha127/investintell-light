@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.analytics import historical_cvar
 from app.optimizer import black_litterman as bl
 from app.optimizer import data as optimizer_data
+from app.optimizer.mandate import resolve_delta
 from app.optimizer import engine
 from app.schemas.builder import (
     AbsoluteViewIn,
@@ -353,13 +354,16 @@ async def run_optimize(
     min_weight = payload.constraints.min_weight
     has_views = bool(payload.views)
     needs_bl = has_views or payload.objective in ("bl_utility", "max_return_cvar")
+    # Effective risk-aversion: explicit bl.delta override beats the mandate
+    # ladder; both feed equilibrium (pi = delta*Sigma*w_mkt) and bl_utility.
+    delta = resolve_delta(payload.bl.delta, payload.mandate)
 
     mu_equilibrium: np.ndarray | None = None
     mu_posterior: np.ndarray | None = None
     w_mkt: np.ndarray | None = None
     if needs_bl:
         w_mkt = await _market_weights_for(session, assets, labels)
-        mu_equilibrium = bl.equilibrium(sigma, w_mkt, delta=payload.bl.delta)
+        mu_equilibrium = bl.equilibrium(sigma, w_mkt, delta=delta)
         if has_views and payload.views is not None:
             try:
                 p, q = bl.build_view_matrices(
@@ -399,7 +403,7 @@ async def run_optimize(
             assert mu_equilibrium is not None  # needs_bl guarantees it
             mu_for_utility = mu_posterior if mu_posterior is not None else mu_equilibrium
             weights, status = bl.solve_bl_utility(
-                mu_for_utility, sigma, delta=payload.bl.delta, cap=cap, min_weight=min_weight
+                mu_for_utility, sigma, delta=delta, cap=cap, min_weight=min_weight
             )
         elif payload.objective == "max_return_cvar":
             assert payload.cvar_limit is not None  # schema validator guarantees it
