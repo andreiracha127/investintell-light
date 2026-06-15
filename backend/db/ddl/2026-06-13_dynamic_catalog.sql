@@ -59,8 +59,13 @@ SELECT add_continuous_aggregate_policy('cagg_nav_weekly',
 
 -- Latest risk metrics per fund (replaces the sync_funds.py fund_risk_latest
 -- snapshot). organization_id IS NULL = the global (non-org) calc. The column
--- set EXACTLY mirrors the MV-backed model (33 columns).
-CREATE MATERIALIZED VIEW IF NOT EXISTS fund_risk_latest_mv AS
+-- set mirrors the MV-backed model plus the Tier-1 class regression metrics.
+-- DROP+CREATE (not CREATE IF NOT EXISTS) so column additions take effect — the
+-- MV is read-only and rebuilt by the risk_metrics worker's
+-- REFRESH MATERIALIZED VIEW CONCURRENTLY path; the unique index below must be
+-- recreated after the DROP for CONCURRENTLY to work.
+DROP MATERIALIZED VIEW IF EXISTS fund_risk_latest_mv;
+CREATE MATERIALIZED VIEW fund_risk_latest_mv AS
 SELECT DISTINCT ON (instrument_id)
        instrument_id, calc_date,
        return_1m, return_3m, return_1y, return_3y_ann, return_5y_ann,
@@ -70,7 +75,8 @@ SELECT DISTINCT ON (instrument_id)
        var_95_1m, cvar_95_1m, cvar_95_12m, cvar_99_evt,
        peer_sharpe_pctl, peer_sortino_pctl, peer_return_pctl, peer_drawdown_pctl,
        manager_score, downside_capture_1y, upside_capture_1y,
-       equity_correlation_252d, peer_strategy_label, peer_count, elite_flag
+       equity_correlation_252d, peer_strategy_label, peer_count, elite_flag,
+       empirical_duration, credit_beta, inflation_beta, crisis_alpha_score
 FROM fund_risk_metrics
 WHERE organization_id IS NULL
 ORDER BY instrument_id, calc_date DESC;

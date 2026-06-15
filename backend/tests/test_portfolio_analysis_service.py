@@ -199,3 +199,38 @@ def test_histogram_has_twenty_bins() -> None:
     response = _assemble(series, benchmark)
     assert len(response.histogram.counts) == 20
     assert len(response.histogram.bin_edges) == 21
+
+
+# --- Risk-adjusted ratios + ENB in PortfolioStats (T1A-5) --------------------
+
+from app.analytics import effective_number_of_bets  # noqa: E402
+from app.services._series import join_prices  # noqa: E402
+
+
+def test_stats_carry_sharpe_sortino_ir_enb() -> None:
+    series, benchmark = _default_inputs(250)
+    resp = _assemble(series, benchmark)
+    stats = resp.stats
+    # Present and finite (not NaN).
+    for value in (
+        stats.sharpe_ratio,
+        stats.sortino_ratio,
+        stats.information_ratio,
+        stats.effective_number_of_bets,
+    ):
+        assert value == value
+    # ENB is bounded by the number of positions (2 here).
+    assert 1.0 <= stats.effective_number_of_bets <= 2.0 + 1e-9
+
+
+def test_stats_enb_matches_engine_over_effective_weights() -> None:
+    series, benchmark = _default_inputs(250)
+    resp = _assemble(series, benchmark)
+    # Effective weights are echoed in the allocation; recompute ENB on the same
+    # inner-joined price frame the assembler builds (via join_prices), then the
+    # per-asset returns frame (pct_change().dropna(), as asset_returns_frame does).
+    weights = {p.ticker: p.weight for p in resp.allocation.positions}
+    prices = join_prices(series)
+    returns_frame = prices.pct_change().dropna()
+    expected = effective_number_of_bets(returns_frame, weights)
+    assert resp.stats.effective_number_of_bets == pytest.approx(expected, rel=1e-9)

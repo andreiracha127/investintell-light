@@ -15,8 +15,10 @@ Flow (dispatch F8 §3, research doc 2026-06-11):
 5. response: weights + in-sample expectations + diagnostics.
 
 In-sample CVaR of the proposal is computed from the RAW scenarios (never the
-re-centered ones) with the SAME F3 estimator (``app.analytics.historical_cvar``)
-so it is directly comparable with portfolio-analysis numbers (gate G3).
+re-centered ones) with the EXACT Rockafellar–Uryasev estimator
+(``app.analytics.realized_cvar``, alpha=0.95) — the same objective
+``engine.solve_min_cvar`` minimizes — so the reported figure is consistent
+with how the weights were chosen.
 
 Error contract: every domain failure raises ``BuilderError`` (→ 422 with the
 message verbatim); solver failures (``OptimizerError``) bubble as 422 too.
@@ -33,7 +35,7 @@ import numpy as np
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.analytics import historical_cvar
+from app.analytics import realized_cvar
 from app.optimizer import black_litterman as bl
 from app.optimizer import data as optimizer_data
 from app.optimizer import engine
@@ -305,10 +307,14 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
         raise BuilderError(str(exc)) from exc
 
     vol_ann = float(np.sqrt(weights @ sigma @ weights))
-    # In-sample CVaR on RAW scenarios, F3 estimator (gate G3 comparability).
+    # In-sample CVaR on RAW scenarios using the EXACT Rockafellar–Uryasev
+    # estimator (app.analytics.realized_cvar) — the same objective the
+    # min-CVaR optimizer minimizes — so the reported figure is consistent
+    # with how the weights were chosen (T1C). alpha=0.95 matches
+    # engine.DEFAULT_CVAR_ALPHA.
     portfolio_daily = pd.Series(scenarios @ weights, index=frame.index)
     try:
-        cvar_95 = historical_cvar(portfolio_daily, confidence=0.95)
+        cvar_95 = realized_cvar(portfolio_daily, confidence=0.95)
     except ValueError as exc:
         raise BuilderError(f"in-sample CVaR undefined: {exc}") from exc
     return_ann_bl = float(mu_posterior @ weights) if mu_posterior is not None else None

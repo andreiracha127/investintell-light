@@ -280,6 +280,56 @@ def risk_contributions(
     }
 
 
+def effective_number_of_bets(
+    returns: pd.DataFrame, weights: Mapping[str, float]
+) -> float:
+    """Entropy Effective Number of Bets over the covariance risk contributions.
+
+    Reuses :func:`risk_contributions` (the CTR decomposition that sums to 1) and
+    applies the Meucci (2009) entropy diversification measure
+    ``ENB = exp(-Sum RC_i ln RC_i)``. Tiny negative CTRs from floating-point
+    noise are floored at 0 and the survivors renormalized before the entropy so
+    ``ENB`` is bounded in ``[1, n_assets]``: ``n_assets`` when every asset
+    contributes equal risk, near 1 when one asset dominates. Unitless.
+
+    Raises:
+        ValueError: if the returns frame has NaN or fewer than 2 rows, or the
+            weights fail the engine guard (exact keys, each > 0, sum == 1
+            within 1e-6) — propagated unchanged from :func:`risk_contributions`;
+            also if all risk contributions floor to a non-positive total.
+    """
+    contributions = risk_contributions(returns, weights)
+    return enb_from_contributions(contributions)
+
+
+def enb_from_contributions(contributions: Mapping[str, float]) -> float:
+    """Entropy Effective Number of Bets over a precomputed CTR decomposition.
+
+    Splits the entropy step out of :func:`effective_number_of_bets` so callers
+    that have already solved :func:`risk_contributions` (e.g. the
+    portfolio-analysis assembler, which also emits the raw contributions) can
+    reuse them instead of paying for a second covariance solve. Same Meucci
+    (2009) ``ENB = exp(-Sum RC_i ln RC_i)`` with the floor-and-renormalize
+    guard, so ``ENB`` is bounded in ``[1, n_assets]``. Unitless.
+
+    Raises:
+        ValueError: if all risk contributions floor to a non-positive total.
+    """
+    rc = np.array(list(contributions.values()), dtype=float)
+    rc_pos = np.where(rc > 0.0, rc, 0.0)
+    total = float(rc_pos.sum())
+    if total <= 0.0:
+        raise ValueError(
+            "effective_number_of_bets is undefined: non-positive risk contributions"
+        )
+    rc_norm = rc_pos / total
+    # log(0) is guarded by the rc_norm>0 mask: zero-contribution terms add 0
+    # (lim p->0 of p ln p = 0), so restrict the entropy sum to positives.
+    mask = rc_norm > 0.0
+    entropy = -float(np.sum(rc_norm[mask] * np.log(rc_norm[mask])))
+    return float(np.exp(entropy))
+
+
 def diversification_ratio(returns: pd.DataFrame, weights: Mapping[str, float]) -> float:
     """Diversification ratio at the stated weights: ``(Σ w_i σ_i) / σ_p``.
 

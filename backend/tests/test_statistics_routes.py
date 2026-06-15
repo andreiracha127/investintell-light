@@ -176,6 +176,8 @@ async def test_scenario_happy_path_shape(stub_client: AsyncClient) -> None:
         "annualized_volatility",
         "var_95",
         "var_99",
+        "sharpe_ratio",
+        "sortino_ratio",
     }
     assert stats["var_99"] >= stats["var_95"]
     assert len(body["histogram"]["counts"]) == 20

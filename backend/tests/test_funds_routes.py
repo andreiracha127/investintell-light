@@ -266,6 +266,10 @@ def _profile() -> catalog.FundProfile:
             "peer_strategy_label": "Large Cap Blend",
             "peer_count": 412,
             "elite_flag": True,
+            "empirical_duration": 6.4,
+            "credit_beta": 1.2,
+            "inflation_beta": 0.35,
+            "crisis_alpha_score": 0.042,
         }
     )
     holding = SimpleNamespace(
@@ -317,6 +321,10 @@ async def test_fund_profile_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["risk"]["sharpe_1y"] == 1.1
     assert body["risk"]["cvar_95_12m"] == -0.21
     assert body["risk"]["peer_count"] == 412
+    assert body["risk"]["empirical_duration"] == 6.4
+    assert body["risk"]["credit_beta"] == 1.2
+    assert body["risk"]["inflation_beta"] == 0.35
+    assert body["risk"]["crisis_alpha_score"] == 0.042
     assert body["nav"] == [
         {"date": "2026-06-04", "nav": 305.1},
         {"date": "2026-06-05", "nav": 306.2},

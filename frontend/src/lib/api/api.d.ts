@@ -822,6 +822,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/macro/regional": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Macro Regional
+         * @description Latest regional macro scorecards (composite + dimensions + freshness).
+         */
+        get: operations["get_macro_regional_macro_regional_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/macro/global-indicators": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Macro Global Indicators
+         * @description Latest global macro risk indicators (geopolitical/energy/commodity/USD).
+         */
+        get: operations["get_macro_global_indicators_macro_global_indicators_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/macro/fiscal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Macro Fiscal
+         * @description Treasury fiscal series for one category over the lookback window.
+         */
+        get: operations["get_macro_fiscal_macro_fiscal_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/portfolios/{portfolio_id}/rebalance/policy": {
         parameters: {
             query?: never;
@@ -1325,6 +1385,20 @@ export interface components {
                 number
             ][];
         };
+        /** DataFreshnessOut */
+        DataFreshnessOut: {
+            /** Last Date */
+            last_date: string | null;
+            /** Days Stale */
+            days_stale: number | null;
+            /** Weight */
+            weight: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "fresh" | "decaying" | "stale";
+        };
         /**
          * DatedNav
          * @description A single dated NAV observation, in currency units.
@@ -1367,6 +1441,17 @@ export interface components {
             mu_equilibrium?: number[] | null;
             /** Mu Posterior */
             mu_posterior?: number[] | null;
+        };
+        /** DimensionOut */
+        DimensionOut: {
+            /** Score */
+            score: number;
+            /** N Indicators */
+            n_indicators: number;
+            /** Indicators */
+            indicators: {
+                [key: string]: number;
+            };
         };
         /**
          * DistributionOut
@@ -1477,6 +1562,39 @@ export interface components {
              * @description Non-NULL rows for this metric over the active universe. 0 implies the snapshot has not been computed yet.
              */
             available_count: number;
+        };
+        /** FiscalPointOut */
+        FiscalPointOut: {
+            /**
+             * Obs Date
+             * Format: date
+             */
+            obs_date: string;
+            /** Value */
+            value: number;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * FiscalResponse
+         * @description Treasury fiscal series for one category (worker treasury_ingestion).
+         */
+        FiscalResponse: {
+            /** Category */
+            category: string;
+            /** Prefix */
+            prefix: string;
+            /** Series */
+            series: components["schemas"]["FiscalSeriesOut"][];
+        };
+        /** FiscalSeriesOut */
+        FiscalSeriesOut: {
+            /** Series Id */
+            series_id: string;
+            /** Points */
+            points: components["schemas"]["FiscalPointOut"][];
         };
         /**
          * FundClassOut
@@ -1774,6 +1892,14 @@ export interface components {
             upside_capture_1y: number | null;
             /** Equity Correlation 252D */
             equity_correlation_252d: number | null;
+            /** Empirical Duration */
+            empirical_duration?: number | null;
+            /** Credit Beta */
+            credit_beta?: number | null;
+            /** Inflation Beta */
+            inflation_beta?: number | null;
+            /** Crisis Alpha Score */
+            crisis_alpha_score?: number | null;
         };
         /** FundsListResponse */
         FundsListResponse: {
@@ -1803,6 +1929,27 @@ export interface components {
             source_calc_date: string | null;
             /** Source Nav Max Date */
             source_nav_max_date: string | null;
+        };
+        /**
+         * GlobalIndicatorsResponse
+         * @description Global macro risk indicators (0-100). Note: polarity varies by field —
+         *     geopolitical_risk_score and energy_stress are risk measures (higher = worse),
+         *     while commodity_stress and usd_strength reflect market stress/strength.
+         */
+        GlobalIndicatorsResponse: {
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /** Geopolitical Risk Score */
+            geopolitical_risk_score: number;
+            /** Energy Stress */
+            energy_stress: number;
+            /** Commodity Stress */
+            commodity_stress: number;
+            /** Usd Strength */
+            usd_strength: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1974,6 +2121,21 @@ export interface components {
             /** Recent Flips */
             recent_flips: components["schemas"]["RegimeFlipOut"][];
         };
+        /**
+         * MacroRegionalResponse
+         * @description Latest regional macro scorecards (worker macro_ingestion, DB-first).
+         */
+        MacroRegionalResponse: {
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /** Regions */
+            regions: {
+                [key: string]: components["schemas"]["RegionScorecardOut"];
+            };
+        };
         /** MarketOverviewResponse */
         MarketOverviewResponse: {
             /** As Of */
@@ -2096,10 +2258,7 @@ export interface components {
              *     }
              */
             constraints: components["schemas"]["ConstraintsIn"];
-            /**
-             * Window Days
-             * @default null
-             */
+            /** Window Days */
             window_days?: number | null;
             /** Views */
             views?: (components["schemas"]["AbsoluteViewIn"] | components["schemas"]["RelativeViewIn"])[] | null;
@@ -2474,6 +2633,26 @@ export interface components {
              * @description Weighted-average asset volatility divided by portfolio volatility at the effective initial weights; >= 1 for long-only portfolios (unitless).
              */
             diversification_ratio: number;
+            /**
+             * Sharpe Ratio
+             * @description Annualized Sharpe ratio of the replayed portfolio's daily returns at the canonical 4% risk-free rate (unitless).
+             */
+            sharpe_ratio: number;
+            /**
+             * Sortino Ratio
+             * @description Annualized Sortino ratio (Target Downside Deviation denominator) at the canonical 4% risk-free rate (unitless).
+             */
+            sortino_ratio: number;
+            /**
+             * Information Ratio
+             * @description Annualized information ratio of the portfolio's active return vs the benchmark over the aligned daily grid (unitless).
+             */
+            information_ratio: number;
+            /**
+             * Effective Number Of Bets
+             * @description Entropy Effective Number of Bets over the per-asset risk contributions at the effective initial weights; in [1, n_positions] (unitless).
+             */
+            effective_number_of_bets: number;
             max_drawdown: components["schemas"]["DrawdownOut"];
             best_day: components["schemas"]["DatedValue"];
             worst_day: components["schemas"]["DatedValue"];
@@ -2879,6 +3058,23 @@ export interface components {
             /** Nfci */
             nfci: boolean;
         };
+        /** RegionScorecardOut */
+        RegionScorecardOut: {
+            /** Region */
+            region: string;
+            /** Composite Score */
+            composite_score: number;
+            /** Coverage */
+            coverage: number;
+            /** Dimensions */
+            dimensions: {
+                [key: string]: components["schemas"]["DimensionOut"];
+            };
+            /** Data Freshness */
+            data_freshness: {
+                [key: string]: components["schemas"]["DataFreshnessOut"];
+            };
+        };
         /**
          * RegressionOut
          * @description OLS regression of y on x over the aligned daily returns.
@@ -3190,6 +3386,16 @@ export interface components {
              * @description Historical 1-day VaR at 99% as a POSITIVE decimal fraction.
              */
             var_99: number;
+            /**
+             * Sharpe Ratio
+             * @description Annualized Sharpe ratio of the cash-inclusive total's daily returns at the canonical 4% risk-free rate (unitless).
+             */
+            sharpe_ratio: number;
+            /**
+             * Sortino Ratio
+             * @description Annualized Sortino ratio (Target Downside Deviation denominator) of the cash-inclusive total's daily returns at the canonical 4% risk-free rate (unitless).
+             */
+            sortino_ratio: number;
         };
         /**
          * ScreenCreate
@@ -4872,6 +5078,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MacroRegimeResponse"];
+                };
+            };
+        };
+    };
+    get_macro_regional_macro_regional_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MacroRegionalResponse"];
+                };
+            };
+        };
+    };
+    get_macro_global_indicators_macro_global_indicators_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GlobalIndicatorsResponse"];
+                };
+            };
+        };
+    };
+    get_macro_fiscal_macro_fiscal_get: {
+        parameters: {
+            query?: {
+                category?: "rates" | "debt" | "auctions" | "fx" | "interest";
+                lookback_days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FiscalResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

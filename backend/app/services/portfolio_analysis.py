@@ -36,14 +36,18 @@ from app.analytics import (
     correlation,
     correlation_matrix,
     diversification_ratio,
+    enb_from_contributions,
     historical_cvar,
     historical_var,
+    information_ratio,
     max_drawdown,
     portfolio_nav,
     portfolio_returns,
     return_histogram,
     risk_contributions,
+    sharpe_ratio,
     simple_returns,
+    sortino_ratio,
     total_return,
     weights_to_quantities,
 )
@@ -323,6 +327,12 @@ def assemble_portfolio_analysis(
         beta=beta(aligned_port, aligned_bench),
         correlation=correlation(aligned_port, aligned_bench),
         diversification_ratio=diversification_ratio(returns_frame, effective_weights),
+        sharpe_ratio=sharpe_ratio(port_returns),
+        sortino_ratio=sortino_ratio(port_returns),
+        information_ratio=information_ratio(aligned_port, aligned_bench),
+        # Reuse the CTR decomposition already solved for `contributions` above
+        # (line ~317) instead of paying for a second covariance solve.
+        effective_number_of_bets=enb_from_contributions(contributions),
         max_drawdown=DrawdownOut(
             depth=drawdown.depth,
             peak_date=drawdown.peak_date,

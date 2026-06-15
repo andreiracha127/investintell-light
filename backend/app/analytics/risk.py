@@ -19,6 +19,14 @@ from app.analytics.returns import align_returns
 
 _MIN_TAIL_POINTS = 10
 
+# Canonical annual risk-free rate (matches the worker risk_metrics rf handling
+# and the legacy return_statistics_service.DEFAULT_RISK_FREE_RATE = 0.04). Used
+# when a request carries no explicit rate.
+DEFAULT_RISK_FREE_RATE = 0.04
+
+# Risk-adjusted ratios need a meaningful sample; reuse the tail-points floor.
+_MIN_RATIO_POINTS = _MIN_TAIL_POINTS
+
 
 @dataclass(frozen=True)
 class DrawdownResult:
@@ -59,6 +67,107 @@ def annualized_volatility(returns: pd.Series, periods_per_year: int = 252) -> fl
     reject_nan(returns, "annualized_volatility")
     vol = float(returns.std(ddof=1, skipna=False)) * math.sqrt(periods_per_year)
     return vol
+
+
+def sharpe_ratio(
+    returns: pd.Series,
+    risk_free_rate: float = DEFAULT_RISK_FREE_RATE,
+    periods_per_year: int = 252,
+) -> float:
+    """Annualized Sharpe ratio of a daily return series.
+
+    ``excess = returns - risk_free_rate / periods_per_year``; the ratio is
+    ``mean(excess) / std(excess, ddof=1) * sqrt(periods_per_year)`` — the
+    canonical arithmetic-mean daily-excess form used by the risk_metrics
+    worker and the legacy return_statistics_service. Inputs and ``risk_free_rate``
+    are decimal fractions (0.04 = 4%), never 0-100; the result is unitless.
+
+    Raises:
+        ValueError: if fewer than 10 returns are supplied, the input contains
+            NaN/inf values, or the excess-return volatility is 0 (Sharpe
+            undefined for a constant series).
+    """
+    if len(returns) < _MIN_RATIO_POINTS:
+        raise ValueError(
+            f"sharpe_ratio requires at least {_MIN_RATIO_POINTS} returns, got {len(returns)}"
+        )
+    reject_nan(returns, "sharpe_ratio")
+    excess = returns.to_numpy(dtype=float) - risk_free_rate / periods_per_year
+    if float(np.ptp(excess)) == 0:
+        raise ValueError("sharpe_ratio is undefined: zero volatility (constant series)")
+    vol = float(np.std(excess, ddof=1))
+    return float(np.mean(excess) / vol * math.sqrt(periods_per_year))
+
+
+def sortino_ratio(
+    returns: pd.Series,
+    risk_free_rate: float = DEFAULT_RISK_FREE_RATE,
+    periods_per_year: int = 252,
+) -> float:
+    """Annualized Sortino ratio with canonical Target Downside Deviation.
+
+    ``excess = returns - risk_free_rate / periods_per_year``; the denominator is
+    the Target Downside Deviation ``TDD = sqrt(mean(min(excess, 0)**2))`` over
+    the FULL sample (N denominator, matching the risk_metrics worker and the
+    legacy return_statistics_service). The ratio is
+    ``mean(excess) / TDD * sqrt(periods_per_year)``. Inputs are decimal
+    fractions (0.04 = 4%), never 0-100; the result is unitless.
+
+    Raises:
+        ValueError: if fewer than 10 returns are supplied, the input contains
+            NaN/inf values, or there is no downside (TDD == 0), which leaves the
+            ratio undefined.
+    """
+    if len(returns) < _MIN_RATIO_POINTS:
+        raise ValueError(
+            f"sortino_ratio requires at least {_MIN_RATIO_POINTS} returns, got {len(returns)}"
+        )
+    reject_nan(returns, "sortino_ratio")
+    excess = returns.to_numpy(dtype=float) - risk_free_rate / periods_per_year
+    shortfall = np.minimum(excess, 0.0)
+    tdd = float(np.sqrt(np.mean(shortfall**2)))
+    if tdd == 0:
+        raise ValueError(
+            "sortino_ratio is undefined: no downside (target downside deviation is 0)"
+        )
+    return float(np.mean(excess) / tdd * math.sqrt(periods_per_year))
+
+
+def information_ratio(
+    portfolio_returns: pd.Series,
+    benchmark_returns: pd.Series,
+    periods_per_year: int = 252,
+) -> float:
+    """Annualized Information Ratio of active returns vs a benchmark.
+
+    NaN/inf inputs are rejected up front (fail-loud), then the series are
+    aligned (inner join). With
+    ``active = portfolio - benchmark``, the tracking error is
+    ``TE = std(active, ddof=1) * sqrt(periods_per_year)`` and
+    ``IR = mean(active) * periods_per_year / TE`` — the active-return form used
+    by the risk_metrics worker's regression_metrics. The risk-free rate does
+    not appear (it cancels in the active return). Inputs are decimal fractions
+    (0.05 = 5%), never 0-100; the result is unitless.
+
+    Raises:
+        ValueError: if either input contains NaN/inf values (rejected up front,
+            matching the fail-loud contract used by sharpe_ratio/sortino_ratio
+            rather than silently dropping NaN rows), fewer than 10 aligned points
+            remain, or the tracking error is 0 (IR undefined when the portfolio
+            tracks the benchmark exactly).
+    """
+    reject_nan(portfolio_returns, "information_ratio")
+    reject_nan(benchmark_returns, "information_ratio")
+    p, b = align_returns(portfolio_returns, benchmark_returns)
+    if len(p) < _MIN_TAIL_POINTS:
+        raise ValueError(
+            f"information_ratio requires at least {_MIN_TAIL_POINTS} common points, got {len(p)}"
+        )
+    active = p.to_numpy(dtype=float) - b.to_numpy(dtype=float)
+    te = float(np.std(active, ddof=1) * math.sqrt(periods_per_year))
+    if te == 0:
+        raise ValueError("information_ratio is undefined: zero tracking error")
+    return float(np.mean(active) * periods_per_year / te)
 
 
 def historical_var(returns: pd.Series, confidence: float = 0.95) -> float:
@@ -112,6 +221,45 @@ def historical_cvar(returns: pd.Series, confidence: float = 0.95) -> float:
         raise ValueError("historical_cvar tail selection is empty")
     cvar = -float(tail.mean())
     return cvar
+
+
+def realized_cvar(returns: pd.Series, confidence: float = 0.95) -> float:
+    """Exact Rockafellar–Uryasev empirical CVaR as a POSITIVE decimal fraction.
+
+    This is the estimator the min-CVaR optimizer minimizes
+    (``app.optimizer.engine.solve_min_cvar``): with single-asset losses
+    ``L = -returns`` and ``alpha = confidence``,
+
+        VaR_a  = upper alpha-quantile of L (``np.quantile(L, alpha, method="higher")``)
+        CVaR_a = VaR_a + (1/((1-alpha)*T)) * sum(max(L_t - VaR_a, 0))
+
+    At optimality this equals ``min_z [ z + sum(max(L - z, 0))/((1-alpha)*T) ]``,
+    i.e. the optimizer's objective value, so the builder's in-sample report is
+    consistent with the objective the weights were chosen to minimize. Unlike
+    :func:`historical_cvar` (a naive tail-mean), this is exact even when the
+    expected tail size ``(1-alpha)*T`` is non-integer.
+
+    Same sign convention as :func:`historical_cvar`: a result of 0.03 means "on
+    the worst ~5% of days the conditional expected loss is 3%". Inputs and
+    result are decimal fractions (0.05 = 5%), never 0-100.
+
+    Raises:
+        ValueError: if ``confidence`` is not in (0, 1), fewer than 10 returns
+            are supplied, or the input contains NaN/infinite values.
+    """
+    if not 0 < confidence < 1:
+        raise ValueError(f"confidence must be in (0, 1), got {confidence}")
+    if len(returns) < _MIN_TAIL_POINTS:
+        raise ValueError(
+            f"realized_cvar requires at least {_MIN_TAIL_POINTS} returns, got {len(returns)}"
+        )
+    reject_nan(returns, "realized_cvar")
+    losses = -returns.to_numpy(dtype=float)
+    t = losses.size
+    var_loss = float(np.quantile(losses, confidence, method="higher"))
+    excess = np.maximum(losses - var_loss, 0.0)
+    cvar = var_loss + float(excess.sum()) / ((1.0 - confidence) * t)
+    return float(cvar)
 
 
 def max_drawdown(prices: pd.Series) -> DrawdownResult:

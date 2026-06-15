@@ -2513,6 +2513,113 @@
         }
       }
     },
+    "/macro/regional": {
+      "get": {
+        "tags": [
+          "macro"
+        ],
+        "summary": "Get Macro Regional",
+        "description": "Latest regional macro scorecards (composite + dimensions + freshness).",
+        "operationId": "get_macro_regional_macro_regional_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MacroRegionalResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/macro/global-indicators": {
+      "get": {
+        "tags": [
+          "macro"
+        ],
+        "summary": "Get Macro Global Indicators",
+        "description": "Latest global macro risk indicators (geopolitical/energy/commodity/USD).",
+        "operationId": "get_macro_global_indicators_macro_global_indicators_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GlobalIndicatorsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/macro/fiscal": {
+      "get": {
+        "tags": [
+          "macro"
+        ],
+        "summary": "Get Macro Fiscal",
+        "description": "Treasury fiscal series for one category over the lookback window.",
+        "operationId": "get_macro_fiscal_macro_fiscal_get",
+        "parameters": [
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "rates",
+                "debt",
+                "auctions",
+                "fx",
+                "interest"
+              ],
+              "type": "string",
+              "default": "rates",
+              "title": "Category"
+            }
+          },
+          {
+            "name": "lookback_days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 3650,
+              "minimum": 1,
+              "default": 365,
+              "title": "Lookback Days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FiscalResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/portfolios/{portfolio_id}/rebalance/policy": {
       "get": {
         "tags": [
@@ -3493,6 +3600,54 @@
         "title": "CumulativeReturns",
         "description": "Cumulative return series rebased to 0 at the first in-range date.\n\nAsset and benchmark share the same date grid (aligned on common trading\ndays before slicing). Values are decimal fractions (0.05 = 5%), never\n0-100; both series start at exactly 0.0 on the same first date."
       },
+      "DataFreshnessOut": {
+        "properties": {
+          "last_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Date"
+          },
+          "days_stale": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days Stale"
+          },
+          "weight": {
+            "type": "number",
+            "title": "Weight"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "decaying",
+              "stale"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "last_date",
+          "days_stale",
+          "weight",
+          "status"
+        ],
+        "title": "DataFreshnessOut"
+      },
       "DatedNav": {
         "properties": {
           "date": {
@@ -3580,6 +3735,32 @@
           "status"
         ],
         "title": "DiagnosticsOut"
+      },
+      "DimensionOut": {
+        "properties": {
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "n_indicators": {
+            "type": "integer",
+            "title": "N Indicators"
+          },
+          "indicators": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Indicators"
+          }
+        },
+        "type": "object",
+        "required": [
+          "score",
+          "n_indicators",
+          "indicators"
+        ],
+        "title": "DimensionOut"
       },
       "DistributionOut": {
         "properties": {
@@ -3799,6 +3980,86 @@
         ],
         "title": "FilterUpdateResponse",
         "description": "PUT/DELETE filter response \u2014 one round-trip powers the Build UI.\n\n``distribution`` is null (rather than failing the successful write with\n422) when the metric has zero non-NULL rows in the snapshot.\n``available_count`` exposes the non-NULL count so the UI can distinguish\n\"0 matches\" from \"no data\" without relying solely on the 422 path."
+      },
+      "FiscalPointOut": {
+        "properties": {
+          "obs_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Obs Date"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "obs_date",
+          "value",
+          "metadata"
+        ],
+        "title": "FiscalPointOut"
+      },
+      "FiscalResponse": {
+        "properties": {
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "prefix": {
+            "type": "string",
+            "title": "Prefix"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/FiscalSeriesOut"
+            },
+            "type": "array",
+            "title": "Series"
+          }
+        },
+        "type": "object",
+        "required": [
+          "category",
+          "prefix",
+          "series"
+        ],
+        "title": "FiscalResponse",
+        "description": "Treasury fiscal series for one category (worker treasury_ingestion)."
+      },
+      "FiscalSeriesOut": {
+        "properties": {
+          "series_id": {
+            "type": "string",
+            "title": "Series Id"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/FiscalPointOut"
+            },
+            "type": "array",
+            "title": "Points"
+          }
+        },
+        "type": "object",
+        "required": [
+          "series_id",
+          "points"
+        ],
+        "title": "FiscalSeriesOut"
       },
       "FundClassOut": {
         "properties": {
@@ -4899,6 +5160,50 @@
               }
             ],
             "title": "Equity Correlation 252D"
+          },
+          "empirical_duration": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Empirical Duration"
+          },
+          "credit_beta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credit Beta"
+          },
+          "inflation_beta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inflation Beta"
+          },
+          "crisis_alpha_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Crisis Alpha Score"
           }
         },
         "type": "object",
@@ -5026,6 +5331,41 @@
         ],
         "title": "FundsStaleness",
         "description": "Global data-freshness markers (max over the synced universe)."
+      },
+      "GlobalIndicatorsResponse": {
+        "properties": {
+          "as_of_date": {
+            "type": "string",
+            "format": "date",
+            "title": "As Of Date"
+          },
+          "geopolitical_risk_score": {
+            "type": "number",
+            "title": "Geopolitical Risk Score"
+          },
+          "energy_stress": {
+            "type": "number",
+            "title": "Energy Stress"
+          },
+          "commodity_stress": {
+            "type": "number",
+            "title": "Commodity Stress"
+          },
+          "usd_strength": {
+            "type": "number",
+            "title": "Usd Strength"
+          }
+        },
+        "type": "object",
+        "required": [
+          "as_of_date",
+          "geopolitical_risk_score",
+          "energy_stress",
+          "commodity_stress",
+          "usd_strength"
+        ],
+        "title": "GlobalIndicatorsResponse",
+        "description": "Global macro risk indicators (0-100). Note: polarity varies by field \u2014\ngeopolitical_risk_score and energy_stress are risk measures (higher = worse),\nwhile commodity_stress and usd_strength reflect market stress/strength."
       },
       "HTTPValidationError": {
         "properties": {
@@ -5519,6 +5859,29 @@
         "title": "MacroRegimeResponse",
         "description": "Estado do detector vote2of3 (worker regime_composite) + breakdown dos votos.\n\nrisk_off \u21d4 \u22652 votos entre credit/trend/nfci. Estados bin\u00e1rios \u2014 o composite\npor score ponderado (legado) foi refutado. O credit_regime segue materializado\n(\u00e9 1 dos votos); o composite \u00e9 o detector promovido (Sharpe 0,549 / DD 25,3%)."
       },
+      "MacroRegionalResponse": {
+        "properties": {
+          "as_of_date": {
+            "type": "string",
+            "format": "date",
+            "title": "As Of Date"
+          },
+          "regions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RegionScorecardOut"
+            },
+            "type": "object",
+            "title": "Regions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "as_of_date",
+          "regions"
+        ],
+        "title": "MacroRegionalResponse",
+        "description": "Latest regional macro scorecards (worker macro_ingestion, DB-first)."
+      },
       "MarketOverviewResponse": {
         "properties": {
           "as_of": {
@@ -5847,11 +6210,17 @@
             }
           },
           "window_days": {
-            "type": "integer",
-            "maximum": 3650.0,
-            "minimum": 30.0,
-            "title": "Window Days",
-            "default": 730
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 3650.0,
+                "minimum": 30.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Days"
           },
           "views": {
             "anyOf": [
@@ -6511,6 +6880,26 @@
             "title": "Diversification Ratio",
             "description": "Weighted-average asset volatility divided by portfolio volatility at the effective initial weights; >= 1 for long-only portfolios (unitless)."
           },
+          "sharpe_ratio": {
+            "type": "number",
+            "title": "Sharpe Ratio",
+            "description": "Annualized Sharpe ratio of the replayed portfolio's daily returns at the canonical 4% risk-free rate (unitless)."
+          },
+          "sortino_ratio": {
+            "type": "number",
+            "title": "Sortino Ratio",
+            "description": "Annualized Sortino ratio (Target Downside Deviation denominator) at the canonical 4% risk-free rate (unitless)."
+          },
+          "information_ratio": {
+            "type": "number",
+            "title": "Information Ratio",
+            "description": "Annualized information ratio of the portfolio's active return vs the benchmark over the aligned daily grid (unitless)."
+          },
+          "effective_number_of_bets": {
+            "type": "number",
+            "title": "Effective Number Of Bets",
+            "description": "Entropy Effective Number of Bets over the per-asset risk contributions at the effective initial weights; in [1, n_positions] (unitless)."
+          },
           "max_drawdown": {
             "$ref": "#/components/schemas/DrawdownOut"
           },
@@ -6531,6 +6920,10 @@
           "beta",
           "correlation",
           "diversification_ratio",
+          "sharpe_ratio",
+          "sortino_ratio",
+          "information_ratio",
+          "effective_number_of_bets",
           "max_drawdown",
           "best_day",
           "worst_day"
@@ -7434,6 +7827,45 @@
         "title": "RegimeVotesOut",
         "description": "Breakdown dos 3 votos do ensemble (explicabilidade: qual sinal est\u00e1 ativo)."
       },
+      "RegionScorecardOut": {
+        "properties": {
+          "region": {
+            "type": "string",
+            "title": "Region"
+          },
+          "composite_score": {
+            "type": "number",
+            "title": "Composite Score"
+          },
+          "coverage": {
+            "type": "number",
+            "title": "Coverage"
+          },
+          "dimensions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DimensionOut"
+            },
+            "type": "object",
+            "title": "Dimensions"
+          },
+          "data_freshness": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DataFreshnessOut"
+            },
+            "type": "object",
+            "title": "Data Freshness"
+          }
+        },
+        "type": "object",
+        "required": [
+          "region",
+          "composite_score",
+          "coverage",
+          "dimensions",
+          "data_freshness"
+        ],
+        "title": "RegionScorecardOut"
+      },
       "RegressionOut": {
         "properties": {
           "beta": {
@@ -7949,6 +8381,16 @@
             "type": "number",
             "title": "Var 99",
             "description": "Historical 1-day VaR at 99% as a POSITIVE decimal fraction."
+          },
+          "sharpe_ratio": {
+            "type": "number",
+            "title": "Sharpe Ratio",
+            "description": "Annualized Sharpe ratio of the cash-inclusive total's daily returns at the canonical 4% risk-free rate (unitless)."
+          },
+          "sortino_ratio": {
+            "type": "number",
+            "title": "Sortino Ratio",
+            "description": "Annualized Sortino ratio (Target Downside Deviation denominator) of the cash-inclusive total's daily returns at the canonical 4% risk-free rate (unitless)."
           }
         },
         "type": "object",
@@ -7963,7 +8405,9 @@
           "min_return",
           "annualized_volatility",
           "var_95",
-          "var_99"
+          "var_99",
+          "sharpe_ratio",
+          "sortino_ratio"
         ],
         "title": "ScenarioStatistics",
         "description": "Typed statistics rail of the scenario \u2014 computed on DAILY data even when\nthe line series are weekly-bounded. NAV figures include cash; returns are\ndaily simple returns of the cash-inclusive total value."

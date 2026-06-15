@@ -14,6 +14,7 @@ from app.analytics import (
     historical_cvar,
     historical_var,
     max_drawdown,
+    realized_cvar,
 )
 
 
@@ -224,3 +225,234 @@ def test_cvar_monotonicity() -> None:
     """
     r = _random_returns(500, seed=17)
     assert historical_cvar(r, 0.99) >= historical_cvar(r, 0.95)
+
+
+# --- exact Rockafellar–Uryasev realized_cvar (T1C) ----------------------------
+
+# Fixed 30-point return series: (1-0.95)*30 = 1.5 (non-integer tail) so the
+# exact RU estimator DIVERGES from the naive tail-mean historical_cvar.
+_RU_SERIES_30 = [
+    -0.012459, -0.004381, 0.017143, 0.002922, 0.012363, 0.007902, -0.007874,
+    0.007445, -0.003716, -0.003791, 0.001663, -0.019437, 0.015898, -0.008324,
+    0.013404, 0.002172, 0.020316, -0.00818, -0.003653, 0.004791, -0.028297,
+    0.011163, 0.020441, 0.015048, 0.010212, -0.001498, 0.017065, 0.014362,
+    0.005504, 0.000466,
+]
+
+
+def _ru_reference(returns: pd.Series, confidence: float) -> float:
+    """Independent RU empirical CVaR, mirroring the optimizer objective.
+
+    Single-asset losses = -returns; CVaR_alpha = var_loss + sum of positive
+    excess over the upper-quantile VaR, scaled by 1/((1-alpha)*T). Positive
+    decimal fraction (same sign convention as the production estimator).
+    """
+    losses = -returns.to_numpy(dtype=float)
+    t = losses.size
+    var_loss = float(np.quantile(losses, confidence, method="higher"))
+    excess = np.maximum(losses - var_loss, 0.0)
+    return var_loss + float(excess.sum()) / ((1.0 - confidence) * t)
+
+
+def test_realized_cvar_matches_ru_reference_non_integer_tail() -> None:
+    """On a 30-point series (1.5 expected tail obs) realized_cvar equals the
+    exact Rockafellar–Uryasev value used by the optimizer objective."""
+    returns = _dated(_RU_SERIES_30)
+    expected = _ru_reference(returns, 0.95)
+    assert realized_cvar(returns, 0.95) == pytest.approx(expected, abs=1e-12)
+    # Pin the literal so a regression to tail-mean is caught loudly.
+    assert realized_cvar(returns, 0.95) == pytest.approx(
+        0.025343666666666667, abs=1e-12
+    )
+
+
+def test_realized_cvar_diverges_from_naive_tail_mean() -> None:
+    """The whole point of the swap: with a non-integer expected tail size the
+    exact RU estimator differs from the naive historical_cvar tail-mean."""
+    returns = _dated(_RU_SERIES_30)
+    assert realized_cvar(returns, 0.95) != pytest.approx(
+        historical_cvar(returns, 0.95), abs=1e-9
+    )
+    # naive tail-mean of this series is 0.023867 (mean of the worst 2).
+    assert historical_cvar(returns, 0.95) == pytest.approx(0.023867, abs=1e-9)
+    assert realized_cvar(returns, 0.95) > historical_cvar(returns, 0.95)
+
+
+def test_realized_cvar_integer_tail_matches_tail_mean() -> None:
+    """Edge case: when (1-alpha)*T is an integer (here 20*0.05 = 1.0) the RU
+    estimator and the tail-mean coincide (single worst observation)."""
+    returns = _dated(
+        [
+            0.012, -0.034, 0.008, -0.021, 0.005, -0.058, 0.017, -0.009, 0.003,
+            -0.045, 0.022, -0.011, 0.006, -0.073, 0.014, -0.002, 0.019, -0.027,
+            0.001, -0.039,
+        ]
+    )
+    assert realized_cvar(returns, 0.95) == pytest.approx(0.073, abs=1e-12)
+    assert realized_cvar(returns, 0.95) == pytest.approx(
+        historical_cvar(returns, 0.95), abs=1e-12
+    )
+
+
+def test_realized_cvar_at_least_var() -> None:
+    """CVaR >= VaR (expected shortfall dominates the threshold)."""
+    r = _random_returns(500, seed=17)
+    assert realized_cvar(r, 0.95) >= historical_var(r, 0.95)
+
+
+def test_realized_cvar_positive_for_lossy_series() -> None:
+    assert realized_cvar(_random_returns(), 0.95) > 0
+
+
+def test_realized_cvar_monotonicity() -> None:
+    """CVaR(99%) >= CVaR(95%): a deeper tail is at least as costly."""
+    r = _random_returns(500, seed=17)
+    assert realized_cvar(r, 0.99) >= realized_cvar(r, 0.95)
+
+
+def test_realized_cvar_short_input_raises() -> None:
+    with pytest.raises(ValueError, match="at least 10"):
+        realized_cvar(_dated([0.01] * 9))
+
+
+def test_realized_cvar_bad_confidence_raises() -> None:
+    with pytest.raises(ValueError, match="confidence"):
+        realized_cvar(_random_returns(), confidence=95.0)
+
+
+def test_realized_cvar_nan_input_raises() -> None:
+    with pytest.raises(ValueError, match="NaN"):
+        realized_cvar(_dated([0.01, np.nan, -0.02] + [0.0] * 7))
+
+
+# --- Sharpe ratio (T1A-1) ----------------------------------------------------
+
+from app.analytics import DEFAULT_RISK_FREE_RATE, sharpe_ratio  # noqa: E402
+
+
+def test_sharpe_ratio_matches_manual_formula() -> None:
+    """sharpe = mean(excess)/std(excess, ddof=1) * sqrt(252), excess = r - rf/252."""
+    returns = _random_returns(252, seed=11)
+    rf = 0.04
+    excess = returns.to_numpy(dtype=float) - rf / 252
+    expected = float(np.mean(excess) / np.std(excess, ddof=1) * math.sqrt(252))
+    assert sharpe_ratio(returns, risk_free_rate=rf) == pytest.approx(expected, rel=1e-12)
+
+
+def test_sharpe_ratio_default_rf_is_canonical() -> None:
+    assert DEFAULT_RISK_FREE_RATE == 0.04
+    returns = _random_returns(252, seed=12)
+    assert sharpe_ratio(returns) == pytest.approx(
+        sharpe_ratio(returns, risk_free_rate=0.04), rel=1e-12
+    )
+
+
+def test_sharpe_ratio_higher_for_higher_mean() -> None:
+    base = _random_returns(252, seed=13)
+    shifted = base + 0.001  # shift mean up, same vol
+    assert sharpe_ratio(shifted) > sharpe_ratio(base)
+
+
+def test_sharpe_ratio_short_input_raises() -> None:
+    with pytest.raises(ValueError, match="at least 10"):
+        sharpe_ratio(_dated([0.01] * 9))
+
+
+def test_sharpe_ratio_zero_vol_raises() -> None:
+    with pytest.raises(ValueError, match="zero volatility|undefined"):
+        sharpe_ratio(_dated([0.01] * 30))
+
+
+def test_sharpe_ratio_nan_input_raises() -> None:
+    with pytest.raises(ValueError, match="NaN"):
+        sharpe_ratio(_dated([0.01, np.nan, 0.02] * 5))
+
+
+# --- Sortino ratio (T1A-2) ---------------------------------------------------
+
+from app.analytics import sortino_ratio  # noqa: E402
+
+
+def test_sortino_ratio_matches_manual_formula() -> None:
+    """sortino = mean(excess)/TDD * sqrt(252); TDD = sqrt(mean(min(excess,0)^2))."""
+    returns = _random_returns(252, seed=21)
+    rf = 0.04
+    excess = returns.to_numpy(dtype=float) - rf / 252
+    shortfall = np.minimum(excess, 0.0)
+    tdd = float(np.sqrt(np.mean(shortfall**2)))
+    expected = float(np.mean(excess) / tdd * math.sqrt(252))
+    assert sortino_ratio(returns, risk_free_rate=rf) == pytest.approx(expected, rel=1e-12)
+
+
+def test_sortino_ratio_ge_sharpe_for_this_seed() -> None:
+    """For seed=22 (positive-Sharpe series) the Target Downside Deviation is
+    below the total excess std, so Sortino > Sharpe. This is NOT a universal
+    property (it inverts for negative-mean series), hence the fixed seed."""
+    returns = _random_returns(252, seed=22)
+    assert sortino_ratio(returns) >= sharpe_ratio(returns) - 1e-9
+
+
+def test_sortino_ratio_short_input_raises() -> None:
+    with pytest.raises(ValueError, match="at least 10"):
+        sortino_ratio(_dated([0.01] * 9))
+
+
+def test_sortino_ratio_no_downside_raises() -> None:
+    """All-positive excess => TDD == 0 => undefined (fail loud, never inf/NaN)."""
+    with pytest.raises(ValueError, match="downside|undefined"):
+        sortino_ratio(_dated([0.05] * 30))  # 0.05 > rf/252, no shortfall
+
+
+def test_sortino_ratio_nan_input_raises() -> None:
+    with pytest.raises(ValueError, match="NaN"):
+        sortino_ratio(_dated([0.01, np.nan, -0.02] * 5))
+
+
+# --- Information ratio (T1A-3) -----------------------------------------------
+
+from app.analytics import information_ratio  # noqa: E402
+
+
+def test_information_ratio_matches_manual_formula() -> None:
+    """IR = mean(active)*252 / (std(active, ddof=1)*sqrt(252)), active = p - b."""
+    port = _random_returns(252, seed=31)
+    bench = _random_returns(252, seed=32)
+    active = (port - bench).to_numpy(dtype=float)
+    te = float(np.std(active, ddof=1) * math.sqrt(252))
+    expected = float(np.mean(active) * 252 / te)
+    assert information_ratio(port, bench) == pytest.approx(expected, rel=1e-12)
+
+
+def test_information_ratio_identical_series_raises() -> None:
+    """Identical series => zero active return AND zero tracking error => undefined."""
+    bench = _random_returns(252, seed=33)
+    with pytest.raises(ValueError, match="tracking error|undefined"):
+        information_ratio(bench, bench)
+
+
+def test_information_ratio_inner_joins_on_common_dates() -> None:
+    """A benchmark carrying one EXTRA leading date is inner-joined away; the IR
+    must equal the IR computed on the already-overlapping window."""
+    port = _random_returns(60, seed=34)
+    bench = _random_returns(60, seed=35)
+    # Prepend one out-of-grid leading observation to the benchmark only; the
+    # inner join must drop it so both runs see the same 60 overlapping dates.
+    extra_date = port.index[0] - pd.Timedelta(days=1)
+    bench_extra = pd.concat([pd.Series([0.123], index=[extra_date]), bench])
+    assert information_ratio(port, bench_extra) == pytest.approx(
+        information_ratio(port, bench), rel=1e-12
+    )
+
+
+def test_information_ratio_short_overlap_raises() -> None:
+    port = _dated([0.01, -0.02, 0.015, 0.0, -0.01], start="2024-01-01")
+    bench = _dated([0.005, -0.01, 0.02, 0.001, -0.005], start="2024-01-01")
+    with pytest.raises(ValueError, match="at least 10"):
+        information_ratio(port, bench)
+
+
+def test_information_ratio_nan_input_raises() -> None:
+    port = _dated([0.01, np.nan, -0.02] * 5)
+    bench = _random_returns(15, seed=36)
+    with pytest.raises(ValueError, match="NaN|overlapping"):
+        information_ratio(port, bench)

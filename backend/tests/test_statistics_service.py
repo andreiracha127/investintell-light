@@ -6,6 +6,7 @@ the service-module boundary (same approach as the F3.2 route tests).
 """
 
 import datetime as dt
+import math
 from types import SimpleNamespace
 from typing import Any
 
@@ -21,8 +22,11 @@ from app.analytics import (
     best_worst_day,
     correlation_matrix,
     historical_var,
+    nav_by_position,
     portfolio_returns,
+    sharpe_ratio,
     simple_returns,
+    sortino_ratio,
     weight_series,
 )
 from app.api import _shared as api_shared
@@ -505,3 +509,44 @@ def test_scenario_cash_and_weekly_bounding() -> None:
     for i in range(n_points):
         row_sum = sum(weight_points[t][i][1] for t in weight_points)
         assert row_sum == pytest.approx(1.0, abs=1e-9)
+
+
+# --- Sharpe/Sortino in ScenarioStatistics (T1A-7) ----------------------------
+
+
+def test_scenario_statistics_carry_sharpe_sortino() -> None:
+    series = _series_map(300)
+    resp = assemble_scenario(
+        series,
+        portfolio_id=1,
+        name="Test",
+        quantities=QUANTITIES,
+        cash=0.0,
+        max_points=MAX_POINTS,
+    )
+    stats = resp.statistics
+    assert math.isfinite(stats.sharpe_ratio)
+    assert math.isfinite(stats.sortino_ratio)
+
+
+def test_scenario_statistics_sharpe_matches_engine_on_total_returns() -> None:
+    series = _series_map(300)
+    resp = assemble_scenario(
+        series,
+        portfolio_id=1,
+        name="Test",
+        quantities=QUANTITIES,
+        cash=0.0,
+        max_points=MAX_POINTS,
+    )
+    # Rebuild the cash-inclusive total daily returns the assembler computes:
+    # values = nav_by_position(prices, quantities); total = values.sum(axis=1) + cash.
+    prices = join_prices(series)
+    total = nav_by_position(prices, QUANTITIES).sum(axis=1) + 0.0
+    total_returns = simple_returns(total)
+    assert resp.statistics.sharpe_ratio == pytest.approx(
+        sharpe_ratio(total_returns), rel=1e-9
+    )
+    assert resp.statistics.sortino_ratio == pytest.approx(
+        sortino_ratio(total_returns), rel=1e-9
+    )
