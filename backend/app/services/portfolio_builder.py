@@ -202,6 +202,19 @@ async def _resolve_block_budgets(
         )
     fund_ids = [ref.id for ref in assets if isinstance(ref, FundRefIn)]
     class_by_id = await optimizer_data.load_fund_asset_class(session, fund_ids)
+    # Fund.asset_class is nullable: a fund with an unknown class matches no block
+    # and would be silently left unconstrained. Fail loud instead (mirrors the
+    # equity guard above) so a requested risk budget is never quietly bypassed.
+    missing_class = [
+        _ref_key(ref)
+        for ref in assets
+        if isinstance(ref, FundRefIn) and class_by_id.get(ref.id) is None
+    ]
+    if missing_class:
+        raise BuilderError(
+            "block budgets require a known asset_class for every fund; missing "
+            f"for: {', '.join(missing_class)}"
+        )
     index_of = {label: i for i, label in enumerate(labels)}
     out: list[engine.BlockBudget] = []
     for budget in block_budgets:
@@ -320,6 +333,15 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
     blocks = await _resolve_block_budgets(
         session, assets, labels, payload.constraints.block_budgets
     )
+    # Block budgets are honoured ONLY by min_cvar (ConstraintsIn docstring). The
+    # bundle replaces the scalar (cap, min_weight) block in the CVaR solver; it
+    # is reused by BOTH the views and no-views min_cvar paths so a user-requested
+    # risk constraint is never silently dropped.
+    cvar_bounds = (
+        engine.BoundsBundle(cap_vec=None, min_vec=None, blocks=blocks)
+        if blocks
+        else None
+    )
 
     try:
         if payload.objective == "bl_utility":
@@ -330,7 +352,9 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
             )
         elif payload.objective == "min_cvar" and mu_posterior is not None:
             # Product default with views: re-centered scenarios + equilibrium
-            # return floor (dispatch §5: piso = π·w_mkt).
+            # return floor (dispatch §5: piso = π·w_mkt). Block budgets (when
+            # given) ride along via bounds — engine builds cons from bounds, then
+            # appends the ret_floor row independently.
             assert mu_equilibrium is not None and w_mkt is not None
             mu_hist = bl.historical_mean_ann(scenarios)
             recentered = bl.recenter_scenarios(scenarios, mu_hist, mu_posterior)
@@ -339,18 +363,14 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
                 recentered,
                 cap=cap,
                 min_weight=min_weight,
+                bounds=cvar_bounds,
                 ret_floor=ret_floor,
                 mu=mu_posterior,
             )
         else:
             if payload.objective == "min_cvar":
-                bundle = (
-                    engine.BoundsBundle(cap_vec=None, min_vec=None, blocks=blocks)
-                    if blocks
-                    else None
-                )
                 weights, status = engine.solve_min_cvar(
-                    scenarios, cap=cap, min_weight=min_weight, bounds=bundle
+                    scenarios, cap=cap, min_weight=min_weight, bounds=cvar_bounds
                 )
             else:
                 weights, status = _solve_mu_free(

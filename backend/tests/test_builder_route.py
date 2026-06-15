@@ -65,6 +65,22 @@ def _stub_aum(
     monkeypatch.setattr(optimizer_data, "load_fund_aum", fake_aum)
 
 
+def _stub_asset_class(
+    monkeypatch: pytest.MonkeyPatch,
+    classes: dict[uuid.UUID, str | None] | None = None,
+) -> None:
+    async def fake_class(
+        session: Any, fund_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, str | None]:
+        if classes is not None:
+            return {fund_id: classes.get(fund_id) for fund_id in fund_ids}
+        # Default: alternate equity / fixed_income so blocks have ≥1 member.
+        order = ("equity", "fixed_income")
+        return {fid: order[i % 2] for i, fid in enumerate(fund_ids)}
+
+    monkeypatch.setattr(optimizer_data, "load_fund_asset_class", fake_class)
+
+
 async def test_optimize_min_cvar_no_views_happy_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -227,6 +243,144 @@ async def test_view_on_asset_outside_universe_maps_to_422(
         response = await client.post("/builder/optimize", json=payload)
     assert response.status_code == 422
     assert "not in the request universe" in response.json()["detail"]
+
+
+# ── Block budgets (per-asset-class Σ-weight bounds, min_cvar only) ───────────
+
+
+async def test_block_budget_binds_min_cvar(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_returns(monkeypatch)
+    # Funds 0 & 2 are equity; cap the equity block at 30% — it must bind.
+    _stub_asset_class(
+        monkeypatch,
+        classes={
+            _FUND_IDS[0]: "equity",
+            _FUND_IDS[1]: "fixed_income",
+            _FUND_IDS[2]: "equity",
+            _FUND_IDS[3]: "fixed_income",
+        },
+    )
+    payload = {
+        "assets": [_fund_ref(i) for i in range(4)],
+        "objective": "min_cvar",
+        "constraints": {
+            "cap": 0.5,
+            "block_budgets": [{"asset_class": "equity", "lo": 0.0, "hi": 0.3}],
+        },
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    by_id = {w["asset"]["id"]: w["weight"] for w in body["weights"]}
+    equity_sum = by_id[str(_FUND_IDS[0])] + by_id[str(_FUND_IDS[2])]
+    assert equity_sum <= 0.3 + 1e-6
+    assert abs(sum(w["weight"] for w in body["weights"]) - 1.0) < 1e-6
+
+
+async def test_block_budget_with_views_binds_min_cvar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reachable combination flagged in review: min_cvar + views +
+    block_budgets must still honour the block bound (not silently drop it)."""
+    _stub_returns(monkeypatch)
+    _stub_aum(monkeypatch)
+    _stub_asset_class(
+        monkeypatch,
+        classes={
+            _FUND_IDS[0]: "equity",
+            _FUND_IDS[1]: "fixed_income",
+            _FUND_IDS[2]: "equity",
+            _FUND_IDS[3]: "fixed_income",
+        },
+    )
+    payload = {
+        "assets": [_fund_ref(i) for i in range(4)],
+        "objective": "min_cvar",
+        "constraints": {
+            "cap": 0.5,
+            "block_budgets": [{"asset_class": "equity", "lo": 0.0, "hi": 0.3}],
+        },
+        "views": [
+            {"type": "absolute", "asset": _fund_ref(0), "q": 0.20, "confidence": 0.6}
+        ],
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    by_id = {w["asset"]["id"]: w["weight"] for w in body["weights"]}
+    equity_sum = by_id[str(_FUND_IDS[0])] + by_id[str(_FUND_IDS[2])]
+    assert equity_sum <= 0.3 + 1e-6
+    assert body["diagnostics"]["mu_posterior"] is not None
+
+
+async def test_block_budget_with_equity_maps_to_422(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+    _stub_asset_class(monkeypatch)
+    payload = {
+        "assets": [_fund_ref(0), _fund_ref(1), {"kind": "equity", "ticker": "AAPL"}],
+        "objective": "min_cvar",
+        "constraints": {
+            "cap": 0.5,
+            "block_budgets": [{"asset_class": "equity", "lo": 0.0, "hi": 0.3}],
+        },
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "block budgets" in detail and "equity:AAPL" in detail
+
+
+async def test_block_budget_unknown_asset_class_maps_to_422(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+    # Fund 1 has a NULL asset_class (the column is nullable) → fail loud.
+    _stub_asset_class(
+        monkeypatch,
+        classes={_FUND_IDS[0]: "equity", _FUND_IDS[1]: None},
+    )
+    payload = {
+        "assets": [_fund_ref(0), _fund_ref(1)],
+        "objective": "min_cvar",
+        "constraints": {
+            "cap": 0.6,
+            "block_budgets": [{"asset_class": "equity", "lo": 0.0, "hi": 0.3}],
+        },
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "known asset_class" in detail and str(_FUND_IDS[1]) in detail
+
+
+async def test_block_budget_matches_no_asset_maps_to_422(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+    # No fund is 'cash' → the cash block matches nothing → fail loud.
+    _stub_asset_class(
+        monkeypatch,
+        classes={_FUND_IDS[0]: "equity", _FUND_IDS[1]: "fixed_income"},
+    )
+    payload = {
+        "assets": [_fund_ref(0), _fund_ref(1)],
+        "objective": "min_cvar",
+        "constraints": {
+            "cap": 0.6,
+            "block_budgets": [{"asset_class": "cash", "lo": 0.0, "hi": 0.3}],
+        },
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "matches no asset" in detail and "cash" in detail
 
 
 # ── Universe optimization (filter+rank the fund universe) ────────────────────
