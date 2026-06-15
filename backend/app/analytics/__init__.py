@@ -37,6 +37,7 @@ from app.analytics.risk import (
     historical_cvar,
     historical_var,
     max_drawdown,
+    realized_cvar,
 )
 from app.analytics.rolling import (
     rolling_beta,
@@ -65,6 +66,7 @@ __all__ = [
     "nav_by_position",
     "portfolio_nav",
     "portfolio_returns",
+    "realized_cvar",
     "return_histogram",
     "risk_contributions",
     "rolling_beta",
