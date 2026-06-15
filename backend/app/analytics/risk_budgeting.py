@@ -183,3 +183,29 @@ def etl_risk_budget(
         cetl=np.asarray(cetl, dtype=float),
         pcetl=np.asarray(pcetl, dtype=float),
     )
+
+
+def portfolio_starr(
+    weights: np.ndarray,
+    scenarios: np.ndarray,
+    portfolio_return_ann: float,
+    risk_free_rate: float,
+    confidence: float = 0.95,
+) -> float:
+    """Portfolio STARR = annualized excess return / annualized ETL.
+
+    ``portfolio_return_ann`` is the EXPLICIT annualized portfolio expected
+    return (gate G5: by contract the caller supplies wᵀμ_BL — never a sample
+    mean). The annualized ETL is the daily etl_risk_budget ETL × TRADING_DAYS.
+    STARR is positive iff the annualized return exceeds the risk-free rate.
+
+    Raises ValueError on a NaN/inf return or rf, or any condition raised by
+    etl_risk_budget (short/empty tail, non-positive ETL, NaN, shape mismatch).
+    """
+    if not np.isfinite(portfolio_return_ann):
+        raise ValueError("portfolio_starr: portfolio_return_ann must be finite")
+    if not np.isfinite(risk_free_rate):
+        raise ValueError("portfolio_starr: risk_free_rate must be finite")
+    dec = etl_risk_budget(weights, scenarios, confidence=confidence)
+    etl_ann = dec.portfolio_etl * TRADING_DAYS
+    return float((portfolio_return_ann - risk_free_rate) / etl_ann)

@@ -177,3 +177,56 @@ def test_etl_budget_rejects_nan() -> None:
     scen[5, 2] = np.inf
     with pytest.raises(ValueError, match="NaN or infinite"):
         rb.etl_risk_budget(np.array([0.25, 0.25, 0.25, 0.25]), scen, confidence=0.95)
+
+
+# ── STARR ────────────────────────────────────────────────────────────────────
+
+
+def test_starr_positive_when_excess_positive() -> None:
+    scen = _scenarios()
+    w = np.array([0.25, 0.25, 0.25, 0.25])
+    # Explicit annualized portfolio expected return well above rf.
+    starr = rb.portfolio_starr(
+        w, scen, portfolio_return_ann=0.10, risk_free_rate=0.04, confidence=0.95
+    )
+    assert starr > 0.0
+
+
+def test_starr_negative_when_excess_negative() -> None:
+    scen = _scenarios()
+    w = np.array([0.25, 0.25, 0.25, 0.25])
+    starr = rb.portfolio_starr(
+        w, scen, portfolio_return_ann=0.01, risk_free_rate=0.04, confidence=0.95
+    )
+    assert starr < 0.0
+
+
+def test_starr_equals_excess_over_annualized_etl() -> None:
+    scen = _scenarios()
+    w = np.array([0.4, 0.3, 0.2, 0.1])
+    dec = rb.etl_risk_budget(w, scen, confidence=0.95)
+    etl_ann = dec.portfolio_etl * rb.TRADING_DAYS
+    expected = (0.08 - 0.04) / etl_ann
+    starr = rb.portfolio_starr(
+        w, scen, portfolio_return_ann=0.08, risk_free_rate=0.04, confidence=0.95
+    )
+    assert abs(starr - expected) < 1e-10
+
+
+def test_starr_rejects_nonpositive_etl_tail() -> None:
+    # All-positive scenarios → loss tail has non-negative mean → ETL <= 0.
+    scen = np.abs(_scenarios()) + 0.001
+    w = np.array([0.25, 0.25, 0.25, 0.25])
+    with pytest.raises(ValueError, match="non-positive portfolio ETL"):
+        rb.portfolio_starr(
+            w, scen, portfolio_return_ann=0.08, risk_free_rate=0.04, confidence=0.95
+        )
+
+
+def test_starr_rejects_nonfinite_return() -> None:
+    scen = _scenarios()
+    w = np.array([0.25, 0.25, 0.25, 0.25])
+    with pytest.raises(ValueError, match="must be finite"):
+        rb.portfolio_starr(
+            w, scen, portfolio_return_ann=np.nan, risk_free_rate=0.04, confidence=0.95
+        )
