@@ -165,6 +165,21 @@ async def load_fund_aum(
     return {fund_id: found.get(fund_id) for fund_id in fund_ids}
 
 
+async def load_fund_asset_class(
+    session: AsyncSession, fund_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, str | None]:
+    """asset_class (funds.asset_class) per instrument — None where unknown."""
+    if not fund_ids:
+        return {}
+    result = await session.execute(
+        select(Fund.instrument_id, Fund.asset_class).where(
+            Fund.instrument_id.in_(fund_ids)
+        )
+    )
+    found = {row[0]: row[1] for row in result.all()}
+    return {fund_id: found.get(fund_id) for fund_id in fund_ids}
+
+
 @dataclass(frozen=True)
 class UniverseFund:
     """A fund selected by a universe spec — id plus display labels."""

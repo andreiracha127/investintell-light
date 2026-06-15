@@ -57,13 +57,6 @@ ViewIn = Annotated[AbsoluteViewIn | RelativeViewIn, Field(discriminator="type")]
 # ── Request ──────────────────────────────────────────────────────────────────
 
 
-class ConstraintsIn(BaseModel):
-    """Long-only and sum(w)=1 are always enforced; these are the knobs."""
-
-    cap: Annotated[float, Field(gt=0, le=1)] | None = 0.25
-    min_weight: Annotated[float, Field(ge=0, le=1)] | None = None
-
-
 class BLParamsIn(BaseModel):
     delta: Annotated[float, Field(gt=0)] = 2.5
     tau: Annotated[float, Field(gt=0)] = 0.05
@@ -90,6 +83,34 @@ UniverseRankBy = Literal[
 # paths feed the optimizer the same bounded number of assets.
 MAX_UNIVERSE_ASSETS = 50
 DEFAULT_UNIVERSE_ASSETS = 30
+
+
+class BlockBudgetIn(BaseModel):
+    """Σ of weights in an asset-class block must lie in [lo, hi] (decimal
+    fractions). ``asset_class`` matches ``Fund.asset_class``."""
+
+    asset_class: AssetClassFilter
+    lo: Annotated[float, Field(ge=0, le=1)] = 0.0
+    hi: Annotated[float, Field(ge=0, le=1)] = 1.0
+
+    @model_validator(mode="after")
+    def _check_order(self) -> "BlockBudgetIn":
+        if self.lo > self.hi:
+            raise ValueError(f"block budget lo ({self.lo}) must be <= hi ({self.hi})")
+        return self
+
+
+class ConstraintsIn(BaseModel):
+    """Long-only and sum(w)=1 are always enforced; these are the knobs.
+
+    ``block_budgets`` (per-asset-class Σ-weight bounds) are honoured ONLY by the
+    ``min_cvar`` objective in v1; they are resolved against ``Fund.asset_class``
+    server-side and IGNORED by the other objectives. Empty/None = no blocks.
+    """
+
+    cap: Annotated[float, Field(gt=0, le=1)] | None = 0.25
+    min_weight: Annotated[float, Field(ge=0, le=1)] | None = None
+    block_budgets: list[BlockBudgetIn] | None = None
 
 
 class UniverseSpecIn(BaseModel):

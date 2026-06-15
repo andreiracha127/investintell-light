@@ -40,6 +40,7 @@ from app.optimizer import engine
 from app.schemas.builder import (
     AbsoluteViewIn,
     AssetRefIn,
+    BlockBudgetIn,
     DiagnosticsOut,
     EquityRefIn,
     ExpectedOut,
@@ -179,6 +180,46 @@ def _solve_mu_free(
     raise BuilderError(f"unknown objective: {objective}")  # pragma: no cover - Literal-guarded
 
 
+async def _resolve_block_budgets(
+    session: AsyncSession,
+    assets: list[AssetRefIn],
+    labels: list[str],
+    block_budgets: list[BlockBudgetIn] | None,
+) -> list[engine.BlockBudget] | None:
+    """Map asset-class block budgets onto engine column-index groups.
+
+    Equities have no asset_class in the builder catalog → any equity makes a
+    block-budget request fail loud (mirrors the AUM rule in
+    ``_market_weights_for``).
+    """
+    if not block_budgets:
+        return None
+    equity_labels = [_ref_key(ref) for ref in assets if isinstance(ref, EquityRefIn)]
+    if equity_labels:
+        raise BuilderError(
+            "block budgets require an asset_class for every asset; equities have "
+            f"none in the builder: {', '.join(equity_labels)}"
+        )
+    fund_ids = [ref.id for ref in assets if isinstance(ref, FundRefIn)]
+    class_by_id = await optimizer_data.load_fund_asset_class(session, fund_ids)
+    index_of = {label: i for i, label in enumerate(labels)}
+    out: list[engine.BlockBudget] = []
+    for budget in block_budgets:
+        idxs = [
+            index_of[_ref_key(ref)]
+            for ref in assets
+            if isinstance(ref, FundRefIn)
+            and class_by_id.get(ref.id) == budget.asset_class
+        ]
+        if not idxs:
+            raise BuilderError(
+                f"block budget for asset_class '{budget.asset_class}' matches no "
+                "asset in the resolved universe"
+            )
+        out.append(engine.BlockBudget(indices=idxs, lo=budget.lo, hi=budget.hi))
+    return out
+
+
 def _filters_from_spec(spec: UniverseSpecIn) -> funds_catalog.FundFilters:
     """Map a UniverseSpecIn onto the catalog's FundFilters (search left off)."""
     return funds_catalog.FundFilters(
@@ -276,6 +317,10 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
             except ValueError as exc:
                 raise BuilderError(str(exc)) from exc
 
+    blocks = await _resolve_block_budgets(
+        session, assets, labels, payload.constraints.block_budgets
+    )
+
     try:
         if payload.objective == "bl_utility":
             assert mu_equilibrium is not None  # needs_bl guarantees it
@@ -298,9 +343,19 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
                 mu=mu_posterior,
             )
         else:
-            weights, status = _solve_mu_free(
-                payload.objective, sigma, scenarios, cap, min_weight
-            )
+            if payload.objective == "min_cvar":
+                bundle = (
+                    engine.BoundsBundle(cap_vec=None, min_vec=None, blocks=blocks)
+                    if blocks
+                    else None
+                )
+                weights, status = engine.solve_min_cvar(
+                    scenarios, cap=cap, min_weight=min_weight, bounds=bundle
+                )
+            else:
+                weights, status = _solve_mu_free(
+                    payload.objective, sigma, scenarios, cap, min_weight
+                )
     except engine.OptimizerError as exc:
         raise BuilderError(str(exc)) from exc
 

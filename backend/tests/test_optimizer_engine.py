@@ -242,3 +242,18 @@ def test_bounds_constraints_empty_block_indices_fails_loud() -> None:
     blocks = [engine.BlockBudget(indices=[], lo=0.0, hi=0.5)]
     with pytest.raises(engine.OptimizerError, match="empty"):
         engine.bounds_constraints(w, cap_vec=None, min_vec=None, blocks=blocks)
+
+
+# ── T2C-2: solve_min_cvar honours the bounds bundle ─────────────────────────
+
+
+def test_min_cvar_with_bounds_block_budget_binds() -> None:
+    scenarios = _random_scenarios(t=500, n=4)
+    blocks = [engine.BlockBudget(indices=[0, 1], lo=0.0, hi=0.20)]
+    weights, status = engine.solve_min_cvar(
+        scenarios,
+        cap=None,
+        bounds=engine.BoundsBundle(cap_vec=None, min_vec=None, blocks=blocks),
+    )
+    _assert_valid(weights, status)
+    assert weights[0] + weights[1] <= 0.20 + 1e-6

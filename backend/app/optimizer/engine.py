@@ -106,6 +106,19 @@ class BlockBudget:
     hi: float
 
 
+@dataclass(frozen=True)
+class BoundsBundle:
+    """Optional advanced-constraint bundle for the CVaR solvers.
+
+    When passed to a solver, it REPLACES the scalar (cap, min_weight) block
+    with ``bounds_constraints`` — per-asset bound vectors plus block budgets.
+    """
+
+    cap_vec: np.ndarray | None = None
+    min_vec: np.ndarray | None = None
+    blocks: list[BlockBudget] | None = None
+
+
 def _check_bound_vectors(
     n: int, cap_vec: np.ndarray | None, min_vec: np.ndarray | None
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
@@ -361,6 +374,7 @@ def solve_min_cvar(
     alpha: float = DEFAULT_CVAR_ALPHA,
     cap: float | None = DEFAULT_CAP,
     min_weight: float | None = None,
+    bounds: BoundsBundle | None = None,
     ret_floor: float | None = None,
     mu: np.ndarray | None = None,
 ) -> tuple[np.ndarray, str]:
@@ -383,7 +397,6 @@ def solve_min_cvar(
         raise OptimizerError(f"min_cvar requires at least 10 scenarios, got {t}")
     if not 0 < alpha < 1:
         raise OptimizerError(f"alpha must be in (0, 1), got {alpha}")
-    _check_constraint_params(n, cap, min_weight)
     if ret_floor is not None and mu is None:
         raise OptimizerError(
             "min_cvar: ret_floor requires an explicit mu vector (BL posterior) — "
@@ -394,7 +407,11 @@ def solve_min_cvar(
     z = cp.Variable()
     losses = -scenarios @ w  # per-scenario loss
     cvar = z + cp.sum(cp.pos(losses - z)) / ((1 - alpha) * t)
-    cons = base_constraints(w, cap, min_weight)
+    if bounds is not None:
+        cons = bounds_constraints(w, bounds.cap_vec, bounds.min_vec, bounds.blocks)
+    else:
+        _check_constraint_params(n, cap, min_weight)
+        cons = base_constraints(w, cap, min_weight)
     if ret_floor is not None and mu is not None:
         mu_arr = np.asarray(mu, dtype=float).ravel()
         if mu_arr.shape != (n,):
