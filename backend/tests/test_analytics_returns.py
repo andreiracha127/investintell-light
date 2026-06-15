@@ -8,6 +8,7 @@ from app.analytics import (
     align_returns,
     cumulative_return_series,
     simple_returns,
+    to_monthly_returns,
     total_return,
 )
 
@@ -92,3 +93,39 @@ def test_align_returns_insufficient_overlap_raises() -> None:
     b = pd.Series([0.01, 0.02], index=pd.date_range("2024-02-01", periods=2, freq="D"))
     with pytest.raises(ValueError, match="overlapping"):
         align_returns(a, b)
+
+
+def test_to_monthly_returns_compounds_21_day_blocks() -> None:
+    """Each 21-day block is geometrically compounded; exactly len//21 months."""
+    rng = np.random.default_rng(7)
+    daily = _dated(list(rng.normal(0.0004, 0.01, 63)))  # exactly 3 months
+    monthly = to_monthly_returns(daily)
+    assert len(monthly) == 3
+    arr = daily.to_numpy(dtype=float)
+    for k in range(3):
+        block = arr[k * 21 : (k + 1) * 21]
+        assert monthly.iloc[k] == pytest.approx(float((1.0 + block).prod() - 1.0), abs=1e-12)
+
+
+def test_to_monthly_returns_end_anchored_drops_oldest_remainder() -> None:
+    """len % 21 != 0 drops the OLDEST days; the last month is the final 21 days."""
+    rng = np.random.default_rng(8)
+    daily = _dated(list(rng.normal(0.0004, 0.01, 50)))  # 50 -> 2 months, drops 8 oldest
+    monthly = to_monthly_returns(daily)
+    assert len(monthly) == 2
+    arr = daily.to_numpy(dtype=float)
+    last_block = arr[-21:]
+    assert monthly.iloc[-1] == pytest.approx(float((1.0 + last_block).prod() - 1.0), abs=1e-12)
+    # Last month is indexed by the last date of the series (as-of date).
+    assert monthly.index[-1] == daily.index[-1]
+
+
+def test_to_monthly_returns_too_few_days_raises() -> None:
+    with pytest.raises(ValueError, match="at least 21"):
+        to_monthly_returns(_dated([0.01] * 20))
+
+
+def test_to_monthly_returns_nan_raises() -> None:
+    daily = _dated([0.01] * 21 + [float("nan")] * 21)
+    with pytest.raises(ValueError, match="NaN"):
+        to_monthly_returns(daily)

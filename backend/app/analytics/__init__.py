@@ -26,6 +26,7 @@ from app.analytics.returns import (
     align_returns,
     cumulative_return_series,
     simple_returns,
+    to_monthly_returns,
     total_return,
 )
 from app.analytics.risk import (
@@ -117,6 +118,7 @@ __all__ = [
     "sharpe_ratio",
     "simple_returns",
     "sortino_ratio",
+    "to_monthly_returns",
     "total_return",
     "variance_risk_budget",
     "weight_series",
