@@ -249,12 +249,23 @@ class ExpectedOut(BaseModel):
     return_ann_bl: float | None
 
 
+class ViewConsistencyOut(BaseModel):
+    """He-Litterman 3-sigma alarm: are any views fighting the equilibrium?"""
+
+    inconsistent: bool
+    n_flagged: int
+    max_z: float
+    threshold_sigma: float
+
+
 class DiagnosticsOut(BaseModel):
     n_obs: int
     status: str
     # Present only on the BL path (views and/or bl_utility), in asset order.
     mu_equilibrium: list[float] | None = None
     mu_posterior: list[float] | None = None
+    # He-Litterman view-vs-prior consistency — present only when views are given.
+    view_consistency: ViewConsistencyOut | None = None
 
 
 class OptimizeResponse(BaseModel):

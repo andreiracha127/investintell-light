@@ -119,3 +119,10 @@ def test_optimize_request_rejects_unknown_mandate() -> None:
 
     with pytest.raises(ValidationError):
         OptimizeRequest(assets=_assets(), mandate="not_a_mandate")
+
+
+def test_diagnostics_out_view_consistency_defaults_to_none() -> None:
+    from app.schemas.builder import DiagnosticsOut
+
+    diag = DiagnosticsOut(n_obs=10, status="optimal")
+    assert diag.view_consistency is None

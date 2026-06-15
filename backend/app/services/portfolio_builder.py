@@ -49,6 +49,7 @@ from app.schemas.builder import (
     OptimizeRequest,
     OptimizeResponse,
     UniverseSpecIn,
+    ViewConsistencyOut,
     ViewIn,
     WeightOut,
 )
@@ -358,6 +359,7 @@ async def run_optimize(
 
     mu_equilibrium: np.ndarray | None = None
     mu_posterior: np.ndarray | None = None
+    view_consistency: ViewConsistencyOut | None = None
     w_mkt: np.ndarray | None = None
     if needs_bl:
         w_mkt = await _market_weights_for(session, assets, labels)
@@ -371,6 +373,15 @@ async def run_optimize(
                 omega = bl.omega_idzorek(p, sigma, confidences, tau=payload.bl.tau)
                 mu_posterior, _sigma_bl = bl.posterior(
                     sigma, mu_equilibrium, p, q, omega, tau=payload.bl.tau
+                )
+                vc = bl.view_consistency_he_litterman(
+                    p, q, mu_equilibrium, omega, sigma, tau=payload.bl.tau
+                )
+                view_consistency = ViewConsistencyOut(
+                    inconsistent=bool(vc["inconsistent"]),
+                    n_flagged=int(vc["n_flagged"]),
+                    max_z=float(vc["max_z"]),
+                    threshold_sigma=float(vc["threshold_sigma"]),
                 )
             except ValueError as exc:
                 raise BuilderError(str(exc)) from exc
@@ -496,5 +507,6 @@ async def run_optimize(
             mu_posterior=(
                 [float(x) for x in mu_posterior] if mu_posterior is not None else None
             ),
+            view_consistency=view_consistency,
         ),
     )

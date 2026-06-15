@@ -210,6 +210,46 @@ def posterior(
     return mu_bl, (sigma_bl + sigma_bl.T) / 2.0
 
 
+# He-Litterman (1999) consistency threshold: a view Q more than this many
+# predictive sigmas from its prior-implied value P*pi is "fighting the prior".
+_HE_LITTERMAN_SIGMA = 3.0
+
+
+def view_consistency_he_litterman(
+    p: np.ndarray,
+    q: np.ndarray,
+    pi: np.ndarray,
+    omega: np.ndarray,
+    sigma_ann: np.ndarray,
+    tau: float = DEFAULT_TAU,
+) -> dict[str, object]:
+    """He-Litterman (1999) view-vs-prior consistency check.
+
+    For each view, the prior-implied value is P*pi and the predictive
+    dispersion of (Q - P*pi) is sqrt(diag(P*(tau*Sigma)*P' + Omega)). A view
+    whose |Q - P*pi| exceeds ``_HE_LITTERMAN_SIGMA`` times that dispersion is
+    the textbook "views fighting the equilibrium" red flag. Returns a
+    structured summary (never raises on a degenerate sigma -> z=0 there).
+    """
+    p = np.asarray(p, dtype=float)
+    q = np.asarray(q, dtype=float).ravel()
+    pi = np.asarray(pi, dtype=float).ravel()
+    omega = np.asarray(omega, dtype=float)
+    sigma_ann = np.asarray(sigma_ann, dtype=float)
+    prior_view = p @ pi                                   # (K,)
+    view_cov = p @ (tau * sigma_ann) @ p.T + omega        # (K, K) predictive cov
+    view_sigma = np.sqrt(np.maximum(np.diag(view_cov), 0.0))
+    residual = np.abs(q - prior_view)
+    z = residual / np.where(view_sigma > 0, view_sigma, 1.0)
+    inconsistent = z > _HE_LITTERMAN_SIGMA
+    return {
+        "inconsistent": bool(inconsistent.any()),
+        "n_flagged": int(inconsistent.sum()),
+        "max_z": round(float(z.max()) if z.size else 0.0, 4),
+        "threshold_sigma": _HE_LITTERMAN_SIGMA,
+    }
+
+
 def historical_mean_ann(scenarios_daily: np.ndarray) -> np.ndarray:
     """Annualized sample mean of daily scenarios — BL re-centering ONLY.
 
