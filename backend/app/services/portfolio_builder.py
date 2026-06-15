@@ -89,10 +89,27 @@ def humanize_error(detail: str) -> str:
     return detail
 
 
-def _regime_cvar_limit(base_limit: float) -> float:
-    """Base CVaR limit, unmodified. T2C-7/T2C-8 replace this with a regime-aware
-    multiplier driven by the credit-regime stress series."""
-    return base_limit
+# Default tightening applied to the CVaR limit when the credit regime is
+# risk_off (halve the tolerated tail loss). Surfaced as a constant so the
+# route/tests can inspect it.
+DEFAULT_RISK_OFF_CVAR_FACTOR = 0.5
+
+
+def regime_cvar_multiplier(state: str | None, *, risk_off_factor: float) -> float:
+    """Multiplier applied to the CVaR limit given the credit-regime state.
+
+    ``risk_off`` -> ``risk_off_factor`` (must be in (0, 1] to TIGHTEN the cap);
+    any other state (risk_on / None / unknown) -> 1.0 (no change). Pure."""
+    if not 0 < risk_off_factor <= 1:
+        raise ValueError(f"risk_off_factor must be in (0, 1], got {risk_off_factor}")
+    return risk_off_factor if state == "risk_off" else 1.0
+
+
+def apply_regime_cvar_limit(
+    base_limit: float, state: str | None, *, risk_off_factor: float
+) -> float:
+    """Effective CVaR limit = base × regime multiplier."""
+    return base_limit * regime_cvar_multiplier(state, risk_off_factor=risk_off_factor)
 
 
 def _to_data_ref(ref: FundRefIn | EquityRefIn) -> optimizer_data.AssetRef:
@@ -382,7 +399,9 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
                     "max_return_cvar needs expected returns — provide views so the "
                     "Black-Litterman posterior exists (gate G5)"
                 )
-            limit = _regime_cvar_limit(payload.cvar_limit)  # T2C-8 makes this regime-aware
+            limit = apply_regime_cvar_limit(
+                payload.cvar_limit, None, risk_off_factor=DEFAULT_RISK_OFF_CVAR_FACTOR
+            )
             # Reuse cvar_bounds (already built above with the same promotion
             # logic) — the max_return_cvar engine path is structurally identical
             # to min_cvar: BoundsBundle replaces the scalar (cap, min_weight)
