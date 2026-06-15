@@ -179,6 +179,13 @@ class FundRiskLatest(Base):
     downside_capture_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     upside_capture_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     equity_correlation_252d: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    # Class-specific regression metrics (Tier 1, rank 4) — read off the risk MV
+    # (db/ddl/2026-06-13_dynamic_catalog.sql), computed by the risk_metrics
+    # worker per asset_class. NULL for funds outside the matching class.
+    empirical_duration: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    credit_beta: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    inflation_beta: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    crisis_alpha_score: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
 
 
 class FundNav(Base):

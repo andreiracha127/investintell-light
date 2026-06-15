@@ -98,6 +98,11 @@ class FundRiskOut(BaseModel):
     downside_capture_1y: float | None
     upside_capture_1y: float | None
     equity_correlation_252d: float | None
+    # Class-specific regression metrics (dimensionless betas / decimal fractions).
+    empirical_duration: float | None = None
+    credit_beta: float | None = None
+    inflation_beta: float | None = None
+    crisis_alpha_score: float | None = None
 
 
 class FundClassOut(BaseModel):
