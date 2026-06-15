@@ -12,8 +12,9 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ApiError,
   fetchStockAnalysis,
-  fetchStockHistory,
+  fetchStockTimeseries,
   isRangePreset,
+  stockTimeseriesToHistoryBars,
   type HistoryBar,
   type RangePreset,
   type StockAnalysis,
@@ -66,9 +67,9 @@ export function StockAnalysisView({
       failureCount < 2,
   });
 
-  const history = useQuery({
-    queryKey: ["history", ticker],
-    queryFn: ({ signal }) => fetchStockHistory(ticker, 2520, signal),
+  const timeseries = useQuery({
+    queryKey: ["stock-timeseries", ticker, range],
+    queryFn: ({ signal }) => fetchStockTimeseries(ticker, range, signal),
     staleTime: 60 * 60 * 1000,
     retry: (failureCount, err) =>
       !(err instanceof ApiError && err.status >= 400 && err.status < 500) &&
@@ -118,7 +119,9 @@ export function StockAnalysisView({
       colors={colors}
       range={range}
       onRangeChange={selectRange}
-      historyBars={history.data?.bars ?? []}
+      historyBars={
+        timeseries.data ? stockTimeseriesToHistoryBars(timeseries.data) : []
+      }
     />
   );
 }

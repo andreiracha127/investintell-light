@@ -11,7 +11,14 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-import { fetchFundHistory, fetchFundProfile, type FundRisk, type RangePreset } from "@/lib/api/client";
+import {
+  fetchFundProfile,
+  fetchFundTimeseries,
+  fundTimeseriesToHistoryBars,
+  fundTimeseriesToNavPoints,
+  type FundRisk,
+  type RangePreset,
+} from "@/lib/api/client";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { InteractiveChart } from "@/components/charts/InteractiveChart";
 import { FundLookthroughSection } from "@/components/funds/FundLookthroughSection";
@@ -88,18 +95,40 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
   }, [instrumentId]);
 
   const [range, setRange] = useState<RangePreset>("1Y");
-  const historyQuery = useQuery({
-    queryKey: ["fund-history", instrumentId],
-    queryFn: ({ signal }) => fetchFundHistory(instrumentId, 2520, signal),
+  const timeseriesQuery = useQuery({
+    queryKey: ["fund-timeseries", instrumentId, range],
+    queryFn: ({ signal }) => fetchFundTimeseries(instrumentId, range, signal),
+    staleTime: 60 * 60 * 1000,
+    retry: retryPolicy,
+  });
+  // Profile `fund.nav` is intentionally bounded by the catalog endpoint.
+  // These analytics charts use the range-aware MAX series for full depth.
+  const performanceTimeseriesQuery = useQuery({
+    queryKey: ["fund-timeseries", instrumentId, "MAX"],
+    queryFn: ({ signal }) => fetchFundTimeseries(instrumentId, "MAX", signal),
     staleTime: 60 * 60 * 1000,
     retry: retryPolicy,
   });
 
+  const chartBars = useMemo(
+    () =>
+      timeseriesQuery.data
+        ? fundTimeseriesToHistoryBars(timeseriesQuery.data)
+        : [],
+    [timeseriesQuery.data],
+  );
+  const performanceNav = useMemo(
+    () =>
+      performanceTimeseriesQuery.data
+        ? fundTimeseriesToNavPoints(performanceTimeseriesQuery.data)
+        : [],
+    [performanceTimeseriesQuery.data],
+  );
+
   // Both analytics charts share this gate, so compute it once: (ly - fy) * 12 + (lm - fm)
   // counts month boundaries crossed; 13 distinct calendar months = 12 month-steps.
   const navSpanMonthSteps = useMemo(() => {
-    if (!profileQuery.data) return 0;
-    const dates = profileQuery.data.nav
+    const dates = performanceNav
       .filter((p) => p.nav !== null)
       .map((p) => p.date)
       .sort();
@@ -107,25 +136,25 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     const [fy, fm] = dates[0].split("-").map(Number);
     const [ly, lm] = dates[dates.length - 1].split("-").map(Number);
     return (ly - fy) * 12 + (lm - fm);
-  }, [profileQuery.data]);
+  }, [performanceNav]);
 
   // Monthly returns heatmap — only shown when the nav spans at least
   // 13 distinct calendar months (= 12 month-steps). The first month is
   // always excluded as a baseline, so 13 months guarantees ≥ 1 return cell.
   const monthlyReturnsOption = useMemo(() => {
-    if (!profileQuery.data || !colors) return null;
+    if (!colors) return null;
     if (navSpanMonthSteps < 12) return null;
-    const cells = monthlyReturns(profileQuery.data.nav);
+    const cells = monthlyReturns(performanceNav);
     return buildHcMonthlyReturnsOption(cells, colors);
-  }, [profileQuery.data, colors, navSpanMonthSteps]);
+  }, [colors, navSpanMonthSteps, performanceNav]);
 
   // Drawdown chart — same 13-distinct-month gate as the heatmap above.
   const drawdownOption = useMemo(() => {
-    if (!profileQuery.data || !colors) return null;
+    if (!colors) return null;
     if (navSpanMonthSteps < 12) return null;
-    const dd = drawdownSeries(profileQuery.data.nav);
+    const dd = drawdownSeries(performanceNav);
     return buildHcDrawdownOption(dd, colors);
-  }, [profileQuery.data, colors, navSpanMonthSteps]);
+  }, [colors, navSpanMonthSteps, performanceNav]);
 
   if (profileQuery.isPending) {
     return (
@@ -217,33 +246,38 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
       {/* ── NAV chart + risk metrics ────────────────────────────────────── */}
       <div className="grid gap-4 lg:[grid-template-columns:2fr_1fr]">
         <div className="flex flex-col gap-4">
-          {historyQuery.data && historyQuery.data.bars.length > 0 ? (
+          {chartBars.length > 0 ? (
             <InteractiveChart
-              key={historyQuery.data.mode}
-              symbol={historyQuery.data.ticker ?? ""}
-              bars={historyQuery.data.bars}
-              mode={historyQuery.data.mode}
+              symbol={fund.ticker ?? fund.name}
+              bars={chartBars}
+              mode="nav"
               range={range}
               onRangeChange={setRange}
             />
           ) : (
-            <Card title={historyQuery.isPending ? "Loading chart…" : "NAV"}>
-              <p className="py-8 text-center text-[13px] text-text-muted">
-                {historyQuery.isPending
-                  ? "Loading price history…"
-                  : "No price or NAV history in the synced window."}
+            <Card title={timeseriesQuery.isPending ? "Loading chart..." : "NAV"}>
+              <p
+                className={`py-8 text-center text-[13px] ${
+                  timeseriesQuery.isError ? "text-loss" : "text-text-muted"
+                }`}
+              >
+                {timeseriesQuery.isPending
+                  ? "Loading NAV history..."
+                  : timeseriesQuery.isError
+                    ? timeseriesQuery.error.message
+                    : "No NAV history in the synced window."}
               </p>
             </Card>
           )}
 
           {monthlyReturnsOption && (
-            <Card title="Monthly returns" subtitle="month-end over month-end, 2y window">
+            <Card title="Monthly returns" subtitle="month-end over month-end, MAX window">
               <HighchartsChart options={monthlyReturnsOption} className="h-[220px] w-full" />
             </Card>
           )}
 
           {drawdownOption && (
-            <Card title="Drawdown" subtitle="running peak-to-trough, 2y window">
+            <Card title="Drawdown" subtitle="running peak-to-trough, MAX window">
               <HighchartsChart options={drawdownOption} className="h-[180px] w-full" />
             </Card>
           )}

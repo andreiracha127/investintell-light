@@ -33,7 +33,9 @@ UNCLASSIFIED_LABEL = "Unclassified"
 # Hard cap on the CSV export — bounded output, no pagination (screener parity).
 CSV_HARD_CAP = 5000
 
-# NAV series window and decimation target for the profile chart.
+# NAV embedded in GET /funds/{id} is intentionally a bounded profile preview.
+# Chart-depth consumers must use /funds/{id}/timeseries?range=... instead
+# (P3), where MAX reads the full available NAV history through the CAGGs.
 NAV_WINDOW_DAYS = 365 * 2
 NAV_TARGET_POINTS = 260
 
@@ -399,8 +401,10 @@ class FundProfile:
 async def fetch_fund_profile(
     session: AsyncSession, instrument_id: uuid.UUID
 ) -> FundProfile | None:
-    """Fund + full risk snapshot + decimated 2y NAV + latest holdings.
+    """Fund + full risk snapshot + bounded preview NAV + latest holdings.
 
+    The NAV list is for lightweight profile context only. Long-history charts
+    use the range-aware timeseries route so profile payload size stays bounded.
     Returns None when the instrument is not in the local universe.
     """
     fund = await session.get(Fund, instrument_id)

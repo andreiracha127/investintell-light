@@ -59,9 +59,25 @@ export type StockHistory =
   StockHistoryOperation["responses"]["200"]["content"]["application/json"];
 export type HistoryBar = StockHistory["bars"][number];
 
+type StockTimeseriesOperation = paths["/stocks/{ticker}/timeseries"]["get"];
+export type StockTimeseries =
+  StockTimeseriesOperation["responses"]["200"]["content"]["application/json"];
+export type StockTimeseriesQuery = NonNullable<
+  StockTimeseriesOperation["parameters"]["query"]
+>;
+
 type FundHistoryOperation = paths["/funds/{instrument_id}/history"]["get"];
 export type FundHistory =
   FundHistoryOperation["responses"]["200"]["content"]["application/json"];
+
+type FundTimeseriesOperation =
+  paths["/funds/{instrument_id}/timeseries"]["get"];
+export type FundTimeseries =
+  FundTimeseriesOperation["responses"]["200"]["content"]["application/json"];
+export type FundTimeseriesQuery = NonNullable<
+  FundTimeseriesOperation["parameters"]["query"]
+>;
+export type TimeseriesInterval = StockTimeseries["interval"];
 
 type SymbolSearchOperation = paths["/search/symbols"]["get"];
 export type SymbolSearchResult =
@@ -426,6 +442,17 @@ export function fetchStockHistory(
   );
 }
 
+export function fetchStockTimeseries(
+  ticker: string,
+  range: RangePreset,
+  signal?: AbortSignal,
+): Promise<StockTimeseries> {
+  return request<StockTimeseries>(
+    `/stocks/${encodeURIComponent(ticker)}/timeseries?range=${range}`,
+    signal,
+  );
+}
+
 export function fetchFundHistory(
   instrumentId: string,
   bars = 2520,
@@ -435,6 +462,66 @@ export function fetchFundHistory(
     `/funds/${encodeURIComponent(instrumentId)}/history?bars=${bars}`,
     signal,
   );
+}
+
+export function fetchFundTimeseries(
+  instrumentId: string,
+  range: RangePreset,
+  signal?: AbortSignal,
+): Promise<FundTimeseries> {
+  return request<FundTimeseries>(
+    `/funds/${encodeURIComponent(instrumentId)}/timeseries?range=${range}`,
+    signal,
+  );
+}
+
+/**
+ * Compatibility bridge while the checked-out InteractiveChart still consumes
+ * ixchart bars. P2 will remove this once the Highcharts Stock component owns
+ * the native OHLC/line arrays directly.
+ */
+export function stockTimeseriesToHistoryBars(
+  data: StockTimeseries,
+): HistoryBar[] {
+  const volumeByTime = new Map(data.volume.map((point) => [point[0], point[1]]));
+  return data.ohlc
+    .filter((point) => point.length >= 5)
+    .map((point) => ({
+      t: point[0],
+      o: point[1],
+      h: point[2],
+      l: point[3],
+      c: point[4],
+      v: volumeByTime.get(point[0]) ?? 0,
+    }));
+}
+
+/**
+ * Compatibility bridge for fund NAV line arrays into the legacy chart bar
+ * shape. NAV has no true OHLC/volume, so o/h/l/c all carry the NAV print.
+ */
+export function fundTimeseriesToHistoryBars(data: FundTimeseries): HistoryBar[] {
+  return data.series
+    .filter((point) => point.length >= 2)
+    .map((point) => ({
+      t: point[0],
+      o: point[1],
+      h: point[1],
+      l: point[1],
+      c: point[1],
+      v: 0,
+    }));
+}
+
+export function fundTimeseriesToNavPoints(
+  data: FundTimeseries,
+): FundNavPoint[] {
+  return data.series
+    .filter((point) => point.length >= 2)
+    .map((point) => ({
+      date: new Date(point[0]).toISOString().slice(0, 10),
+      nav: point[1],
+    }));
 }
 
 export function fetchSymbolSearch(

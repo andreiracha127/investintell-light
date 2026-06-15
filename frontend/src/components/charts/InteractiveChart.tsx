@@ -9,7 +9,15 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchStockHistory, fetchFundHistory, RANGE_PRESETS, type RangePreset, type SymbolSearchResult } from "@/lib/api/client";
+import {
+  fetchFundTimeseries,
+  fetchStockTimeseries,
+  fundTimeseriesToHistoryBars,
+  RANGE_PRESETS,
+  stockTimeseriesToHistoryBars,
+  type RangePreset,
+  type SymbolSearchResult,
+} from "@/lib/api/client";
 import { SymbolSearchInput } from "@/components/charts/SymbolSearchInput";
 import { Chart } from "@/lib/ixchart/engine";
 import { readIxTokens } from "@/lib/ixchart/tokens";
@@ -66,18 +74,29 @@ export function InteractiveChart({
   const [live, setLive] = useState(true);
   const [feed, setFeed] = useState<FeedStatus>("off");
 
-  const { data: compareBars } = useQuery<{ bars: Bar[] }>({
+  const { data: compareBars } = useQuery<Bar[]>({
     queryKey: [
-      "compare-history",
+      "compare-timeseries",
       compareSel?.kind,
       compareSel?.symbol,
       compareSel?.instrument_id,
+      range,
     ],
-    queryFn: ({ signal }) =>
-      compareSel!.instrument_id &&
-      (compareSel!.kind === "mutual_fund" || compareSel!.kind === "mmf")
-        ? fetchFundHistory(compareSel!.instrument_id, 2520, signal)
-        : fetchStockHistory(compareSel!.symbol, 2520, signal),
+    queryFn: async ({ signal }) => {
+      if (
+        compareSel!.instrument_id &&
+        (compareSel!.kind === "mutual_fund" || compareSel!.kind === "mmf")
+      ) {
+        const data = await fetchFundTimeseries(
+          compareSel!.instrument_id,
+          range,
+          signal,
+        );
+        return fundTimeseriesToHistoryBars(data);
+      }
+      const data = await fetchStockTimeseries(compareSel!.symbol, range, signal);
+      return stockTimeseriesToHistoryBars(data);
+    },
     enabled: compareSel != null,
     staleTime: 60 * 60 * 1000,
   });
@@ -125,7 +144,7 @@ export function InteractiveChart({
 
   // comparação
   useEffect(() => {
-    chartRef.current?.setCompare(compareSel?.symbol ?? null, compareBars?.bars);
+    chartRef.current?.setCompare(compareSel?.symbol ?? null, compareBars);
   }, [compareSel, compareBars]);
 
   // opções de render
