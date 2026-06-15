@@ -150,7 +150,7 @@ def realized_cvar(returns: pd.Series, confidence: float = 0.95) -> float:
     var_loss = float(np.quantile(losses, confidence, method="higher"))
     excess = np.maximum(losses - var_loss, 0.0)
     cvar = var_loss + float(excess.sum()) / ((1.0 - confidence) * t)
-    return cvar
+    return float(cvar)
 
 
 def max_drawdown(prices: pd.Series) -> DrawdownResult:
