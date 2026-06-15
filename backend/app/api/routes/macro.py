@@ -19,7 +19,15 @@ from app.schemas.macro import (
     RegimeSignalOut,
     RegimeVotesOut,
 )
+from app.schemas.macro_scorecards import (
+    DataFreshnessOut,
+    DimensionOut,
+    GlobalIndicatorsResponse,
+    MacroRegionalResponse,
+    RegionScorecardOut,
+)
 from app.services import macro_regime
+from app.services import macro_scorecards
 
 router = APIRouter(tags=["macro"])
 
@@ -67,4 +75,66 @@ async def get_macro_regime(
             RegimeFlipOut(date=flip.date, state=flip.state)
             for flip in snapshot.recent_flips
         ],
+    )
+
+
+_NOT_MATERIALIZED = (
+    "Macro scorecards not materialized — the macro_ingestion worker has not "
+    "populated macro_regional_snapshots yet."
+)
+
+
+@router.get("/macro/regional", response_model=MacroRegionalResponse)
+async def get_macro_regional(
+    datalake: Annotated[AsyncSession, Depends(get_datalake_session)],
+) -> MacroRegionalResponse:
+    """Latest regional macro scorecards (composite + dimensions + freshness)."""
+    snap = await macro_scorecards.fetch_macro_scorecards(datalake)
+    if snap is None:
+        raise HTTPException(status_code=404, detail=_NOT_MATERIALIZED)
+    return MacroRegionalResponse(
+        as_of_date=snap.as_of_date,
+        regions={
+            name: RegionScorecardOut(
+                region=r.region,
+                composite_score=r.composite_score,
+                coverage=r.coverage,
+                dimensions={
+                    dim: DimensionOut(
+                        score=d.score,
+                        n_indicators=d.n_indicators,
+                        indicators=d.indicators,
+                    )
+                    for dim, d in r.dimensions.items()
+                },
+                data_freshness={
+                    sid: DataFreshnessOut(
+                        last_date=f.last_date,
+                        days_stale=f.days_stale,
+                        weight=f.weight,
+                        status=f.status,
+                    )
+                    for sid, f in r.data_freshness.items()
+                },
+            )
+            for name, r in snap.regions.items()
+        },
+    )
+
+
+@router.get("/macro/global-indicators", response_model=GlobalIndicatorsResponse)
+async def get_macro_global_indicators(
+    datalake: Annotated[AsyncSession, Depends(get_datalake_session)],
+) -> GlobalIndicatorsResponse:
+    """Latest global macro risk indicators (geopolitical/energy/commodity/USD)."""
+    snap = await macro_scorecards.fetch_macro_scorecards(datalake)
+    if snap is None:
+        raise HTTPException(status_code=404, detail=_NOT_MATERIALIZED)
+    g = snap.global_indicators
+    return GlobalIndicatorsResponse(
+        as_of_date=snap.as_of_date,
+        geopolitical_risk_score=g.geopolitical_risk_score,
+        energy_stress=g.energy_stress,
+        commodity_stress=g.commodity_stress,
+        usd_strength=g.usd_strength,
     )
