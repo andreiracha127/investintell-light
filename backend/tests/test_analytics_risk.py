@@ -406,3 +406,53 @@ def test_sortino_ratio_no_downside_raises() -> None:
 def test_sortino_ratio_nan_input_raises() -> None:
     with pytest.raises(ValueError, match="NaN"):
         sortino_ratio(_dated([0.01, np.nan, -0.02] * 5))
+
+
+# --- Information ratio (T1A-3) -----------------------------------------------
+
+from app.analytics import information_ratio  # noqa: E402
+
+
+def test_information_ratio_matches_manual_formula() -> None:
+    """IR = mean(active)*252 / (std(active, ddof=1)*sqrt(252)), active = p - b."""
+    port = _random_returns(252, seed=31)
+    bench = _random_returns(252, seed=32)
+    active = (port - bench).to_numpy(dtype=float)
+    te = float(np.std(active, ddof=1) * math.sqrt(252))
+    expected = float(np.mean(active) * 252 / te)
+    assert information_ratio(port, bench) == pytest.approx(expected, rel=1e-12)
+
+
+def test_information_ratio_identical_series_raises() -> None:
+    """Identical series => zero active return AND zero tracking error => undefined."""
+    bench = _random_returns(252, seed=33)
+    with pytest.raises(ValueError, match="tracking error|undefined"):
+        information_ratio(bench, bench)
+
+
+def test_information_ratio_inner_joins_on_common_dates() -> None:
+    """A benchmark carrying one EXTRA leading date is inner-joined away; the IR
+    must equal the IR computed on the already-overlapping window."""
+    port = _random_returns(60, seed=34)
+    bench = _random_returns(60, seed=35)
+    # Prepend one out-of-grid leading observation to the benchmark only; the
+    # inner join must drop it so both runs see the same 60 overlapping dates.
+    extra_date = port.index[0] - pd.Timedelta(days=1)
+    bench_extra = pd.concat([pd.Series([0.123], index=[extra_date]), bench])
+    assert information_ratio(port, bench_extra) == pytest.approx(
+        information_ratio(port, bench), rel=1e-12
+    )
+
+
+def test_information_ratio_short_overlap_raises() -> None:
+    port = _dated([0.01, -0.02, 0.015, 0.0, -0.01], start="2024-01-01")
+    bench = _dated([0.005, -0.01, 0.02, 0.001, -0.005], start="2024-01-01")
+    with pytest.raises(ValueError, match="at least 10"):
+        information_ratio(port, bench)
+
+
+def test_information_ratio_nan_input_raises() -> None:
+    port = _dated([0.01, np.nan, -0.02] * 5)
+    bench = _random_returns(15, seed=36)
+    with pytest.raises(ValueError, match="NaN|overlapping"):
+        information_ratio(port, bench)

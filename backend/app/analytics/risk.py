@@ -133,6 +133,43 @@ def sortino_ratio(
     return float(np.mean(excess) / tdd * math.sqrt(periods_per_year))
 
 
+def information_ratio(
+    portfolio_returns: pd.Series,
+    benchmark_returns: pd.Series,
+    periods_per_year: int = 252,
+) -> float:
+    """Annualized Information Ratio of active returns vs a benchmark.
+
+    NaN/inf inputs are rejected up front (fail-loud), then the series are
+    aligned (inner join). With
+    ``active = portfolio - benchmark``, the tracking error is
+    ``TE = std(active, ddof=1) * sqrt(periods_per_year)`` and
+    ``IR = mean(active) * periods_per_year / TE`` — the active-return form used
+    by the risk_metrics worker's regression_metrics. The risk-free rate does
+    not appear (it cancels in the active return). Inputs are decimal fractions
+    (0.05 = 5%), never 0-100; the result is unitless.
+
+    Raises:
+        ValueError: if either input contains NaN/inf values (rejected up front,
+            matching the fail-loud contract used by sharpe_ratio/sortino_ratio
+            rather than silently dropping NaN rows), fewer than 10 aligned points
+            remain, or the tracking error is 0 (IR undefined when the portfolio
+            tracks the benchmark exactly).
+    """
+    reject_nan(portfolio_returns, "information_ratio")
+    reject_nan(benchmark_returns, "information_ratio")
+    p, b = align_returns(portfolio_returns, benchmark_returns)
+    if len(p) < _MIN_TAIL_POINTS:
+        raise ValueError(
+            f"information_ratio requires at least {_MIN_TAIL_POINTS} common points, got {len(p)}"
+        )
+    active = p.to_numpy(dtype=float) - b.to_numpy(dtype=float)
+    te = float(np.std(active, ddof=1) * math.sqrt(periods_per_year))
+    if te == 0:
+        raise ValueError("information_ratio is undefined: zero tracking error")
+    return float(np.mean(active) * periods_per_year / te)
+
+
 def historical_var(returns: pd.Series, confidence: float = 0.95) -> float:
     """Historical Value-at-Risk as a POSITIVE decimal fraction.
 
