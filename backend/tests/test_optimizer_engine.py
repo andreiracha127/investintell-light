@@ -372,3 +372,80 @@ def test_max_return_cvar_capped_rejects_nan_mu() -> None:
     mu_bad = np.array([0.04, np.nan, 0.10, 0.14])
     with pytest.raises(engine.OptimizerError, match="NaN"):
         engine.solve_max_return_cvar_capped(scen, mu=mu_bad, cvar_limit=0.05)
+
+
+# ── T3F-2: SCS fallback + post-solve re-verification + telemetry ──────────────
+
+from app.optimizer.engine import SolveTelemetry, _finalize, _verify_constraints
+
+
+def test_finalize_telemetry_records_solver_and_realized_constraints() -> None:
+    import cvxpy as cp
+
+    sigma = np.diag([0.04, 0.09, 0.16])
+    w = cp.Variable(3)
+    problem = cp.Problem(
+        cp.Minimize(cp.quad_form(w, cp.psd_wrap(sigma))),
+        engine.base_constraints(w, cap=0.5, min_weight=None),
+    )
+    weights, status, telemetry = _finalize(
+        problem, w, "tele", cap=0.5, min_weight=None, with_telemetry=True
+    )
+    assert status == "optimal"
+    assert isinstance(telemetry, SolveTelemetry)
+    assert telemetry.solver in {"CLARABEL", "SCS"}
+    assert telemetry.used_fallback in {True, False}
+    assert telemetry.realized_max_weight <= 0.5 + 1e-6
+    assert abs(telemetry.realized_sum - 1.0) < 1e-6
+
+
+def test_finalize_default_signature_still_returns_two_tuple() -> None:
+    """Back-compat: without with_telemetry, _finalize returns (weights, status)."""
+    import cvxpy as cp
+
+    sigma = np.diag([0.04, 0.09])
+    w = cp.Variable(2)
+    problem = cp.Problem(
+        cp.Minimize(cp.quad_form(w, cp.psd_wrap(sigma))),
+        engine.base_constraints(w, cap=None, min_weight=None),
+    )
+    result = _finalize(problem, w, "compat", cap=None, min_weight=None)
+    assert isinstance(result, tuple) and len(result) == 2
+    weights, status = result
+    _assert_valid(weights, status)
+
+
+def test_verify_constraints_rejects_cap_violation() -> None:
+    weights = np.array([0.6, 0.4])
+    ok, reason = _verify_constraints(weights, cap=0.5, min_weight=None)
+    assert ok is False
+    assert "cap" in reason
+
+
+def test_verify_constraints_rejects_sum_violation() -> None:
+    weights = np.array([0.5, 0.4])  # sums to 0.9
+    ok, reason = _verify_constraints(weights, cap=None, min_weight=None)
+    assert ok is False
+    assert "sum" in reason
+
+
+def test_verify_constraints_rejects_min_weight_violation() -> None:
+    weights = np.array([0.95, 0.05])
+    ok, reason = _verify_constraints(weights, cap=None, min_weight=0.1)
+    assert ok is False
+    assert "min_weight" in reason
+
+
+def test_verify_constraints_accepts_valid() -> None:
+    weights = np.array([0.5, 0.5])
+    ok, reason = _verify_constraints(weights, cap=0.6, min_weight=0.1)
+    assert ok is True
+    assert reason == ""
+
+
+def test_solve_min_vol_still_passes_post_verification() -> None:
+    """The public solver path now runs post-solve re-verification internally;
+    a normal solve must still succeed and respect the cap."""
+    sigma = np.diag([0.05**2, 0.2**2, 0.2**2, 0.2**2, 0.2**2])
+    weights, status = engine.solve_min_vol(sigma, cap=0.25)
+    _assert_valid(weights, status, cap=0.25)
