@@ -36,8 +36,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.analytics import historical_cvar
 from app.optimizer import black_litterman as bl
 from app.optimizer import data as optimizer_data
-from app.optimizer.mandate import resolve_delta
 from app.optimizer import engine
+from app.optimizer.mandate import resolve_delta
 from app.schemas.builder import (
     AbsoluteViewIn,
     AssetRefIn,
@@ -52,9 +52,7 @@ from app.schemas.builder import (
     ViewIn,
     WeightOut,
 )
-from app.services import funds_catalog
-from app.services import macro_regime
-
+from app.services import funds_catalog, macro_regime
 
 # Test seam: when set, overrides the regime state read (bypasses the data-lake).
 _OVERRIDE_REGIME_STATE: str | None = None
