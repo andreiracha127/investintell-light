@@ -6,17 +6,19 @@ function res(status: number) {
 }
 
 describe("createFetchWithAuth", () => {
-  it("injects the Bearer token and credentials when a token exists", async () => {
+  it("injects the Bearer token when a token exists (no cross-origin credentials)", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(res(200));
     const f = createFetchWithAuth({ getToken: () => "tok123", refresh: async () => true, onAuthFail: () => {}, fetchImpl });
     await f("http://x/y", {});
     expect(fetchImpl).toHaveBeenCalledWith(
       "http://x/y",
       expect.objectContaining({
-        credentials: "include",
         headers: expect.objectContaining({ Authorization: "Bearer tok123" }),
       }),
     );
+    // The Bearer API must NOT be called with credentials (would force a
+    // credentialed-CORS response the backend does not set).
+    expect((fetchImpl.mock.calls[0][1] as RequestInit).credentials).toBeUndefined();
   });
 
   it("omits Authorization when there is no token", async () => {

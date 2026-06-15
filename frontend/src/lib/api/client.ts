@@ -254,7 +254,11 @@ export function createFetchWithAuth(deps: AuthFetchDeps) {
             ? Object.fromEntries(init.headers as [string, string][])
             : { ...(init.headers as Record<string, string> | undefined) };
       if (token) base["Authorization"] = `Bearer ${token}`;
-      return { ...init, credentials: "include", headers: base };
+      // The FastAPI backend authenticates via the Bearer header, not cookies.
+      // Do NOT send credentials cross-origin: it would force a credentialed
+      // CORS response (Access-Control-Allow-Credentials) the API does not set,
+      // blocking every call. Same-origin /api/auth/* keep their own credentials.
+      return { ...init, headers: base };
     };
 
     let res = await fetchImpl(input, withAuth(getToken()));
