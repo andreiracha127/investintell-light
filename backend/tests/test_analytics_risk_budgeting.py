@@ -116,3 +116,64 @@ def test_variance_budget_rejects_zero_variance_portfolio() -> None:
     scen = np.zeros((50, 2))  # constant (all-zero) returns → zero variance
     with pytest.raises(ValueError, match="portfolio variance"):
         rb.variance_risk_budget(np.array([0.5, 0.5]), scen)
+
+
+# ── ETL decomposition (MCETL / PCETL) ────────────────────────────────────────
+
+from app.analytics.risk import historical_cvar  # noqa: E402
+
+
+def test_etl_contributions_sum_to_total_es() -> None:
+    """w·MCETL sums EXACTLY to the (positive) portfolio ETL; PCETL sums to 1."""
+    scen = _scenarios()
+    w = np.array([0.4, 0.3, 0.2, 0.1])
+    dec = rb.etl_risk_budget(w, scen, confidence=0.95)
+    np.testing.assert_allclose(
+        float((w * dec.mcetl).sum()), dec.portfolio_etl, rtol=1e-10, atol=1e-12
+    )
+    assert abs(float(dec.pcetl.sum()) - 1.0) < 1e-9
+    assert dec.portfolio_etl > 0.0  # positive sign convention (loss magnitude)
+
+
+def test_cetl_sums_to_portfolio_etl() -> None:
+    scen = _scenarios()
+    w = np.array([0.4, 0.3, 0.2, 0.1])
+    dec = rb.etl_risk_budget(w, scen, confidence=0.95)
+    assert abs(float(dec.cetl.sum()) - dec.portfolio_etl) < 1e-12
+
+
+def test_portfolio_etl_matches_historical_cvar() -> None:
+    """portfolio_etl equals app.analytics.historical_cvar on the same series."""
+    scen = _scenarios()
+    w = np.array([0.25, 0.25, 0.25, 0.25])
+    dec = rb.etl_risk_budget(w, scen, confidence=0.95)
+    port = pd.Series(scen @ w)
+    assert abs(dec.portfolio_etl - historical_cvar(port, confidence=0.95)) < 1e-12
+
+
+def test_pcetl_is_cetl_over_etl() -> None:
+    scen = _scenarios()
+    w = np.array([0.5, 0.2, 0.2, 0.1])
+    dec = rb.etl_risk_budget(w, scen, confidence=0.95)
+    np.testing.assert_allclose(
+        dec.pcetl, (w * dec.mcetl) / dec.portfolio_etl, rtol=1e-10, atol=1e-12
+    )
+
+
+def test_etl_budget_requires_min_tail_rows() -> None:
+    scen = _scenarios(t=9)
+    with pytest.raises(ValueError, match="at least 10 rows"):
+        rb.etl_risk_budget(np.array([0.25, 0.25, 0.25, 0.25]), scen, confidence=0.95)
+
+
+def test_etl_budget_rejects_bad_confidence() -> None:
+    scen = _scenarios()
+    with pytest.raises(ValueError, match="confidence must be in"):
+        rb.etl_risk_budget(np.array([0.25, 0.25, 0.25, 0.25]), scen, confidence=1.5)
+
+
+def test_etl_budget_rejects_nan() -> None:
+    scen = _scenarios()
+    scen[5, 2] = np.inf
+    with pytest.raises(ValueError, match="NaN or infinite"):
+        rb.etl_risk_budget(np.array([0.25, 0.25, 0.25, 0.25]), scen, confidence=0.95)

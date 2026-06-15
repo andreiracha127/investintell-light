@@ -114,3 +114,72 @@ def variance_risk_budget(weights: np.ndarray, scenarios: np.ndarray) -> Variance
         ctr=np.asarray(ctr, dtype=float),
         pctr=np.asarray(pctr, dtype=float),
     )
+
+
+def _tail_mask(port_returns: np.ndarray, confidence: float, func_name: str) -> np.ndarray:
+    """Boolean mask of the loss-tail scenarios (port <= the (1-c) quantile).
+
+    Identical selection to app.analytics.historical_cvar (risk.py:109-110) so
+    the aggregate ETL reconciles exactly with the F3 estimator.
+    """
+    if not 0 < confidence < 1:
+        raise ValueError(f"{func_name}: confidence must be in (0, 1), got {confidence}")
+    cutoff = float(np.quantile(port_returns, 1 - confidence))
+    mask = port_returns <= cutoff
+    if not mask.any():
+        raise ValueError(f"{func_name} tail selection is empty")
+    return mask
+
+
+@dataclass(frozen=True)
+class EtlRiskBudget:
+    """Per-asset Expected-Shortfall (ETL/CVaR) decomposition (daily scale).
+
+    ``portfolio_etl``: POSITIVE loss magnitude (matches historical_cvar).
+    ``mcetl``: marginal contribution to ETL = −E[r_i | portfolio in tail]
+        (positive when asset i loses in the portfolio tail).
+    ``cetl``:  absolute contribution, w_i·mcetl_i (sums to portfolio_etl).
+    ``pcetl``: percentage contribution (sums to 1.0; scale-invariant).
+    """
+
+    portfolio_etl: float
+    mcetl: np.ndarray
+    cetl: np.ndarray
+    pcetl: np.ndarray
+
+
+def etl_risk_budget(
+    weights: np.ndarray, scenarios: np.ndarray, confidence: float = 0.95
+) -> EtlRiskBudget:
+    """Euler decomposition of historical Expected Shortfall on a T×N matrix.
+
+    The portfolio loss tail is the set of scenarios whose portfolio return is at
+    or below the (1−confidence) quantile (same rule as historical_cvar). The
+    marginal ETL of asset i is the negated mean of its return over that tail, so
+    by linearity Σ_i w_i·MCETL_i = −mean(portfolio tail) = portfolio_etl
+    (positive). PCETL_i = w_i·MCETL_i / portfolio_etl (sums to 1).
+
+    Raises ValueError on <10 rows, NaN/inf, a weights-length mismatch, a
+    confidence outside (0, 1), an empty tail, or a non-positive portfolio ETL
+    (the loss tail has non-negative mean return).
+    """
+    scen = _validate_scenarios(scenarios, "etl_risk_budget", _MIN_TAIL_ROWS)
+    w = _validate_weights(weights, scen.shape[1], "etl_risk_budget")
+    port = scen @ w
+    mask = _tail_mask(port, confidence, "etl_risk_budget")
+    tail_assets = scen[mask, :]            # (k, N) asset returns in the tail
+    mcetl = -tail_assets.mean(axis=0)      # (N,) positive loss magnitudes
+    portfolio_etl = float(-port[mask].mean())
+    if portfolio_etl <= 0.0:
+        raise ValueError(
+            "etl_risk_budget is undefined: non-positive portfolio ETL "
+            "(the loss tail has non-negative mean return)"
+        )
+    cetl = w * mcetl
+    pcetl = cetl / portfolio_etl
+    return EtlRiskBudget(
+        portfolio_etl=portfolio_etl,
+        mcetl=np.asarray(mcetl, dtype=float),
+        cetl=np.asarray(cetl, dtype=float),
+        pcetl=np.asarray(pcetl, dtype=float),
+    )
