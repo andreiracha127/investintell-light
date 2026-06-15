@@ -166,3 +166,209 @@ def test_g5_structural_no_mean_estimation_in_engine_or_data() -> None:
         "black_litterman.py must contain exactly one mean estimation "
         "(historical_mean_ann, for re-centering only)"
     )
+
+
+# ── T2C-1: per-asset bound vectors + block budgets ──────────────────────────
+
+
+def test_bounds_constraints_per_asset_vectors_bind() -> None:
+    import cvxpy as cp
+
+    # Asset 0 capped at 0.10, others free up to 1; min 0.05 on asset 2.
+    n = 3
+    w = cp.Variable(n)
+    caps = np.array([0.10, 1.0, 1.0])
+    mins = np.array([0.0, 0.0, 0.05])
+    cons = engine.bounds_constraints(w, cap_vec=caps, min_vec=mins, blocks=None)
+    sigma = np.diag([0.01, 0.04, 0.09])
+    prob = cp.Problem(cp.Minimize(cp.quad_form(w, cp.psd_wrap(sigma))), cons)
+    prob.solve()
+    assert str(prob.status) == cp.OPTIMAL
+    weights = np.asarray(w.value).ravel()
+    assert abs(weights.sum() - 1.0) < 1e-6
+    assert weights[0] <= 0.10 + 1e-6
+    assert weights[2] >= 0.05 - 1e-6
+
+
+def test_bounds_constraints_block_budget_caps_group_sum() -> None:
+    import cvxpy as cp
+
+    # Two blocks: {0,1} must sum to <= 0.30; {2,3} sum in [0.40, 1.0].
+    n = 4
+    w = cp.Variable(n)
+    blocks = [
+        engine.BlockBudget(indices=[0, 1], lo=0.0, hi=0.30),
+        engine.BlockBudget(indices=[2, 3], lo=0.40, hi=1.0),
+    ]
+    cons = engine.bounds_constraints(w, cap_vec=None, min_vec=None, blocks=blocks)
+    sigma = np.diag([0.01, 0.01, 0.04, 0.04])
+    prob = cp.Problem(cp.Minimize(cp.quad_form(w, cp.psd_wrap(sigma))), cons)
+    prob.solve()
+    assert str(prob.status) == cp.OPTIMAL
+    weights = np.asarray(w.value).ravel()
+    assert weights[0] + weights[1] <= 0.30 + 1e-6
+    assert weights[2] + weights[3] >= 0.40 - 1e-6
+
+
+def test_bounds_constraints_block_floor_infeasible_against_caps_fails_loud() -> None:
+    import cvxpy as cp
+
+    # Block {0,1} floor 0.80, but each asset capped at 0.30 -> max group sum 0.60
+    # < 0.80: structurally infeasible, must fail loud BEFORE solving.
+    w = cp.Variable(4)
+    caps = np.array([0.30, 0.30, 1.0, 1.0])
+    blocks = [engine.BlockBudget(indices=[0, 1], lo=0.80, hi=1.0)]
+    with pytest.raises(engine.OptimizerError, match="block floor"):
+        engine.bounds_constraints(w, cap_vec=caps, min_vec=None, blocks=blocks)
+
+
+def test_bounds_constraints_block_sum_of_floors_exceeds_one_fails_loud() -> None:
+    import cvxpy as cp
+
+    # Two disjoint blocks whose floors sum to > 1 can never satisfy sum(w)=1.
+    w = cp.Variable(4)
+    blocks = [
+        engine.BlockBudget(indices=[0, 1], lo=0.60, hi=1.0),
+        engine.BlockBudget(indices=[2, 3], lo=0.60, hi=1.0),
+    ]
+    with pytest.raises(engine.OptimizerError, match="block floors"):
+        engine.bounds_constraints(w, cap_vec=None, min_vec=None, blocks=blocks)
+
+
+def test_bounds_constraints_empty_block_indices_fails_loud() -> None:
+    import cvxpy as cp
+
+    w = cp.Variable(3)
+    blocks = [engine.BlockBudget(indices=[], lo=0.0, hi=0.5)]
+    with pytest.raises(engine.OptimizerError, match="empty"):
+        engine.bounds_constraints(w, cap_vec=None, min_vec=None, blocks=blocks)
+
+
+# ── T2C-2: solve_min_cvar honours the bounds bundle ─────────────────────────
+
+
+def test_min_cvar_with_bounds_block_budget_binds() -> None:
+    scenarios = _random_scenarios(t=500, n=4)
+    blocks = [engine.BlockBudget(indices=[0, 1], lo=0.0, hi=0.20)]
+    weights, status = engine.solve_min_cvar(
+        scenarios,
+        cap=None,
+        bounds=engine.BoundsBundle(cap_vec=None, min_vec=None, blocks=blocks),
+    )
+    _assert_valid(weights, status)
+    assert weights[0] + weights[1] <= 0.20 + 1e-6
+
+
+# ── T2C-3: L1 turnover penalty ──────────────────────────────────────────────
+
+
+def test_min_cvar_turnover_penalty_pulls_toward_current() -> None:
+    scenarios = _random_scenarios(t=600, n=4, seed=7)
+    current = np.array([0.25, 0.25, 0.25, 0.25])
+    w_free, _ = engine.solve_min_cvar(scenarios, cap=None)
+    w_sticky, status = engine.solve_min_cvar(
+        scenarios, cap=None, current_weights=current, turnover_lambda=5.0
+    )
+    _assert_valid(w_sticky, status)
+    assert np.abs(w_sticky - current).sum() < np.abs(w_free - current).sum()
+
+
+def test_min_cvar_turnover_zero_lambda_matches_unpenalized() -> None:
+    scenarios = _random_scenarios(t=600, n=4, seed=7)
+    current = np.array([0.10, 0.20, 0.30, 0.40])
+    w0, _ = engine.solve_min_cvar(scenarios, cap=None)
+    w1, _ = engine.solve_min_cvar(
+        scenarios, cap=None, current_weights=current, turnover_lambda=0.0
+    )
+    np.testing.assert_allclose(w0, w1, atol=1e-4)
+
+
+def test_min_cvar_turnover_requires_current_weights() -> None:
+    scenarios = _random_scenarios(t=200, n=3)
+    with pytest.raises(engine.OptimizerError, match="turnover_lambda requires"):
+        engine.solve_min_cvar(scenarios, turnover_lambda=1.0)
+
+
+def test_min_cvar_turnover_current_weights_shape_checked() -> None:
+    scenarios = _random_scenarios(t=200, n=3)
+    with pytest.raises(engine.OptimizerError, match="current_weights"):
+        engine.solve_min_cvar(
+            scenarios, current_weights=np.array([0.5, 0.5]), turnover_lambda=1.0
+        )
+
+
+# ── T2C-5: CVaR-as-constraint max-return ────────────────────────────────────
+
+
+def _mu_and_scenarios(n: int = 4, t: int = 600, seed: int = 3):
+    rng = np.random.default_rng(seed)
+    vols = np.array([0.010, 0.012, 0.020, 0.030])[:n]
+    scen = rng.normal(0.0, 1.0, size=(t, n)) * vols
+    mu = np.array([0.04, 0.06, 0.10, 0.14])[:n]
+    return mu, scen
+
+
+def test_max_return_cvar_capped_optimal_and_caps() -> None:
+    mu, scen = _mu_and_scenarios()
+    w, status = engine.solve_max_return_cvar_capped(
+        scen, mu=mu, cvar_limit=0.05, alpha=0.95, cap=0.5
+    )
+    _assert_valid(w, status, cap=0.5)
+
+
+def test_max_return_cvar_capped_tighter_limit_lowers_return() -> None:
+    mu, scen = _mu_and_scenarios()
+    w_loose, _ = engine.solve_max_return_cvar_capped(
+        scen, mu=mu, cvar_limit=0.08, alpha=0.95, cap=None
+    )
+    w_tight, _ = engine.solve_max_return_cvar_capped(
+        scen, mu=mu, cvar_limit=0.025, alpha=0.95, cap=None
+    )
+    assert float(mu @ w_tight) <= float(mu @ w_loose) + 1e-6
+
+
+def test_max_return_cvar_capped_realized_cvar_within_limit() -> None:
+    mu, scen = _mu_and_scenarios()
+    limit = 0.03
+    w, _ = engine.solve_max_return_cvar_capped(
+        scen, mu=mu, cvar_limit=limit, alpha=0.95, cap=None
+    )
+    realized = engine._realized_cvar(w, scen, alpha=0.95)
+    assert realized <= limit + 1e-4
+
+
+def test_max_return_cvar_capped_requires_mu() -> None:
+    _, scen = _mu_and_scenarios()
+    with pytest.raises(engine.OptimizerError, match="mu"):
+        engine.solve_max_return_cvar_capped(scen, mu=None, cvar_limit=0.05)  # type: ignore[arg-type]
+
+
+def test_max_return_cvar_capped_rejects_nonpositive_limit() -> None:
+    mu, scen = _mu_and_scenarios()
+    with pytest.raises(engine.OptimizerError, match="cvar_limit"):
+        engine.solve_max_return_cvar_capped(scen, mu=mu, cvar_limit=0.0)
+
+
+def test_max_return_cvar_capped_with_bounds_bundle_binds() -> None:
+    """Engine-side dispatch: BoundsBundle path is exercised end-to-end."""
+    mu, scen = _mu_and_scenarios(n=4, t=600)
+    blocks = [engine.BlockBudget(indices=[2, 3], lo=0.0, hi=0.30)]
+    bundle = engine.BoundsBundle(
+        cap_vec=np.array([0.50, 0.50, 0.30, 0.30]),
+        min_vec=None,
+        blocks=blocks,
+    )
+    w, status = engine.solve_max_return_cvar_capped(
+        scen, mu=mu, cvar_limit=0.05, alpha=0.95, bounds=bundle
+    )
+    _assert_valid(w, status)
+    # Block budget must bind: assets 2+3 ≤ 0.30.
+    assert w[2] + w[3] <= 0.30 + 1e-6
+
+
+def test_max_return_cvar_capped_rejects_nan_mu() -> None:
+    """NaN in the BL posterior mu must raise a clear OptimizerError."""
+    _, scen = _mu_and_scenarios()
+    mu_bad = np.array([0.04, np.nan, 0.10, 0.14])
+    with pytest.raises(engine.OptimizerError, match="NaN"):
+        engine.solve_max_return_cvar_capped(scen, mu=mu_bad, cvar_limit=0.05)

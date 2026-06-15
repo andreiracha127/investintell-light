@@ -17,6 +17,8 @@ Fail-loud: any solver status other than ``optimal`` raises
 ``OptimizerError`` — never a silently degraded answer.
 """
 
+from dataclasses import dataclass
+
 import cvxpy as cp
 import numpy as np
 
@@ -86,6 +88,139 @@ def base_constraints(
         cons.append(w <= cap)
     if min_weight is not None:
         cons.append(w >= min_weight)
+    return cons
+
+
+@dataclass(frozen=True)
+class BlockBudget:
+    """Group-budget constraint: Σ wᵢ over ``indices`` must lie in [lo, hi].
+
+    ``indices`` are 0-based asset columns (e.g. all funds whose
+    ``Fund.asset_class == 'equity'``). ``lo``/``hi`` are decimal fractions of
+    the fully-invested portfolio (0.30 = 30%). Convex (linear) by construction,
+    so it composes with every objective in this module.
+    """
+
+    indices: list[int]
+    lo: float
+    hi: float
+
+
+@dataclass(frozen=True)
+class BoundsBundle:
+    """Optional advanced-constraint bundle for the CVaR solvers.
+
+    When passed to a solver, it REPLACES the scalar (cap, min_weight) block
+    with ``bounds_constraints`` — per-asset bound vectors plus block budgets.
+    """
+
+    cap_vec: np.ndarray | None = None
+    min_vec: np.ndarray | None = None
+    blocks: list[BlockBudget] | None = None
+
+
+def _check_bound_vectors(
+    n: int, cap_vec: np.ndarray | None, min_vec: np.ndarray | None
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Validate per-asset cap/min vectors; return them as float ndarrays.
+
+    Element-wise analogue of ``_check_constraint_params``: each cap ∈ (0, 1],
+    each min ≥ 0, min ≤ cap, Σ caps ≥ 1 (else sum(w)=1 is unreachable),
+    Σ mins ≤ 1. All failures are fail-loud ``OptimizerError``.
+    """
+    cap_arr = None
+    min_arr = None
+    if cap_vec is not None:
+        cap_arr = np.asarray(cap_vec, dtype=float).ravel()
+        if cap_arr.shape != (n,):
+            raise OptimizerError(f"cap_vec has shape {cap_arr.shape}, expected ({n},)")
+        if not np.isfinite(cap_arr).all():
+            raise OptimizerError("cap_vec contains NaN/inf — refusing to build constraints")
+        if ((cap_arr <= 0) | (cap_arr > 1)).any():
+            raise OptimizerError("each per-asset cap must be in (0, 1]")
+        if float(cap_arr.sum()) < 1 - 1e-12:
+            raise OptimizerError(
+                f"infeasible constraints: per-asset caps sum to {float(cap_arr.sum())} < 1 — "
+                "raise some caps or add assets"
+            )
+    if min_vec is not None:
+        min_arr = np.asarray(min_vec, dtype=float).ravel()
+        if min_arr.shape != (n,):
+            raise OptimizerError(f"min_vec has shape {min_arr.shape}, expected ({n},)")
+        if not np.isfinite(min_arr).all():
+            raise OptimizerError("min_vec contains NaN/inf — refusing to build constraints")
+        if (min_arr < 0).any():
+            raise OptimizerError("each per-asset min_weight must be >= 0")
+        if float(min_arr.sum()) > 1 + 1e-12:
+            raise OptimizerError(
+                f"infeasible constraints: per-asset minimums sum to {float(min_arr.sum())} > 1"
+            )
+    if cap_arr is not None and min_arr is not None and (min_arr > cap_arr + 1e-12).any():
+        raise OptimizerError("a per-asset min_weight exceeds its cap")
+    return cap_arr, min_arr
+
+
+def bounds_constraints(
+    w: cp.Variable,
+    cap_vec: np.ndarray | None,
+    min_vec: np.ndarray | None,
+    blocks: list[BlockBudget] | None,
+) -> list[cp.Constraint]:
+    """Long-only + sum=1 + per-asset bound vectors + block budgets.
+
+    Always enforces ``w >= 0`` and ``cp.sum(w) == 1`` (the universal contract).
+    Per-asset bounds (when given) replace the scalar cap/min. Block budgets add
+    ``lo <= Σ_{i in block} wᵢ <= hi`` per group.
+
+    Fail-loud pre-solve infeasibility checks (raised as ``OptimizerError`` so
+    they never reach the solver as a silent ``infeasible`` status):
+    - an empty block index list ("empty");
+    - a block floor exceeds the max attainable group sum under the caps
+      ("block floor" — singular);
+    - the sum of block floors exceeds 1 ("block floors" — plural).
+    """
+    n = int(w.shape[0])
+    cap_arr, min_arr = _check_bound_vectors(n, cap_vec, min_vec)
+    cons: list[cp.Constraint] = [w >= 0, cp.sum(w) == 1]
+    if cap_arr is not None:
+        cons.append(w <= cap_arr)
+    if min_arr is not None:
+        cons.append(w >= min_arr)
+    if blocks:
+        for b in blocks:
+            if not b.indices:
+                raise OptimizerError("block budget has an empty index list")
+            if len(set(b.indices)) != len(b.indices):
+                raise OptimizerError(
+                    "block budget has duplicate indices — each asset must appear at most once"
+                )
+            for idx in b.indices:
+                if not 0 <= idx < n:
+                    raise OptimizerError(f"block index {idx} out of range (n={n})")
+            if not (0.0 <= b.lo <= b.hi <= 1.0):
+                raise OptimizerError(
+                    f"block budget bounds must satisfy 0 <= lo <= hi <= 1, got "
+                    f"[{b.lo}, {b.hi}]"
+                )
+            if b.lo > 0:
+                if cap_arr is not None:
+                    max_attainable = float(min(cap_arr[b.indices].sum(), 1.0))
+                else:
+                    max_attainable = float(min(len(b.indices), 1.0))
+                if b.lo > max_attainable + 1e-12:
+                    raise OptimizerError(
+                        f"infeasible constraints: block floor {b.lo} exceeds the maximum "
+                        f"attainable sum {max_attainable} of its {len(b.indices)} assets under "
+                        "their caps — lower the floor or raise the caps"
+                    )
+            group_sum = cp.sum(w[b.indices])
+            cons.append(group_sum >= b.lo)
+            cons.append(group_sum <= b.hi)
+        if sum(b.lo for b in blocks) > 1 + 1e-12:
+            raise OptimizerError(
+                f"infeasible constraints: block floors sum to {sum(b.lo for b in blocks)} > 1 — "
+                "sum(w)=1 cannot satisfy all minimums"
+            )
     return cons
 
 
@@ -239,6 +374,9 @@ def solve_min_cvar(
     alpha: float = DEFAULT_CVAR_ALPHA,
     cap: float | None = DEFAULT_CAP,
     min_weight: float | None = None,
+    bounds: BoundsBundle | None = None,
+    current_weights: np.ndarray | None = None,
+    turnover_lambda: float = 0.0,
     ret_floor: float | None = None,
     mu: np.ndarray | None = None,
 ) -> tuple[np.ndarray, str]:
@@ -261,22 +399,177 @@ def solve_min_cvar(
         raise OptimizerError(f"min_cvar requires at least 10 scenarios, got {t}")
     if not 0 < alpha < 1:
         raise OptimizerError(f"alpha must be in (0, 1), got {alpha}")
-    _check_constraint_params(n, cap, min_weight)
     if ret_floor is not None and mu is None:
         raise OptimizerError(
             "min_cvar: ret_floor requires an explicit mu vector (BL posterior) — "
             "historical means are never estimated here (gate G5)"
         )
+    if turnover_lambda < 0:
+        raise OptimizerError(f"min_cvar: turnover_lambda must be >= 0, got {turnover_lambda}")
+    w0: np.ndarray | None = None
+    if turnover_lambda > 0:
+        if current_weights is None:
+            raise OptimizerError(
+                "min_cvar: turnover_lambda requires current_weights (the existing "
+                "portfolio allocation to penalize trading away from)"
+            )
+        w0 = np.asarray(current_weights, dtype=float).ravel()
+        if w0.shape != (n,):
+            raise OptimizerError(
+                f"min_cvar: current_weights has shape {w0.shape}, expected ({n},)"
+            )
 
     w = cp.Variable(n)
     z = cp.Variable()
     losses = -scenarios @ w  # per-scenario loss
     cvar = z + cp.sum(cp.pos(losses - z)) / ((1 - alpha) * t)
-    cons = base_constraints(w, cap, min_weight)
+    if bounds is not None:
+        cons = bounds_constraints(w, bounds.cap_vec, bounds.min_vec, bounds.blocks)
+    else:
+        _check_constraint_params(n, cap, min_weight)
+        cons = base_constraints(w, cap, min_weight)
     if ret_floor is not None and mu is not None:
         mu_arr = np.asarray(mu, dtype=float).ravel()
         if mu_arr.shape != (n,):
             raise OptimizerError(f"min_cvar: mu has shape {mu_arr.shape}, expected ({n},)")
         cons.append(mu_arr @ w >= ret_floor)
-    problem = cp.Problem(cp.Minimize(cvar), cons)
+
+    objective_expr = cvar
+    if turnover_lambda > 0 and w0 is not None:
+        objective_expr = cvar + turnover_lambda * cp.norm1(w - w0)
+
+    problem = cp.Problem(cp.Minimize(objective_expr), cons)
     return _finalize(problem, w, "min_cvar")
+
+
+def _realized_cvar(
+    weights: np.ndarray, scenarios: np.ndarray, alpha: float
+) -> float:
+    """Empirical CVaR_α (loss-space, positive = loss) of realized weights.
+
+    Exact Rockafellar-Uryasev estimator (port of the legacy
+    ``ru_cvar_lp.realized_cvar_from_weights``): the LP optimum at the k-th
+    worst loss. Used as the post-solve verifier for the CVaR-constraint path,
+    where the in-LP (z, slack) auxiliaries only UPPER-BOUND the CVaR and can
+    over-estimate, so the cap is re-checked on the realized weights. Uses
+    ``np.partition`` (no sample mean) — gate G5 structural guard safe.
+    """
+    weights = np.asarray(weights, dtype=float).ravel()
+    scenarios = np.asarray(scenarios, dtype=float)
+    t = scenarios.shape[0]
+    if t == 0:
+        raise OptimizerError("scenarios must have at least one row")
+    if not 0 < alpha < 1:
+        raise OptimizerError(f"alpha must be in (0, 1), got {alpha}")
+    losses = -scenarios @ weights
+    k = max(int(np.ceil(np.round((1.0 - alpha) * t, 8))), 1)
+    var_threshold = float(np.partition(losses, -k)[-k])
+    u = np.maximum(losses - var_threshold, 0.0)
+    return float(var_threshold + u.sum() / ((1.0 - alpha) * t))
+
+
+_SOLVER_LADDER = (cp.CLARABEL, cp.SCS)
+
+
+def _solve_with_ladder(
+    problem: cp.Problem, w: cp.Variable, label: str
+) -> tuple[np.ndarray, str]:
+    """Solve trying CLARABEL then SCS (legacy optimizer_service ladder).
+
+    Accepts ``optimal`` and ``optimal_inaccurate`` (SCS often returns the
+    latter on a feasible problem). Any other terminal status across BOTH
+    solvers is a fail-loud ``OptimizerError``. Reimplements ``_finalize``'s
+    noise cleanup / sum=1 verification because ``_finalize`` calls
+    ``problem.solve()`` with no solver argument.
+    """
+    last_status = "no_solver_ran"
+    for solver in _SOLVER_LADDER:
+        try:
+            problem.solve(solver=solver)
+        except cp.error.SolverError:
+            continue
+        last_status = str(problem.status)
+        if last_status in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE) and w.value is not None:
+            weights = np.asarray(w.value, dtype=float).ravel()
+            weights[np.abs(weights) < 1e-10] = 0.0
+            if (weights < -_WEIGHT_ATOL).any():
+                continue
+            weights = np.clip(weights, 0.0, None)
+            total = float(weights.sum())
+            if total <= 0 or abs(total - 1.0) > 1e-3:
+                continue
+            return weights / total, "optimal"
+    raise OptimizerError(
+        f"{label}: no solver in {list(_SOLVER_LADDER)} produced a usable "
+        f"solution (last status '{last_status}')"
+    )
+
+
+def solve_max_return_cvar_capped(
+    scenarios: np.ndarray,
+    mu: np.ndarray,
+    cvar_limit: float,
+    alpha: float = DEFAULT_CVAR_ALPHA,
+    cap: float | None = DEFAULT_CAP,
+    min_weight: float | None = None,
+    bounds: BoundsBundle | None = None,
+    cvar_tol: float = 1e-4,
+) -> tuple[np.ndarray, str]:
+    """Max-return s.t. CVaR_α(w) ≤ ``cvar_limit`` (Rockafellar-Uryasev cap).
+
+        max  μᵀw      s.t.  z + 1/((1−α)·T)·Σ max(−rₜᵀw − z, 0) ≤ cvar_limit,
+                            long-only, sum(w)=1, caps/min/blocks.
+
+    ``cvar_limit`` is expressed in the **same daily-return units as the
+    scenarios** (e.g. 0.02 = 2% daily CVaR_95).  It is NOT an annualised
+    figure.  The caller (``run_optimize``) owns the unit contract; the engine
+    never rescales it.
+
+    Gate G5: ``mu`` (annualized expected returns) is REQUIRED and never
+    estimated here — by contract it is the Black-Litterman posterior. The
+    in-LP CVaR auxiliaries only upper-bound the realized CVaR, so the solved
+    weights are re-verified with ``_realized_cvar``; a breach beyond
+    ``cvar_tol`` fails loud. Solver ladder: CLARABEL then SCS.
+    """
+    scenarios = np.asarray(scenarios, dtype=float)
+    if scenarios.ndim != 2:
+        raise OptimizerError(f"scenarios must be T×n, got ndim={scenarios.ndim}")
+    if not np.isfinite(scenarios).all():
+        raise OptimizerError("scenarios contain NaN/inf")
+    t, n = scenarios.shape
+    if t < 10:
+        raise OptimizerError(f"max_return_cvar requires at least 10 scenarios, got {t}")
+    if not 0 < alpha < 1:
+        raise OptimizerError(f"alpha must be in (0, 1), got {alpha}")
+    if mu is None:
+        raise OptimizerError(
+            "max_return_cvar: mu is required (BL posterior) — historical means are "
+            "never estimated here (gate G5)"
+        )
+    mu_arr = np.asarray(mu, dtype=float).ravel()
+    if mu_arr.shape != (n,):
+        raise OptimizerError(f"max_return_cvar: mu has shape {mu_arr.shape}, expected ({n},)")
+    if not np.isfinite(mu_arr).all():
+        raise OptimizerError("max_return_cvar: mu contains NaN/inf — BL posterior is invalid")
+    if cvar_limit <= 0:
+        raise OptimizerError(f"max_return_cvar: cvar_limit must be > 0, got {cvar_limit}")
+
+    w = cp.Variable(n)
+    z = cp.Variable()
+    losses = -scenarios @ w
+    cvar_expr = z + cp.sum(cp.pos(losses - z)) / ((1 - alpha) * t)
+    if bounds is not None:
+        cons = bounds_constraints(w, bounds.cap_vec, bounds.min_vec, bounds.blocks)
+    else:
+        _check_constraint_params(n, cap, min_weight)
+        cons = base_constraints(w, cap, min_weight)
+    cons.append(cvar_expr <= cvar_limit)
+    problem = cp.Problem(cp.Maximize(mu_arr @ w), cons)
+    weights, status = _solve_with_ladder(problem, w, "max_return_cvar")
+    realized = _realized_cvar(weights, scenarios, alpha)
+    if realized > cvar_limit + cvar_tol:
+        raise OptimizerError(
+            f"max_return_cvar: solved weights realize CVaR {realized:.6f} > limit "
+            f"{cvar_limit} (tol {cvar_tol}) — the solver returned an inaccurate point"
+        )
+    return weights, status

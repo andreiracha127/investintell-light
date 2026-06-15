@@ -41,6 +41,27 @@ class DrawdownResult:
 
 
 @dataclass(frozen=True)
+class DrawdownEpisode:
+    """One drawdown episode of a price/NAV series.
+
+    ``depth`` is a NEGATIVE decimal fraction (e.g. -0.20 = a 20% peak-to-trough
+    loss), never 0-100. ``peak_date`` is the running-max date at the ONSET of
+    the drawdown; ``trough_date`` is the deepest point; ``recovery_date`` is the
+    first date the series regains its prior peak (``None`` for an OPEN,
+    unrecovered episode). Durations are CALENDAR days: ``duration_days`` spans
+    peak -> recovery (peak -> last date for an open episode) and
+    ``recovery_days`` spans trough -> recovery (``None`` while open).
+    """
+
+    depth: float
+    peak_date: date
+    trough_date: date
+    recovery_date: date | None
+    duration_days: int
+    recovery_days: int | None
+
+
+@dataclass(frozen=True)
 class BestWorst:
     """Best and worst single-period returns (decimal fractions) and their dates."""
 
@@ -288,6 +309,94 @@ def max_drawdown(prices: pd.Series) -> DrawdownResult:
         peak_date=to_date(peak_label),
         trough_date=to_date(trough_label),
     )
+
+
+def drawdown_episodes(prices: pd.Series, top_n: int = 5) -> list["DrawdownEpisode"]:
+    """Top-``top_n`` worst drawdown episodes of a price/NAV series, deepest first.
+
+    An episode runs from the most recent peak (drawdown == 0) preceding a loss,
+    through the deepest trough, to the first date the series regains that peak.
+    The final episode is OPEN (``recovery_date=None``) when the series never
+    recovers by the last date. ``depth`` values are NEGATIVE decimal fractions
+    (never 0-100); durations are calendar days. For a monotonically rising
+    series the result is an empty list.
+
+    Ported from the legacy ``extract_drawdown_periods``: the onset peak is
+    captured in a SEPARATE index (``peak_idx``) at drawdown onset, distinct
+    from the rolling ``last_peak_idx`` cursor, because the recovery bar itself
+    has ``drawdown == 0`` and would otherwise overwrite the cursor.
+
+    Raises:
+        ValueError: if ``top_n`` < 1, fewer than 2 prices are supplied, or the
+            input contains NaN/infinite values.
+    """
+    if top_n < 1:
+        raise ValueError(f"top_n must be >= 1, got {top_n}")
+    if len(prices) < 2:
+        raise ValueError(
+            f"drawdown_episodes requires at least 2 prices, got {len(prices)}"
+        )
+    reject_nan(prices, "drawdown_episodes")
+
+    values = prices.to_numpy(dtype=float)
+    running_max = np.maximum.accumulate(values)
+    dd = values / running_max - 1.0  # <= 0; 0 at every new running high
+
+    labels = list(prices.index)
+    episodes: list[DrawdownEpisode] = []
+    in_dd = False
+    last_peak_idx = 0
+    peak_idx = 0
+    trough_idx = 0
+    trough_val = 0.0
+
+    for i, d in enumerate(dd):
+        if d == 0:
+            last_peak_idx = i
+
+        if d < 0:
+            if not in_dd:
+                in_dd = True
+                peak_idx = last_peak_idx  # onset peak — captured ONCE per episode
+                trough_idx = i
+                trough_val = d
+            elif d < trough_val:
+                trough_idx = i
+                trough_val = d
+        elif in_dd:
+            # Recovery: d == 0 means a new running high was reached at index i.
+            episodes.append(
+                DrawdownEpisode(
+                    depth=float(trough_val),
+                    peak_date=to_date(labels[peak_idx]),
+                    trough_date=to_date(labels[trough_idx]),
+                    recovery_date=to_date(labels[i]),
+                    duration_days=(
+                        to_date(labels[i]) - to_date(labels[peak_idx])
+                    ).days,
+                    recovery_days=(
+                        to_date(labels[i]) - to_date(labels[trough_idx])
+                    ).days,
+                )
+            )
+            in_dd = False
+
+    if in_dd:
+        episodes.append(
+            DrawdownEpisode(
+                depth=float(trough_val),
+                peak_date=to_date(labels[peak_idx]),
+                trough_date=to_date(labels[trough_idx]),
+                recovery_date=None,
+                duration_days=(
+                    to_date(labels[-1]) - to_date(labels[peak_idx])
+                ).days,
+                recovery_days=None,
+            )
+        )
+
+    episodes.sort(key=lambda e: e.depth)
+    return episodes[:top_n]
 
 
 def best_worst_day(returns: pd.Series) -> BestWorst:

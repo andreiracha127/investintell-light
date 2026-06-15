@@ -57,20 +57,25 @@ ViewIn = Annotated[AbsoluteViewIn | RelativeViewIn, Field(discriminator="type")]
 # ── Request ──────────────────────────────────────────────────────────────────
 
 
-class ConstraintsIn(BaseModel):
-    """Long-only and sum(w)=1 are always enforced; these are the knobs."""
-
-    cap: Annotated[float, Field(gt=0, le=1)] | None = 0.25
-    min_weight: Annotated[float, Field(ge=0, le=1)] | None = None
-
-
 class BLParamsIn(BaseModel):
     delta: Annotated[float, Field(gt=0)] = 2.5
     tau: Annotated[float, Field(gt=0)] = 0.05
 
 
 Objective = Literal[
-    "equal_weight", "min_vol", "erc", "max_diversification", "min_cvar", "bl_utility"
+    "equal_weight", "min_vol", "erc", "max_diversification", "min_cvar",
+    "bl_utility", "max_return_cvar",
+]
+
+Mandate = Literal[
+    "conservative",
+    "defensive",
+    "moderate_conservative",
+    "moderate",
+    "balanced",
+    "moderate_aggressive",
+    "aggressive",
+    "growth",
 ]
 
 # Candidate-universe selection vocabulary — mirrors the GET /funds filters and
@@ -90,6 +95,34 @@ UniverseRankBy = Literal[
 # paths feed the optimizer the same bounded number of assets.
 MAX_UNIVERSE_ASSETS = 50
 DEFAULT_UNIVERSE_ASSETS = 30
+
+
+class BlockBudgetIn(BaseModel):
+    """Σ of weights in an asset-class block must lie in [lo, hi] (decimal
+    fractions). ``asset_class`` matches ``Fund.asset_class``."""
+
+    asset_class: AssetClassFilter
+    lo: Annotated[float, Field(ge=0, le=1)] = 0.0
+    hi: Annotated[float, Field(ge=0, le=1)] = 1.0
+
+    @model_validator(mode="after")
+    def _check_order(self) -> "BlockBudgetIn":
+        if self.lo > self.hi:
+            raise ValueError(f"block budget lo ({self.lo}) must be <= hi ({self.hi})")
+        return self
+
+
+class ConstraintsIn(BaseModel):
+    """Long-only and sum(w)=1 are always enforced; these are the knobs.
+
+    ``block_budgets`` (per-asset-class Σ-weight bounds) are honoured ONLY by the
+    ``min_cvar`` objective in v1; they are resolved against ``Fund.asset_class``
+    server-side and IGNORED by the other objectives. Empty/None = no blocks.
+    """
+
+    cap: Annotated[float, Field(gt=0, le=1)] | None = 0.25
+    min_weight: Annotated[float, Field(ge=0, le=1)] | None = None
+    block_budgets: list[BlockBudgetIn] | None = None
 
 
 class UniverseSpecIn(BaseModel):
@@ -144,6 +177,19 @@ class OptimizeRequest(BaseModel):
     # funds only — equities have no market cap in the builder yet).
     views: list[ViewIn] | None = None
     bl: BLParamsIn = BLParamsIn()
+    # Optional investor mandate; resolves the BL risk-aversion (delta) ladder.
+    # An explicit bl.delta override still wins (see app.optimizer.mandate).
+    mandate: Mandate | None = None
+    # L1 turnover penalty λ·‖w − w₀‖₁ on the min_cvar objective. Requires
+    # ``current_weights`` (asset-label -> decimal fraction, label scheme
+    # 'fund:<uuid>' / 'equity:<TICKER>'). v1: honoured only by min_cvar.
+    turnover_lambda: Annotated[float, Field(ge=0)] = 0.0
+    current_weights: dict[str, float] | None = None
+    # Daily tail-loss cap for ``max_return_cvar`` (decimal fraction, e.g.
+    # 0.02 = 2% daily CVaR_95). The LP constraint operates on daily-return
+    # scenarios, so this is a *daily* limit — not an annualised figure.
+    # Required for that objective, ignored otherwise.
+    cvar_limit: Annotated[float, Field(gt=0, le=1)] | None = None
 
     @model_validator(mode="after")
     def _check_asset_source(self) -> "OptimizeRequest":
@@ -160,6 +206,24 @@ class OptimizeRequest(BaseModel):
                 "specific assets, which a universe optimization selects for you; "
                 "use an explicit 'assets' list to express views"
             )
+        if self.turnover_lambda > 0 and not self.current_weights:
+            raise ValueError(
+                "turnover_lambda requires current_weights (a label -> fraction map "
+                "of the existing allocation)"
+            )
+        if self.objective == "max_return_cvar":
+            if self.cvar_limit is None:
+                raise ValueError("max_return_cvar requires a cvar_limit (tail-loss cap)")
+            if self.universe is not None:
+                raise ValueError(
+                    "max_return_cvar needs expected returns and so requires views on an "
+                    "explicit 'assets' list — it cannot run over a 'universe'"
+                )
+            if not self.views:
+                raise ValueError(
+                    "max_return_cvar needs expected returns — supply Black-Litterman "
+                    "'views' (gate G5: no sample mean is ever used as the objective)"
+                )
         return self
 
 
@@ -185,12 +249,23 @@ class ExpectedOut(BaseModel):
     return_ann_bl: float | None
 
 
+class ViewConsistencyOut(BaseModel):
+    """He-Litterman 3-sigma alarm: are any views fighting the equilibrium?"""
+
+    inconsistent: bool
+    n_flagged: int
+    max_z: float
+    threshold_sigma: float
+
+
 class DiagnosticsOut(BaseModel):
     n_obs: int
     status: str
     # Present only on the BL path (views and/or bl_utility), in asset order.
     mu_equilibrium: list[float] | None = None
     mu_posterior: list[float] | None = None
+    # He-Litterman view-vs-prior consistency — present only when views are given.
+    view_consistency: ViewConsistencyOut | None = None
 
 
 class OptimizeResponse(BaseModel):

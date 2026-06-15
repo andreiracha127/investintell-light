@@ -65,6 +65,22 @@ def _stub_aum(
     monkeypatch.setattr(optimizer_data, "load_fund_aum", fake_aum)
 
 
+def _stub_asset_class(
+    monkeypatch: pytest.MonkeyPatch,
+    classes: dict[uuid.UUID, str | None] | None = None,
+) -> None:
+    async def fake_class(
+        session: Any, fund_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, str | None]:
+        if classes is not None:
+            return {fund_id: classes.get(fund_id) for fund_id in fund_ids}
+        # Default: alternate equity / fixed_income so blocks have ≥1 member.
+        order = ("equity", "fixed_income")
+        return {fid: order[i % 2] for i, fid in enumerate(fund_ids)}
+
+    monkeypatch.setattr(optimizer_data, "load_fund_asset_class", fake_class)
+
+
 async def test_optimize_min_cvar_no_views_happy_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -227,6 +243,180 @@ async def test_view_on_asset_outside_universe_maps_to_422(
         response = await client.post("/builder/optimize", json=payload)
     assert response.status_code == 422
     assert "not in the request universe" in response.json()["detail"]
+
+
+# ── Block budgets (per-asset-class Σ-weight bounds, min_cvar only) ───────────
+
+
+async def test_block_budget_binds_min_cvar(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_returns(monkeypatch)
+    # Funds 0 & 2 are equity; cap the equity block at 30% — it must bind.
+    _stub_asset_class(
+        monkeypatch,
+        classes={
+            _FUND_IDS[0]: "equity",
+            _FUND_IDS[1]: "fixed_income",
+            _FUND_IDS[2]: "equity",
+            _FUND_IDS[3]: "fixed_income",
+        },
+    )
+    payload = {
+        "assets": [_fund_ref(i) for i in range(4)],
+        "objective": "min_cvar",
+        "constraints": {
+            "cap": 0.5,
+            "block_budgets": [{"asset_class": "equity", "lo": 0.0, "hi": 0.3}],
+        },
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    by_id = {w["asset"]["id"]: w["weight"] for w in body["weights"]}
+    equity_sum = by_id[str(_FUND_IDS[0])] + by_id[str(_FUND_IDS[2])]
+    assert equity_sum <= 0.3 + 1e-6
+    assert abs(sum(w["weight"] for w in body["weights"]) - 1.0) < 1e-6
+
+
+async def test_block_budget_does_not_drop_default_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: supplying block_budgets must NOT silently drop the scalar
+    per-asset cap. With the DEFAULT cap (0.25) left untouched, the bundle path
+    used to translate to cap_vec=None and let a single fund take up to its
+    block hi (or 1.0). Assert the 25% per-asset cap still binds every weight."""
+    _stub_returns(monkeypatch)
+    _stub_asset_class(
+        monkeypatch,
+        classes={
+            _FUND_IDS[0]: "equity",
+            _FUND_IDS[1]: "fixed_income",
+            _FUND_IDS[2]: "equity",
+            _FUND_IDS[3]: "fixed_income",
+        },
+    )
+    payload = {
+        "assets": [_fund_ref(i) for i in range(4)],
+        "objective": "min_cvar",
+        # cap omitted → default 0.25; a wide block budget that does NOT itself
+        # cap any single asset below 0.25, so only the scalar cap can bind.
+        "constraints": {
+            "block_budgets": [{"asset_class": "fixed_income", "lo": 0.0, "hi": 0.9}],
+        },
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    weights = [w["weight"] for w in body["weights"]]
+    # The default 25% per-asset cap must still bind despite block_budgets.
+    assert all(w <= 0.25 + 1e-6 for w in weights), weights
+    assert abs(sum(weights) - 1.0) < 1e-6
+
+
+async def test_block_budget_with_views_binds_min_cvar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reachable combination flagged in review: min_cvar + views +
+    block_budgets must still honour the block bound (not silently drop it)."""
+    _stub_returns(monkeypatch)
+    _stub_aum(monkeypatch)
+    _stub_asset_class(
+        monkeypatch,
+        classes={
+            _FUND_IDS[0]: "equity",
+            _FUND_IDS[1]: "fixed_income",
+            _FUND_IDS[2]: "equity",
+            _FUND_IDS[3]: "fixed_income",
+        },
+    )
+    payload = {
+        "assets": [_fund_ref(i) for i in range(4)],
+        "objective": "min_cvar",
+        "constraints": {
+            "cap": 0.5,
+            "block_budgets": [{"asset_class": "equity", "lo": 0.0, "hi": 0.3}],
+        },
+        "views": [
+            {"type": "absolute", "asset": _fund_ref(0), "q": 0.20, "confidence": 0.6}
+        ],
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    by_id = {w["asset"]["id"]: w["weight"] for w in body["weights"]}
+    equity_sum = by_id[str(_FUND_IDS[0])] + by_id[str(_FUND_IDS[2])]
+    assert equity_sum <= 0.3 + 1e-6
+    assert body["diagnostics"]["mu_posterior"] is not None
+
+
+async def test_block_budget_with_equity_maps_to_422(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+    _stub_asset_class(monkeypatch)
+    payload = {
+        "assets": [_fund_ref(0), _fund_ref(1), {"kind": "equity", "ticker": "AAPL"}],
+        "objective": "min_cvar",
+        "constraints": {
+            "cap": 0.5,
+            "block_budgets": [{"asset_class": "equity", "lo": 0.0, "hi": 0.3}],
+        },
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "block budgets" in detail and "equity:AAPL" in detail
+
+
+async def test_block_budget_unknown_asset_class_maps_to_422(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+    # Fund 1 has a NULL asset_class (the column is nullable) → fail loud.
+    _stub_asset_class(
+        monkeypatch,
+        classes={_FUND_IDS[0]: "equity", _FUND_IDS[1]: None},
+    )
+    payload = {
+        "assets": [_fund_ref(0), _fund_ref(1)],
+        "objective": "min_cvar",
+        "constraints": {
+            "cap": 0.6,
+            "block_budgets": [{"asset_class": "equity", "lo": 0.0, "hi": 0.3}],
+        },
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "known asset_class" in detail and str(_FUND_IDS[1]) in detail
+
+
+async def test_block_budget_matches_no_asset_maps_to_422(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+    # No fund is 'cash' → the cash block matches nothing → fail loud.
+    _stub_asset_class(
+        monkeypatch,
+        classes={_FUND_IDS[0]: "equity", _FUND_IDS[1]: "fixed_income"},
+    )
+    payload = {
+        "assets": [_fund_ref(0), _fund_ref(1)],
+        "objective": "min_cvar",
+        "constraints": {
+            "cap": 0.6,
+            "block_budgets": [{"asset_class": "cash", "lo": 0.0, "hi": 0.3}],
+        },
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "matches no asset" in detail and "cash" in detail
 
 
 # ── Universe optimization (filter+rank the fund universe) ────────────────────
@@ -415,6 +605,91 @@ def test_humanize_error_passes_actionable_messages_through() -> None:
 
     msg = "insufficient common history: 120 overlapping observations"
     assert humanize_error(msg) == msg
+
+
+async def test_optimize_turnover_penalty_stays_near_current(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+    base = {
+        "assets": [_fund_ref(i) for i in range(4)],
+        "objective": "min_cvar",
+        "constraints": {"cap": None},
+    }
+    current = {f"fund:{_FUND_IDS[i]}": 0.25 for i in range(4)}
+    async with _client() as client:
+        free = await client.post("/builder/optimize", json=base)
+        sticky = await client.post(
+            "/builder/optimize",
+            json={**base, "turnover_lambda": 8.0, "current_weights": current},
+        )
+    assert free.status_code == 200, free.text
+    assert sticky.status_code == 200, sticky.text
+    free_w = {w["asset"]["id"]: w["weight"] for w in free.json()["weights"]}
+    sticky_w = {w["asset"]["id"]: w["weight"] for w in sticky.json()["weights"]}
+    free_l1 = sum(abs(free_w[str(_FUND_IDS[i])] - 0.25) for i in range(4))
+    sticky_l1 = sum(abs(sticky_w[str(_FUND_IDS[i])] - 0.25) for i in range(4))
+    assert sticky_l1 < free_l1
+
+
+async def test_optimize_max_return_cvar_with_views_happy_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+    _stub_aum(monkeypatch)
+    payload = {
+        "assets": [_fund_ref(i) for i in range(4)],
+        "objective": "max_return_cvar",
+        "cvar_limit": 0.10,
+        "views": [
+            {"type": "absolute", "asset": _fund_ref(0), "q": 0.15, "confidence": 0.6}
+        ],
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert abs(sum(w["weight"] for w in body["weights"]) - 1.0) < 1e-6
+    assert body["diagnostics"]["mu_posterior"] is not None
+    assert body["diagnostics"]["status"] == "optimal"
+
+
+async def test_optimize_max_return_cvar_without_bl_inputs_is_422(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+    payload = {
+        "assets": [_fund_ref(i) for i in range(4)],
+        "objective": "max_return_cvar",
+        "cvar_limit": 0.10,
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 422, response.text
+    assert "expected returns" in response.text.lower()
+
+
+async def test_optimize_max_return_cvar_risk_off_smoke(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+    _stub_aum(monkeypatch)
+    from app.services import portfolio_builder
+
+    monkeypatch.setattr(portfolio_builder, "_OVERRIDE_REGIME_STATE", "risk_off", raising=False)
+    payload = {
+        "assets": [_fund_ref(i) for i in range(4)],
+        "objective": "max_return_cvar",
+        "cvar_limit": 0.20,
+        "views": [
+            {"type": "absolute", "asset": _fund_ref(0), "q": 0.15, "confidence": 0.6}
+        ],
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    monkeypatch.setattr(portfolio_builder, "_OVERRIDE_REGIME_STATE", None, raising=False)
+    assert response.status_code == 200, response.text
+    assert abs(sum(w["weight"] for w in response.json()["weights"]) - 1.0) < 1e-6
 
 
 # --- T1C: builder in-sample CVaR uses the exact RU estimator ------------------

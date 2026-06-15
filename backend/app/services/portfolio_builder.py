@@ -39,9 +39,11 @@ from app.analytics import realized_cvar
 from app.optimizer import black_litterman as bl
 from app.optimizer import data as optimizer_data
 from app.optimizer import engine
+from app.optimizer.mandate import resolve_delta
 from app.schemas.builder import (
     AbsoluteViewIn,
     AssetRefIn,
+    BlockBudgetIn,
     DiagnosticsOut,
     EquityRefIn,
     ExpectedOut,
@@ -49,10 +51,14 @@ from app.schemas.builder import (
     OptimizeRequest,
     OptimizeResponse,
     UniverseSpecIn,
+    ViewConsistencyOut,
     ViewIn,
     WeightOut,
 )
-from app.services import funds_catalog
+from app.services import funds_catalog, macro_regime
+
+# Test seam: when set, overrides the regime state read (bypasses the data-lake).
+_OVERRIDE_REGIME_STATE: str | None = None
 
 
 class BuilderError(ValueError):
@@ -88,6 +94,29 @@ def humanize_error(detail: str) -> str:
             f"window or drop the affected assets ({detail})"
         )
     return detail
+
+
+# Default tightening applied to the CVaR limit when the credit regime is
+# risk_off (halve the tolerated tail loss). Surfaced as a constant so the
+# route/tests can inspect it.
+DEFAULT_RISK_OFF_CVAR_FACTOR = 0.5
+
+
+def regime_cvar_multiplier(state: str | None, *, risk_off_factor: float) -> float:
+    """Multiplier applied to the CVaR limit given the credit-regime state.
+
+    ``risk_off`` -> ``risk_off_factor`` (must be in (0, 1] to TIGHTEN the cap);
+    any other state (risk_on / None / unknown) -> 1.0 (no change). Pure."""
+    if not 0 < risk_off_factor <= 1:
+        raise ValueError(f"risk_off_factor must be in (0, 1], got {risk_off_factor}")
+    return risk_off_factor if state == "risk_off" else 1.0
+
+
+def apply_regime_cvar_limit(
+    base_limit: float, state: str | None, *, risk_off_factor: float
+) -> float:
+    """Effective CVaR limit = base × regime multiplier."""
+    return base_limit * regime_cvar_multiplier(state, risk_off_factor=risk_off_factor)
 
 
 def _to_data_ref(ref: FundRefIn | EquityRefIn) -> optimizer_data.AssetRef:
@@ -181,6 +210,59 @@ def _solve_mu_free(
     raise BuilderError(f"unknown objective: {objective}")  # pragma: no cover - Literal-guarded
 
 
+async def _resolve_block_budgets(
+    session: AsyncSession,
+    assets: list[AssetRefIn],
+    labels: list[str],
+    block_budgets: list[BlockBudgetIn] | None,
+) -> list[engine.BlockBudget] | None:
+    """Map asset-class block budgets onto engine column-index groups.
+
+    Equities have no asset_class in the builder catalog → any equity makes a
+    block-budget request fail loud (mirrors the AUM rule in
+    ``_market_weights_for``).
+    """
+    if not block_budgets:
+        return None
+    equity_labels = [_ref_key(ref) for ref in assets if isinstance(ref, EquityRefIn)]
+    if equity_labels:
+        raise BuilderError(
+            "block budgets require an asset_class for every asset; equities have "
+            f"none in the builder: {', '.join(equity_labels)}"
+        )
+    fund_ids = [ref.id for ref in assets if isinstance(ref, FundRefIn)]
+    class_by_id = await optimizer_data.load_fund_asset_class(session, fund_ids)
+    # Fund.asset_class is nullable: a fund with an unknown class matches no block
+    # and would be silently left unconstrained. Fail loud instead (mirrors the
+    # equity guard above) so a requested risk budget is never quietly bypassed.
+    missing_class = [
+        _ref_key(ref)
+        for ref in assets
+        if isinstance(ref, FundRefIn) and class_by_id.get(ref.id) is None
+    ]
+    if missing_class:
+        raise BuilderError(
+            "block budgets require a known asset_class for every fund; missing "
+            f"for: {', '.join(missing_class)}"
+        )
+    index_of = {label: i for i, label in enumerate(labels)}
+    out: list[engine.BlockBudget] = []
+    for budget in block_budgets:
+        idxs = [
+            index_of[_ref_key(ref)]
+            for ref in assets
+            if isinstance(ref, FundRefIn)
+            and class_by_id.get(ref.id) == budget.asset_class
+        ]
+        if not idxs:
+            raise BuilderError(
+                f"block budget for asset_class '{budget.asset_class}' matches no "
+                "asset in the resolved universe"
+            )
+        out.append(engine.BlockBudget(indices=idxs, lo=budget.lo, hi=budget.hi))
+    return out
+
+
 def _filters_from_spec(spec: UniverseSpecIn) -> funds_catalog.FundFilters:
     """Map a UniverseSpecIn onto the catalog's FundFilters (search left off)."""
     return funds_catalog.FundFilters(
@@ -214,7 +296,7 @@ async def _resolve_assets(
 
     assert payload.universe is not None  # the schema validator guarantees one
     spec = payload.universe
-    needs_bl = bool(payload.views) or payload.objective == "bl_utility"
+    needs_bl = bool(payload.views) or payload.objective in ("bl_utility", "max_return_cvar")
     candidates = await optimizer_data.select_universe_funds(
         session,
         _filters_from_spec(spec),
@@ -236,7 +318,11 @@ async def _resolve_assets(
     return assets, label_map
 
 
-async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> OptimizeResponse:
+async def run_optimize(
+    session: AsyncSession,
+    payload: OptimizeRequest,
+    datalake: AsyncSession | None = None,
+) -> OptimizeResponse:
     assets, label_map = await _resolve_assets(session, payload)
     refs = [_to_data_ref(ref) for ref in assets]
     try:
@@ -249,6 +335,17 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
     labels = list(frame.columns)
     index_of = {label: i for i, label in enumerate(labels)}
     scenarios = frame.to_numpy(dtype=float)
+    current_vec: np.ndarray | None = None
+    if payload.turnover_lambda > 0 and payload.current_weights:
+        try:
+            current_vec = np.array(
+                [payload.current_weights[label] for label in labels], dtype=float
+            )
+        except KeyError as exc:
+            raise BuilderError(
+                f"current_weights is missing an entry for asset {exc.args[0]} — it must "
+                "cover every asset in the request universe"
+            ) from exc
     try:
         sigma = engine.sigma_ledoit_wolf(scenarios)
     except engine.OptimizerError as exc:
@@ -257,14 +354,18 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
     cap = payload.constraints.cap
     min_weight = payload.constraints.min_weight
     has_views = bool(payload.views)
-    needs_bl = has_views or payload.objective == "bl_utility"
+    needs_bl = has_views or payload.objective in ("bl_utility", "max_return_cvar")
+    # Effective risk-aversion: explicit bl.delta override beats the mandate
+    # ladder; both feed equilibrium (pi = delta*Sigma*w_mkt) and bl_utility.
+    delta = resolve_delta(payload.bl.delta, payload.mandate)
 
     mu_equilibrium: np.ndarray | None = None
     mu_posterior: np.ndarray | None = None
+    view_consistency: ViewConsistencyOut | None = None
     w_mkt: np.ndarray | None = None
     if needs_bl:
         w_mkt = await _market_weights_for(session, assets, labels)
-        mu_equilibrium = bl.equilibrium(sigma, w_mkt, delta=payload.bl.delta)
+        mu_equilibrium = bl.equilibrium(sigma, w_mkt, delta=delta)
         if has_views and payload.views is not None:
             try:
                 p, q = bl.build_view_matrices(
@@ -275,19 +376,77 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
                 mu_posterior, _sigma_bl = bl.posterior(
                     sigma, mu_equilibrium, p, q, omega, tau=payload.bl.tau
                 )
+                vc = bl.view_consistency_he_litterman(
+                    p, q, mu_equilibrium, omega, sigma, tau=payload.bl.tau
+                )
+                view_consistency = ViewConsistencyOut(
+                    inconsistent=bool(vc["inconsistent"]),
+                    n_flagged=int(vc["n_flagged"]),
+                    max_z=float(vc["max_z"]),
+                    threshold_sigma=float(vc["threshold_sigma"]),
+                )
             except ValueError as exc:
                 raise BuilderError(str(exc)) from exc
+
+    blocks = await _resolve_block_budgets(
+        session, assets, labels, payload.constraints.block_budgets
+    )
+    # Block budgets are honoured ONLY by min_cvar (ConstraintsIn docstring). The
+    # bundle replaces the scalar (cap, min_weight) block in the CVaR solver; it
+    # is reused by BOTH the views and no-views min_cvar paths so a user-requested
+    # risk constraint is never silently dropped. Because the bundle path REPLACES
+    # the scalar (cap, min_weight) constraints in bounds_constraints, the active
+    # scalars must be promoted to per-asset vectors here — otherwise the default
+    # cap (0.25) would be silently dropped the moment a block budget is supplied.
+    n = len(labels)
+    cvar_bounds = (
+        engine.BoundsBundle(
+            cap_vec=np.full(n, cap) if cap is not None else None,
+            min_vec=np.full(n, min_weight) if min_weight is not None else None,
+            blocks=blocks,
+        )
+        if blocks
+        else None
+    )
 
     try:
         if payload.objective == "bl_utility":
             assert mu_equilibrium is not None  # needs_bl guarantees it
             mu_for_utility = mu_posterior if mu_posterior is not None else mu_equilibrium
             weights, status = bl.solve_bl_utility(
-                mu_for_utility, sigma, delta=payload.bl.delta, cap=cap, min_weight=min_weight
+                mu_for_utility, sigma, delta=delta, cap=cap, min_weight=min_weight
+            )
+        elif payload.objective == "max_return_cvar":
+            assert payload.cvar_limit is not None  # schema validator guarantees it
+            if mu_posterior is None:
+                raise BuilderError(
+                    "max_return_cvar needs expected returns — provide views so the "
+                    "Black-Litterman posterior exists (gate G5)"
+                )
+            state = _OVERRIDE_REGIME_STATE
+            if state is None and datalake is not None:
+                snap = await macro_regime.fetch_credit_regime(datalake)
+                state = snap.state if snap is not None else None
+            limit = apply_regime_cvar_limit(
+                payload.cvar_limit, state, risk_off_factor=DEFAULT_RISK_OFF_CVAR_FACTOR
+            )
+            # Reuse cvar_bounds (already built above with the same promotion
+            # logic) — the max_return_cvar engine path is structurally identical
+            # to min_cvar: BoundsBundle replaces the scalar (cap, min_weight)
+            # block, so no duplicate construction is needed.
+            weights, status = engine.solve_max_return_cvar_capped(
+                scenarios,
+                mu=mu_posterior,
+                cvar_limit=limit,
+                cap=cap,
+                min_weight=min_weight,
+                bounds=cvar_bounds,
             )
         elif payload.objective == "min_cvar" and mu_posterior is not None:
             # Product default with views: re-centered scenarios + equilibrium
-            # return floor (dispatch §5: piso = π·w_mkt).
+            # return floor (dispatch §5: piso = π·w_mkt). Block budgets (when
+            # given) ride along via bounds — engine builds cons from bounds, then
+            # appends the ret_floor row independently.
             assert mu_equilibrium is not None and w_mkt is not None
             mu_hist = bl.historical_mean_ann(scenarios)
             recentered = bl.recenter_scenarios(scenarios, mu_hist, mu_posterior)
@@ -296,13 +455,26 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
                 recentered,
                 cap=cap,
                 min_weight=min_weight,
+                bounds=cvar_bounds,
                 ret_floor=ret_floor,
                 mu=mu_posterior,
+                current_weights=current_vec,
+                turnover_lambda=payload.turnover_lambda,
             )
         else:
-            weights, status = _solve_mu_free(
-                payload.objective, sigma, scenarios, cap, min_weight
-            )
+            if payload.objective == "min_cvar":
+                weights, status = engine.solve_min_cvar(
+                    scenarios,
+                    cap=cap,
+                    min_weight=min_weight,
+                    bounds=cvar_bounds,
+                    current_weights=current_vec,
+                    turnover_lambda=payload.turnover_lambda,
+                )
+            else:
+                weights, status = _solve_mu_free(
+                    payload.objective, sigma, scenarios, cap, min_weight
+                )
     except engine.OptimizerError as exc:
         raise BuilderError(str(exc)) from exc
 
@@ -341,5 +513,6 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
             mu_posterior=(
                 [float(x) for x in mu_posterior] if mu_posterior is not None else None
             ),
+            view_consistency=view_consistency,
         ),
     )

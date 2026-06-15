@@ -59,7 +59,10 @@ SELECT add_continuous_aggregate_policy('cagg_nav_weekly',
 
 -- Latest risk metrics per fund (replaces the sync_funds.py fund_risk_latest
 -- snapshot). organization_id IS NULL = the global (non-org) calc. The column
--- set mirrors the MV-backed model plus the Tier-1 class regression metrics.
+-- set mirrors the MV-backed model plus the Tier-1 class regression metrics
+-- (empirical_duration/credit_beta/inflation_beta/crisis_alpha_score) and the
+-- Tier-2 EVT/GARCH tail columns (cvar_99_evt/cvar_999_evt/evt_xi_shape +
+-- volatility_garch/vol_model).
 -- DROP+CREATE (not CREATE IF NOT EXISTS) so column additions take effect — the
 -- MV is read-only and rebuilt by the risk_metrics worker's
 -- REFRESH MATERIALIZED VIEW CONCURRENTLY path; the unique index below must be
@@ -69,10 +72,12 @@ CREATE MATERIALIZED VIEW fund_risk_latest_mv AS
 SELECT DISTINCT ON (instrument_id)
        instrument_id, calc_date,
        return_1m, return_3m, return_1y, return_3y_ann, return_5y_ann,
-       volatility_1y, max_drawdown_1y, max_drawdown_3y,
+       volatility_1y, volatility_garch, vol_model,
+       max_drawdown_1y, max_drawdown_3y,
        sharpe_1y, sharpe_3y, sortino_1y, calmar_ratio_3y,
        alpha_1y, beta_1y, information_ratio_1y, tracking_error_1y,
-       var_95_1m, cvar_95_1m, cvar_95_12m, cvar_99_evt,
+       var_95_1m, cvar_95_1m, cvar_95_12m,
+       cvar_99_evt, cvar_999_evt, evt_xi_shape,
        peer_sharpe_pctl, peer_sortino_pctl, peer_return_pctl, peer_drawdown_pctl,
        manager_score, downside_capture_1y, upside_capture_1y,
        equity_correlation_252d, peer_strategy_label, peer_count, elite_flag,

@@ -5,6 +5,7 @@ Scale contract (project-wide): all fractional quantities (returns, vol,
 VaR, CVaR, drawdown) are decimal fractions (0.05 = 5%), never 0-100.
 """
 
+from app.analytics.absorption import AbsorptionResult, absorption_ratio
 from app.analytics.active_share import active_share
 from app.analytics.distribution import Histogram, return_histogram
 from app.analytics.portfolio import (
@@ -33,11 +34,13 @@ from app.analytics.risk import (
 from app.analytics.risk import (
     DEFAULT_RISK_FREE_RATE,
     BestWorst,
+    DrawdownEpisode,
     DrawdownResult,
     annualized_volatility,
     best_worst_day,
     beta,
     correlation,
+    drawdown_episodes,
     historical_cvar,
     historical_var,
     information_ratio,
@@ -46,6 +49,19 @@ from app.analytics.risk import (
     sharpe_ratio,
     sortino_ratio,
 )
+from app.analytics.risk_budgeting import (
+    EtlRiskBudget,
+    VarianceRiskBudget,
+    etl_implied_returns,
+    etl_risk_budget,
+    portfolio_starr,
+    sharpe_implied_returns,
+    variance_risk_budget,
+)
+from app.analytics.robust_sharpe import (
+    RobustSharpeResult,
+    robust_sharpe,
+)
 from app.analytics.rolling import (
     rolling_beta,
     rolling_correlation,
@@ -53,12 +69,18 @@ from app.analytics.rolling import (
 )
 
 __all__ = [
+    "AbsorptionResult",
     "BestWorst",
     "DEFAULT_INITIAL_NAV",
     "DEFAULT_RISK_FREE_RATE",
+    "DrawdownEpisode",
     "DrawdownResult",
+    "EtlRiskBudget",
     "Histogram",
     "MIN_IN_RANGE_RETURNS",
+    "RobustSharpeResult",
+    "VarianceRiskBudget",
+    "absorption_ratio",
     "active_share",
     "align_returns",
     "annualized_volatility",
@@ -69,8 +91,11 @@ __all__ = [
     "correlation_matrix",
     "cumulative_return_series",
     "diversification_ratio",
+    "drawdown_episodes",
     "effective_number_of_bets",
     "enb_from_contributions",
+    "etl_implied_returns",
+    "etl_risk_budget",
     "historical_cvar",
     "historical_var",
     "information_ratio",
@@ -78,16 +103,20 @@ __all__ = [
     "nav_by_position",
     "portfolio_nav",
     "portfolio_returns",
+    "portfolio_starr",
     "realized_cvar",
     "return_histogram",
     "risk_contributions",
-    "sharpe_ratio",
+    "robust_sharpe",
     "rolling_beta",
     "rolling_correlation",
     "rolling_volatility",
+    "sharpe_implied_returns",
+    "sharpe_ratio",
     "simple_returns",
     "sortino_ratio",
     "total_return",
+    "variance_risk_budget",
     "weight_series",
     "weights_to_quantities",
 ]
