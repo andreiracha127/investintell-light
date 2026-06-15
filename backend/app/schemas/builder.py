@@ -171,8 +171,10 @@ class OptimizeRequest(BaseModel):
     # 'fund:<uuid>' / 'equity:<TICKER>'). v1: honoured only by min_cvar.
     turnover_lambda: Annotated[float, Field(ge=0)] = 0.0
     current_weights: dict[str, float] | None = None
-    # Annual tail-loss cap for ``max_return_cvar`` (decimal fraction, e.g.
-    # 0.10 = 10% CVaR_95). Required for that objective, ignored otherwise.
+    # Daily tail-loss cap for ``max_return_cvar`` (decimal fraction, e.g.
+    # 0.02 = 2% daily CVaR_95). The LP constraint operates on daily-return
+    # scenarios, so this is a *daily* limit — not an annualised figure.
+    # Required for that objective, ignored otherwise.
     cvar_limit: Annotated[float, Field(gt=0, le=1)] | None = None
 
     @model_validator(mode="after")

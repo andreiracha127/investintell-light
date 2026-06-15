@@ -520,6 +520,11 @@ def solve_max_return_cvar_capped(
         max  μᵀw      s.t.  z + 1/((1−α)·T)·Σ max(−rₜᵀw − z, 0) ≤ cvar_limit,
                             long-only, sum(w)=1, caps/min/blocks.
 
+    ``cvar_limit`` is expressed in the **same daily-return units as the
+    scenarios** (e.g. 0.02 = 2% daily CVaR_95).  It is NOT an annualised
+    figure.  The caller (``run_optimize``) owns the unit contract; the engine
+    never rescales it.
+
     Gate G5: ``mu`` (annualized expected returns) is REQUIRED and never
     estimated here — by contract it is the Black-Litterman posterior. The
     in-LP CVaR auxiliaries only upper-bound the realized CVaR, so the solved

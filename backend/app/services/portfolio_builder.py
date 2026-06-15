@@ -383,8 +383,15 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
                     "Black-Litterman posterior exists (gate G5)"
                 )
             limit = _regime_cvar_limit(payload.cvar_limit)  # T2C-8 makes this regime-aware
+            # Mirror the min_cvar pattern: when block budgets are present the
+            # bundle REPLACES the scalar (cap, min_weight) path inside the
+            # engine, so scalars must be promoted to per-asset vectors first.
             bundle = (
-                engine.BoundsBundle(cap_vec=None, min_vec=None, blocks=blocks)
+                engine.BoundsBundle(
+                    cap_vec=np.full(n, cap) if cap is not None else None,
+                    min_vec=np.full(n, min_weight) if min_weight is not None else None,
+                    blocks=blocks,
+                )
                 if blocks
                 else None
             )
