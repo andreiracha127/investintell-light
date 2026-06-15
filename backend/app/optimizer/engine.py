@@ -19,6 +19,7 @@ Fail-loud: any solver status other than ``optimal`` raises
 
 import cvxpy as cp
 import numpy as np
+from dataclasses import dataclass
 
 TRADING_DAYS = 252
 
@@ -86,6 +87,118 @@ def base_constraints(
         cons.append(w <= cap)
     if min_weight is not None:
         cons.append(w >= min_weight)
+    return cons
+
+
+@dataclass(frozen=True)
+class BlockBudget:
+    """Group-budget constraint: Σ wᵢ over ``indices`` must lie in [lo, hi].
+
+    ``indices`` are 0-based asset columns (e.g. all funds whose
+    ``Fund.asset_class == 'equity'``). ``lo``/``hi`` are decimal fractions of
+    the fully-invested portfolio (0.30 = 30%). Convex (linear) by construction,
+    so it composes with every objective in this module.
+    """
+
+    indices: list[int]
+    lo: float
+    hi: float
+
+
+def _check_bound_vectors(
+    n: int, cap_vec: np.ndarray | None, min_vec: np.ndarray | None
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Validate per-asset cap/min vectors; return them as float ndarrays.
+
+    Element-wise analogue of ``_check_constraint_params``: each cap ∈ (0, 1],
+    each min ≥ 0, min ≤ cap, Σ caps ≥ 1 (else sum(w)=1 is unreachable),
+    Σ mins ≤ 1. All failures are fail-loud ``OptimizerError``.
+    """
+    cap_arr = None
+    min_arr = None
+    if cap_vec is not None:
+        cap_arr = np.asarray(cap_vec, dtype=float).ravel()
+        if cap_arr.shape != (n,):
+            raise OptimizerError(f"cap_vec has shape {cap_arr.shape}, expected ({n},)")
+        if ((cap_arr <= 0) | (cap_arr > 1)).any():
+            raise OptimizerError("each per-asset cap must be in (0, 1]")
+        if float(cap_arr.sum()) < 1 - 1e-12:
+            raise OptimizerError(
+                f"infeasible constraints: per-asset caps sum to {float(cap_arr.sum())} < 1 — "
+                "raise some caps or add assets"
+            )
+    if min_vec is not None:
+        min_arr = np.asarray(min_vec, dtype=float).ravel()
+        if min_arr.shape != (n,):
+            raise OptimizerError(f"min_vec has shape {min_arr.shape}, expected ({n},)")
+        if (min_arr < 0).any():
+            raise OptimizerError("each per-asset min_weight must be >= 0")
+        if float(min_arr.sum()) > 1 + 1e-12:
+            raise OptimizerError(
+                f"infeasible constraints: per-asset minimums sum to {float(min_arr.sum())} > 1"
+            )
+    if cap_arr is not None and min_arr is not None and (min_arr > cap_arr + 1e-12).any():
+        raise OptimizerError("a per-asset min_weight exceeds its cap")
+    return cap_arr, min_arr
+
+
+def bounds_constraints(
+    w: cp.Variable,
+    cap_vec: np.ndarray | None,
+    min_vec: np.ndarray | None,
+    blocks: list[BlockBudget] | None,
+) -> list[cp.Constraint]:
+    """Long-only + sum=1 + per-asset bound vectors + block budgets.
+
+    Always enforces ``w >= 0`` and ``cp.sum(w) == 1`` (the universal contract).
+    Per-asset bounds (when given) replace the scalar cap/min. Block budgets add
+    ``lo <= Σ_{i in block} wᵢ <= hi`` per group.
+
+    Fail-loud pre-solve infeasibility checks (raised as ``OptimizerError`` so
+    they never reach the solver as a silent ``infeasible`` status):
+    - an empty block index list ("empty");
+    - a block floor exceeds the max attainable group sum under the caps
+      ("block floor" — singular);
+    - the sum of block floors exceeds 1 ("block floors" — plural).
+    """
+    n = int(w.shape[0])
+    cap_arr, min_arr = _check_bound_vectors(n, cap_vec, min_vec)
+    cons: list[cp.Constraint] = [w >= 0, cp.sum(w) == 1]
+    if cap_arr is not None:
+        cons.append(w <= cap_arr)
+    if min_arr is not None:
+        cons.append(w >= min_arr)
+    if blocks:
+        for b in blocks:
+            if not b.indices:
+                raise OptimizerError("block budget has an empty index list")
+            for idx in b.indices:
+                if not 0 <= idx < n:
+                    raise OptimizerError(f"block index {idx} out of range (n={n})")
+            if not (0.0 <= b.lo <= b.hi <= 1.0):
+                raise OptimizerError(
+                    f"block budget bounds must satisfy 0 <= lo <= hi <= 1, got "
+                    f"[{b.lo}, {b.hi}]"
+                )
+            if b.lo > 0:
+                if cap_arr is not None:
+                    max_attainable = float(min(cap_arr[b.indices].sum(), 1.0))
+                else:
+                    max_attainable = float(min(len(b.indices), 1.0))
+                if b.lo > max_attainable + 1e-12:
+                    raise OptimizerError(
+                        f"infeasible constraints: block floor {b.lo} exceeds the maximum "
+                        f"attainable sum {max_attainable} of its {len(b.indices)} assets under "
+                        "their caps — lower the floor or raise the caps"
+                    )
+            group_sum = cp.sum(w[b.indices])
+            cons.append(group_sum >= b.lo)
+            cons.append(group_sum <= b.hi)
+        if sum(b.lo for b in blocks) > 1 + 1e-12:
+            raise OptimizerError(
+                f"infeasible constraints: block floors sum to {sum(b.lo for b in blocks)} > 1 — "
+                "sum(w)=1 cannot satisfy all minimums"
+            )
     return cons
 
 

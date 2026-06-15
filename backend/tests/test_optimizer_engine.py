@@ -166,3 +166,79 @@ def test_g5_structural_no_mean_estimation_in_engine_or_data() -> None:
         "black_litterman.py must contain exactly one mean estimation "
         "(historical_mean_ann, for re-centering only)"
     )
+
+
+# ── T2C-1: per-asset bound vectors + block budgets ──────────────────────────
+
+
+def test_bounds_constraints_per_asset_vectors_bind() -> None:
+    import cvxpy as cp
+
+    # Asset 0 capped at 0.10, others free up to 1; min 0.05 on asset 2.
+    n = 3
+    w = cp.Variable(n)
+    caps = np.array([0.10, 1.0, 1.0])
+    mins = np.array([0.0, 0.0, 0.05])
+    cons = engine.bounds_constraints(w, cap_vec=caps, min_vec=mins, blocks=None)
+    sigma = np.diag([0.01, 0.04, 0.09])
+    prob = cp.Problem(cp.Minimize(cp.quad_form(w, cp.psd_wrap(sigma))), cons)
+    prob.solve()
+    assert str(prob.status) == cp.OPTIMAL
+    weights = np.asarray(w.value).ravel()
+    assert abs(weights.sum() - 1.0) < 1e-6
+    assert weights[0] <= 0.10 + 1e-6
+    assert weights[2] >= 0.05 - 1e-6
+
+
+def test_bounds_constraints_block_budget_caps_group_sum() -> None:
+    import cvxpy as cp
+
+    # Two blocks: {0,1} must sum to <= 0.30; {2,3} sum in [0.40, 1.0].
+    n = 4
+    w = cp.Variable(n)
+    blocks = [
+        engine.BlockBudget(indices=[0, 1], lo=0.0, hi=0.30),
+        engine.BlockBudget(indices=[2, 3], lo=0.40, hi=1.0),
+    ]
+    cons = engine.bounds_constraints(w, cap_vec=None, min_vec=None, blocks=blocks)
+    sigma = np.diag([0.01, 0.01, 0.04, 0.04])
+    prob = cp.Problem(cp.Minimize(cp.quad_form(w, cp.psd_wrap(sigma))), cons)
+    prob.solve()
+    assert str(prob.status) == cp.OPTIMAL
+    weights = np.asarray(w.value).ravel()
+    assert weights[0] + weights[1] <= 0.30 + 1e-6
+    assert weights[2] + weights[3] >= 0.40 - 1e-6
+
+
+def test_bounds_constraints_block_floor_infeasible_against_caps_fails_loud() -> None:
+    import cvxpy as cp
+
+    # Block {0,1} floor 0.80, but each asset capped at 0.30 -> max group sum 0.60
+    # < 0.80: structurally infeasible, must fail loud BEFORE solving.
+    w = cp.Variable(4)
+    caps = np.array([0.30, 0.30, 1.0, 1.0])
+    blocks = [engine.BlockBudget(indices=[0, 1], lo=0.80, hi=1.0)]
+    with pytest.raises(engine.OptimizerError, match="block floor"):
+        engine.bounds_constraints(w, cap_vec=caps, min_vec=None, blocks=blocks)
+
+
+def test_bounds_constraints_block_sum_of_floors_exceeds_one_fails_loud() -> None:
+    import cvxpy as cp
+
+    # Two disjoint blocks whose floors sum to > 1 can never satisfy sum(w)=1.
+    w = cp.Variable(4)
+    blocks = [
+        engine.BlockBudget(indices=[0, 1], lo=0.60, hi=1.0),
+        engine.BlockBudget(indices=[2, 3], lo=0.60, hi=1.0),
+    ]
+    with pytest.raises(engine.OptimizerError, match="block floors"):
+        engine.bounds_constraints(w, cap_vec=None, min_vec=None, blocks=blocks)
+
+
+def test_bounds_constraints_empty_block_indices_fails_loud() -> None:
+    import cvxpy as cp
+
+    w = cp.Variable(3)
+    blocks = [engine.BlockBudget(indices=[], lo=0.0, hi=0.5)]
+    with pytest.raises(engine.OptimizerError, match="empty"):
+        engine.bounds_constraints(w, cap_vec=None, min_vec=None, blocks=blocks)
