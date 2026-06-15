@@ -278,6 +278,42 @@ async def test_block_budget_binds_min_cvar(monkeypatch: pytest.MonkeyPatch) -> N
     assert abs(sum(w["weight"] for w in body["weights"]) - 1.0) < 1e-6
 
 
+async def test_block_budget_does_not_drop_default_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: supplying block_budgets must NOT silently drop the scalar
+    per-asset cap. With the DEFAULT cap (0.25) left untouched, the bundle path
+    used to translate to cap_vec=None and let a single fund take up to its
+    block hi (or 1.0). Assert the 25% per-asset cap still binds every weight."""
+    _stub_returns(monkeypatch)
+    _stub_asset_class(
+        monkeypatch,
+        classes={
+            _FUND_IDS[0]: "equity",
+            _FUND_IDS[1]: "fixed_income",
+            _FUND_IDS[2]: "equity",
+            _FUND_IDS[3]: "fixed_income",
+        },
+    )
+    payload = {
+        "assets": [_fund_ref(i) for i in range(4)],
+        "objective": "min_cvar",
+        # cap omitted → default 0.25; a wide block budget that does NOT itself
+        # cap any single asset below 0.25, so only the scalar cap can bind.
+        "constraints": {
+            "block_budgets": [{"asset_class": "fixed_income", "lo": 0.0, "hi": 0.9}],
+        },
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    weights = [w["weight"] for w in body["weights"]]
+    # The default 25% per-asset cap must still bind despite block_budgets.
+    assert all(w <= 0.25 + 1e-6 for w in weights), weights
+    assert abs(sum(weights) - 1.0) < 1e-6
+
+
 async def test_block_budget_with_views_binds_min_cvar(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

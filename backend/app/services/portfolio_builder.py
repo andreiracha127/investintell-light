@@ -336,9 +336,17 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
     # Block budgets are honoured ONLY by min_cvar (ConstraintsIn docstring). The
     # bundle replaces the scalar (cap, min_weight) block in the CVaR solver; it
     # is reused by BOTH the views and no-views min_cvar paths so a user-requested
-    # risk constraint is never silently dropped.
+    # risk constraint is never silently dropped. Because the bundle path REPLACES
+    # the scalar (cap, min_weight) constraints in bounds_constraints, the active
+    # scalars must be promoted to per-asset vectors here — otherwise the default
+    # cap (0.25) would be silently dropped the moment a block budget is supplied.
+    n = len(labels)
     cvar_bounds = (
-        engine.BoundsBundle(cap_vec=None, min_vec=None, blocks=blocks)
+        engine.BoundsBundle(
+            cap_vec=np.full(n, cap) if cap is not None else None,
+            min_vec=np.full(n, min_weight) if min_weight is not None else None,
+            blocks=blocks,
+        )
         if blocks
         else None
     )
