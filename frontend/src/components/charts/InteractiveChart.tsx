@@ -288,7 +288,6 @@ export function InteractiveChart({
             setCompares((current) => addCompareSelection(current, item));
             setScale((current) => ({ ...current, pct: true, log: false }));
           }}
-          onClear={() => setCompares([])}
         />
         <div className="flex flex-wrap items-center gap-1">
           {compares.map((compare) => (
