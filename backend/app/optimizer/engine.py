@@ -17,9 +17,10 @@ Fail-loud: any solver status other than ``optimal`` raises
 ``OptimizerError`` — never a silently degraded answer.
 """
 
+from dataclasses import dataclass
+
 import cvxpy as cp
 import numpy as np
-from dataclasses import dataclass
 
 TRADING_DAYS = 252
 
@@ -120,6 +121,8 @@ def _check_bound_vectors(
         cap_arr = np.asarray(cap_vec, dtype=float).ravel()
         if cap_arr.shape != (n,):
             raise OptimizerError(f"cap_vec has shape {cap_arr.shape}, expected ({n},)")
+        if not np.isfinite(cap_arr).all():
+            raise OptimizerError("cap_vec contains NaN/inf — refusing to build constraints")
         if ((cap_arr <= 0) | (cap_arr > 1)).any():
             raise OptimizerError("each per-asset cap must be in (0, 1]")
         if float(cap_arr.sum()) < 1 - 1e-12:
@@ -131,6 +134,8 @@ def _check_bound_vectors(
         min_arr = np.asarray(min_vec, dtype=float).ravel()
         if min_arr.shape != (n,):
             raise OptimizerError(f"min_vec has shape {min_arr.shape}, expected ({n},)")
+        if not np.isfinite(min_arr).all():
+            raise OptimizerError("min_vec contains NaN/inf — refusing to build constraints")
         if (min_arr < 0).any():
             raise OptimizerError("each per-asset min_weight must be >= 0")
         if float(min_arr.sum()) > 1 + 1e-12:
@@ -172,6 +177,10 @@ def bounds_constraints(
         for b in blocks:
             if not b.indices:
                 raise OptimizerError("block budget has an empty index list")
+            if len(set(b.indices)) != len(b.indices):
+                raise OptimizerError(
+                    "block budget has duplicate indices — each asset must appear at most once"
+                )
             for idx in b.indices:
                 if not 0 <= idx < n:
                     raise OptimizerError(f"block index {idx} out of range (n={n})")
