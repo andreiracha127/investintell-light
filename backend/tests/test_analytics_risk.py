@@ -14,6 +14,7 @@ from app.analytics import (
     historical_cvar,
     historical_var,
     max_drawdown,
+    realized_cvar,
 )
 
 
@@ -227,9 +228,6 @@ def test_cvar_monotonicity() -> None:
 
 
 # --- exact Rockafellar–Uryasev realized_cvar (T1C) ----------------------------
-
-from app.analytics import realized_cvar  # noqa: E402  (export added in T1C-2)
-
 
 # Fixed 30-point return series: (1-0.95)*30 = 1.5 (non-integer tail) so the
 # exact RU estimator DIVERGES from the naive tail-mean historical_cvar.
