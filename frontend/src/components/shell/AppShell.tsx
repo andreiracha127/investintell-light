@@ -8,9 +8,22 @@
  */
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import {
+  Header,
+  HeaderName,
+  HeaderGlobalBar,
+  HeaderGlobalAction,
+  HeaderMenuButton,
+  OverflowMenu,
+  OverflowMenuItem,
+  SkipToContent,
+} from "@carbon/react";
+import { Light, Asleep, Logout } from "@carbon/icons-react";
 import { TickerSearch } from "@/components/TickerSearch";
+import { useAuth } from "@/lib/auth/context";
+import { gateDecision } from "@/lib/auth/authState";
 
 type Theme = "light" | "dark";
 type Accent = "oxblood" | "blue" | "teal";
@@ -177,79 +190,68 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const overlay = narrow && navOpen;
   const sidebarVisible = navOpen || !narrow;
 
+  const router = useRouter();
+  const { status, signOut } = useAuth();
+
+  useEffect(() => {
+    const target = gateDecision(status, pathname);
+    if (target) router.replace(target);
+  }, [status, pathname, router]);
+
+  // The login route renders bare (no shell chrome).
+  if (pathname === "/login") return <>{children}</>;
+
+  // Don't flash the app or bounce a valid user while the session resolves.
+  if (status === "loading") {
+    return <div className="flex h-screen items-center justify-center text-text-muted">Loading…</div>;
+  }
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-surface-0 text-text-primary">
       {/* ── Top header (Carbon UI Shell) ─────────────────────────────────── */}
-      <header className="relative z-60 flex h-12 shrink-0 items-center gap-1 border-b border-border bg-surface-1 pr-2">
-        <button
-          type="button"
-          onClick={() => setNavOpen((v) => !v)}
-          title="Toggle navigation"
+      <Header aria-label="Investintell Cockpit" className="ix-carbon-scope">
+        <SkipToContent />
+        <HeaderMenuButton
           aria-label="Toggle navigation"
-          className="flex h-12 w-12 shrink-0 items-center justify-center text-text-secondary hover:bg-layer-hover"
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-            <path d="M1 3h14M1 8h14M1 13h14" stroke="currentColor" strokeWidth="1.4" />
-          </svg>
-        </button>
-        <Link href="/" className="flex items-baseline gap-2 pr-3.5 no-underline">
-          <span className="font-serif text-[17px] font-bold tracking-[-0.01em] text-text-primary">
-            Investintell
-          </span>
-          <span className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-accent">
-            Cockpit
-          </span>
-        </Link>
+          isCollapsible
+          isActive={navOpen}
+          onClick={() => setNavOpen((v) => !v)}
+        />
+        <HeaderName href="/" prefix="Investintell">Cockpit</HeaderName>
 
-        <TickerSearch />
+        <div className="flex flex-1 items-center">
+          <TickerSearch />
+        </div>
 
-        <div className="flex-1" />
-
-        {/* density toggle */}
         <div className="hidden h-8 items-stretch border border-border-strong sm:flex">
-          <DensityButton
-            label="Compact"
-            active={settings.density === "compact"}
-            onClick={() => update({ density: "compact" })}
-          />
-          <DensityButton
-            label="Comfort"
-            active={settings.density === "comfortable"}
-            onClick={() => update({ density: "comfortable" })}
-          />
+          <DensityButton label="Compact" active={settings.density === "compact"} onClick={() => update({ density: "compact" })} />
+          <DensityButton label="Comfort" active={settings.density === "comfortable"} onClick={() => update({ density: "comfortable" })} />
         </div>
 
-        {/* theme toggle */}
-        <button
-          type="button"
-          onClick={() => update({ theme: settings.theme === "light" ? "dark" : "light" })}
-          title="Toggle theme"
-          aria-label="Toggle theme"
-          className="flex h-9 w-9 items-center justify-center text-text-secondary hover:bg-layer-hover"
-        >
-          {settings.theme === "light" ? (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-              <circle cx="8" cy="8" r="3.4" stroke="currentColor" strokeWidth="1.3" />
-              <path
-                d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6L13 13M13 3l-1.4 1.4M4.4 11.6L3 13"
-                stroke="currentColor"
-                strokeWidth="1.2"
-              />
-            </svg>
-          ) : (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-              <path d="M13.5 9.5A5.5 5.5 0 016.5 2.5 5.5 5.5 0 1013.5 9.5z" stroke="currentColor" strokeWidth="1.3" />
-            </svg>
-          )}
-        </button>
+        <HeaderGlobalBar>
+          <HeaderGlobalAction
+            aria-label={settings.theme === "light" ? "Switch to dark theme" : "Switch to light theme"}
+            onClick={() => update({ theme: settings.theme === "light" ? "dark" : "light" })}
+            tooltipAlignment="center"
+          >
+            {settings.theme === "light" ? <Asleep size={20} /> : <Light size={20} />}
+          </HeaderGlobalAction>
 
-        {/* accent dots */}
-        <div className="hidden items-center gap-1.5 px-2 sm:flex">
-          <AccentDot color="#7A1C24" name="oxblood" title="Oxblood" settings={settings} onPick={update} />
-          <AccentDot color="#0F62FE" name="blue" title="Carbon blue" settings={settings} onPick={update} />
-          <AccentDot color="#007D79" name="teal" title="Teal" settings={settings} onPick={update} />
-        </div>
-      </header>
+          <OverflowMenu
+            aria-label="Accent color"
+            renderIcon={() => <span className="h-4 w-4 rounded-full" style={{ background: "var(--color-accent)" }} />}
+            flipped
+          >
+            <OverflowMenuItem itemText="Oxblood" onClick={() => update({ accent: "oxblood" })} />
+            <OverflowMenuItem itemText="Carbon blue" onClick={() => update({ accent: "blue" })} />
+            <OverflowMenuItem itemText="Teal" onClick={() => update({ accent: "teal" })} />
+          </OverflowMenu>
+
+          <HeaderGlobalAction aria-label="Sign out" onClick={() => void signOut()} tooltipAlignment="end">
+            <Logout size={20} />
+          </HeaderGlobalAction>
+        </HeaderGlobalBar>
+      </Header>
 
       {/* ── Body row: sidebar + main ─────────────────────────────────────── */}
       <div className="relative flex min-h-0 flex-1">
@@ -311,6 +313,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {/* Keyed on settings so ECharts options (built from chartColors() in
             useMemo) are rebuilt when theme/accent/density tokens change. */}
         <main
+          id="main-content"
           key={`${settings.theme}-${settings.accent}-${settings.density}`}
           className="min-w-0 flex-1 overflow-auto bg-surface-0"
         >
@@ -341,36 +344,5 @@ function DensityButton({
     >
       {label}
     </button>
-  );
-}
-
-function AccentDot({
-  color,
-  name,
-  title,
-  settings,
-  onPick,
-}: {
-  color: string;
-  name: Accent;
-  title: string;
-  settings: Settings;
-  onPick: (patch: Partial<Settings>) => void;
-}) {
-  const active = settings.accent === name;
-  return (
-    <button
-      type="button"
-      onClick={() => onPick({ accent: name })}
-      title={title}
-      aria-label={`${title} accent`}
-      aria-pressed={active}
-      className="h-4 w-4 cursor-pointer rounded-full p-0 outline-offset-1"
-      style={{
-        background: color,
-        border: active ? "2px solid var(--color-text-primary)" : "1px solid var(--color-border-strong)",
-        outline: active ? "1px solid var(--color-text-primary)" : "1px solid transparent",
-      }}
-    />
   );
 }

@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { Geist_Mono } from "next/font/google";
 import "./globals.css";
+import "@carbon/styles/css/styles.min.css";
 import { Providers } from "./providers";
 import { AppShell } from "@/components/shell/AppShell";
+import { CarbonThemeBridge } from "@/components/shell/CarbonThemeBridge";
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
@@ -36,7 +38,9 @@ export default function RootLayout({
       <body className={`${geistMono.variable} antialiased`}>
         <script dangerouslySetInnerHTML={{ __html: SETTINGS_SCRIPT }} />
         <Providers>
-          <AppShell>{children}</AppShell>
+          <CarbonThemeBridge>
+            <AppShell>{children}</AppShell>
+          </CarbonThemeBridge>
         </Providers>
       </body>
     </html>
