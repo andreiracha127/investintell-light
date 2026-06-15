@@ -209,3 +209,60 @@ def portfolio_starr(
     dec = etl_risk_budget(weights, scenarios, confidence=confidence)
     etl_ann = dec.portfolio_etl * TRADING_DAYS
     return float((portfolio_return_ann - risk_free_rate) / etl_ann)
+
+
+def sharpe_implied_returns(
+    weights: np.ndarray,
+    scenarios: np.ndarray,
+    portfolio_return_ann: float,
+    risk_free_rate: float,
+) -> np.ndarray:
+    """Sharpe-implied (annualized) per-asset returns: rf + Sharpe·MCTR_ann.
+
+    Sharpe = (portfolio_return_ann − rf) / σ_p_ann, MCTR_ann = MCTR·√252.
+    By construction w·(implied − rf) = portfolio_return_ann − rf.
+
+    Gate G5: ``portfolio_return_ann`` is the EXPLICIT wᵀμ_BL supplied by the
+    caller — this function never estimates a mean from the scenarios.
+
+    Raises ValueError on non-finite excess inputs, or any condition raised by
+    variance_risk_budget (degenerate variance, NaN, shape mismatch).
+    """
+    if not np.isfinite(portfolio_return_ann):
+        raise ValueError("sharpe_implied_returns: portfolio_return_ann must be finite")
+    if not np.isfinite(risk_free_rate):
+        raise ValueError("sharpe_implied_returns: risk_free_rate must be finite")
+    dec = variance_risk_budget(weights, scenarios)
+    vol_ann = dec.portfolio_volatility * np.sqrt(TRADING_DAYS)
+    sharpe = (portfolio_return_ann - risk_free_rate) / vol_ann
+    mctr_ann = dec.mctr * np.sqrt(TRADING_DAYS)
+    return np.asarray(risk_free_rate + sharpe * mctr_ann, dtype=float)
+
+
+def etl_implied_returns(
+    weights: np.ndarray,
+    scenarios: np.ndarray,
+    portfolio_return_ann: float,
+    risk_free_rate: float,
+    confidence: float = 0.95,
+) -> np.ndarray:
+    """ETL-implied (annualized) per-asset returns: rf + STARR·MCETL_ann.
+
+    STARR = (portfolio_return_ann − rf) / ETL_ann, MCETL_ann = MCETL·252.
+    By construction w·(implied − rf) = portfolio_return_ann − rf.
+
+    Gate G5: ``portfolio_return_ann`` is the EXPLICIT wᵀμ_BL supplied by the
+    caller — this function never estimates a mean from the scenarios.
+
+    Raises ValueError on non-finite excess inputs, or any condition raised by
+    etl_risk_budget (short/empty tail, non-positive ETL, NaN, shape mismatch).
+    """
+    if not np.isfinite(portfolio_return_ann):
+        raise ValueError("etl_implied_returns: portfolio_return_ann must be finite")
+    if not np.isfinite(risk_free_rate):
+        raise ValueError("etl_implied_returns: risk_free_rate must be finite")
+    dec = etl_risk_budget(weights, scenarios, confidence=confidence)
+    etl_ann = dec.portfolio_etl * TRADING_DAYS
+    starr = (portfolio_return_ann - risk_free_rate) / etl_ann
+    mcetl_ann = dec.mcetl * TRADING_DAYS
+    return np.asarray(risk_free_rate + starr * mcetl_ann, dtype=float)

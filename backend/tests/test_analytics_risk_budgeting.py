@@ -230,3 +230,53 @@ def test_starr_rejects_nonfinite_return() -> None:
         rb.portfolio_starr(
             w, scen, portfolio_return_ann=np.nan, risk_free_rate=0.04, confidence=0.95
         )
+
+
+# ── implied returns (gate G5: explicit excess return only) ───────────────────
+
+
+def test_sharpe_implied_reconstructs_portfolio_excess() -> None:
+    scen = _scenarios()
+    w = np.array([0.4, 0.3, 0.2, 0.1])
+    rf, mu_p_ann = 0.04, 0.09
+    implied = rb.sharpe_implied_returns(
+        w, scen, portfolio_return_ann=mu_p_ann, risk_free_rate=rf
+    )
+    # w·(implied − rf) == portfolio annualized excess return.
+    assert abs(float((w * (implied - rf)).sum()) - (mu_p_ann - rf)) < 1e-9
+
+
+def test_sharpe_implied_offset_by_rf() -> None:
+    scen = _scenarios()
+    w = np.array([0.25, 0.25, 0.25, 0.25])
+    var_dec = rb.variance_risk_budget(w, scen)
+    rf, mu_p_ann = 0.03, 0.08
+    sharpe = (mu_p_ann - rf) / (var_dec.portfolio_volatility * np.sqrt(rb.TRADING_DAYS))
+    expected = rf + sharpe * (var_dec.mctr * np.sqrt(rb.TRADING_DAYS))
+    implied = rb.sharpe_implied_returns(
+        w, scen, portfolio_return_ann=mu_p_ann, risk_free_rate=rf
+    )
+    np.testing.assert_allclose(implied, expected, rtol=1e-9, atol=1e-12)
+
+
+def test_etl_implied_reconstructs_portfolio_excess() -> None:
+    scen = _scenarios()
+    w = np.array([0.4, 0.3, 0.2, 0.1])
+    rf, mu_p_ann = 0.04, 0.09
+    implied = rb.etl_implied_returns(
+        w, scen, portfolio_return_ann=mu_p_ann, risk_free_rate=rf, confidence=0.95
+    )
+    assert abs(float((w * (implied - rf)).sum()) - (mu_p_ann - rf)) < 1e-9
+
+
+def test_implied_returns_reject_nonfinite_excess_inputs() -> None:
+    scen = _scenarios()
+    w = np.array([0.25, 0.25, 0.25, 0.25])
+    with pytest.raises(ValueError, match="must be finite"):
+        rb.sharpe_implied_returns(
+            w, scen, portfolio_return_ann=np.nan, risk_free_rate=0.04
+        )
+    with pytest.raises(ValueError, match="must be finite"):
+        rb.etl_implied_returns(
+            w, scen, portfolio_return_ann=0.08, risk_free_rate=np.inf
+        )
