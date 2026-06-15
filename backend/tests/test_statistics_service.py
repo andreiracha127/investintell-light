@@ -6,6 +6,7 @@ the service-module boundary (same approach as the F3.2 route tests).
 """
 
 import datetime as dt
+import math
 from types import SimpleNamespace
 from typing import Any
 
@@ -21,8 +22,11 @@ from app.analytics import (
     best_worst_day,
     correlation_matrix,
     historical_var,
+    nav_by_position,
     portfolio_returns,
+    sharpe_ratio,
     simple_returns,
+    sortino_ratio,
     weight_series,
 )
 from app.api import _shared as api_shared
@@ -509,8 +513,6 @@ def test_scenario_cash_and_weekly_bounding() -> None:
 
 # --- Sharpe/Sortino in ScenarioStatistics (T1A-7) ----------------------------
 
-from app.analytics import nav_by_position, sharpe_ratio, sortino_ratio  # noqa: E402
-
 
 def test_scenario_statistics_carry_sharpe_sortino() -> None:
     series = _series_map(300)
@@ -523,8 +525,8 @@ def test_scenario_statistics_carry_sharpe_sortino() -> None:
         max_points=MAX_POINTS,
     )
     stats = resp.statistics
-    assert stats.sharpe_ratio == stats.sharpe_ratio  # not NaN
-    assert stats.sortino_ratio == stats.sortino_ratio  # not NaN
+    assert math.isfinite(stats.sharpe_ratio)
+    assert math.isfinite(stats.sortino_ratio)
 
 
 def test_scenario_statistics_sharpe_matches_engine_on_total_returns() -> None:
