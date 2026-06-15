@@ -22,11 +22,13 @@ import {
   fetchFundEntityAnalytics,
   fetchFundFactors,
   fetchFundHoldingsTop,
+  fetchFundInstitutionalReveal,
   fetchFundPeers,
   fetchFundProfile,
   fetchFundRiskTimeseries,
   fetchFundStyleDrift,
   fetchFundTimeseries,
+  fetchHoldingReverseLookup,
   fetchFundsScatter,
   fundTimeseriesToHistoryBars,
   type FundActiveShare,
@@ -34,6 +36,8 @@ import {
   type FundEntityAnalytics,
   type FundFactors,
   type FundHoldingsTop,
+  type FundInstitutionalReveal,
+  type HoldingReverseLookup,
   type FundPeers,
   type FundRisk,
   type FundRiskTimeseries,
@@ -44,6 +48,9 @@ import {
 import {
   buildHcFactorSensitivityOption,
   buildHcFundsScatterOption,
+  buildHcInsiderSentimentOption,
+  buildHcInstitutionalHolderOption,
+  buildHcInstitutionalOverlapOption,
   buildHcRiskTimeseriesOption,
   buildHcStyleBiasOption,
   buildHcStyleDriftOption,
@@ -52,6 +59,11 @@ import {
 import { buildHcHistogramOption } from "@/lib/charts/hc/histogram";
 import { buildHcRollingOption } from "@/lib/charts/hc/rolling";
 import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import {
+  dossierQueryKeys,
+  FUND_DOSSIER_DEFAULTS,
+  FUND_DOSSIER_STALE_TIME_MS,
+} from "@/lib/funds/dossierQueries";
 import {
   formatCompact,
   formatDate,
@@ -121,13 +133,6 @@ function latestPoint(series: [string, number][]): [string, number] | null {
 }
 
 export function FundProfileView({ instrumentId }: { instrumentId: string }) {
-  const profileQuery = useQuery({
-    queryKey: ["fund-profile", instrumentId],
-    queryFn: ({ signal }) => fetchFundProfile(instrumentId, signal),
-    staleTime: 30_000,
-    retry: retryPolicy,
-  });
-
   const [colors, setColors] = useState<ChartColors | null>(null);
   useEffect(() => {
     setColors(chartColors());
@@ -136,94 +141,172 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
   const [activeTab, setActiveTab] = useState<TabId>("performance");
   const [range, setRange] = useState<RangePreset>("1Y");
   const [deepOpen, setDeepOpen] = useState(false);
+  const [relationshipsOpen, setRelationshipsOpen] = useState(false);
   const [benchmarkDraft, setBenchmarkDraft] = useState("");
   const [benchmarkId, setBenchmarkId] = useState("");
+  const [selectedCusip, setSelectedCusip] = useState("");
 
   useEffect(() => {
     setActiveTab("performance");
     setRange("1Y");
     setDeepOpen(false);
+    setRelationshipsOpen(false);
     setBenchmarkDraft("");
     setBenchmarkId("");
+    setSelectedCusip("");
   }, [instrumentId]);
 
   const benchmarkQuery = benchmarkId ? { benchmark_id: benchmarkId } : {};
+  const isPerformanceTab = activeTab === "performance";
+  const isHoldingsTab = activeTab === "holdings";
+  const isStyleTab = activeTab === "style";
+  const isFactorsTab = activeTab === "factors";
+  const isPeersTab = activeTab === "peers";
+
+  const profileQuery = useQuery({
+    queryKey: dossierQueryKeys.profile(instrumentId),
+    queryFn: ({ signal }) => fetchFundProfile(instrumentId, signal),
+    staleTime: FUND_DOSSIER_STALE_TIME_MS.profile,
+    retry: retryPolicy,
+  });
 
   const timeseriesQuery = useQuery({
-    queryKey: ["fund-timeseries", instrumentId, range],
+    queryKey: dossierQueryKeys.timeseries(instrumentId, { range }),
     queryFn: ({ signal }) => fetchFundTimeseries(instrumentId, range, signal),
-    staleTime: 60 * 60 * 1000,
+    staleTime: FUND_DOSSIER_STALE_TIME_MS.timeseries,
+    enabled: isPerformanceTab,
     retry: retryPolicy,
   });
 
   const analysisQuery = useQuery({
-    queryKey: ["fund-analysis", instrumentId, range],
+    queryKey: dossierQueryKeys.analysis(instrumentId, {
+      range,
+      window: FUND_DOSSIER_DEFAULTS.analysisWindow,
+    }),
     queryFn: ({ signal }) =>
-      fetchFundAnalysis(instrumentId, { range, window: 252 }, signal),
-    staleTime: 60_000,
+      fetchFundAnalysis(
+        instrumentId,
+        { range, window: FUND_DOSSIER_DEFAULTS.analysisWindow },
+        signal,
+      ),
+    staleTime: FUND_DOSSIER_STALE_TIME_MS.analysis,
+    enabled: isPerformanceTab,
     retry: retryPolicy,
   });
 
   const holdingsTopQuery = useQuery({
-    queryKey: ["fund-holdings-top", instrumentId],
-    queryFn: ({ signal }) => fetchFundHoldingsTop(instrumentId, { limit: 25 }, signal),
-    staleTime: 60_000,
+    queryKey: dossierQueryKeys.holdingsTop(instrumentId, {
+      limit: FUND_DOSSIER_DEFAULTS.holdingsTopLimit,
+    }),
+    queryFn: ({ signal }) =>
+      fetchFundHoldingsTop(
+        instrumentId,
+        { limit: FUND_DOSSIER_DEFAULTS.holdingsTopLimit },
+        signal,
+      ),
+    staleTime: FUND_DOSSIER_STALE_TIME_MS["holdings-top"],
+    enabled: isHoldingsTab,
     retry: retryPolicy,
   });
 
   const peersQuery = useQuery({
-    queryKey: ["fund-peers", instrumentId],
-    queryFn: ({ signal }) => fetchFundPeers(instrumentId, { limit: 10 }, signal),
-    staleTime: 60_000,
+    queryKey: dossierQueryKeys.peers(instrumentId, {
+      limit: FUND_DOSSIER_DEFAULTS.peersLimit,
+    }),
+    queryFn: ({ signal }) =>
+      fetchFundPeers(
+        instrumentId,
+        { limit: FUND_DOSSIER_DEFAULTS.peersLimit },
+        signal,
+      ),
+    staleTime: FUND_DOSSIER_STALE_TIME_MS.peers,
+    enabled: isPeersTab,
     retry: retryPolicy,
   });
 
   const scatterQuery = useQuery({
-    queryKey: ["funds-scatter", 250],
-    queryFn: ({ signal }) => fetchFundsScatter({ limit: 250 }, signal),
-    staleTime: 60_000,
+    queryKey: dossierQueryKeys.scatter({
+      limit: FUND_DOSSIER_DEFAULTS.scatterLimit,
+    }),
+    queryFn: ({ signal }) =>
+      fetchFundsScatter({ limit: FUND_DOSSIER_DEFAULTS.scatterLimit }, signal),
+    staleTime: FUND_DOSSIER_STALE_TIME_MS.scatter,
+    enabled: isPeersTab,
     retry: retryPolicy,
   });
 
   const factorsQuery = useQuery({
-    queryKey: ["fund-factors", instrumentId],
+    queryKey: dossierQueryKeys.factors(instrumentId),
     queryFn: ({ signal }) => fetchFundFactors(instrumentId, signal),
-    staleTime: 60_000,
+    staleTime: FUND_DOSSIER_STALE_TIME_MS.factors,
+    enabled: isFactorsTab,
     retry: retryPolicy,
   });
 
   const styleDriftQuery = useQuery({
-    queryKey: ["fund-style-drift", instrumentId],
+    queryKey: dossierQueryKeys.styleDrift(instrumentId, {
+      quarters: FUND_DOSSIER_DEFAULTS.styleDriftQuarters,
+    }),
     queryFn: ({ signal }) =>
-      fetchFundStyleDrift(instrumentId, { quarters: 8 }, signal),
-    staleTime: 60_000,
+      fetchFundStyleDrift(
+        instrumentId,
+        { quarters: FUND_DOSSIER_DEFAULTS.styleDriftQuarters },
+        signal,
+      ),
+    staleTime: FUND_DOSSIER_STALE_TIME_MS["style-drift"],
+    enabled: isStyleTab,
     retry: retryPolicy,
   });
 
   const riskTimeseriesQuery = useQuery({
-    queryKey: ["fund-risk-timeseries", instrumentId],
+    queryKey: dossierQueryKeys.riskTimeseries(instrumentId),
     queryFn: ({ signal }) => fetchFundRiskTimeseries(instrumentId, {}, signal),
-    staleTime: 60_000,
+    staleTime: FUND_DOSSIER_STALE_TIME_MS["risk-timeseries"],
+    enabled: isPerformanceTab,
     retry: retryPolicy,
   });
 
   const entityAnalyticsQuery = useQuery({
-    queryKey: ["fund-entity-analytics", instrumentId, benchmarkId || null],
+    queryKey: dossierQueryKeys.entityAnalytics(instrumentId, {
+      window: FUND_DOSSIER_DEFAULTS.entityWindow,
+      ...benchmarkQuery,
+    }),
     queryFn: ({ signal }) =>
       fetchFundEntityAnalytics(
         instrumentId,
-        { window: "1Y", ...benchmarkQuery },
+        { window: FUND_DOSSIER_DEFAULTS.entityWindow, ...benchmarkQuery },
         signal,
       ),
-    staleTime: 60_000,
+    staleTime: FUND_DOSSIER_STALE_TIME_MS["entity-analytics"],
+    enabled: deepOpen,
     retry: retryPolicy,
   });
 
   const activeShareQuery = useQuery({
-    queryKey: ["fund-active-share", instrumentId, benchmarkId || null],
+    queryKey: dossierQueryKeys.activeShare(instrumentId, benchmarkQuery),
     queryFn: ({ signal }) =>
       fetchFundActiveShare(instrumentId, benchmarkQuery, signal),
-    staleTime: 60_000,
+    staleTime: FUND_DOSSIER_STALE_TIME_MS["active-share"],
+    enabled: isHoldingsTab,
+    retry: retryPolicy,
+  });
+
+  const institutionalRevealQuery = useQuery({
+    queryKey: dossierQueryKeys.institutionalReveal(instrumentId),
+    queryFn: ({ signal }) => fetchFundInstitutionalReveal(instrumentId, signal),
+    staleTime: FUND_DOSSIER_STALE_TIME_MS["institutional-reveal"],
+    enabled: relationshipsOpen,
+    retry: retryPolicy,
+  });
+
+  const reverseLookupCusip =
+    selectedCusip || institutionalRevealQuery.data?.overlap[0]?.cusip || "";
+
+  const reverseLookupQuery = useQuery({
+    queryKey: dossierQueryKeys.holdingReverseLookup(reverseLookupCusip),
+    queryFn: ({ signal }) => fetchHoldingReverseLookup(reverseLookupCusip, signal),
+    staleTime: FUND_DOSSIER_STALE_TIME_MS["holding-reverse-lookup"],
+    enabled: relationshipsOpen && reverseLookupCusip.length > 0,
     retry: retryPolicy,
   });
 
@@ -297,6 +380,26 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     if (!colors || !entityAnalyticsQuery.data) return null;
     return buildHcTailRiskOption(entityAnalyticsQuery.data, colors);
   }, [entityAnalyticsQuery.data, colors]);
+
+  const insiderOption = useMemo(() => {
+    const analytics = entityAnalyticsQuery.data;
+    const insider = analytics?.insider_data;
+    if (!colors || !analytics || !insider?.quarters?.length) return null;
+    if (insider.empty_state) return null;
+    return buildHcInsiderSentimentOption(analytics, colors);
+  }, [entityAnalyticsQuery.data, colors]);
+
+  const institutionalHolderOption = useMemo(() => {
+    if (!colors || !institutionalRevealQuery.data?.top_holders.length) return null;
+    if (institutionalRevealQuery.data.empty_state) return null;
+    return buildHcInstitutionalHolderOption(institutionalRevealQuery.data, colors);
+  }, [institutionalRevealQuery.data, colors]);
+
+  const institutionalOverlapOption = useMemo(() => {
+    if (!colors || !institutionalRevealQuery.data?.overlap.length) return null;
+    if (institutionalRevealQuery.data.empty_state) return null;
+    return buildHcInstitutionalOverlapOption(institutionalRevealQuery.data, colors);
+  }, [institutionalRevealQuery.data, colors]);
 
   const distributionOption = useMemo(() => {
     if (!colors || !entityAnalyticsQuery.data) return null;
@@ -390,13 +493,22 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setDeepOpen(true)}
-          className="h-[32px] border border-accent bg-accent px-3 text-[11px] font-bold uppercase tracking-[0.06em] text-on-accent transition-colors hover:bg-accent-muted"
-        >
-          Deep Analysis
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setRelationshipsOpen(true)}
+            className="h-[32px] border border-border-strong bg-surface-2 px-3 text-[11px] font-bold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:bg-layer-hover"
+          >
+            Relationships
+          </button>
+          <button
+            type="button"
+            onClick={() => setDeepOpen(true)}
+            className="h-[32px] border border-accent bg-accent px-3 text-[11px] font-bold uppercase tracking-[0.06em] text-on-accent transition-colors hover:bg-accent-muted"
+          >
+            Deep Analysis
+          </button>
+        </div>
       </div>
 
       <div className="mb-4 grid gap-px border border-border bg-border [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
@@ -497,6 +609,19 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
           tailRiskOption={tailRiskOption}
           distributionOption={distributionOption}
           drawdownOption={deepDrawdownOption}
+          insiderOption={insiderOption}
+        />
+      )}
+
+      {relationshipsOpen && (
+        <RelationshipsModal
+          institutionalRevealQuery={institutionalRevealQuery}
+          reverseLookupQuery={reverseLookupQuery}
+          selectedCusip={reverseLookupCusip}
+          onSelectCusip={setSelectedCusip}
+          onClose={() => setRelationshipsOpen(false)}
+          holderOption={institutionalHolderOption}
+          overlapOption={institutionalOverlapOption}
         />
       )}
     </div>
@@ -861,6 +986,7 @@ function DeepAnalysisModal({
   tailRiskOption,
   distributionOption,
   drawdownOption,
+  insiderOption,
 }: {
   entityAnalyticsQuery: UseQueryResult<FundEntityAnalytics, Error>;
   benchmarkDraft: string;
@@ -871,6 +997,7 @@ function DeepAnalysisModal({
   tailRiskOption: Highcharts.Options | null;
   distributionOption: Highcharts.Options | null;
   drawdownOption: Highcharts.Options | null;
+  insiderOption: Highcharts.Options | null;
 }) {
   const data = entityAnalyticsQuery.data;
   const rollingReturns = data
@@ -1037,12 +1164,221 @@ function DeepAnalysisModal({
               </ModalSection>
 
               <ModalSection title="Insider">
-                <EmptyMessage message="Insider dossier data is not populated in this phase." />
+                {data.insider_data?.empty_state ? (
+                  <EmptyStatePanel
+                    reason={data.insider_data.empty_state.reason}
+                    source={data.insider_data.empty_state.source}
+                  />
+                ) : data.insider_data ? (
+                  <>
+                    <div className="mb-3 grid gap-px border border-border bg-border [grid-template-columns:repeat(auto-fit,minmax(130px,1fr))]">
+                      <KpiTile label="Buy value" value={money(data.insider_data.total_buy_value)} />
+                      <KpiTile label="Sell value" value={money(data.insider_data.total_sell_value)} />
+                      <KpiTile label="Net" value={money(data.insider_data.net_value)} />
+                      <KpiTile label="Sentiment" value={num(data.insider_data.sentiment_score)} />
+                      <KpiTile label="Issuers" value={String(data.insider_data.issuer_ciks?.length ?? 0)} />
+                      <KpiTile label="As of" value={formatDate(data.insider_data.as_of)} />
+                    </div>
+                    {insiderOption ? (
+                      <HighchartsChart options={insiderOption} className="h-[230px] w-full" />
+                    ) : (
+                      <EmptyMessage message="No insider sentiment quarters returned." />
+                    )}
+                  </>
+                ) : (
+                  <EmptyMessage message="No insider payload returned." />
+                )}
               </ModalSection>
             </div>
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function RelationshipsModal({
+  institutionalRevealQuery,
+  reverseLookupQuery,
+  selectedCusip,
+  onSelectCusip,
+  onClose,
+  holderOption,
+  overlapOption,
+}: {
+  institutionalRevealQuery: UseQueryResult<FundInstitutionalReveal, Error>;
+  reverseLookupQuery: UseQueryResult<HoldingReverseLookup, Error>;
+  selectedCusip: string;
+  onSelectCusip: (cusip: string) => void;
+  onClose: () => void;
+  holderOption: Highcharts.Options | null;
+  overlapOption: Highcharts.Options | null;
+}) {
+  const data = institutionalRevealQuery.data;
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-[rgba(22,22,22,0.72)] px-4 py-6"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Fund relationships"
+    >
+      <div className="mx-auto flex max-h-[calc(100vh-48px)] max-w-[1180px] flex-col border border-border-strong bg-surface shadow-2xl">
+        <div className="flex items-center justify-between gap-3 border-b border-border-strong px-4 py-3">
+          <div>
+            <h2 className="ix-title m-0 text-[22px]">Relationships</h2>
+            <p className="m-0 text-[12px] text-text-secondary">
+              {data
+                ? `${data.fund_name} - ${data.period ? formatDate(data.period) : "no 13F period"}`
+                : "Loading"}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-[30px] min-w-[30px] border border-border-strong bg-surface-2 px-2 text-[14px] font-bold text-text-secondary hover:bg-layer-hover"
+            aria-label="Close relationships"
+          >
+            x
+          </button>
+        </div>
+
+        <div className="overflow-y-auto px-4 py-4">
+          {!data ? (
+            <QueryMessage
+              query={institutionalRevealQuery}
+              emptyMessage="No institutional reveal payload returned."
+              loadingMessage="Loading institutional relationships..."
+            />
+          ) : data.empty_state ? (
+            <EmptyStatePanel
+              reason={data.empty_state.reason}
+              source={data.empty_state.source}
+            />
+          ) : (
+            <div className="grid gap-4 lg:grid-cols-2">
+              <ModalSection title="Ranked Holders">
+                {holderOption ? (
+                  <HighchartsChart options={holderOption} className="h-[300px] w-full" />
+                ) : (
+                  <EmptyMessage message="No institutional holders returned." />
+                )}
+              </ModalSection>
+
+              <ModalSection title="Institutional Overlap">
+                {overlapOption ? (
+                  <HighchartsChart options={overlapOption} className="h-[300px] w-full" />
+                ) : (
+                  <EmptyMessage message="No overlap securities returned." />
+                )}
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {data.overlap.slice(0, 10).map((row) => (
+                    <button
+                      key={row.cusip}
+                      type="button"
+                      onClick={() => onSelectCusip(row.cusip)}
+                      className={`h-[28px] border px-2 text-[11px] font-bold tabular-nums ${
+                        selectedCusip === row.cusip
+                          ? "border-accent bg-accent text-on-accent"
+                          : "border-border-strong bg-surface-2 text-text-secondary hover:bg-layer-hover"
+                      }`}
+                    >
+                      {row.cusip}
+                    </button>
+                  ))}
+                </div>
+              </ModalSection>
+
+              <ModalSection title="Holder Network">
+                <NetworkTable data={data} />
+              </ModalSection>
+
+              <ModalSection title="Reverse Lookup">
+                <ReverseLookupPanel query={reverseLookupQuery} cusip={selectedCusip} />
+              </ModalSection>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NetworkTable({ data }: { data: FundInstitutionalReveal }) {
+  if (data.holder_network.edges.length === 0) {
+    return <EmptyMessage message="No holder-network edges returned." />;
+  }
+  const nodeLabel = new Map(data.holder_network.nodes.map((node) => [node.id, node.label]));
+  return (
+    <table className="w-full border-collapse ix-fs tabular-nums lining-nums">
+      <thead>
+        <tr className="bg-field">
+          <Th>Source</Th>
+          <Th>Target</Th>
+          <Th align="right">Weight</Th>
+        </tr>
+      </thead>
+      <tbody>
+        {data.holder_network.edges.slice(0, 18).map((edge, index) => (
+          <tr key={`${edge.source}-${edge.target}-${index}`} className="border-t border-border">
+            <Td>{nodeLabel.get(edge.source) ?? edge.source}</Td>
+            <Td>{nodeLabel.get(edge.target) ?? edge.target}</Td>
+            <Td align="right">{edge.label === "fund holding" ? pct(edge.weight, 1) : money(edge.weight)}</Td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function ReverseLookupPanel({
+  query,
+  cusip,
+}: {
+  query: UseQueryResult<HoldingReverseLookup, Error>;
+  cusip: string;
+}) {
+  if (!cusip) {
+    return <EmptyMessage message="Select an overlap CUSIP to inspect reverse lookup." />;
+  }
+  const data = query.data;
+  if (!data) {
+    return (
+      <QueryMessage
+        query={query}
+        emptyMessage="No reverse lookup payload returned."
+        loadingMessage={`Loading ${cusip} reverse lookup...`}
+      />
+    );
+  }
+  if (data.empty_state) {
+    return <EmptyStatePanel reason={data.empty_state.reason} source={data.empty_state.source} />;
+  }
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-px border border-border bg-border [grid-template-columns:repeat(auto-fit,minmax(120px,1fr))]">
+        <KpiTile label="CUSIP" value={data.cusip} />
+        <KpiTile label="Institutions" value={String(data.institutions.length)} />
+        <KpiTile label="Funds" value={String(data.fund_exposures.length)} />
+        <KpiTile label="Period" value={formatDate(data.period)} />
+      </div>
+      <table className="w-full border-collapse ix-fs tabular-nums lining-nums">
+        <thead>
+          <tr className="bg-field">
+            <Th>Institution</Th>
+            <Th align="right">13F value</Th>
+            <Th align="right">Shares</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.institutions.slice(0, 8).map((institution) => (
+            <tr key={institution.cik} className="border-t border-border">
+              <Td>{institution.manager_name}</Td>
+              <Td align="right">{money(institution.value_usd)}</Td>
+              <Td align="right">{num(institution.shares, 0)}</Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

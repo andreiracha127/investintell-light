@@ -360,6 +360,39 @@ class FundTailRiskMetrics(BaseModel):
     jarque_bera_pvalue: float | None = None
 
 
+class InsiderQuarterSentiment(BaseModel):
+    """Quarterly Form 4 buy/sell aggregate for issuers held by the fund."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    quarter: dt.date
+    buy_value: float = 0.0
+    sell_value: float = 0.0
+    net_value: float = 0.0
+    buy_count: int = 0
+    sell_count: int = 0
+
+
+class InsiderData(BaseModel):
+    """Insider sentiment mapped from fund holdings to issuer CIKs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    issuer_ciks: list[str] = Field(default_factory=list)
+    matched_cusips: list[str] = Field(default_factory=list)
+    quarters: list[InsiderQuarterSentiment] = Field(default_factory=list)
+    total_buy_value: float = 0.0
+    total_sell_value: float = 0.0
+    net_value: float = 0.0
+    sentiment_score: float | None = Field(
+        default=None,
+        description="Net/(buy+sell), bounded to [-1, 1] when volume exists.",
+    )
+    source: str = "sec_insider_sentiment"
+    as_of: dt.date | None = None
+    empty_state: EmptyState | None = None
+
+
 class FundEntityAnalyticsResponse(BaseModel):
     """Deep Analysis modal payload for one fund."""
 
@@ -376,7 +409,122 @@ class FundEntityAnalyticsResponse(BaseModel):
     distribution: FundReturnDistribution
     return_statistics: FundReturnStatistics
     tail_risk: FundTailRiskMetrics
-    insider_data: None = None
+    insider_data: InsiderData | None = None
+
+
+class InstitutionalHolder(BaseModel):
+    """Institutional manager exposure across the fund's underlying CUSIPs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cik: str
+    manager_name: str
+    value_usd: float | None = None
+    shares: float | None = None
+    holding_count: int = 0
+    period: dt.date | None = None
+    report_date: dt.date | None = None
+
+
+class InstitutionalOverlapSecurity(BaseModel):
+    """One fund holding with matching 13F institutional ownership."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cusip: str
+    name: str | None = None
+    fund_pct_of_nav: float | None = None
+    institutional_value_usd: float | None = None
+    institution_count: int = 0
+    top_managers: list[str] = Field(default_factory=list)
+
+
+class HolderNetworkNode(BaseModel):
+    """Node for the Relationships modal holder/security network."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    label: str
+    type: Literal["fund", "institution", "security"]
+    value: float | None = None
+
+
+class HolderNetworkEdge(BaseModel):
+    """Edge for the Relationships modal holder/security network."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str
+    target: str
+    weight: float | None = None
+    label: str | None = None
+
+
+class HolderNetwork(BaseModel):
+    """Small network payload for institutional relationships."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nodes: list[HolderNetworkNode]
+    edges: list[HolderNetworkEdge]
+
+
+class FundInstitutionalRevealResponse(BaseModel):
+    """Tier C institutional reveal for one fund's underlying holdings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    instrument_id: uuid.UUID
+    series_id: str
+    fund_name: str
+    holdings_report_date: dt.date | None = None
+    period: dt.date | None = None
+    top_holders: list[InstitutionalHolder]
+    overlap: list[InstitutionalOverlapSecurity]
+    holder_network: HolderNetwork
+    empty_state: EmptyState | None = None
+
+
+class ReverseLookupInstitution(BaseModel):
+    """Institutional manager holding a requested CUSIP."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cik: str
+    manager_name: str
+    value_usd: float | None = None
+    shares: float | None = None
+    period: dt.date | None = None
+    report_date: dt.date | None = None
+
+
+class ReverseLookupFundExposure(BaseModel):
+    """Fund/series exposure to a requested CUSIP from local N-PORT holdings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    instrument_id: uuid.UUID
+    series_id: str
+    ticker: str | None = None
+    name: str
+    issuer_name: str | None = None
+    pct_of_nav: float | None = None
+    market_value: float | None = None
+    report_date: dt.date | None = None
+
+
+class HoldingReverseLookupResponse(BaseModel):
+    """Tier C reverse lookup from CUSIP to institutions and fund exposures."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cusip: str
+    security_name: str | None = None
+    period: dt.date | None = None
+    institutions: list[ReverseLookupInstitution]
+    fund_exposures: list[ReverseLookupFundExposure]
+    empty_state: EmptyState | None = None
 
 
 class FundRegimeBand(BaseModel):

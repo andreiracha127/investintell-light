@@ -9,6 +9,7 @@ import type { Options, Point, XAxisPlotBandsOptions } from "highcharts";
 import type {
   FundEntityAnalytics,
   FundFactors,
+  FundInstitutionalReveal,
   FundRiskTimeseries,
   FundStyleDrift,
   FundsScatter,
@@ -285,6 +286,146 @@ export function buildHcTailRiskOption(
         name: "Tail risk",
         data: rows.map(([, value]) => (value ?? 0) * 100),
         color: colors.accent,
+        borderWidth: 0,
+      },
+    ],
+  };
+}
+
+export function buildHcInsiderSentimentOption(
+  analytics: FundEntityAnalytics,
+  colors: ChartColors,
+): Options {
+  const rows = analytics.insider_data?.quarters ?? [];
+  const chronological = [...rows].reverse();
+  return {
+    chart: { type: "column" },
+    xAxis: {
+      categories: chronological.map((row) => row.quarter),
+      tickWidth: 0,
+      crosshair: true,
+    },
+    yAxis: {
+      title: { text: undefined },
+      labels: {
+        formatter() {
+          return formatNumber(this.value as number, 0);
+        },
+      },
+    },
+    tooltip: {
+      shared: true,
+      valuePrefix: "$",
+      valueDecimals: 0,
+    },
+    plotOptions: { column: { borderWidth: 0 } },
+    series: [
+      {
+        type: "column",
+        name: "Buy value",
+        data: chronological.map((row) => row.buy_value),
+        color: colors.gain,
+      },
+      {
+        type: "column",
+        name: "Sell value",
+        data: chronological.map((row) => row.sell_value),
+        color: colors.loss,
+      },
+      {
+        type: "line",
+        name: "Net",
+        data: chronological.map((row) => row.net_value),
+        color: colors.accent,
+        marker: { enabled: true, radius: 3 },
+      },
+    ],
+  };
+}
+
+export function buildHcInstitutionalHolderOption(
+  reveal: FundInstitutionalReveal,
+  colors: ChartColors,
+): Options {
+  const holders = reveal.top_holders.slice(0, 12);
+  return {
+    chart: { type: "bar" },
+    xAxis: {
+      categories: holders.map((holder) => holder.manager_name),
+      tickWidth: 0,
+    },
+    yAxis: {
+      title: { text: undefined },
+      labels: {
+        formatter() {
+          return `$${formatNumber(this.value as number, 0)}`;
+        },
+      },
+    },
+    tooltip: {
+      formatter(this: Point) {
+        const holder = holders[this.index];
+        return (
+          `${holder?.manager_name ?? "Institution"}<br/>` +
+          `<b>$${formatNumber(this.y as number, 0)}</b><br/>` +
+          `${holder?.holding_count ?? 0} matched holdings`
+        );
+      },
+    },
+    series: [
+      {
+        type: "bar",
+        name: "13F value",
+        data: holders.map((holder, index) => ({
+          y: holder.value_usd ?? 0,
+          color: categoryColor(colors, index),
+        })),
+        borderWidth: 0,
+      },
+    ],
+  };
+}
+
+export function buildHcInstitutionalOverlapOption(
+  reveal: FundInstitutionalReveal,
+  colors: ChartColors,
+): Options {
+  const rows = reveal.overlap.slice(0, 12);
+  return {
+    chart: { type: "column" },
+    xAxis: {
+      categories: rows.map((row) => row.name ?? row.cusip),
+      tickWidth: 0,
+      crosshair: true,
+    },
+    yAxis: [
+      {
+        title: { text: undefined },
+        labels: {
+          formatter() {
+            return `$${formatNumber(this.value as number, 0)}`;
+          },
+        },
+      },
+    ],
+    tooltip: {
+      formatter(this: Point) {
+        const row = rows[this.index];
+        return (
+          `${row?.name ?? row?.cusip ?? "Holding"}<br/>` +
+          `<b>$${formatNumber(this.y as number, 0)}</b><br/>` +
+          `${row?.institution_count ?? 0} institutions`
+        );
+      },
+    },
+    series: [
+      {
+        type: "column",
+        name: "Institutional value",
+        data: rows.map((row, index) => ({
+          y: row.institutional_value_usd ?? 0,
+          color: categoryColor(colors, index),
+        })),
         borderWidth: 0,
       },
     ],

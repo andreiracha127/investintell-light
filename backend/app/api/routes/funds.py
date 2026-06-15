@@ -43,6 +43,8 @@ from app.schemas.fund_analysis import (
     FundEntityAnalyticsResponse,
     FundFactorsResponse,
     FundHoldingsTopResponse,
+    FundInstitutionalRevealResponse,
+    HoldingReverseLookupResponse,
     FundPeersResponse,
     FundRiskTimeseriesResponse,
     FundScatterResponse,
@@ -327,6 +329,7 @@ async def get_fund_style_drift(
 async def get_fund_entity_analytics(
     instrument_id: uuid.UUID,
     session: SessionDep,
+    datalake: DatalakeDep,
     window: Annotated[
         fund_dossier_tier_b.WindowKey,
         Query(description="Lookback window for Deep Analysis metrics."),
@@ -339,7 +342,7 @@ async def get_fund_entity_analytics(
     """Tier B Deep Analysis analytics for one fund."""
     try:
         payload = await fund_dossier_tier_b.fetch_fund_entity_analytics(
-            session, instrument_id, window=window, benchmark_id=benchmark_id
+            session, datalake, instrument_id, window=window, benchmark_id=benchmark_id
         )
     except (
         fund_analysis.FundAnalysisError,
@@ -410,6 +413,47 @@ async def get_fund_active_share(
     if payload is None:
         raise HTTPException(status_code=404, detail=f"Fund {instrument_id} not found.")
     return payload
+
+
+@router.get(
+    "/funds/{instrument_id}/institutional-reveal",
+    response_model=FundInstitutionalRevealResponse,
+)
+async def get_fund_institutional_reveal(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    datalake: DatalakeDep,
+) -> FundInstitutionalRevealResponse:
+    """Tier C 13F institutional overlap and holder network."""
+    try:
+        payload = await fund_dossier_tier_b.fetch_fund_institutional_reveal(
+            session, datalake, instrument_id
+        )
+    except fund_dossier_tier_b.TierBSourceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Fund {instrument_id} not found.")
+    return payload
+
+
+@router.get(
+    "/holdings/{cusip}/reverse-lookup",
+    response_model=HoldingReverseLookupResponse,
+)
+async def get_holding_reverse_lookup(
+    cusip: str,
+    session: SessionDep,
+    datalake: DatalakeDep,
+) -> HoldingReverseLookupResponse:
+    """Tier C reverse lookup from CUSIP to institutional and fund holders."""
+    try:
+        return await fund_dossier_tier_b.fetch_holding_reverse_lookup(
+            session, datalake, cusip
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except fund_dossier_tier_b.TierBSourceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/funds/{instrument_id}", response_model=FundProfileResponse)

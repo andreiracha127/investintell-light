@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type {
   FundEntityAnalytics,
   FundFactors,
+  FundInstitutionalReveal,
   FundRiskTimeseries,
   FundStyleDrift,
   FundsScatter,
@@ -11,6 +12,9 @@ import type { ChartColors } from "@/lib/charts/theme";
 import {
   buildHcFactorSensitivityOption,
   buildHcFundsScatterOption,
+  buildHcInsiderSentimentOption,
+  buildHcInstitutionalHolderOption,
+  buildHcInstitutionalOverlapOption,
   buildHcRiskTimeseriesOption,
   buildHcStyleBiasOption,
   buildHcStyleDriftOption,
@@ -132,7 +136,66 @@ function analytics(): FundEntityAnalytics {
       jarque_bera: 2,
       jarque_bera_pvalue: 0.3,
     },
-    insider_data: null,
+    insider_data: {
+      issuer_ciks: ["320193"],
+      matched_cusips: ["037833100"],
+      quarters: [
+        {
+          quarter: "2026-01-01",
+          buy_value: 125,
+          sell_value: 80,
+          net_value: 45,
+          buy_count: 1,
+          sell_count: 1,
+        },
+      ],
+      total_buy_value: 125,
+      total_sell_value: 80,
+      net_value: 45,
+      sentiment_score: 0.21,
+      source: "sec_insider_sentiment",
+      as_of: "2026-01-01",
+      empty_state: null,
+    },
+  };
+}
+
+function institutionalReveal(): FundInstitutionalReveal {
+  return {
+    instrument_id: "fund-id",
+    series_id: "S1",
+    fund_name: "Fund",
+    holdings_report_date: "2026-03-31",
+    period: "2026-03-31",
+    top_holders: [
+      {
+        cik: "1067983",
+        manager_name: "Berkshire Hathaway",
+        value_usd: 123000,
+        shares: 4500,
+        holding_count: 1,
+        period: "2026-03-31",
+        report_date: "2026-03-31",
+      },
+    ],
+    overlap: [
+      {
+        cusip: "037833100",
+        name: "APPLE INC",
+        fund_pct_of_nav: 7.1,
+        institutional_value_usd: 123000,
+        institution_count: 1,
+        top_managers: ["Berkshire Hathaway"],
+      },
+    ],
+    holder_network: {
+      nodes: [
+        { id: "fund:fund-id", label: "Fund", type: "fund", value: null },
+        { id: "institution:1067983", label: "Berkshire Hathaway", type: "institution", value: 123000 },
+      ],
+      edges: [],
+    },
+    empty_state: null,
   };
 }
 
@@ -189,6 +252,32 @@ describe("fund dossier Highcharts builders", () => {
     expect(option.series?.[0]).toMatchObject({
       type: "column",
       data: [1, 2, 3, 2.5, 4, 3.5000000000000004],
+    });
+  });
+
+  it("builds insider sentiment buy/sell/net series", () => {
+    const option = buildHcInsiderSentimentOption(analytics(), colors);
+
+    expect(option.series?.[0]).toMatchObject({
+      type: "column",
+      name: "Buy value",
+      data: [125],
+    });
+    expect(option.series?.[2]).toMatchObject({ type: "line", name: "Net", data: [45] });
+  });
+
+  it("builds institutional holder and overlap charts", () => {
+    const reveal = institutionalReveal();
+    const holders = buildHcInstitutionalHolderOption(reveal, colors);
+    const overlap = buildHcInstitutionalOverlapOption(reveal, colors);
+
+    expect(holders.series?.[0]).toMatchObject({
+      type: "bar",
+      name: "13F value",
+    });
+    expect(overlap.series?.[0]).toMatchObject({
+      type: "column",
+      name: "Institutional value",
     });
   });
 
