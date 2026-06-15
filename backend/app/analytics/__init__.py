@@ -7,6 +7,7 @@ VaR, CVaR, drawdown) are decimal fractions (0.05 = 5%), never 0-100.
 
 from app.analytics.absorption import AbsorptionResult, absorption_ratio
 from app.analytics.active_share import active_share
+from app.analytics.benchmark_composite import composite_benchmark_nav
 from app.analytics.distribution import Histogram, return_histogram
 from app.analytics.portfolio import (
     DEFAULT_INITIAL_NAV,
@@ -89,6 +90,7 @@ __all__ = [
     "asset_returns_frame",
     "best_worst_day",
     "beta",
+    "composite_benchmark_nav",
     "correlation",
     "correlation_matrix",
     "cumulative_return_series",
