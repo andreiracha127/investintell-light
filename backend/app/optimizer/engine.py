@@ -256,6 +256,33 @@ def _validate_sigma(sigma: np.ndarray, label: str) -> np.ndarray:
     return np.asarray((sigma + sigma.T) / 2.0)
 
 
+def repair_psd(sigma: np.ndarray, kappa_target: float = 1e4) -> np.ndarray:
+    """Symmetrize Σ and floor its eigenvalues to enforce PSD + conditioning.
+
+    Ported from the legacy factor covariance assembler
+    (quant_engine/factor_model_service.py:706-723). The eigenvalue floor is
+    ``max(1e-10, max_eigval / kappa_target)``: any eigenvalue below it (including
+    negatives from numerical drift or shrinkage) is clamped up, bounding the
+    condition number κ = λ_max/λ_min at ``kappa_target``. A matrix already inside
+    the band is returned unchanged (up to symmetrization).
+
+    Raises:
+        OptimizerError: if ``sigma`` is non-square, contains NaN/inf, or
+            ``kappa_target`` is not > 1.
+    """
+    sigma = _validate_sigma(sigma, "repair_psd")  # square + finite + symmetrize
+    if not kappa_target > 1.0:
+        raise OptimizerError(f"kappa_target must be > 1, got {kappa_target}")
+    eigvals, eigvecs = np.linalg.eigh(sigma)
+    max_eigval = float(eigvals.max())
+    clamp_val = max(1e-10, max_eigval / kappa_target)
+    if eigvals.min() < clamp_val:
+        eigvals = np.maximum(eigvals, clamp_val)
+        sigma = eigvecs @ np.diag(eigvals) @ eigvecs.T
+        sigma = (sigma + sigma.T) / 2.0
+    return np.asarray(sigma, dtype=float)
+
+
 def solve_equal_weight(
     n_assets: int,
     cap: float | None = DEFAULT_CAP,
