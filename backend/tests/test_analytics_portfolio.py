@@ -413,3 +413,53 @@ def test_correlation_matrix_invariant_under_column_permutation() -> None:
         index=corr_abc.index, columns=corr_abc.columns
     )
     assert np.max(np.abs((corr_abc - corr_bca).to_numpy())) < 1e-12
+
+
+# --- Effective Number of Bets (entropy ENB) (T1A-4) --------------------------
+
+from app.analytics import effective_number_of_bets  # noqa: E402
+
+
+def test_enb_equals_n_for_equal_risk_contributions() -> None:
+    """When every asset contributes equal risk, ENB == number of assets.
+
+    _orthogonal_returns gives two zero-covariance columns; at equal vol and
+    equal weights the two risk contributions are equal (0.5 each), so the
+    entropy ENB exp(-sum p ln p) for p=1/2 is exactly 2.
+    """
+    returns = _orthogonal_returns(0.01, 0.01, blocks=5)  # 2 assets, equal vol
+    weights = {"A": 0.5, "B": 0.5}
+    assert effective_number_of_bets(returns, weights) == pytest.approx(2.0, rel=1e-9)
+
+
+def test_enb_below_n_for_concentrated_risk() -> None:
+    """Unequal risk contributions => ENB strictly below the asset count."""
+    returns = _orthogonal_returns(0.03, 0.005, blocks=5)  # very unequal vol
+    weights = {"A": 0.5, "B": 0.5}
+    enb = effective_number_of_bets(returns, weights)
+    assert 1.0 <= enb < 2.0
+
+
+def test_enb_matches_entropy_of_risk_contributions() -> None:
+    """ENB must equal exp(-sum RC_i ln RC_i) over risk_contributions() output."""
+    returns = _seeded_prices(["A", "B", "C"], periods=120, seed=5).pct_change().dropna()
+    weights = {"A": 0.4, "B": 0.35, "C": 0.25}
+    rc = risk_contributions(returns, weights)
+    rc_arr = np.array(list(rc.values()), dtype=float)
+    rc_pos = np.where(rc_arr > 0.0, rc_arr, 0.0)
+    rc_norm = rc_pos / rc_pos.sum()
+    mask = rc_norm > 0.0
+    expected = float(np.exp(-np.sum(rc_norm[mask] * np.log(rc_norm[mask]))))
+    assert effective_number_of_bets(returns, weights) == pytest.approx(expected, rel=1e-9)
+
+
+def test_enb_short_input_raises() -> None:
+    one_row = _price_frame({"A": [100.0, 101.0], "B": [50.0, 50.5]}).pct_change().dropna()
+    with pytest.raises(ValueError, match="at least 2"):
+        effective_number_of_bets(one_row, {"A": 0.5, "B": 0.5})
+
+
+def test_enb_bad_weights_raises() -> None:
+    returns = _orthogonal_returns(0.01, 0.01, blocks=5)
+    with pytest.raises(ValueError, match="sum to 1|long-only"):
+        effective_number_of_bets(returns, {"A": 0.5, "B": 0.4})  # sums to 0.9
