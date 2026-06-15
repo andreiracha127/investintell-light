@@ -162,6 +162,15 @@ class ScenarioStatistics(BaseModel):
     var_99: float = Field(
         description="Historical 1-day VaR at 99% as a POSITIVE decimal fraction."
     )
+    sharpe_ratio: float = Field(
+        description="Annualized Sharpe ratio of the cash-inclusive total's daily returns "
+        "at the canonical 4% risk-free rate (unitless)."
+    )
+    sortino_ratio: float = Field(
+        description="Annualized Sortino ratio (Target Downside Deviation denominator) of "
+        "the cash-inclusive total's daily returns at the canonical 4% risk-free rate "
+        "(unitless)."
+    )
 
 
 class ScenarioParams(BaseModel):

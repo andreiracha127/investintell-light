@@ -47,7 +47,9 @@ from app.analytics import (
     portfolio_returns,
     return_histogram,
     rolling_correlation,
+    sharpe_ratio,
     simple_returns,
+    sortino_ratio,
     weight_series,
 )
 from app.analytics._validation import to_date as _to_date
@@ -401,6 +403,8 @@ def assemble_scenario(
             annualized_volatility=annualized_volatility(total_returns),
             var_95=historical_var(total_returns, confidence=0.95),
             var_99=historical_var(total_returns, confidence=0.99),
+            sharpe_ratio=sharpe_ratio(total_returns),
+            sortino_ratio=sortino_ratio(total_returns),
         )
         return HistogramOut(
             bin_edges=histogram.bin_edges,
