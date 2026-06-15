@@ -63,6 +63,7 @@ from app.analytics.robust_sharpe import (
     robust_sharpe,
 )
 from app.analytics.rolling import (
+    rolling_annualized_return,
     rolling_beta,
     rolling_correlation,
     rolling_volatility,
@@ -108,6 +109,7 @@ __all__ = [
     "return_histogram",
     "risk_contributions",
     "robust_sharpe",
+    "rolling_annualized_return",
     "rolling_beta",
     "rolling_correlation",
     "rolling_volatility",

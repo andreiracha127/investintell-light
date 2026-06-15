@@ -8,6 +8,7 @@ from app.analytics import (
     annualized_volatility,
     beta,
     correlation,
+    rolling_annualized_return,
     rolling_beta,
     rolling_correlation,
     rolling_volatility,
@@ -95,3 +96,38 @@ def test_rolling_input_shorter_than_window_raises() -> None:
         rolling_beta(returns, returns, window=WINDOW)
     with pytest.raises(ValueError, match="at least window"):
         rolling_correlation(returns, returns, window=WINDOW)
+
+
+def test_rolling_annualized_return_leading_nans_and_value() -> None:
+    """First window-1 values are NaN; the value at index window-1 equals the
+    annualized compounding of the first window slice: (prod(1+r))**(252/w)-1."""
+    returns = _random_returns()
+    result = rolling_annualized_return(returns, window=WINDOW)
+    assert len(result) == len(returns)
+    assert result.index.equals(returns.index)
+    assert result.iloc[: WINDOW - 1].isna().all()
+    first = returns.iloc[:WINDOW]
+    expected = float((1.0 + first).prod()) ** (252 / WINDOW) - 1.0
+    assert result.iloc[WINDOW - 1] == pytest.approx(expected, abs=1e-12)
+    assert not result.iloc[WINDOW - 1 :].isna().any()
+
+
+def test_rolling_annualized_return_periods_per_year_param() -> None:
+    """A non-default periods_per_year changes the annualization exponent."""
+    returns = _random_returns()
+    result = rolling_annualized_return(returns, window=WINDOW, periods_per_year=12)
+    first = returns.iloc[:WINDOW]
+    expected = float((1.0 + first).prod()) ** (12 / WINDOW) - 1.0
+    assert result.iloc[WINDOW - 1] == pytest.approx(expected, abs=1e-12)
+
+
+def test_rolling_annualized_return_window_too_small_raises() -> None:
+    returns = _random_returns()
+    with pytest.raises(ValueError, match="window >= 2"):
+        rolling_annualized_return(returns, window=1)
+
+
+def test_rolling_annualized_return_input_shorter_than_window_raises() -> None:
+    returns = _random_returns(5)
+    with pytest.raises(ValueError, match="at least window"):
+        rolling_annualized_return(returns, window=WINDOW)
