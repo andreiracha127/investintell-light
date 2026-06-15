@@ -15,6 +15,7 @@ from app.api.routes import screener as screener_router
 from app.api.routes import search as search_router
 from app.api.routes import statistics as statistics_router
 from app.api.routes import stocks as stocks_router
+from app.api.routes import treasury as treasury_router
 from app.core.cache import CatalogCacheMiddleware
 from app.core.config import get_settings
 from app.core.db import engine
@@ -57,6 +58,7 @@ def create_app() -> FastAPI:
     application.include_router(funds_router.router)
     application.include_router(builder_router.router)
     application.include_router(macro_router.router)
+    application.include_router(treasury_router.router)
     application.include_router(rebalance_router.router)
     application.include_router(search_router.router)
     return application
