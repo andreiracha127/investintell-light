@@ -67,6 +67,17 @@ Objective = Literal[
     "bl_utility", "max_return_cvar",
 ]
 
+Mandate = Literal[
+    "conservative",
+    "defensive",
+    "moderate_conservative",
+    "moderate",
+    "balanced",
+    "moderate_aggressive",
+    "aggressive",
+    "growth",
+]
+
 # Candidate-universe selection vocabulary — mirrors the GET /funds filters and
 # sort whitelist so a universe optimization reuses the same catalog semantics.
 FundTypeFilter = Literal["etf", "mmf", "mutual_fund"]
@@ -166,6 +177,9 @@ class OptimizeRequest(BaseModel):
     # funds only — equities have no market cap in the builder yet).
     views: list[ViewIn] | None = None
     bl: BLParamsIn = BLParamsIn()
+    # Optional investor mandate; resolves the BL risk-aversion (delta) ladder.
+    # An explicit bl.delta override still wins (see app.optimizer.mandate).
+    mandate: Mandate | None = None
     # L1 turnover penalty λ·‖w − w₀‖₁ on the min_cvar objective. Requires
     # ``current_weights`` (asset-label -> decimal fraction, label scheme
     # 'fund:<uuid>' / 'equity:<TICKER>'). v1: honoured only by min_cvar.
@@ -235,12 +249,23 @@ class ExpectedOut(BaseModel):
     return_ann_bl: float | None
 
 
+class ViewConsistencyOut(BaseModel):
+    """He-Litterman 3-sigma alarm: are any views fighting the equilibrium?"""
+
+    inconsistent: bool
+    n_flagged: int
+    max_z: float
+    threshold_sigma: float
+
+
 class DiagnosticsOut(BaseModel):
     n_obs: int
     status: str
     # Present only on the BL path (views and/or bl_utility), in asset order.
     mu_equilibrium: list[float] | None = None
     mu_posterior: list[float] | None = None
+    # He-Litterman view-vs-prior consistency — present only when views are given.
+    view_consistency: ViewConsistencyOut | None = None
 
 
 class OptimizeResponse(BaseModel):

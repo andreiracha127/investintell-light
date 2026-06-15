@@ -172,3 +172,51 @@ def test_posterior_no_views_limit_keeps_pi_when_omega_huge() -> None:
     omega = bl.omega_idzorek(p, sigma, [1e-6])
     mu_bl, _ = bl.posterior(sigma, pi, p, q, omega)
     np.testing.assert_allclose(mu_bl, pi, atol=1e-4)
+
+
+# ── He-Litterman 3-sigma view-consistency warning (T2F-3) ─────────────────────
+
+
+def test_view_consistency_flags_view_fighting_prior() -> None:
+    """A Q far above the prior-implied P*pi (>3 predictive sigma) is flagged."""
+    sigma = _fixture_sigma()
+    pi = bl.equilibrium(sigma, _W_MKT)
+    # Absolute view on asset 2, far above its equilibrium return, very confident
+    # (small Omega) -> large z-score.
+    p, q = bl.build_view_matrices(
+        [bl.AbsoluteView(asset=2, q=float(pi[2]) + 1.0, confidence=0.99)], 3
+    )
+    omega = bl.omega_idzorek(p, sigma, [0.99])
+    result = bl.view_consistency_he_litterman(p, q, pi, omega, sigma, tau=bl.DEFAULT_TAU)
+    assert result["inconsistent"] is True
+    assert result["n_flagged"] == 1
+    assert result["max_z"] > 3.0
+    assert result["threshold_sigma"] == 3.0
+
+
+def test_view_consistency_passes_view_aligned_with_prior() -> None:
+    """A Q equal to the prior-implied value is consistent (z=0)."""
+    sigma = _fixture_sigma()
+    pi = bl.equilibrium(sigma, _W_MKT)
+    p, q = bl.build_view_matrices(
+        [bl.AbsoluteView(asset=0, q=float(pi[0]), confidence=0.5)], 3
+    )
+    omega = bl.omega_idzorek(p, sigma, [0.5])
+    result = bl.view_consistency_he_litterman(p, q, pi, omega, sigma, tau=bl.DEFAULT_TAU)
+    assert result["inconsistent"] is False
+    assert result["n_flagged"] == 0
+    assert result["max_z"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_view_consistency_relative_view_uses_predictive_dispersion() -> None:
+    """A modest relative view within ~3 sigma is NOT flagged."""
+    sigma = _fixture_sigma()
+    pi = bl.equilibrium(sigma, _W_MKT)
+    p, q = bl.build_view_matrices(
+        [bl.RelativeView(long=0, short=1, q=float(pi[0] - pi[1]) + 0.01, confidence=0.5)],
+        3,
+    )
+    omega = bl.omega_idzorek(p, sigma, [0.5])
+    result = bl.view_consistency_he_litterman(p, q, pi, omega, sigma, tau=bl.DEFAULT_TAU)
+    assert result["inconsistent"] is False
+    assert 0.0 <= result["max_z"] <= 3.0

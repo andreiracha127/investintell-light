@@ -37,6 +37,7 @@ from app.analytics import historical_cvar
 from app.optimizer import black_litterman as bl
 from app.optimizer import data as optimizer_data
 from app.optimizer import engine
+from app.optimizer.mandate import resolve_delta
 from app.schemas.builder import (
     AbsoluteViewIn,
     AssetRefIn,
@@ -48,12 +49,11 @@ from app.schemas.builder import (
     OptimizeRequest,
     OptimizeResponse,
     UniverseSpecIn,
+    ViewConsistencyOut,
     ViewIn,
     WeightOut,
 )
-from app.services import funds_catalog
-from app.services import macro_regime
-
+from app.services import funds_catalog, macro_regime
 
 # Test seam: when set, overrides the regime state read (bypasses the data-lake).
 _OVERRIDE_REGIME_STATE: str | None = None
@@ -353,13 +353,17 @@ async def run_optimize(
     min_weight = payload.constraints.min_weight
     has_views = bool(payload.views)
     needs_bl = has_views or payload.objective in ("bl_utility", "max_return_cvar")
+    # Effective risk-aversion: explicit bl.delta override beats the mandate
+    # ladder; both feed equilibrium (pi = delta*Sigma*w_mkt) and bl_utility.
+    delta = resolve_delta(payload.bl.delta, payload.mandate)
 
     mu_equilibrium: np.ndarray | None = None
     mu_posterior: np.ndarray | None = None
+    view_consistency: ViewConsistencyOut | None = None
     w_mkt: np.ndarray | None = None
     if needs_bl:
         w_mkt = await _market_weights_for(session, assets, labels)
-        mu_equilibrium = bl.equilibrium(sigma, w_mkt, delta=payload.bl.delta)
+        mu_equilibrium = bl.equilibrium(sigma, w_mkt, delta=delta)
         if has_views and payload.views is not None:
             try:
                 p, q = bl.build_view_matrices(
@@ -369,6 +373,15 @@ async def run_optimize(
                 omega = bl.omega_idzorek(p, sigma, confidences, tau=payload.bl.tau)
                 mu_posterior, _sigma_bl = bl.posterior(
                     sigma, mu_equilibrium, p, q, omega, tau=payload.bl.tau
+                )
+                vc = bl.view_consistency_he_litterman(
+                    p, q, mu_equilibrium, omega, sigma, tau=payload.bl.tau
+                )
+                view_consistency = ViewConsistencyOut(
+                    inconsistent=bool(vc["inconsistent"]),
+                    n_flagged=int(vc["n_flagged"]),
+                    max_z=float(vc["max_z"]),
+                    threshold_sigma=float(vc["threshold_sigma"]),
                 )
             except ValueError as exc:
                 raise BuilderError(str(exc)) from exc
@@ -399,7 +412,7 @@ async def run_optimize(
             assert mu_equilibrium is not None  # needs_bl guarantees it
             mu_for_utility = mu_posterior if mu_posterior is not None else mu_equilibrium
             weights, status = bl.solve_bl_utility(
-                mu_for_utility, sigma, delta=payload.bl.delta, cap=cap, min_weight=min_weight
+                mu_for_utility, sigma, delta=delta, cap=cap, min_weight=min_weight
             )
         elif payload.objective == "max_return_cvar":
             assert payload.cvar_limit is not None  # schema validator guarantees it
@@ -494,5 +507,6 @@ async def run_optimize(
             mu_posterior=(
                 [float(x) for x in mu_posterior] if mu_posterior is not None else None
             ),
+            view_consistency=view_consistency,
         ),
     )

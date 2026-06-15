@@ -101,3 +101,28 @@ def test_max_return_cvar_with_universe_is_rejected() -> None:
             cvar_limit=0.05,
             views=[{"type": "absolute", "asset": {"kind": "fund", "id": _A}, "q": 0.1}],
         )
+
+
+def test_optimize_request_mandate_defaults_to_none() -> None:
+    req = OptimizeRequest(assets=_assets())
+    assert req.mandate is None
+
+
+def test_optimize_request_accepts_known_mandate() -> None:
+    req = OptimizeRequest(assets=_assets(), mandate="aggressive")
+    assert req.mandate == "aggressive"
+
+
+def test_optimize_request_rejects_unknown_mandate() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        OptimizeRequest(assets=_assets(), mandate="not_a_mandate")
+
+
+def test_diagnostics_out_view_consistency_defaults_to_none() -> None:
+    from app.schemas.builder import DiagnosticsOut
+
+    diag = DiagnosticsOut(n_obs=10, status="optimal")
+    assert diag.view_consistency is None

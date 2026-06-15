@@ -87,6 +87,10 @@ class FundRiskOut(BaseModel):
     cvar_95_1m: float | None
     cvar_95_12m: float | None
     cvar_99_evt: float | None
+    cvar_999_evt: float | None
+    evt_xi_shape: float | None
+    volatility_garch: float | None
+    vol_model: str | None
     peer_strategy_label: str | None
     peer_sharpe_pctl: float | None
     peer_sortino_pctl: float | None

@@ -504,6 +504,22 @@ def test_fund_risk_latest_pk_and_metric_lockstep() -> None:
         assert table.c[col].nullable is True, col
 
 
+def test_fund_risk_latest_surfaces_orphaned_worker_columns() -> None:
+    """T2F-1: volatility_garch / vol_model / cvar_999_evt / evt_xi_shape are
+    computed by the worker into fund_risk_metrics; the MV-backed ORM must carry
+    them (nullable) so FundRiskOut can surface them."""
+    from sqlalchemy import Numeric, String
+
+    table = _table("fund_risk_latest_mv")
+    for col in ("volatility_garch", "cvar_999_evt", "evt_xi_shape"):
+        assert col in table.c, col
+        assert isinstance(table.c[col].type, Numeric), col
+        assert table.c[col].nullable is True, col
+    assert "vol_model" in table.c
+    assert isinstance(table.c["vol_model"].type, String)
+    assert table.c["vol_model"].nullable is True
+
+
 def test_fund_nav_composite_pk_and_no_fk() -> None:
     # FundNav is repointed to the live nav_timeseries hypertable (Task 4.3); a
     # hypertable is not a FK target, so instrument_id stays a plain composite-PK
