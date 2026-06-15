@@ -347,3 +347,28 @@ def test_max_return_cvar_capped_rejects_nonpositive_limit() -> None:
     mu, scen = _mu_and_scenarios()
     with pytest.raises(engine.OptimizerError, match="cvar_limit"):
         engine.solve_max_return_cvar_capped(scen, mu=mu, cvar_limit=0.0)
+
+
+def test_max_return_cvar_capped_with_bounds_bundle_binds() -> None:
+    """Engine-side dispatch: BoundsBundle path is exercised end-to-end."""
+    mu, scen = _mu_and_scenarios(n=4, t=600)
+    blocks = [engine.BlockBudget(indices=[2, 3], lo=0.0, hi=0.30)]
+    bundle = engine.BoundsBundle(
+        cap_vec=np.array([0.50, 0.50, 0.30, 0.30]),
+        min_vec=None,
+        blocks=blocks,
+    )
+    w, status = engine.solve_max_return_cvar_capped(
+        scen, mu=mu, cvar_limit=0.05, alpha=0.95, bounds=bundle
+    )
+    _assert_valid(w, status)
+    # Block budget must bind: assets 2+3 ≤ 0.30.
+    assert w[2] + w[3] <= 0.30 + 1e-6
+
+
+def test_max_return_cvar_capped_rejects_nan_mu() -> None:
+    """NaN in the BL posterior mu must raise a clear OptimizerError."""
+    _, scen = _mu_and_scenarios()
+    mu_bad = np.array([0.04, np.nan, 0.10, 0.14])
+    with pytest.raises(engine.OptimizerError, match="NaN"):
+        engine.solve_max_return_cvar_capped(scen, mu=mu_bad, cvar_limit=0.05)

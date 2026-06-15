@@ -87,3 +87,17 @@ def test_max_return_cvar_requires_cvar_limit() -> None:
             assets=_assets(), objective="max_return_cvar",
             views=[{"type": "absolute", "asset": {"kind": "fund", "id": _A}, "q": 0.1}],
         )
+
+
+def test_max_return_cvar_with_universe_is_rejected() -> None:
+    """Schema validator blocks max_return_cvar + universe at the Pydantic level."""
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="universe"):
+        OptimizeRequest(
+            universe={},
+            objective="max_return_cvar",
+            cvar_limit=0.05,
+            views=[{"type": "absolute", "asset": {"kind": "fund", "id": _A}, "q": 0.1}],
+        )

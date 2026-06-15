@@ -549,6 +549,8 @@ def solve_max_return_cvar_capped(
     mu_arr = np.asarray(mu, dtype=float).ravel()
     if mu_arr.shape != (n,):
         raise OptimizerError(f"max_return_cvar: mu has shape {mu_arr.shape}, expected ({n},)")
+    if not np.isfinite(mu_arr).all():
+        raise OptimizerError("max_return_cvar: mu contains NaN/inf — BL posterior is invalid")
     if cvar_limit <= 0:
         raise OptimizerError(f"max_return_cvar: cvar_limit must be > 0, got {cvar_limit}")
 

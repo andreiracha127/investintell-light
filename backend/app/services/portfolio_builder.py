@@ -272,7 +272,7 @@ async def _resolve_assets(
 
     assert payload.universe is not None  # the schema validator guarantees one
     spec = payload.universe
-    needs_bl = bool(payload.views) or payload.objective == "bl_utility"
+    needs_bl = bool(payload.views) or payload.objective in ("bl_utility", "max_return_cvar")
     candidates = await optimizer_data.select_universe_funds(
         session,
         _filters_from_spec(spec),
@@ -326,7 +326,7 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
     cap = payload.constraints.cap
     min_weight = payload.constraints.min_weight
     has_views = bool(payload.views)
-    needs_bl = has_views or payload.objective == "bl_utility"
+    needs_bl = has_views or payload.objective in ("bl_utility", "max_return_cvar")
 
     mu_equilibrium: np.ndarray | None = None
     mu_posterior: np.ndarray | None = None
@@ -383,25 +383,17 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
                     "Black-Litterman posterior exists (gate G5)"
                 )
             limit = _regime_cvar_limit(payload.cvar_limit)  # T2C-8 makes this regime-aware
-            # Mirror the min_cvar pattern: when block budgets are present the
-            # bundle REPLACES the scalar (cap, min_weight) path inside the
-            # engine, so scalars must be promoted to per-asset vectors first.
-            bundle = (
-                engine.BoundsBundle(
-                    cap_vec=np.full(n, cap) if cap is not None else None,
-                    min_vec=np.full(n, min_weight) if min_weight is not None else None,
-                    blocks=blocks,
-                )
-                if blocks
-                else None
-            )
+            # Reuse cvar_bounds (already built above with the same promotion
+            # logic) — the max_return_cvar engine path is structurally identical
+            # to min_cvar: BoundsBundle replaces the scalar (cap, min_weight)
+            # block, so no duplicate construction is needed.
             weights, status = engine.solve_max_return_cvar_capped(
                 scenarios,
                 mu=mu_posterior,
                 cvar_limit=limit,
                 cap=cap,
                 min_weight=min_weight,
-                bounds=bundle,
+                bounds=cvar_bounds,
             )
         elif payload.objective == "min_cvar" and mu_posterior is not None:
             # Product default with views: re-centered scenarios + equilibrium
