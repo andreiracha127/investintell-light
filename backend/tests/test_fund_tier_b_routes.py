@@ -20,6 +20,7 @@ from app.schemas.fund_analysis import (
     FundEntityAnalyticsResponse,
     FundFactorsResponse,
     FundMarketSensitivity,
+    FundInstitutionalRevealResponse,
     FundRegimeBand,
     FundReturnDistribution,
     FundReturnStatistics,
@@ -27,6 +28,16 @@ from app.schemas.fund_analysis import (
     FundRiskTimeseriesResponse,
     FundRollingReturns,
     FundSourceMetadata,
+    HolderNetwork,
+    HolderNetworkEdge,
+    HolderNetworkNode,
+    HoldingReverseLookupResponse,
+    InsiderData,
+    InsiderQuarterSentiment,
+    InstitutionalHolder,
+    InstitutionalOverlapSecurity,
+    ReverseLookupFundExposure,
+    ReverseLookupInstitution,
     FundStyleBias,
     FundStyleDriftPeriod,
     FundStyleDriftResponse,
@@ -116,7 +127,25 @@ def _entity_payload() -> FundEntityAnalyticsResponse:
         ),
         return_statistics=FundReturnStatistics(arithmetic_mean_monthly=0.01),
         tail_risk=FundTailRiskMetrics(var_parametric_95=0.02, etl_95=0.03),
-        insider_data=None,
+        insider_data=InsiderData(
+            issuer_ciks=["320193"],
+            matched_cusips=["037833100"],
+            quarters=[
+                InsiderQuarterSentiment(
+                    quarter=dt.date(2026, 1, 1),
+                    buy_value=125.0,
+                    sell_value=80.0,
+                    net_value=45.0,
+                    buy_count=1,
+                    sell_count=1,
+                )
+            ],
+            total_buy_value=125.0,
+            total_sell_value=80.0,
+            net_value=45.0,
+            sentiment_score=0.2195121951,
+            as_of=dt.date(2026, 1, 1),
+        ),
     )
 
 
@@ -143,6 +172,82 @@ def _active_share_payload() -> FundActiveShareResponse:
         n_benchmark_positions=12,
         n_common_positions=4,
         as_of_date=dt.date(2026, 3, 31),
+    )
+
+
+def _institutional_payload() -> FundInstitutionalRevealResponse:
+    return FundInstitutionalRevealResponse(
+        instrument_id=_FUND_ID,
+        series_id="S000000001",
+        fund_name="Sample Fund",
+        holdings_report_date=dt.date(2026, 3, 31),
+        period=dt.date(2026, 3, 31),
+        top_holders=[
+            InstitutionalHolder(
+                cik="1067983",
+                manager_name="Berkshire Hathaway",
+                value_usd=123000.0,
+                shares=4500.0,
+                holding_count=1,
+                period=dt.date(2026, 3, 31),
+                report_date=dt.date(2026, 3, 31),
+            )
+        ],
+        overlap=[
+            InstitutionalOverlapSecurity(
+                cusip="037833100",
+                name="APPLE INC",
+                fund_pct_of_nav=7.1,
+                institutional_value_usd=123000.0,
+                institution_count=1,
+                top_managers=["Berkshire Hathaway"],
+            )
+        ],
+        holder_network=HolderNetwork(
+            nodes=[
+                HolderNetworkNode(id=f"fund:{_FUND_ID}", label="Sample Fund", type="fund"),
+                HolderNetworkNode(id="institution:1067983", label="Berkshire Hathaway", type="institution"),
+                HolderNetworkNode(id="security:037833100", label="APPLE INC", type="security"),
+            ],
+            edges=[
+                HolderNetworkEdge(
+                    source=f"fund:{_FUND_ID}",
+                    target="security:037833100",
+                    weight=7.1,
+                    label="fund holding",
+                )
+            ],
+        ),
+    )
+
+
+def _reverse_lookup_payload() -> HoldingReverseLookupResponse:
+    return HoldingReverseLookupResponse(
+        cusip="037833100",
+        security_name="APPLE INC",
+        period=dt.date(2026, 3, 31),
+        institutions=[
+            ReverseLookupInstitution(
+                cik="1067983",
+                manager_name="Berkshire Hathaway",
+                value_usd=123000.0,
+                shares=4500.0,
+                period=dt.date(2026, 3, 31),
+                report_date=dt.date(2026, 3, 31),
+            )
+        ],
+        fund_exposures=[
+            ReverseLookupFundExposure(
+                instrument_id=_FUND_ID,
+                series_id="S000000001",
+                ticker="SAMP",
+                name="Sample Fund",
+                issuer_name="APPLE INC",
+                pct_of_nav=7.1,
+                market_value=100000.0,
+                report_date=dt.date(2026, 3, 31),
+            )
+        ],
     )
 
 
@@ -195,7 +300,7 @@ async def test_fund_style_drift_quarter_bounds(quarters: int) -> None:
 async def test_fund_entity_analytics_success(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = {}
 
-    async def fake_fetch(session, instrument_id, *, window, benchmark_id):
+    async def fake_fetch(session, datalake, instrument_id, *, window, benchmark_id):
         seen.update(instrument_id=instrument_id, window=window, benchmark_id=benchmark_id)
         return _entity_payload()
 
@@ -207,6 +312,7 @@ async def test_fund_entity_analytics_success(monkeypatch: pytest.MonkeyPatch) ->
         )
     assert resp.status_code == 200
     assert resp.json()["tail_risk"]["var_parametric_95"] == 0.02
+    assert resp.json()["insider_data"]["net_value"] == 45.0
     assert seen == {
         "instrument_id": _FUND_ID,
         "window": "1Y",
@@ -276,3 +382,90 @@ async def test_fund_active_share_success(monkeypatch: pytest.MonkeyPatch) -> Non
         )
     assert resp.status_code == 200
     assert resp.json()["active_share"] == 0.42
+
+
+async def test_fund_institutional_reveal_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_fetch(session, datalake, instrument_id):
+        assert instrument_id == _FUND_ID
+        return _institutional_payload()
+
+    monkeypatch.setattr(tier_b, "fetch_fund_institutional_reveal", fake_fetch)
+    async with _client() as client:
+        resp = await client.get(f"/funds/{_FUND_ID}/institutional-reveal")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["top_holders"][0]["manager_name"] == "Berkshire Hathaway"
+    assert body["overlap"][0]["cusip"] == "037833100"
+
+
+async def test_fund_institutional_reveal_empty_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_fetch(session, datalake, instrument_id):
+        return FundInstitutionalRevealResponse(
+            instrument_id=instrument_id,
+            series_id="S000000001",
+            fund_name="Sample Fund",
+            top_holders=[],
+            overlap=[],
+            holder_network=HolderNetwork(
+                nodes=[HolderNetworkNode(id=f"fund:{instrument_id}", label="Sample Fund", type="fund")],
+                edges=[],
+            ),
+            empty_state=EmptyState(
+                reason="SEC 13F holdings tables are not deployed yet.",
+                source="sec_13f_holdings",
+            ),
+        )
+
+    monkeypatch.setattr(tier_b, "fetch_fund_institutional_reveal", fake_fetch)
+    async with _client() as client:
+        resp = await client.get(f"/funds/{_FUND_ID}/institutional-reveal")
+    assert resp.status_code == 200
+    assert "SEC 13F" in resp.json()["empty_state"]["reason"]
+
+
+async def test_holding_reverse_lookup_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_fetch(session, datalake, cusip):
+        assert cusip == "037833100"
+        return _reverse_lookup_payload()
+
+    monkeypatch.setattr(tier_b, "fetch_holding_reverse_lookup", fake_fetch)
+    async with _client() as client:
+        resp = await client.get("/holdings/037833100/reverse-lookup")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["institutions"][0]["cik"] == "1067983"
+    assert body["fund_exposures"][0]["instrument_id"] == str(_FUND_ID)
+
+
+async def test_holding_reverse_lookup_invalid_cusip_422(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_fetch(*args, **kwargs):
+        raise ValueError("Invalid CUSIP 'bad!'.")
+
+    monkeypatch.setattr(tier_b, "fetch_holding_reverse_lookup", fake_fetch)
+    async with _client() as client:
+        resp = await client.get("/holdings/bad!/reverse-lookup")
+    assert resp.status_code == 422
+
+
+async def test_holding_reverse_lookup_empty_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_fetch(session, datalake, cusip):
+        return HoldingReverseLookupResponse(
+            cusip="037833100",
+            institutions=[],
+            fund_exposures=[],
+            empty_state=EmptyState(reason="No fund exposure or 13F institutional holder matched this CUSIP."),
+        )
+
+    monkeypatch.setattr(tier_b, "fetch_holding_reverse_lookup", fake_fetch)
+    async with _client() as client:
+        resp = await client.get("/holdings/037833100/reverse-lookup")
+    assert resp.status_code == 200
+    assert "No fund exposure" in resp.json()["empty_state"]["reason"]

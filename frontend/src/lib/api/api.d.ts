@@ -815,6 +815,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/funds/{instrument_id}/institutional-reveal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fund Institutional Reveal
+         * @description Tier C 13F institutional overlap and holder network.
+         */
+        get: operations["get_fund_institutional_reveal_funds__instrument_id__institutional_reveal_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/holdings/{cusip}/reverse-lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Holding Reverse Lookup
+         * @description Tier C reverse lookup from CUSIP to institutional and fund holders.
+         */
+        get: operations["get_holding_reverse_lookup_holdings__cusip__reverse_lookup_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/funds/{instrument_id}": {
         parameters: {
             query?: never;
@@ -2017,8 +2057,7 @@ export interface components {
             distribution: components["schemas"]["FundReturnDistribution"];
             return_statistics: components["schemas"]["FundReturnStatistics"];
             tail_risk: components["schemas"]["FundTailRiskMetrics"];
-            /** Insider Data */
-            insider_data?: null;
+            insider_data?: components["schemas"]["InsiderData"] | null;
         };
         /**
          * FundFactorsResponse
@@ -2116,6 +2155,31 @@ export interface components {
             sector_breakdown: components["schemas"]["FundSectorExposure"][];
             /** Pct Of Nav Total */
             pct_of_nav_total: number | null;
+        };
+        /**
+         * FundInstitutionalRevealResponse
+         * @description Tier C institutional reveal for one fund's underlying holdings.
+         */
+        FundInstitutionalRevealResponse: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Series Id */
+            series_id: string;
+            /** Fund Name */
+            fund_name: string;
+            /** Holdings Report Date */
+            holdings_report_date?: string | null;
+            /** Period */
+            period?: string | null;
+            /** Top Holders */
+            top_holders: components["schemas"]["InstitutionalHolder"][];
+            /** Overlap */
+            overlap: components["schemas"]["InstitutionalOverlapSecurity"][];
+            holder_network: components["schemas"]["HolderNetwork"];
+            empty_state?: components["schemas"]["EmptyState"] | null;
         };
         /**
          * FundListItem
@@ -2802,6 +2866,64 @@ export interface components {
             /** Bars */
             bars: components["schemas"]["HistoryBar"][];
         };
+        /**
+         * HolderNetwork
+         * @description Small network payload for institutional relationships.
+         */
+        HolderNetwork: {
+            /** Nodes */
+            nodes: components["schemas"]["HolderNetworkNode"][];
+            /** Edges */
+            edges: components["schemas"]["HolderNetworkEdge"][];
+        };
+        /**
+         * HolderNetworkEdge
+         * @description Edge for the Relationships modal holder/security network.
+         */
+        HolderNetworkEdge: {
+            /** Source */
+            source: string;
+            /** Target */
+            target: string;
+            /** Weight */
+            weight?: number | null;
+            /** Label */
+            label?: string | null;
+        };
+        /**
+         * HolderNetworkNode
+         * @description Node for the Relationships modal holder/security network.
+         */
+        HolderNetworkNode: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "fund" | "institution" | "security";
+            /** Value */
+            value?: number | null;
+        };
+        /**
+         * HoldingReverseLookupResponse
+         * @description Tier C reverse lookup from CUSIP to institutions and fund exposures.
+         */
+        HoldingReverseLookupResponse: {
+            /** Cusip */
+            cusip: string;
+            /** Security Name */
+            security_name?: string | null;
+            /** Period */
+            period?: string | null;
+            /** Institutions */
+            institutions: components["schemas"]["ReverseLookupInstitution"][];
+            /** Fund Exposures */
+            fund_exposures: components["schemas"]["ReverseLookupFundExposure"][];
+            empty_state?: components["schemas"]["EmptyState"] | null;
+        };
         /** IndexCard */
         IndexCard: {
             /** Ticker */
@@ -2814,6 +2936,126 @@ export interface components {
             change_pct: number;
             /** Spark */
             spark: number[];
+        };
+        /**
+         * InsiderData
+         * @description Insider sentiment mapped from fund holdings to issuer CIKs.
+         */
+        InsiderData: {
+            /** Issuer Ciks */
+            issuer_ciks?: string[];
+            /** Matched Cusips */
+            matched_cusips?: string[];
+            /** Quarters */
+            quarters?: components["schemas"]["InsiderQuarterSentiment"][];
+            /**
+             * Total Buy Value
+             * @default 0
+             */
+            total_buy_value: number;
+            /**
+             * Total Sell Value
+             * @default 0
+             */
+            total_sell_value: number;
+            /**
+             * Net Value
+             * @default 0
+             */
+            net_value: number;
+            /**
+             * Sentiment Score
+             * @description Net/(buy+sell), bounded to [-1, 1] when volume exists.
+             */
+            sentiment_score?: number | null;
+            /**
+             * Source
+             * @default sec_insider_sentiment
+             */
+            source: string;
+            /** As Of */
+            as_of?: string | null;
+            empty_state?: components["schemas"]["EmptyState"] | null;
+        };
+        /**
+         * InsiderQuarterSentiment
+         * @description Quarterly Form 4 buy/sell aggregate for issuers held by the fund.
+         */
+        InsiderQuarterSentiment: {
+            /**
+             * Quarter
+             * Format: date
+             */
+            quarter: string;
+            /**
+             * Buy Value
+             * @default 0
+             */
+            buy_value: number;
+            /**
+             * Sell Value
+             * @default 0
+             */
+            sell_value: number;
+            /**
+             * Net Value
+             * @default 0
+             */
+            net_value: number;
+            /**
+             * Buy Count
+             * @default 0
+             */
+            buy_count: number;
+            /**
+             * Sell Count
+             * @default 0
+             */
+            sell_count: number;
+        };
+        /**
+         * InstitutionalHolder
+         * @description Institutional manager exposure across the fund's underlying CUSIPs.
+         */
+        InstitutionalHolder: {
+            /** Cik */
+            cik: string;
+            /** Manager Name */
+            manager_name: string;
+            /** Value Usd */
+            value_usd?: number | null;
+            /** Shares */
+            shares?: number | null;
+            /**
+             * Holding Count
+             * @default 0
+             */
+            holding_count: number;
+            /** Period */
+            period?: string | null;
+            /** Report Date */
+            report_date?: string | null;
+        };
+        /**
+         * InstitutionalOverlapSecurity
+         * @description One fund holding with matching 13F institutional ownership.
+         */
+        InstitutionalOverlapSecurity: {
+            /** Cusip */
+            cusip: string;
+            /** Name */
+            name?: string | null;
+            /** Fund Pct Of Nav */
+            fund_pct_of_nav?: number | null;
+            /** Institutional Value Usd */
+            institutional_value_usd?: number | null;
+            /**
+             * Institution Count
+             * @default 0
+             */
+            institution_count: number;
+            /** Top Managers */
+            top_managers?: string[];
         };
         /** LeaderRow */
         LeaderRow: {
@@ -3882,6 +4124,49 @@ export interface components {
             name: string;
             /** Data Type */
             data_type: string;
+        };
+        /**
+         * ReverseLookupFundExposure
+         * @description Fund/series exposure to a requested CUSIP from local N-PORT holdings.
+         */
+        ReverseLookupFundExposure: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Series Id */
+            series_id: string;
+            /** Ticker */
+            ticker?: string | null;
+            /** Name */
+            name: string;
+            /** Issuer Name */
+            issuer_name?: string | null;
+            /** Pct Of Nav */
+            pct_of_nav?: number | null;
+            /** Market Value */
+            market_value?: number | null;
+            /** Report Date */
+            report_date?: string | null;
+        };
+        /**
+         * ReverseLookupInstitution
+         * @description Institutional manager holding a requested CUSIP.
+         */
+        ReverseLookupInstitution: {
+            /** Cik */
+            cik: string;
+            /** Manager Name */
+            manager_name: string;
+            /** Value Usd */
+            value_usd?: number | null;
+            /** Shares */
+            shares?: number | null;
+            /** Period */
+            period?: string | null;
+            /** Report Date */
+            report_date?: string | null;
         };
         /**
          * RiskContributionOut
@@ -5858,6 +6143,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FundActiveShareResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_institutional_reveal_funds__instrument_id__institutional_reveal_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundInstitutionalRevealResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_holding_reverse_lookup_holdings__cusip__reverse_lookup_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cusip: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HoldingReverseLookupResponse"];
                 };
             };
             /** @description Validation Error */

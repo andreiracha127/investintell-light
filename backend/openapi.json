@@ -2644,6 +2644,93 @@
         }
       }
     },
+    "/funds/{instrument_id}/institutional-reveal": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Fund Institutional Reveal",
+        "description": "Tier C 13F institutional overlap and holder network.",
+        "operationId": "get_fund_institutional_reveal_funds__instrument_id__institutional_reveal_get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instrument Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundInstitutionalRevealResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/holdings/{cusip}/reverse-lookup": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Holding Reverse Lookup",
+        "description": "Tier C reverse lookup from CUSIP to institutional and fund holders.",
+        "operationId": "get_holding_reverse_lookup_holdings__cusip__reverse_lookup_get",
+        "parameters": [
+          {
+            "name": "cusip",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Cusip"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HoldingReverseLookupResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/funds/{instrument_id}": {
       "get": {
         "tags": [
@@ -5175,8 +5262,14 @@
             "$ref": "#/components/schemas/FundTailRiskMetrics"
           },
           "insider_data": {
-            "type": "null",
-            "title": "Insider Data"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InsiderData"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -5497,6 +5590,86 @@
         ],
         "title": "FundHoldingsTopResponse",
         "description": "Top holdings plus sector breakdown for one fund series."
+      },
+      "FundInstitutionalRevealResponse": {
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instrument Id"
+          },
+          "series_id": {
+            "type": "string",
+            "title": "Series Id"
+          },
+          "fund_name": {
+            "type": "string",
+            "title": "Fund Name"
+          },
+          "holdings_report_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdings Report Date"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          },
+          "top_holders": {
+            "items": {
+              "$ref": "#/components/schemas/InstitutionalHolder"
+            },
+            "type": "array",
+            "title": "Top Holders"
+          },
+          "overlap": {
+            "items": {
+              "$ref": "#/components/schemas/InstitutionalOverlapSecurity"
+            },
+            "type": "array",
+            "title": "Overlap"
+          },
+          "holder_network": {
+            "$ref": "#/components/schemas/HolderNetwork"
+          },
+          "empty_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmptyState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrument_id",
+          "series_id",
+          "fund_name",
+          "top_holders",
+          "overlap",
+          "holder_network"
+        ],
+        "title": "FundInstitutionalRevealResponse",
+        "description": "Tier C institutional reveal for one fund's underlying holdings."
       },
       "FundListItem": {
         "properties": {
@@ -7833,6 +8006,179 @@
         ],
         "title": "HistoryResponse"
       },
+      "HolderNetwork": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/HolderNetworkNode"
+            },
+            "type": "array",
+            "title": "Nodes"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/HolderNetworkEdge"
+            },
+            "type": "array",
+            "title": "Edges"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "nodes",
+          "edges"
+        ],
+        "title": "HolderNetwork",
+        "description": "Small network payload for institutional relationships."
+      },
+      "HolderNetworkEdge": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source",
+          "target"
+        ],
+        "title": "HolderNetworkEdge",
+        "description": "Edge for the Relationships modal holder/security network."
+      },
+      "HolderNetworkNode": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "fund",
+              "institution",
+              "security"
+            ],
+            "title": "Type"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "type"
+        ],
+        "title": "HolderNetworkNode",
+        "description": "Node for the Relationships modal holder/security network."
+      },
+      "HoldingReverseLookupResponse": {
+        "properties": {
+          "cusip": {
+            "type": "string",
+            "title": "Cusip"
+          },
+          "security_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Security Name"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          },
+          "institutions": {
+            "items": {
+              "$ref": "#/components/schemas/ReverseLookupInstitution"
+            },
+            "type": "array",
+            "title": "Institutions"
+          },
+          "fund_exposures": {
+            "items": {
+              "$ref": "#/components/schemas/ReverseLookupFundExposure"
+            },
+            "type": "array",
+            "title": "Fund Exposures"
+          },
+          "empty_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmptyState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cusip",
+          "institutions",
+          "fund_exposures"
+        ],
+        "title": "HoldingReverseLookupResponse",
+        "description": "Tier C reverse lookup from CUSIP to institutions and fund exposures."
+      },
       "IndexCard": {
         "properties": {
           "ticker": {
@@ -7868,6 +8214,261 @@
           "spark"
         ],
         "title": "IndexCard"
+      },
+      "InsiderData": {
+        "properties": {
+          "issuer_ciks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Issuer Ciks"
+          },
+          "matched_cusips": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Matched Cusips"
+          },
+          "quarters": {
+            "items": {
+              "$ref": "#/components/schemas/InsiderQuarterSentiment"
+            },
+            "type": "array",
+            "title": "Quarters"
+          },
+          "total_buy_value": {
+            "type": "number",
+            "title": "Total Buy Value",
+            "default": 0.0
+          },
+          "total_sell_value": {
+            "type": "number",
+            "title": "Total Sell Value",
+            "default": 0.0
+          },
+          "net_value": {
+            "type": "number",
+            "title": "Net Value",
+            "default": 0.0
+          },
+          "sentiment_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sentiment Score",
+            "description": "Net/(buy+sell), bounded to [-1, 1] when volume exists."
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "default": "sec_insider_sentiment"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "empty_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmptyState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "InsiderData",
+        "description": "Insider sentiment mapped from fund holdings to issuer CIKs."
+      },
+      "InsiderQuarterSentiment": {
+        "properties": {
+          "quarter": {
+            "type": "string",
+            "format": "date",
+            "title": "Quarter"
+          },
+          "buy_value": {
+            "type": "number",
+            "title": "Buy Value",
+            "default": 0.0
+          },
+          "sell_value": {
+            "type": "number",
+            "title": "Sell Value",
+            "default": 0.0
+          },
+          "net_value": {
+            "type": "number",
+            "title": "Net Value",
+            "default": 0.0
+          },
+          "buy_count": {
+            "type": "integer",
+            "title": "Buy Count",
+            "default": 0
+          },
+          "sell_count": {
+            "type": "integer",
+            "title": "Sell Count",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "quarter"
+        ],
+        "title": "InsiderQuarterSentiment",
+        "description": "Quarterly Form 4 buy/sell aggregate for issuers held by the fund."
+      },
+      "InstitutionalHolder": {
+        "properties": {
+          "cik": {
+            "type": "string",
+            "title": "Cik"
+          },
+          "manager_name": {
+            "type": "string",
+            "title": "Manager Name"
+          },
+          "value_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Usd"
+          },
+          "shares": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shares"
+          },
+          "holding_count": {
+            "type": "integer",
+            "title": "Holding Count",
+            "default": 0
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          },
+          "report_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Date"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cik",
+          "manager_name"
+        ],
+        "title": "InstitutionalHolder",
+        "description": "Institutional manager exposure across the fund's underlying CUSIPs."
+      },
+      "InstitutionalOverlapSecurity": {
+        "properties": {
+          "cusip": {
+            "type": "string",
+            "title": "Cusip"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "fund_pct_of_nav": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fund Pct Of Nav"
+          },
+          "institutional_value_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Institutional Value Usd"
+          },
+          "institution_count": {
+            "type": "integer",
+            "title": "Institution Count",
+            "default": 0
+          },
+          "top_managers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Top Managers"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cusip"
+        ],
+        "title": "InstitutionalOverlapSecurity",
+        "description": "One fund holding with matching 13F institutional ownership."
       },
       "LeaderRow": {
         "properties": {
@@ -10261,6 +10862,154 @@
         ],
         "title": "ResultsColumnOut",
         "description": "One results-table column (ticker/name are data_type 'string')."
+      },
+      "ReverseLookupFundExposure": {
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instrument Id"
+          },
+          "series_id": {
+            "type": "string",
+            "title": "Series Id"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "issuer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issuer Name"
+          },
+          "pct_of_nav": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pct Of Nav"
+          },
+          "market_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Value"
+          },
+          "report_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Date"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrument_id",
+          "series_id",
+          "name"
+        ],
+        "title": "ReverseLookupFundExposure",
+        "description": "Fund/series exposure to a requested CUSIP from local N-PORT holdings."
+      },
+      "ReverseLookupInstitution": {
+        "properties": {
+          "cik": {
+            "type": "string",
+            "title": "Cik"
+          },
+          "manager_name": {
+            "type": "string",
+            "title": "Manager Name"
+          },
+          "value_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Usd"
+          },
+          "shares": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shares"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          },
+          "report_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Date"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cik",
+          "manager_name"
+        ],
+        "title": "ReverseLookupInstitution",
+        "description": "Institutional manager holding a requested CUSIP."
       },
       "RiskContributionOut": {
         "properties": {

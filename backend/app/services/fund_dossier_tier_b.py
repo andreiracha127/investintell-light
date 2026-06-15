@@ -7,6 +7,7 @@ data is fabricated when a source table is empty.
 
 import datetime as dt
 import math
+import re
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -14,12 +15,12 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics import simple_returns
-from app.models.fund import Fund
+from app.models.fund import Fund, FundHolding
 from app.schemas.analysis import SeriesPoint
 from app.schemas.fund_analysis import (
     EmptyState,
@@ -28,7 +29,18 @@ from app.schemas.fund_analysis import (
     FundDrawdownAnalysis,
     FundDrawdownPeriod,
     FundEntityAnalyticsResponse,
+    FundInstitutionalRevealResponse,
     FundFactorsResponse,
+    HolderNetwork,
+    HolderNetworkEdge,
+    HolderNetworkNode,
+    HoldingReverseLookupResponse,
+    InsiderData,
+    InsiderQuarterSentiment,
+    InstitutionalHolder,
+    InstitutionalOverlapSecurity,
+    ReverseLookupFundExposure,
+    ReverseLookupInstitution,
     FundMarketSensitivity,
     FundRegimeBand,
     FundReturnDistribution,
@@ -72,6 +84,9 @@ _STYLE_FACTORS = (
     ("investment", "investment_growth"),
     ("profitability", "profitability_gross"),
 )
+_CUSIP_RE = re.compile(r"^[A-Z0-9]{6,12}$")
+_TIER_C_HOLDING_LIMIT = 100
+_TIER_C_13F_ROW_LIMIT = 500
 
 
 class InvalidBenchmarkError(FundAnalysisError):
@@ -118,6 +133,38 @@ def _source_error(source: str, exc: SQLAlchemyError) -> TierBSourceError:
     return TierBSourceError(f"{source} unavailable: {exc.__class__.__name__}")
 
 
+def _is_missing_relation(exc: SQLAlchemyError) -> bool:
+    text_value = str(getattr(exc, "orig", exc)).lower()
+    return "undefinedtable" in text_value or "does not exist" in text_value
+
+
+def _normalize_cusip(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = re.sub(r"[^A-Z0-9]", "", value.upper())
+    return normalized if _CUSIP_RE.match(normalized) else None
+
+
+def _empty_network(fund: Fund) -> HolderNetwork:
+    return HolderNetwork(
+        nodes=[
+            HolderNetworkNode(
+                id=f"fund:{fund.instrument_id}",
+                label=fund.ticker or fund.name,
+                type="fund",
+            )
+        ],
+        edges=[],
+    )
+
+
+def _sentiment_score(buy_value: float, sell_value: float) -> float | None:
+    total = buy_value + sell_value
+    if total <= 0:
+        return None
+    return max(-1.0, min(1.0, (buy_value - sell_value) / total))
+
+
 async def _fund_or_none(session: AsyncSession, instrument_id: uuid.UUID) -> Fund | None:
     return await session.get(Fund, instrument_id)
 
@@ -127,6 +174,43 @@ async def _fund_or_missing(session: AsyncSession, instrument_id: uuid.UUID) -> F
     if fund is None:
         raise LookupError(f"Fund {instrument_id} not found.")
     return fund
+
+
+async def _latest_fund_holdings(
+    session: AsyncSession,
+    series_id: str,
+    *,
+    limit: int | None = _TIER_C_HOLDING_LIMIT,
+) -> tuple[dt.date | None, list[FundHolding]]:
+    latest_report = await session.scalar(
+        select(func.max(FundHolding.report_date)).where(FundHolding.series_id == series_id)
+    )
+    if latest_report is None:
+        return None, []
+    stmt = (
+        select(FundHolding)
+        .where(
+            FundHolding.series_id == series_id,
+            FundHolding.report_date == latest_report,
+            FundHolding.cusip.is_not(None),
+        )
+        .order_by(FundHolding.rank)
+    )
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    holdings = list((await session.execute(stmt)).scalars())
+    return latest_report, holdings
+
+
+def _holding_cusips(holdings: list[FundHolding]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for holding in holdings:
+        cusip = _normalize_cusip(holding.cusip)
+        if cusip and cusip not in seen:
+            seen.add(cusip)
+            out.append(cusip)
+    return out
 
 
 def _factor_frame(factor_returns: Mapping[str, Any]) -> pd.DataFrame:
@@ -724,6 +808,105 @@ def _tail_risk(returns: pd.Series) -> FundTailRiskMetrics:
     )
 
 
+def _insider_empty(reason: str, source: str | None = "sec_insider_sentiment") -> InsiderData:
+    return InsiderData(empty_state=_empty(reason, source))
+
+
+async def fetch_fund_insider_data(
+    session: AsyncSession,
+    datalake: AsyncSession,
+    fund: Fund,
+) -> InsiderData:
+    """Map fund holdings CUSIPs to issuer CIKs and aggregate Form 4 sentiment."""
+    _, holdings = await _latest_fund_holdings(session, fund.series_id)
+    cusips = _holding_cusips(holdings)
+    if not cusips:
+        return _insider_empty(
+            "No CUSIP-bearing holdings are available for insider mapping.",
+            "fund_holdings",
+        )
+    try:
+        rows = (
+            await datalake.execute(
+                text(
+                    """
+                    WITH issuer_map AS (
+                        SELECT DISTINCT
+                            upper(m.cusip) AS cusip,
+                            m.issuer_cik::text AS cik
+                        FROM sec_cusip_ticker_map m
+                        WHERE upper(m.cusip) = ANY(:cusips)
+                          AND m.issuer_cik IS NOT NULL
+                    ),
+                    quarterly AS (
+                        SELECT
+                            s.quarter,
+                            SUM(s.buy_value) AS buy_value,
+                            SUM(s.sell_value) AS sell_value,
+                            SUM(s.net_value) AS net_value,
+                            SUM(s.buy_count) AS buy_count,
+                            SUM(s.sell_count) AS sell_count
+                        FROM sec_insider_sentiment s
+                        JOIN issuer_map im ON im.cik = s.cik
+                        GROUP BY s.quarter
+                    )
+                    SELECT
+                        q.quarter,
+                        q.buy_value,
+                        q.sell_value,
+                        q.net_value,
+                        q.buy_count,
+                        q.sell_count,
+                        array_agg(DISTINCT im.cik) AS issuer_ciks,
+                        array_agg(DISTINCT im.cusip) AS matched_cusips
+                    FROM quarterly q
+                    JOIN sec_insider_sentiment s ON s.quarter = q.quarter
+                    JOIN issuer_map im ON im.cik = s.cik
+                    GROUP BY
+                        q.quarter, q.buy_value, q.sell_value, q.net_value,
+                        q.buy_count, q.sell_count
+                    ORDER BY q.quarter DESC
+                    LIMIT 8
+                    """
+                ),
+                {"cusips": cusips},
+            )
+        ).mappings().all()
+    except SQLAlchemyError as exc:
+        if _is_missing_relation(exc):
+            return _insider_empty("SEC insider sentiment tables are not deployed yet.")
+        raise _source_error("sec_insider_sentiment", exc) from exc
+
+    if not rows:
+        return _insider_empty("No Form 4 insider sentiment matched this fund's holdings.")
+
+    quarters = [
+        InsiderQuarterSentiment(
+            quarter=row["quarter"],
+            buy_value=_float(row["buy_value"]) or 0.0,
+            sell_value=_float(row["sell_value"]) or 0.0,
+            net_value=_float(row["net_value"]) or 0.0,
+            buy_count=int(row["buy_count"] or 0),
+            sell_count=int(row["sell_count"] or 0),
+        )
+        for row in rows
+    ]
+    total_buy = sum(item.buy_value for item in quarters)
+    total_sell = sum(item.sell_value for item in quarters)
+    issuer_ciks = sorted({cik for row in rows for cik in (row["issuer_ciks"] or [])})
+    matched_cusips = sorted({cusip for row in rows for cusip in (row["matched_cusips"] or [])})
+    return InsiderData(
+        issuer_ciks=issuer_ciks,
+        matched_cusips=matched_cusips,
+        quarters=quarters,
+        total_buy_value=total_buy,
+        total_sell_value=total_sell,
+        net_value=total_buy - total_sell,
+        sentiment_score=_sentiment_score(total_buy, total_sell),
+        as_of=max(item.quarter for item in quarters),
+    )
+
+
 def assemble_entity_analytics(
     nav: pd.Series,
     *,
@@ -732,6 +915,7 @@ def assemble_entity_analytics(
     benchmark_nav: pd.Series | None = None,
     benchmark_id: uuid.UUID | None = None,
     benchmark_label: str | None = None,
+    insider_data: InsiderData | None = None,
 ) -> FundEntityAnalyticsResponse:
     visible_nav = _window_nav(nav.dropna(), window)
     if len(visible_nav) < 10:
@@ -763,7 +947,7 @@ def assemble_entity_analytics(
         distribution=_distribution(returns),
         return_statistics=_return_statistics(returns),
         tail_risk=_tail_risk(returns),
-        insider_data=None,
+        insider_data=insider_data,
     )
 
 
@@ -782,6 +966,7 @@ async def _nav_for_window(
 
 async def fetch_fund_entity_analytics(
     session: AsyncSession,
+    datalake: AsyncSession,
     instrument_id: uuid.UUID,
     *,
     window: WindowKey,
@@ -799,6 +984,7 @@ async def fetch_fund_entity_analytics(
             raise InvalidBenchmarkError(f"Benchmark fund {benchmark_id} not found.")
         benchmark_nav = await _nav_for_window(session, benchmark_id, window)
         benchmark_label = benchmark.ticker or benchmark.name
+    insider_data = await fetch_fund_insider_data(session, datalake, fund)
     return assemble_entity_analytics(
         nav,
         fund=fund,
@@ -806,6 +992,347 @@ async def fetch_fund_entity_analytics(
         benchmark_nav=benchmark_nav,
         benchmark_id=benchmark_id,
         benchmark_label=benchmark_label,
+        insider_data=insider_data,
+    )
+
+
+def _build_holder_network(
+    fund: Fund,
+    holders: list[InstitutionalHolder],
+    overlap: list[InstitutionalOverlapSecurity],
+    rows: list[Mapping[str, Any]],
+) -> HolderNetwork:
+    nodes: list[HolderNetworkNode] = [
+        HolderNetworkNode(
+            id=f"fund:{fund.instrument_id}",
+            label=fund.ticker or fund.name,
+            type="fund",
+        )
+    ]
+    edges: list[HolderNetworkEdge] = []
+    top_holders = holders[:8]
+    top_cusips = {item.cusip for item in overlap[:12]}
+    for item in overlap[:12]:
+        nodes.append(
+            HolderNetworkNode(
+                id=f"security:{item.cusip}",
+                label=item.name or item.cusip,
+                type="security",
+                value=item.institutional_value_usd,
+            )
+        )
+        edges.append(
+            HolderNetworkEdge(
+                source=f"fund:{fund.instrument_id}",
+                target=f"security:{item.cusip}",
+                weight=item.fund_pct_of_nav,
+                label="fund holding",
+            )
+        )
+    for holder in top_holders:
+        nodes.append(
+            HolderNetworkNode(
+                id=f"institution:{holder.cik}",
+                label=holder.manager_name,
+                type="institution",
+                value=holder.value_usd,
+            )
+        )
+    top_holder_ciks = {holder.cik for holder in top_holders}
+    for row in rows:
+        if row["cik"] not in top_holder_ciks or row["cusip"] not in top_cusips:
+            continue
+        edges.append(
+            HolderNetworkEdge(
+                source=f"institution:{row['cik']}",
+                target=f"security:{row['cusip']}",
+                weight=_float(row["value_usd"]),
+                label="13F value",
+            )
+        )
+    return HolderNetwork(nodes=nodes, edges=edges)
+
+
+def _institutional_payload(
+    fund: Fund,
+    holdings_report_date: dt.date | None,
+    holdings: list[FundHolding],
+    rows: list[Mapping[str, Any]],
+    *,
+    empty_state: EmptyState | None = None,
+) -> FundInstitutionalRevealResponse:
+    if not rows:
+        return FundInstitutionalRevealResponse(
+            instrument_id=fund.instrument_id,
+            series_id=fund.series_id,
+            fund_name=fund.name,
+            holdings_report_date=holdings_report_date,
+            period=None,
+            top_holders=[],
+            overlap=[],
+            holder_network=_empty_network(fund),
+            empty_state=empty_state,
+        )
+
+    holder_map: dict[str, dict[str, Any]] = {}
+    overlap_map: dict[str, dict[str, Any]] = {}
+    holding_by_cusip = {
+        cusip: holding
+        for holding in holdings
+        if (cusip := _normalize_cusip(holding.cusip))
+    }
+    for row in rows:
+        holder = holder_map.setdefault(
+            row["cik"],
+            {
+                "manager_name": row["manager_name"],
+                "value_usd": 0.0,
+                "shares": 0.0,
+                "holding_count": 0,
+                "period": row["period"],
+                "report_date": row["report_date"],
+            },
+        )
+        holder["value_usd"] += _float(row["value_usd"]) or 0.0
+        holder["shares"] += _float(row["shares"]) or 0.0
+        holder["holding_count"] += 1
+
+        overlap = overlap_map.setdefault(
+            row["cusip"],
+            {
+                "name": row["name"],
+                "value_usd": 0.0,
+                "institutions": set(),
+                "managers": [],
+            },
+        )
+        overlap["value_usd"] += _float(row["value_usd"]) or 0.0
+        overlap["institutions"].add(row["cik"])
+        if row["manager_name"] not in overlap["managers"]:
+            overlap["managers"].append(row["manager_name"])
+
+    holders = sorted(
+        [
+            InstitutionalHolder(
+                cik=cik,
+                manager_name=data["manager_name"],
+                value_usd=data["value_usd"],
+                shares=data["shares"],
+                holding_count=data["holding_count"],
+                period=data["period"],
+                report_date=data["report_date"],
+            )
+            for cik, data in holder_map.items()
+        ],
+        key=lambda item: item.value_usd or 0.0,
+        reverse=True,
+    )
+    overlap = sorted(
+        [
+            InstitutionalOverlapSecurity(
+                cusip=cusip,
+                name=data["name"] or getattr(holding_by_cusip.get(cusip), "issuer_name", None),
+                fund_pct_of_nav=_float(getattr(holding_by_cusip.get(cusip), "pct_of_nav", None)),
+                institutional_value_usd=data["value_usd"],
+                institution_count=len(data["institutions"]),
+                top_managers=data["managers"][:5],
+            )
+            for cusip, data in overlap_map.items()
+        ],
+        key=lambda item: item.institutional_value_usd or 0.0,
+        reverse=True,
+    )
+    period = max(row["period"] for row in rows if row["period"] is not None)
+    return FundInstitutionalRevealResponse(
+        instrument_id=fund.instrument_id,
+        series_id=fund.series_id,
+        fund_name=fund.name,
+        holdings_report_date=holdings_report_date,
+        period=period,
+        top_holders=holders[:20],
+        overlap=overlap[:50],
+        holder_network=_build_holder_network(fund, holders, overlap, rows),
+        empty_state=None,
+    )
+
+
+async def fetch_fund_institutional_reveal(
+    session: AsyncSession,
+    datalake: AsyncSession,
+    instrument_id: uuid.UUID,
+) -> FundInstitutionalRevealResponse | None:
+    fund = await _fund_or_none(session, instrument_id)
+    if fund is None:
+        return None
+    holdings_report_date, holdings = await _latest_fund_holdings(session, fund.series_id)
+    cusips = _holding_cusips(holdings)
+    if not cusips:
+        return _institutional_payload(
+            fund,
+            holdings_report_date,
+            holdings,
+            [],
+            empty_state=_empty("No CUSIP-bearing holdings are available for 13F matching.", "fund_holdings"),
+        )
+    try:
+        rows = (
+            await datalake.execute(
+                text(
+                    """
+                    WITH matched AS (
+                        SELECT
+                            cik, manager_name, period, report_date, upper(cusip) AS cusip,
+                            name, value_usd, shares
+                        FROM sec_13f_holdings
+                        WHERE upper(cusip) = ANY(:cusips)
+                    ),
+                    latest AS (
+                        SELECT max(period) AS period FROM matched
+                    )
+                    SELECT matched.*
+                    FROM matched
+                    JOIN latest ON latest.period = matched.period
+                    ORDER BY value_usd DESC NULLS LAST
+                    LIMIT :limit
+                    """
+                ),
+                {"cusips": cusips, "limit": _TIER_C_13F_ROW_LIMIT},
+            )
+        ).mappings().all()
+    except SQLAlchemyError as exc:
+        if _is_missing_relation(exc):
+            return _institutional_payload(
+                fund,
+                holdings_report_date,
+                holdings,
+                [],
+                empty_state=_empty("SEC 13F holdings tables are not deployed yet.", "sec_13f_holdings"),
+            )
+        raise _source_error("sec_13f_holdings", exc) from exc
+    if not rows:
+        return _institutional_payload(
+            fund,
+            holdings_report_date,
+            holdings,
+            [],
+            empty_state=_empty("No 13F institutional holdings matched this fund's CUSIPs.", "sec_13f_holdings"),
+        )
+    return _institutional_payload(fund, holdings_report_date, holdings, rows)
+
+
+async def _fund_exposures_for_cusip(
+    session: AsyncSession,
+    cusip: str,
+) -> list[ReverseLookupFundExposure]:
+    rows = (
+        await session.execute(
+            text(
+                """
+                WITH latest AS (
+                    SELECT series_id, max(report_date) AS report_date
+                    FROM fund_holdings
+                    WHERE upper(cusip) = :cusip
+                    GROUP BY series_id
+                )
+                SELECT
+                    f.instrument_id, f.series_id, f.ticker, f.name,
+                    h.issuer_name, h.pct_of_nav, h.market_value, h.report_date
+                FROM fund_holdings h
+                JOIN latest l
+                  ON l.series_id = h.series_id AND l.report_date = h.report_date
+                JOIN funds_v f ON f.series_id = h.series_id
+                WHERE upper(h.cusip) = :cusip
+                ORDER BY h.pct_of_nav DESC NULLS LAST, f.name
+                LIMIT 50
+                """
+            ),
+            {"cusip": cusip},
+        )
+    ).mappings().all()
+    return [
+        ReverseLookupFundExposure(
+            instrument_id=row["instrument_id"],
+            series_id=row["series_id"],
+            ticker=row["ticker"],
+            name=row["name"],
+            issuer_name=row["issuer_name"],
+            pct_of_nav=_float(row["pct_of_nav"]),
+            market_value=_float(row["market_value"]),
+            report_date=row["report_date"],
+        )
+        for row in rows
+    ]
+
+
+async def fetch_holding_reverse_lookup(
+    session: AsyncSession,
+    datalake: AsyncSession,
+    cusip: str,
+) -> HoldingReverseLookupResponse:
+    normalized = _normalize_cusip(cusip)
+    if normalized is None:
+        raise ValueError(f"Invalid CUSIP {cusip!r}.")
+
+    fund_exposures = await _fund_exposures_for_cusip(session, normalized)
+    empty_state: EmptyState | None = None
+    try:
+        rows = (
+            await datalake.execute(
+                text(
+                    """
+                    WITH latest AS (
+                        SELECT max(period) AS period
+                        FROM sec_13f_holdings
+                        WHERE upper(cusip) = :cusip
+                    )
+                    SELECT
+                        cik, manager_name, period, report_date, upper(cusip) AS cusip,
+                        name, value_usd, shares
+                    FROM sec_13f_holdings
+                    WHERE upper(cusip) = :cusip
+                      AND period = (SELECT period FROM latest)
+                    ORDER BY value_usd DESC NULLS LAST
+                    LIMIT 100
+                    """
+                ),
+                {"cusip": normalized},
+            )
+        ).mappings().all()
+    except SQLAlchemyError as exc:
+        if _is_missing_relation(exc):
+            rows = []
+            empty_state = _empty("SEC 13F holdings tables are not deployed yet.", "sec_13f_holdings")
+        else:
+            raise _source_error("sec_13f_holdings", exc) from exc
+
+    institutions = [
+        ReverseLookupInstitution(
+            cik=row["cik"],
+            manager_name=row["manager_name"],
+            value_usd=_float(row["value_usd"]),
+            shares=_float(row["shares"]),
+            period=row["period"],
+            report_date=row["report_date"],
+        )
+        for row in rows
+    ]
+    security_name = (
+        rows[0]["name"]
+        if rows
+        else (fund_exposures[0].issuer_name if fund_exposures else None)
+    )
+    period = rows[0]["period"] if rows else None
+    if empty_state is None and not institutions:
+        empty_state = _empty("No 13F institutional holders matched this CUSIP.", "sec_13f_holdings")
+    if not institutions and not fund_exposures:
+        empty_state = _empty("No fund exposure or 13F institutional holder matched this CUSIP.")
+    return HoldingReverseLookupResponse(
+        cusip=normalized,
+        security_name=security_name,
+        period=period,
+        institutions=institutions,
+        fund_exposures=fund_exposures,
+        empty_state=empty_state,
     )
 
 
