@@ -37,6 +37,20 @@ type BuilderOptimizeOperation = paths["/builder/optimize"]["post"];
 type BuilderSaveOperation = paths["/builder/save"]["post"];
 type FundsCsvOperation = paths["/funds.csv"]["get"];
 type FundProfileOperation = paths["/funds/{instrument_id}"]["get"];
+type FundAnalysisOperation = paths["/funds/{instrument_id}/analysis"]["get"];
+type FundHoldingsTopOperation =
+  paths["/funds/{instrument_id}/holdings/top"]["get"];
+type FundPeersOperation = paths["/funds/{instrument_id}/peers"]["get"];
+type FundsScatterOperation = paths["/funds/scatter"]["get"];
+type FundFactorsOperation = paths["/funds/{instrument_id}/factors"]["get"];
+type FundStyleDriftOperation =
+  paths["/funds/{instrument_id}/style-drift"]["get"];
+type FundEntityAnalyticsOperation =
+  paths["/funds/{instrument_id}/entity-analytics"]["get"];
+type FundRiskTimeseriesOperation =
+  paths["/funds/{instrument_id}/risk-timeseries"]["get"];
+type FundActiveShareOperation =
+  paths["/funds/{instrument_id}/active-share"]["get"];
 type FundLookthroughOperation =
   paths["/funds/{instrument_id}/lookthrough"]["get"];
 type PortfolioLookthroughOperation =
@@ -188,6 +202,46 @@ export type FundProfile =
 export type FundRisk = NonNullable<FundProfile["risk"]>;
 export type FundNavPoint = FundProfile["nav"][number];
 export type FundHolding = FundProfile["holdings"]["items"][number];
+export type FundAnalysis =
+  FundAnalysisOperation["responses"]["200"]["content"]["application/json"];
+export type FundAnalysisQuery = NonNullable<
+  FundAnalysisOperation["parameters"]["query"]
+>;
+export type FundHoldingsTop =
+  FundHoldingsTopOperation["responses"]["200"]["content"]["application/json"];
+export type FundHoldingsTopQuery = NonNullable<
+  FundHoldingsTopOperation["parameters"]["query"]
+>;
+export type FundPeers =
+  FundPeersOperation["responses"]["200"]["content"]["application/json"];
+export type FundPeersQuery = NonNullable<FundPeersOperation["parameters"]["query"]>;
+export type FundsScatter =
+  FundsScatterOperation["responses"]["200"]["content"]["application/json"];
+export type FundsScatterQuery = NonNullable<
+  FundsScatterOperation["parameters"]["query"]
+>;
+export type FundFactors =
+  FundFactorsOperation["responses"]["200"]["content"]["application/json"];
+export type FundStyleDrift =
+  FundStyleDriftOperation["responses"]["200"]["content"]["application/json"];
+export type FundStyleDriftQuery = NonNullable<
+  FundStyleDriftOperation["parameters"]["query"]
+>;
+export type FundEntityAnalytics =
+  FundEntityAnalyticsOperation["responses"]["200"]["content"]["application/json"];
+export type FundEntityAnalyticsQuery = NonNullable<
+  FundEntityAnalyticsOperation["parameters"]["query"]
+>;
+export type FundRiskTimeseries =
+  FundRiskTimeseriesOperation["responses"]["200"]["content"]["application/json"];
+export type FundRiskTimeseriesQuery = NonNullable<
+  FundRiskTimeseriesOperation["parameters"]["query"]
+>;
+export type FundActiveShare =
+  FundActiveShareOperation["responses"]["200"]["content"]["application/json"];
+export type FundActiveShareQuery = NonNullable<
+  FundActiveShareOperation["parameters"]["query"]
+>;
 
 export type FundLookthroughQuery = NonNullable<
   FundLookthroughOperation["parameters"]["query"]
@@ -859,6 +913,137 @@ export function fetchFundProfile(
 ): Promise<FundProfile> {
   return request<FundProfile>(
     `/funds/${encodeURIComponent(instrumentId)}`,
+    signal,
+  );
+}
+
+export function fetchFundAnalysis(
+  instrumentId: string,
+  query: FundAnalysisQuery = {},
+  signal?: AbortSignal,
+): Promise<FundAnalysis> {
+  const params = new URLSearchParams();
+  if (query.range !== undefined) params.set("range", query.range);
+  if (query.window !== undefined) params.set("window", String(query.window));
+  const qs = params.toString();
+  return request<FundAnalysis>(
+    `/funds/${encodeURIComponent(instrumentId)}/analysis${qs ? `?${qs}` : ""}`,
+    signal,
+  );
+}
+
+export function fetchFundHoldingsTop(
+  instrumentId: string,
+  query: FundHoldingsTopQuery = {},
+  signal?: AbortSignal,
+): Promise<FundHoldingsTop> {
+  const params = new URLSearchParams();
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  const qs = params.toString();
+  return request<FundHoldingsTop>(
+    `/funds/${encodeURIComponent(instrumentId)}/holdings/top${
+      qs ? `?${qs}` : ""
+    }`,
+    signal,
+  );
+}
+
+export function fetchFundPeers(
+  instrumentId: string,
+  query: FundPeersQuery = {},
+  signal?: AbortSignal,
+): Promise<FundPeers> {
+  const params = new URLSearchParams();
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  const qs = params.toString();
+  return request<FundPeers>(
+    `/funds/${encodeURIComponent(instrumentId)}/peers${qs ? `?${qs}` : ""}`,
+    signal,
+  );
+}
+
+export function fetchFundsScatter(
+  query: FundsScatterQuery = {},
+  signal?: AbortSignal,
+): Promise<FundsScatter> {
+  const params = new URLSearchParams();
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  const qs = params.toString();
+  return request<FundsScatter>(`/funds/scatter${qs ? `?${qs}` : ""}`, signal);
+}
+
+export function fetchFundFactors(
+  instrumentId: string,
+  signal?: AbortSignal,
+): Promise<FundFactors> {
+  return request<FundFactors>(
+    `/funds/${encodeURIComponent(instrumentId)}/factors`,
+    signal,
+  );
+}
+
+export function fetchFundStyleDrift(
+  instrumentId: string,
+  query: FundStyleDriftQuery = {},
+  signal?: AbortSignal,
+): Promise<FundStyleDrift> {
+  const params = new URLSearchParams();
+  if (query.quarters !== undefined) params.set("quarters", String(query.quarters));
+  const qs = params.toString();
+  return request<FundStyleDrift>(
+    `/funds/${encodeURIComponent(instrumentId)}/style-drift${
+      qs ? `?${qs}` : ""
+    }`,
+    signal,
+  );
+}
+
+export function fetchFundEntityAnalytics(
+  instrumentId: string,
+  query: FundEntityAnalyticsQuery = {},
+  signal?: AbortSignal,
+): Promise<FundEntityAnalytics> {
+  const params = new URLSearchParams();
+  if (query.window !== undefined) params.set("window", query.window);
+  if (query.benchmark_id != null) params.set("benchmark_id", query.benchmark_id);
+  const qs = params.toString();
+  return request<FundEntityAnalytics>(
+    `/funds/${encodeURIComponent(instrumentId)}/entity-analytics${
+      qs ? `?${qs}` : ""
+    }`,
+    signal,
+  );
+}
+
+export function fetchFundRiskTimeseries(
+  instrumentId: string,
+  query: FundRiskTimeseriesQuery = {},
+  signal?: AbortSignal,
+): Promise<FundRiskTimeseries> {
+  const params = new URLSearchParams();
+  if (query.from != null) params.set("from", query.from);
+  if (query.to != null) params.set("to", query.to);
+  const qs = params.toString();
+  return request<FundRiskTimeseries>(
+    `/funds/${encodeURIComponent(instrumentId)}/risk-timeseries${
+      qs ? `?${qs}` : ""
+    }`,
+    signal,
+  );
+}
+
+export function fetchFundActiveShare(
+  instrumentId: string,
+  query: FundActiveShareQuery = {},
+  signal?: AbortSignal,
+): Promise<FundActiveShare> {
+  const params = new URLSearchParams();
+  if (query.benchmark_id != null) params.set("benchmark_id", query.benchmark_id);
+  const qs = params.toString();
+  return request<FundActiveShare>(
+    `/funds/${encodeURIComponent(instrumentId)}/active-share${
+      qs ? `?${qs}` : ""
+    }`,
     signal,
   );
 }
