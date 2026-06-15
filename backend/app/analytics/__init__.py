@@ -40,6 +40,7 @@ from app.analytics.risk import (
     max_drawdown,
     realized_cvar,
     sharpe_ratio,
+    sortino_ratio,
 )
 from app.analytics.rolling import (
     rolling_beta,
@@ -77,6 +78,7 @@ __all__ = [
     "rolling_correlation",
     "rolling_volatility",
     "simple_returns",
+    "sortino_ratio",
     "total_return",
     "weight_series",
     "weights_to_quantities",

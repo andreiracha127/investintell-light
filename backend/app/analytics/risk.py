@@ -99,6 +99,40 @@ def sharpe_ratio(
     return float(np.mean(excess) / vol * math.sqrt(periods_per_year))
 
 
+def sortino_ratio(
+    returns: pd.Series,
+    risk_free_rate: float = DEFAULT_RISK_FREE_RATE,
+    periods_per_year: int = 252,
+) -> float:
+    """Annualized Sortino ratio with canonical Target Downside Deviation.
+
+    ``excess = returns - risk_free_rate / periods_per_year``; the denominator is
+    the Target Downside Deviation ``TDD = sqrt(mean(min(excess, 0)**2))`` over
+    the FULL sample (N denominator, matching the risk_metrics worker and the
+    legacy return_statistics_service). The ratio is
+    ``mean(excess) / TDD * sqrt(periods_per_year)``. Inputs are decimal
+    fractions (0.04 = 4%), never 0-100; the result is unitless.
+
+    Raises:
+        ValueError: if fewer than 10 returns are supplied, the input contains
+            NaN/inf values, or there is no downside (TDD == 0), which leaves the
+            ratio undefined.
+    """
+    if len(returns) < _MIN_RATIO_POINTS:
+        raise ValueError(
+            f"sortino_ratio requires at least {_MIN_RATIO_POINTS} returns, got {len(returns)}"
+        )
+    reject_nan(returns, "sortino_ratio")
+    excess = returns.to_numpy(dtype=float) - risk_free_rate / periods_per_year
+    shortfall = np.minimum(excess, 0.0)
+    tdd = float(np.sqrt(np.mean(shortfall**2)))
+    if tdd == 0:
+        raise ValueError(
+            "sortino_ratio is undefined: no downside (target downside deviation is 0)"
+        )
+    return float(np.mean(excess) / tdd * math.sqrt(periods_per_year))
+
+
 def historical_var(returns: pd.Series, confidence: float = 0.95) -> float:
     """Historical Value-at-Risk as a POSITIVE decimal fraction.
 

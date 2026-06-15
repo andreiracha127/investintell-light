@@ -366,3 +366,43 @@ def test_sharpe_ratio_zero_vol_raises() -> None:
 def test_sharpe_ratio_nan_input_raises() -> None:
     with pytest.raises(ValueError, match="NaN"):
         sharpe_ratio(_dated([0.01, np.nan, 0.02] * 5))
+
+
+# --- Sortino ratio (T1A-2) ---------------------------------------------------
+
+from app.analytics import sortino_ratio  # noqa: E402
+
+
+def test_sortino_ratio_matches_manual_formula() -> None:
+    """sortino = mean(excess)/TDD * sqrt(252); TDD = sqrt(mean(min(excess,0)^2))."""
+    returns = _random_returns(252, seed=21)
+    rf = 0.04
+    excess = returns.to_numpy(dtype=float) - rf / 252
+    shortfall = np.minimum(excess, 0.0)
+    tdd = float(np.sqrt(np.mean(shortfall**2)))
+    expected = float(np.mean(excess) / tdd * math.sqrt(252))
+    assert sortino_ratio(returns, risk_free_rate=rf) == pytest.approx(expected, rel=1e-12)
+
+
+def test_sortino_ratio_ge_sharpe_for_this_seed() -> None:
+    """For seed=22 (positive-Sharpe series) the Target Downside Deviation is
+    below the total excess std, so Sortino > Sharpe. This is NOT a universal
+    property (it inverts for negative-mean series), hence the fixed seed."""
+    returns = _random_returns(252, seed=22)
+    assert sortino_ratio(returns) >= sharpe_ratio(returns) - 1e-9
+
+
+def test_sortino_ratio_short_input_raises() -> None:
+    with pytest.raises(ValueError, match="at least 10"):
+        sortino_ratio(_dated([0.01] * 9))
+
+
+def test_sortino_ratio_no_downside_raises() -> None:
+    """All-positive excess => TDD == 0 => undefined (fail loud, never inf/NaN)."""
+    with pytest.raises(ValueError, match="downside|undefined"):
+        sortino_ratio(_dated([0.05] * 30))  # 0.05 > rf/252, no shortfall
+
+
+def test_sortino_ratio_nan_input_raises() -> None:
+    with pytest.raises(ValueError, match="NaN"):
+        sortino_ratio(_dated([0.01, np.nan, -0.02] * 5))
