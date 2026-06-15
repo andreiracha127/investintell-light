@@ -38,10 +38,15 @@ from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
 from app.models.fund import Fund
 from app.schemas.fund_analysis import (
+    FundActiveShareResponse,
     FundAnalysisResponse,
+    FundEntityAnalyticsResponse,
+    FundFactorsResponse,
     FundHoldingsTopResponse,
     FundPeersResponse,
+    FundRiskTimeseriesResponse,
     FundScatterResponse,
+    FundStyleDriftResponse,
 )
 from app.schemas.funds import (
     FundClassOut,
@@ -61,7 +66,7 @@ from app.schemas.lookthrough import (
 )
 from app.schemas.market import FundHistoryResponse, HistoryBar
 from app.schemas.timeseries import LineSeriesResponse
-from app.services import fund_analysis, lookthrough
+from app.services import fund_analysis, fund_dossier_tier_b, lookthrough
 from app.services import funds_catalog as catalog
 from app.services._series import select_adj_ohlcv_rows as _select_adj_ohlcv_rows_impl
 from app.services.screener import render_csv
@@ -268,6 +273,143 @@ async def get_funds_scatter(
 ) -> FundScatterResponse:
     """Columnar risk/return scatter payload for the funds landing page."""
     return await fund_analysis.fetch_funds_scatter(session, limit=limit)
+
+
+@router.get(
+    "/funds/{instrument_id}/factors",
+    response_model=FundFactorsResponse,
+)
+async def get_fund_factors(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    datalake: DatalakeDep,
+) -> FundFactorsResponse:
+    """Tier B factor sensitivities and style-bias snapshot."""
+    try:
+        payload = await fund_dossier_tier_b.fetch_fund_factors(
+            session, datalake, instrument_id
+        )
+    except fund_dossier_tier_b.TierBSourceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Fund {instrument_id} not found.")
+    return payload
+
+
+@router.get(
+    "/funds/{instrument_id}/style-drift",
+    response_model=FundStyleDriftResponse,
+)
+async def get_fund_style_drift(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    datalake: DatalakeDep,
+    quarters: Annotated[
+        int, Query(ge=1, le=20, description="Historical N-PORT periods returned.")
+    ] = 8,
+) -> FundStyleDriftResponse:
+    """Tier B historical sector drift from N-PORT reports."""
+    try:
+        payload = await fund_dossier_tier_b.fetch_fund_style_drift(
+            session, datalake, instrument_id, quarters=quarters
+        )
+    except fund_dossier_tier_b.TierBSourceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Fund {instrument_id} not found.")
+    return payload
+
+
+@router.get(
+    "/funds/{instrument_id}/entity-analytics",
+    response_model=FundEntityAnalyticsResponse,
+)
+async def get_fund_entity_analytics(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    window: Annotated[
+        fund_dossier_tier_b.WindowKey,
+        Query(description="Lookback window for Deep Analysis metrics."),
+    ] = "1Y",
+    benchmark_id: Annotated[
+        uuid.UUID | None,
+        Query(description="Optional benchmark fund UUID for capture and relative stats."),
+    ] = None,
+) -> FundEntityAnalyticsResponse:
+    """Tier B Deep Analysis analytics for one fund."""
+    try:
+        payload = await fund_dossier_tier_b.fetch_fund_entity_analytics(
+            session, instrument_id, window=window, benchmark_id=benchmark_id
+        )
+    except (
+        fund_analysis.FundAnalysisError,
+        fund_dossier_tier_b.InvalidBenchmarkError,
+    ) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Fund {instrument_id} not found.")
+    return payload
+
+
+@router.get(
+    "/funds/{instrument_id}/risk-timeseries",
+    response_model=FundRiskTimeseriesResponse,
+)
+async def get_fund_risk_timeseries(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    datalake: DatalakeDep,
+    from_date: Annotated[
+        dt.date | None,
+        Query(alias="from", description="Optional inclusive start date."),
+    ] = None,
+    to_date: Annotated[
+        dt.date | None,
+        Query(alias="to", description="Optional inclusive end date."),
+    ] = None,
+) -> FundRiskTimeseriesResponse:
+    """Tier B drawdown, conditional volatility, and regime overlay."""
+    try:
+        payload = await fund_dossier_tier_b.fetch_fund_risk_timeseries(
+            session,
+            datalake,
+            instrument_id,
+            from_date=from_date,
+            to_date=to_date,
+        )
+    except (fund_analysis.FundAnalysisError, fund_dossier_tier_b.TierBSourceError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Fund {instrument_id} not found.")
+    return payload
+
+
+@router.get(
+    "/funds/{instrument_id}/active-share",
+    response_model=FundActiveShareResponse,
+)
+async def get_fund_active_share(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    datalake: DatalakeDep,
+    benchmark_id: Annotated[
+        uuid.UUID | None,
+        Query(description="Benchmark fund UUID with N-PORT holdings."),
+    ] = None,
+) -> FundActiveShareResponse:
+    """Tier B holdings-based active share against a benchmark fund."""
+    try:
+        payload = await fund_dossier_tier_b.fetch_fund_active_share(
+            session, datalake, instrument_id, benchmark_id=benchmark_id
+        )
+    except (
+        fund_dossier_tier_b.InvalidBenchmarkError,
+        fund_dossier_tier_b.TierBSourceError,
+    ) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Fund {instrument_id} not found.")
+    return payload
 
 
 @router.get("/funds/{instrument_id}", response_model=FundProfileResponse)
