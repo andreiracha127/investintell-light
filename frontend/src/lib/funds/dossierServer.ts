@@ -4,9 +4,12 @@ import { serverRequest } from "@/lib/api/server";
 import {
   buildFundBackendPath,
   buildFundsScatterBackendPath,
+  buildHoldingReverseLookupBackendPath,
   FUND_DOSSIER_REVALIDATE_SECONDS,
   fundResourceCacheKey,
   fundResourceTags,
+  holdingReverseLookupCacheKey,
+  holdingReverseLookupTags,
   normalizeFundResourceParams,
   normalizeScatterParams,
   scatterCacheKey,
@@ -43,6 +46,21 @@ export async function fetchCachedFundsScatter<T>(
     {
       revalidate: FUND_DOSSIER_REVALIDATE_SECONDS.scatter,
       tags: scatterTags(),
+    },
+  );
+  return getCached();
+}
+
+export async function fetchCachedHoldingReverseLookup<T>(
+  cusip: string,
+): Promise<T> {
+  const backendPath = buildHoldingReverseLookupBackendPath(cusip);
+  const getCached = unstable_cache(
+    async () => serverRequest<T>(backendPath),
+    holdingReverseLookupCacheKey(cusip),
+    {
+      revalidate: FUND_DOSSIER_REVALIDATE_SECONDS["holding-reverse-lookup"],
+      tags: holdingReverseLookupTags(cusip),
     },
   );
   return getCached();

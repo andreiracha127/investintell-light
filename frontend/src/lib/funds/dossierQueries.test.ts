@@ -3,12 +3,17 @@ import { describe, expect, it } from "vitest";
 import {
   buildFundBackendPath,
   buildFundProxyPath,
+  buildHoldingReverseLookupBackendPath,
+  buildHoldingReverseLookupProxyPath,
   buildFundsScatterProxyPath,
   cacheControlHeader,
   dossierQueryKeys,
   fundResourceCacheKey,
   fundResourceTags,
+  holdingReverseLookupCacheKey,
+  holdingReverseLookupTags,
   normalizeAnalysisParams,
+  normalizeCusip,
   normalizeEntityAnalyticsParams,
 } from "@/lib/funds/dossierQueries";
 
@@ -47,6 +52,15 @@ describe("fund dossier query config", () => {
       "/funds/fund%2Fwith%20space/holdings/top?limit=25",
     );
     expect(buildFundsScatterProxyPath({})).toBe("/api/funds/scatter?limit=250");
+    expect(buildFundProxyPath("institutional-reveal", "fund-1")).toBe(
+      "/api/funds/fund-1/institutional-reveal",
+    );
+    expect(buildHoldingReverseLookupBackendPath("037833-100")).toBe(
+      "/holdings/037833100/reverse-lookup",
+    );
+    expect(buildHoldingReverseLookupProxyPath("037833-100")).toBe(
+      "/api/holdings/037833100/reverse-lookup",
+    );
   });
 
   it("keeps cache headers, tags, and key parts granular", () => {
@@ -67,5 +81,21 @@ describe("fund dossier query config", () => {
       "range:MAX",
       "window:252",
     ]);
+    expect(cacheControlHeader("institutional-reveal")).toBe(
+      "public, s-maxage=3600, stale-while-revalidate=3600",
+    );
+    expect(holdingReverseLookupTags("037833-100")).toEqual([
+      "holding:037833100:reverse-lookup",
+    ]);
+    expect(holdingReverseLookupCacheKey("037833-100")).toEqual([
+      "fund-dossier",
+      "holding-reverse-lookup",
+      "037833100",
+    ]);
+    expect(dossierQueryKeys.holdingReverseLookup("037833-100")).toEqual([
+      "holding-reverse-lookup",
+      "037833100",
+    ]);
+    expect(normalizeCusip(" 037833-100 ")).toBe("037833100");
   });
 });

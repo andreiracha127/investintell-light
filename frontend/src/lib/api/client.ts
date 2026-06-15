@@ -10,6 +10,7 @@ import { getAccessToken, refreshSession } from "@/lib/auth/token";
 import {
   buildFundProxyPath,
   buildFundsScatterProxyPath,
+  buildHoldingReverseLookupProxyPath,
 } from "@/lib/funds/dossierQueries";
 
 type AnalysisOperation = paths["/stocks/{ticker}/analysis"]["get"];
@@ -55,6 +56,10 @@ type FundRiskTimeseriesOperation =
   paths["/funds/{instrument_id}/risk-timeseries"]["get"];
 type FundActiveShareOperation =
   paths["/funds/{instrument_id}/active-share"]["get"];
+type FundInstitutionalRevealOperation =
+  paths["/funds/{instrument_id}/institutional-reveal"]["get"];
+type HoldingReverseLookupOperation =
+  paths["/holdings/{cusip}/reverse-lookup"]["get"];
 type FundLookthroughOperation =
   paths["/funds/{instrument_id}/lookthrough"]["get"];
 type PortfolioLookthroughOperation =
@@ -246,6 +251,10 @@ export type FundActiveShare =
 export type FundActiveShareQuery = NonNullable<
   FundActiveShareOperation["parameters"]["query"]
 >;
+export type FundInstitutionalReveal =
+  FundInstitutionalRevealOperation["responses"]["200"]["content"]["application/json"];
+export type HoldingReverseLookup =
+  HoldingReverseLookupOperation["responses"]["200"]["content"]["application/json"];
 
 export type FundLookthroughQuery = NonNullable<
   FundLookthroughOperation["parameters"]["query"]
@@ -1056,6 +1065,26 @@ export function fetchFundActiveShare(
 ): Promise<FundActiveShare> {
   return requestSameOrigin<FundActiveShare>(
     buildFundProxyPath("active-share", instrumentId, query),
+    signal,
+  );
+}
+
+export function fetchFundInstitutionalReveal(
+  instrumentId: string,
+  signal?: AbortSignal,
+): Promise<FundInstitutionalReveal> {
+  return requestSameOrigin<FundInstitutionalReveal>(
+    buildFundProxyPath("institutional-reveal", instrumentId),
+    signal,
+  );
+}
+
+export function fetchHoldingReverseLookup(
+  cusip: string,
+  signal?: AbortSignal,
+): Promise<HoldingReverseLookup> {
+  return requestSameOrigin<HoldingReverseLookup>(
+    buildHoldingReverseLookupProxyPath(cusip),
     signal,
   );
 }

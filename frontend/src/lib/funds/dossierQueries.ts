@@ -34,9 +34,13 @@ export type FundDossierSubresource =
   | "style-drift"
   | "risk-timeseries"
   | "entity-analytics"
-  | "active-share";
+  | "active-share"
+  | "institutional-reveal";
 
-export type FundsDossierResource = FundDossierSubresource | "scatter";
+export type FundsDossierResource =
+  | FundDossierSubresource
+  | "scatter"
+  | "holding-reverse-lookup";
 
 type CacheTier = "short" | "long";
 
@@ -62,7 +66,9 @@ const CACHE_TIER_BY_RESOURCE = {
   "risk-timeseries": "long",
   "entity-analytics": "long",
   "active-share": "short",
+  "institutional-reveal": "long",
   scatter: "short",
+  "holding-reverse-lookup": "long",
 } as const satisfies Record<FundsDossierResource, CacheTier>;
 
 export const FUND_DOSSIER_REVALIDATE_SECONDS = Object.fromEntries(
@@ -158,6 +164,7 @@ export function normalizeFundResourceParams(
   switch (resource) {
     case "profile":
     case "factors":
+    case "institutional-reveal":
       return {};
     case "timeseries":
       return normalizeTimeseriesParams(query);
@@ -218,6 +225,7 @@ function paramPairs(resource: FundDossierSubresource, params: Record<string, Que
   switch (resource) {
     case "profile":
     case "factors":
+    case "institutional-reveal":
       return [];
     case "timeseries":
       return [["range", params.range]] as const;
@@ -278,6 +286,8 @@ export function buildFundBackendPath(
       return appendQuery(fundPath(instrumentId, "/entity-analytics"), paramPairs(resource, normalized));
     case "active-share":
       return appendQuery(fundPath(instrumentId, "/active-share"), paramPairs(resource, normalized));
+    case "institutional-reveal":
+      return fundPath(instrumentId, "/institutional-reveal");
   }
 }
 
@@ -304,12 +314,28 @@ export function buildFundsScatterProxyPath(
   return appendQuery("/api/funds/scatter", [["limit", normalized.limit]]);
 }
 
+export function normalizeCusip(value: QueryValue): string {
+  return stringParam(value, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+export function buildHoldingReverseLookupBackendPath(cusip: QueryValue): string {
+  return `/holdings/${encodeURIComponent(normalizeCusip(cusip))}/reverse-lookup`;
+}
+
+export function buildHoldingReverseLookupProxyPath(cusip: QueryValue): string {
+  return `/api/holdings/${encodeURIComponent(normalizeCusip(cusip))}/reverse-lookup`;
+}
+
 export function fundResourceTags(resource: FundDossierSubresource, instrumentId: string): string[] {
   return [`fund:${instrumentId}`, `fund:${instrumentId}:${resource}`];
 }
 
 export function scatterTags(): string[] {
   return ["funds:scatter"];
+}
+
+export function holdingReverseLookupTags(cusip: QueryValue): string[] {
+  return [`holding:${normalizeCusip(cusip)}:reverse-lookup`];
 }
 
 export function cacheKeyParts(
@@ -338,6 +364,10 @@ export function scatterCacheKey(params = normalizeScatterParams()): string[] {
   return cacheKeyParts("scatter", "all", [["limit", params.limit]]);
 }
 
+export function holdingReverseLookupCacheKey(cusip: QueryValue): string[] {
+  return cacheKeyParts("holding-reverse-lookup", normalizeCusip(cusip), []);
+}
+
 export function cacheControlHeader(resource: FundsDossierResource): string {
   const tier = CACHE_TIER_BY_RESOURCE[resource];
   return `public, s-maxage=${CACHE_SECONDS_BY_TIER[tier]}, stale-while-revalidate=${SWR_SECONDS_BY_TIER[tier]}`;
@@ -356,6 +386,7 @@ export function parseFundSubresource(value: string): FundDossierSubresource | nu
     case "risk-timeseries":
     case "entity-analytics":
     case "active-share":
+    case "institutional-reveal":
       return value;
     default:
       return null;
@@ -408,4 +439,6 @@ export const dossierQueryKeys = {
     const params = normalizeActiveShareParams(query);
     return ["fund-active-share", instrumentId, params.benchmark_id] as const;
   },
+  institutionalReveal: (instrumentId: string) => ["fund-institutional-reveal", instrumentId] as const,
+  holdingReverseLookup: (cusip: QueryValue) => ["holding-reverse-lookup", normalizeCusip(cusip)] as const,
 } as const;

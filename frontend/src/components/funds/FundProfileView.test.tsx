@@ -72,11 +72,13 @@ vi.mock("@/lib/api/client", async (importOriginal) => {
     fetchFundEntityAnalytics: vi.fn(),
     fetchFundFactors: vi.fn(),
     fetchFundHoldingsTop: vi.fn(),
+    fetchFundInstitutionalReveal: vi.fn(),
     fetchFundPeers: vi.fn(),
     fetchFundProfile: vi.fn(),
     fetchFundRiskTimeseries: vi.fn(),
     fetchFundStyleDrift: vi.fn(),
     fetchFundTimeseries: vi.fn(),
+    fetchHoldingReverseLookup: vi.fn(),
     fetchFundsScatter: vi.fn(),
   };
 });
@@ -356,7 +358,27 @@ function makeEntityAnalytics(): client.FundEntityAnalytics {
       jarque_bera: 2,
       jarque_bera_pvalue: 0.3,
     },
-    insider_data: null,
+    insider_data: {
+      issuer_ciks: ["320193"],
+      matched_cusips: ["037833100"],
+      quarters: [
+        {
+          quarter: "2026-01-01",
+          buy_value: 125,
+          sell_value: 80,
+          net_value: 45,
+          buy_count: 1,
+          sell_count: 1,
+        },
+      ],
+      total_buy_value: 125,
+      total_sell_value: 80,
+      net_value: 45,
+      sentiment_score: 0.21,
+      source: "sec_insider_sentiment",
+      as_of: "2026-01-01",
+      empty_state: null,
+    },
   };
 }
 
@@ -372,6 +394,72 @@ function makeActiveShare(): client.FundActiveShare {
     n_common_positions: 0,
     as_of_date: null,
     empty_state: { reason: "benchmark_id is required", source: "request" },
+  };
+}
+
+function makeInstitutionalReveal(): client.FundInstitutionalReveal {
+  return {
+    instrument_id: FUND_ID,
+    series_id: "VFINX-series",
+    fund_name: "Vanguard 500 Index Fund",
+    holdings_report_date: "2026-03-31",
+    period: "2026-03-31",
+    top_holders: [
+      {
+        cik: "1067983",
+        manager_name: "Berkshire Hathaway",
+        value_usd: 123000,
+        shares: 4500,
+        holding_count: 1,
+        period: "2026-03-31",
+        report_date: "2026-03-31",
+      },
+    ],
+    overlap: [
+      {
+        cusip: "037833100",
+        name: "Apple Inc.",
+        fund_pct_of_nav: 7.1,
+        institutional_value_usd: 123000,
+        institution_count: 1,
+        top_managers: ["Berkshire Hathaway"],
+      },
+    ],
+    holder_network: {
+      nodes: [
+        { id: `fund:${FUND_ID}`, label: "VFINX", type: "fund", value: null },
+        { id: "security:037833100", label: "Apple Inc.", type: "security", value: 123000 },
+      ],
+      edges: [
+        {
+          source: `fund:${FUND_ID}`,
+          target: "security:037833100",
+          weight: 7.1,
+          label: "fund holding",
+        },
+      ],
+    },
+    empty_state: null,
+  };
+}
+
+function makeReverseLookup(): client.HoldingReverseLookup {
+  return {
+    cusip: "037833100",
+    security_name: "Apple Inc.",
+    period: "2026-03-31",
+    institutions: [
+      {
+        cik: "1067983",
+        manager_name: "Berkshire Hathaway",
+        value_usd: 123000,
+        shares: 4500,
+        period: "2026-03-31",
+        report_date: "2026-03-31",
+      },
+    ],
+    fund_exposures: [],
+    empty_state: null,
   };
 }
 
@@ -394,6 +482,8 @@ function mockDossierResponses() {
   mocked.fetchFundRiskTimeseries.mockResolvedValue(makeRiskTimeseries());
   mocked.fetchFundEntityAnalytics.mockResolvedValue(makeEntityAnalytics());
   mocked.fetchFundActiveShare.mockResolvedValue(makeActiveShare());
+  mocked.fetchFundInstitutionalReveal.mockResolvedValue(makeInstitutionalReveal());
+  mocked.fetchHoldingReverseLookup.mockResolvedValue(makeReverseLookup());
 }
 
 function renderFundProfile() {
@@ -449,6 +539,8 @@ describe("FundProfileView", () => {
     expect(mocked.fetchFundStyleDrift).not.toHaveBeenCalled();
     expect(mocked.fetchFundEntityAnalytics).not.toHaveBeenCalled();
     expect(mocked.fetchFundActiveShare).not.toHaveBeenCalled();
+    expect(mocked.fetchFundInstitutionalReveal).not.toHaveBeenCalled();
+    expect(mocked.fetchHoldingReverseLookup).not.toHaveBeenCalled();
 
     expect(await screen.findByText("Vanguard 500 Index Fund")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Performance" })).toBeInTheDocument();
@@ -456,6 +548,7 @@ describe("FundProfileView", () => {
     expect(screen.getByRole("tab", { name: "Style" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Factors" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Peers" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Relationships" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Deep Analysis" })).toBeInTheDocument();
     expect(screen.getByTestId("interactive-chart")).toHaveTextContent("1Y");
 
@@ -508,6 +601,22 @@ describe("FundProfileView", () => {
       expect(mocked.fetchFundEntityAnalytics).toHaveBeenCalledWith(
         FUND_ID,
         { window: "1Y" },
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(await screen.findByText("Buy value")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Close deep analysis" }));
+    await user.click(screen.getByRole("button", { name: "Relationships" }));
+    await waitFor(() =>
+      expect(mocked.fetchFundInstitutionalReveal).toHaveBeenCalledWith(
+        FUND_ID,
+        expect.any(AbortSignal),
+      ),
+    );
+    await waitFor(() =>
+      expect(mocked.fetchHoldingReverseLookup).toHaveBeenCalledWith(
+        "037833100",
         expect.any(AbortSignal),
       ),
     );

@@ -20,6 +20,7 @@ vi.mock("next/cache", () => ({
 }));
 
 import { GET as fundGet } from "@/app/api/funds/[id]/[sub]/route";
+import { GET as holdingReverseGet } from "@/app/api/holdings/[cusip]/reverse-lookup/route";
 import { GET as scatterGet } from "@/app/api/funds/scatter/route";
 
 const OLD_API_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -134,6 +135,30 @@ describe("fund dossier route handlers", () => {
     expect(cacheCalls[0]).toMatchObject({
       keyParts: ["fund-dossier", "scatter", "all", "limit:250"],
       options: { revalidate: 300, tags: ["funds:scatter"] },
+    });
+  });
+
+  it("proxies holding reverse lookup with CUSIP cache tags", async () => {
+    const fetchMock = okFetch({ cusip: "037833100", institutions: [] });
+
+    const response = await holdingReverseGet(
+      new Request("https://app.test/api/holdings/037833100/reverse-lookup"),
+      { params: Promise.resolve({ cusip: "037833100" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe(
+      "public, s-maxage=3600, stale-while-revalidate=3600",
+    );
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      "https://api.example.test/holdings/037833100/reverse-lookup",
+    );
+    expect(cacheCalls[0]).toMatchObject({
+      keyParts: ["fund-dossier", "holding-reverse-lookup", "037833100"],
+      options: {
+        revalidate: 3600,
+        tags: ["holding:037833100:reverse-lookup"],
+      },
     });
   });
 });
