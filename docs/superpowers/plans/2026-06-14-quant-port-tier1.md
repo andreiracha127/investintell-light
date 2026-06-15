@@ -354,7 +354,14 @@ def information_ratio(
     return float(np.mean(active) * periods_per_year / te)
 ```
 
-  Note on the NaN test: `align_returns` (`backend/app/analytics/returns.py` lines 63-78) drops NaN rows in its inner join, so a portfolio series with a NaN loses that row; with 15 input returns and one NaN dropped, fewer than 10 of the 5-period repeat pattern may overlap — either branch ("at least 10 common points" or align_returns' "at least 2 overlapping") satisfies the test regex `match="NaN|overlapping"`. If overlap stays >= 10, the residual NaN is impossible because align_returns already dropped it; the test passes via the overlap-count path. (The regex tolerates both outcomes; do not add a separate reject_nan call — it would change which message is raised.)
+  CORRECTION (applied in shipped commit `0e42d9c`): the original note here was wrong. The test data `[0.01, np.nan, -0.02] * 5` contains **5** NaN rows, not 1; `align_returns` drops all 5, leaving **exactly 10** aligned points (== `_MIN_TAIL_POINTS`), so `len(p) < 10` is False and no NaN/overlap error fires — the function returned a value and `test_information_ratio_nan_input_raises` failed (DID NOT RAISE). The fix: make `information_ratio` fail-loud on NaN/inf up front, consistent with `sharpe_ratio`/`sortino_ratio` and the project NaN contract (silently dropping NaN rows is itself a contract violation). Add, before `align_returns`:
+
+```python
+    reject_nan(portfolio_returns, "information_ratio")
+    reject_nan(benchmark_returns, "information_ratio")
+```
+
+  The literal test then passes via the NaN branch; the other four IR tests stay green (finite inputs pass `reject_nan`; the inner-join test's extra value is finite; the short-overlap test still hits the "at least 10 common points" guard). The docstring Raises clause should say NaN/inf inputs are rejected up front rather than "propagated from align_returns".
 
   Then in `backend/app/analytics/__init__.py` add `information_ratio,` to the risk import block and `"information_ratio",` to `__all__` (insert after `"historical_var",` at line 63).
 
