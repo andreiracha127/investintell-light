@@ -255,6 +255,22 @@ class PortfolioStats(BaseModel):
         description="Weighted-average asset volatility divided by portfolio volatility "
         "at the effective initial weights; >= 1 for long-only portfolios (unitless)."
     )
+    sharpe_ratio: float = Field(
+        description="Annualized Sharpe ratio of the replayed portfolio's daily returns "
+        "at the canonical 4% risk-free rate (unitless)."
+    )
+    sortino_ratio: float = Field(
+        description="Annualized Sortino ratio (Target Downside Deviation denominator) at "
+        "the canonical 4% risk-free rate (unitless)."
+    )
+    information_ratio: float = Field(
+        description="Annualized information ratio of the portfolio's active return vs the "
+        "benchmark over the aligned daily grid (unitless)."
+    )
+    effective_number_of_bets: float = Field(
+        description="Entropy Effective Number of Bets over the per-asset risk contributions "
+        "at the effective initial weights; in [1, n_positions] (unitless)."
+    )
     max_drawdown: DrawdownOut
     best_day: DatedValue
     worst_day: DatedValue
