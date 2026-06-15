@@ -210,3 +210,78 @@ def test_jackknife_se_all_constant_returns_nan() -> None:
     se_ok = _jackknife_se(healthy, periods_per_year=12)
     assert math.isfinite(se_ok)
     assert se_ok > 0.0
+
+
+# --- tiered sample-size degradation ------------------------------------------
+
+
+def test_empty_input_is_degraded_all_nan() -> None:
+    """T=0 (empty or all-NaN) -> fully degraded, reason 'all_nan_or_empty'."""
+    res = robust_sharpe(np.array([], dtype=float), rf_rate=0.0)
+    assert res.n_observations == 0
+    assert res.degraded is True
+    assert res.degraded_reason == "all_nan_or_empty"
+    assert math.isnan(res.sharpe_traditional)
+    assert math.isnan(res.sharpe_cornish_fisher)
+
+
+def test_all_nan_input_is_degraded() -> None:
+    """A series of only NaNs strips to length 0."""
+    res = robust_sharpe(np.array([float("nan")] * 20), rf_rate=0.0)
+    assert res.n_observations == 0
+    assert res.degraded_reason == "all_nan_or_empty"
+
+
+def test_nans_are_stripped_then_counted() -> None:
+    """Interior NaNs are dropped; n_observations counts only finite points."""
+    rng = np.random.default_rng(2)
+    clean = rng.normal(0.01, 0.04, 100)
+    dirty = np.insert(clean, [10, 50, 90], np.nan)
+    res = robust_sharpe(dirty, rf_rate=0.0)
+    assert res.n_observations == 100
+
+
+def test_below_12_best_effort_traditional_only() -> None:
+    """T<12: traditional Sharpe is best-effort finite; CF/CI are NaN and the
+    result is degraded with reason 'insufficient_observations'."""
+    arr = np.array([0.01, 0.02, -0.01, 0.03, 0.0, 0.015, -0.005, 0.02], dtype=float)
+    res = robust_sharpe(arr, rf_rate=0.0)
+    assert res.n_observations == 8
+    assert res.degraded is True
+    assert res.degraded_reason == "insufficient_observations"
+    assert math.isfinite(res.sharpe_traditional)
+    assert math.isnan(res.sharpe_cornish_fisher)
+    assert math.isnan(res.ci_lower_95)
+
+
+def test_between_12_and_36_no_cornish_fisher() -> None:
+    """12 <= T < 36: traditional Sharpe and moments are computed, but CF is
+    not (insufficient observations for a stable expansion)."""
+    r = _normal_returns(24, seed=4)
+    res = robust_sharpe(r, rf_rate=0.0)
+    assert res.n_observations == 24
+    assert res.degraded is True
+    assert res.degraded_reason == "insufficient_observations"
+    assert math.isfinite(res.sharpe_traditional)
+    assert math.isfinite(res.skewness)
+    assert math.isfinite(res.excess_kurtosis)
+    assert math.isnan(res.sharpe_cornish_fisher)
+
+
+def test_zero_volatility_positive_mean_is_plus_inf() -> None:
+    """Constant positive returns: zero vol -> +inf traditional Sharpe, degraded
+    with reason 'zero_volatility', no division-by-zero crash."""
+    res = robust_sharpe(np.array([0.02] * 40, dtype=float), rf_rate=0.0)
+    assert res.n_observations == 40
+    assert res.degraded is True
+    assert res.degraded_reason == "zero_volatility"
+    assert res.sharpe_traditional == float("inf")
+    assert res.skewness == 0.0
+    assert res.excess_kurtosis == 0.0
+
+
+def test_zero_volatility_negative_mean_is_minus_inf() -> None:
+    """Constant zero return with a positive rf -> negative excess -> -inf."""
+    res = robust_sharpe(np.array([0.0] * 40, dtype=float), rf_rate=0.01)
+    assert res.sharpe_traditional == float("-inf")
+    assert res.degraded_reason == "zero_volatility"

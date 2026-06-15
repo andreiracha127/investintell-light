@@ -165,16 +165,54 @@ def robust_sharpe(
     T = int(arr.size)
     rf = 0.0 if rf_rate is None else float(rf_rate)
 
+    if T < _MIN_OBS_TRADITIONAL:
+        if T == 0:
+            return _nan_result(n=0, reason="all_nan_or_empty")
+        # T<12 still emits a best-effort traditional Sharpe.
+        excess_be = arr - rf
+        mean_be = float(np.mean(excess_be))
+        std_be = float(np.std(arr, ddof=1)) if T > 1 else 0.0
+        sqrt_ann_be = float(np.sqrt(periods_per_year))
+        sr_trad_be = (mean_be / std_be * sqrt_ann_be) if std_be > 0 else float("nan")
+        return _nan_result(
+            n=T,
+            reason="insufficient_observations",
+            sharpe_traditional=sr_trad_be,
+        )
+
     excess = arr - rf
     mean = float(np.mean(excess))
     std_returns = float(np.std(arr, ddof=1))
     sqrt_ann = float(np.sqrt(periods_per_year))
+
+    if std_returns == 0.0 or not np.isfinite(std_returns):
+        signed = (
+            float("inf")
+            if mean > 0
+            else (float("-inf") if mean < 0 else float("nan"))
+        )
+        return _nan_result(
+            n=T,
+            reason="zero_volatility",
+            sharpe_traditional=signed,
+            skewness=0.0,
+            excess_kurtosis=0.0,
+        )
 
     sr_period = mean / std_returns  # per-period Sharpe (not annualized)
     sr_traditional = sr_period * sqrt_ann
 
     skew = float(stats.skew(arr, bias=False))
     excess_kurt = float(stats.kurtosis(arr, bias=False, fisher=True))
+
+    if T < _MIN_OBS_CORNISH_FISHER:
+        return _nan_result(
+            n=T,
+            reason="insufficient_observations",
+            sharpe_traditional=sr_traditional,
+            skewness=skew,
+            excess_kurtosis=excess_kurt,
+        )
 
     # Cornish-Fisher adjusted Sharpe via modified-VaR scaling of sigma.
     z = float(stats.norm.ppf(alpha_cf))
