@@ -6,6 +6,7 @@
  * `detail`, which the UI renders verbatim. No silent fallbacks.
  */
 import type { components, paths } from "@/lib/api/api";
+import { getAccessToken, refreshSession } from "@/lib/auth/token";
 
 type AnalysisOperation = paths["/stocks/{ticker}/analysis"]["get"];
 type PricesOperation = paths["/stocks/{ticker}/prices"]["get"];
@@ -230,6 +231,58 @@ export function isRangePreset(value: unknown): value is RangePreset {
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+type AuthFetchDeps = {
+  getToken: () => string | null;
+  refresh: () => Promise<boolean>;
+  onAuthFail: () => void;
+  fetchImpl: typeof fetch;
+};
+
+/** Wrap fetch: attach Bearer from the readable cookie; on 401/403 refresh once
+ *  and retry; on persistent auth failure call onAuthFail and return the response. */
+export function createFetchWithAuth(deps: AuthFetchDeps) {
+  const { getToken, refresh, onAuthFail, fetchImpl } = deps;
+  return async function fetchWithAuth(
+    input: RequestInfo | URL,
+    init: RequestInit = {},
+  ): Promise<Response> {
+    const withAuth = (token: string | null): RequestInit => {
+      const base: Record<string, string> =
+        init.headers instanceof Headers
+          ? Object.fromEntries(init.headers.entries())
+          : Array.isArray(init.headers)
+            ? Object.fromEntries(init.headers as [string, string][])
+            : { ...(init.headers as Record<string, string> | undefined) };
+      if (token) base["Authorization"] = `Bearer ${token}`;
+      return { ...init, credentials: "include", headers: base };
+    };
+
+    let res = await fetchImpl(input, withAuth(getToken()));
+    if (res.status === 401 || res.status === 403) {
+      const refreshed = await refresh();
+      if (refreshed) {
+        res = await fetchImpl(input, withAuth(getToken()));
+      }
+      if (res.status === 401 || res.status === 403) {
+        onAuthFail();
+      }
+    }
+    return res;
+  };
+}
+
+const fetchWithAuth = createFetchWithAuth({
+  getToken: getAccessToken,
+  refresh: () => refreshSession(),
+  onAuthFail: () => {
+    if (typeof window !== "undefined") {
+      const next = encodeURIComponent(window.location.pathname + window.location.search);
+      window.location.assign(`/login?next=${next}`);
+    }
+  },
+  fetchImpl: (input, init) => fetch(input, init),
+});
+
 export class ApiError extends Error {
   readonly status: number;
 
@@ -290,7 +343,7 @@ async function request<T>(
 
   let res: Response;
   try {
-    res = await fetch(`${BASE_URL}${path}`, {
+    res = await fetchWithAuth(`${BASE_URL}${path}`, {
       signal: combinedSignal,
       ...(init && {
         method: init.method,
@@ -673,7 +726,7 @@ export async function fetchScreenResultsCsv(
   signal?: AbortSignal,
 ): Promise<Blob> {
   const qs = resultsParams(query);
-  const res = await fetch(
+  const res = await fetchWithAuth(
     `${BASE_URL}/screener/screens/${screenId}/results.csv${qs ? `?${qs}` : ""}`,
     { signal: signal ?? AbortSignal.timeout(30_000) },
   );
@@ -725,7 +778,7 @@ export async function fetchFundsCsv(
   signal?: AbortSignal,
 ): Promise<Blob> {
   const qs = fundsParams(query);
-  const res = await fetch(`${BASE_URL}/funds.csv${qs ? `?${qs}` : ""}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/funds.csv${qs ? `?${qs}` : ""}`, {
     signal: signal ?? AbortSignal.timeout(30_000),
   });
   if (!res.ok) {
