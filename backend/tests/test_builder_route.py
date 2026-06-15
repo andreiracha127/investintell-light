@@ -415,3 +415,77 @@ def test_humanize_error_passes_actionable_messages_through() -> None:
 
     msg = "insufficient common history: 120 overlapping observations"
     assert humanize_error(msg) == msg
+
+
+# --- T1C: builder in-sample CVaR uses the exact RU estimator ------------------
+
+from app.analytics import historical_cvar, realized_cvar  # noqa: E402
+from app.optimizer import engine  # noqa: E402
+
+
+def _stub_returns_30(monkeypatch: pytest.MonkeyPatch) -> None:
+    """30-obs stub: (1-0.95)*30 = 1.5 -> non-integer tail, so the exact RU
+    estimator and the naive tail-mean DIFFER (unlike the 500-obs stub where
+    25 is integer and they coincide). Identical RNG recipe to _stub_returns."""
+
+    async def fake_load(
+        session: Any,
+        assets: list[optimizer_data.AssetRef],
+        window_days: int = 730,
+        today: dt.date | None = None,
+    ) -> pd.DataFrame:
+        rng = np.random.default_rng(11)
+        index = pd.bdate_range("2024-01-02", periods=30)
+        data = {
+            ref.label: rng.normal(0.0003, 0.008 + 0.002 * i, 30)
+            for i, ref in enumerate(assets)
+        }
+        return pd.DataFrame(data, index=index)
+
+    monkeypatch.setattr(optimizer_data, "load_aligned_returns", fake_load)
+
+
+async def test_builder_reports_ru_in_sample_cvar_not_tail_mean(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The /builder/optimize response reports the exact Rockafellar–Uryasev
+    in-sample CVaR (consistent with the min-CVaR objective), not the naive
+    tail-mean. The two differ on this 30-obs (non-integer tail) fixture."""
+    _stub_returns_30(monkeypatch)
+    payload = {
+        "assets": [_fund_ref(i) for i in range(4)],
+        "objective": "min_cvar",
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 200, response.text
+    reported = response.json()["expected"]["cvar_95_in_sample"]
+    assert response.json()["diagnostics"]["n_obs"] == 30
+
+    # Reconstruct the builder's post-solve report from the IDENTICAL stub: same
+    # RNG -> same scenarios -> deterministic solve -> portfolio_daily.
+    rng = np.random.default_rng(11)
+    index = pd.bdate_range("2024-01-02", periods=30)
+    refs = [
+        optimizer_data.FundAssetRef(id=_FUND_IDS[i]) for i in range(4)
+    ]
+    frame = pd.DataFrame(
+        {
+            ref.label: rng.normal(0.0003, 0.008 + 0.002 * i, 30)
+            for i, ref in enumerate(refs)
+        },
+        index=index,
+    )
+    scenarios = frame.to_numpy(dtype=float)
+    weights, status = engine.solve_min_cvar(scenarios, cap=0.25, min_weight=None)
+    assert status == "optimal"
+    portfolio_daily = pd.Series(scenarios @ weights, index=frame.index)
+
+    ru = realized_cvar(portfolio_daily, confidence=0.95)
+    naive = historical_cvar(portfolio_daily, confidence=0.95)
+
+    # The estimators disagree on this fixture (the swap is observable).
+    assert ru != pytest.approx(naive, abs=1e-9)
+    # The builder reports the RU value (optimizer-consistent), not the tail-mean.
+    assert reported == pytest.approx(ru, abs=1e-12)
+    assert reported != pytest.approx(naive, abs=1e-9)
