@@ -139,6 +139,15 @@ Do not cache portfolio/user data. If any endpoint requires a user token, do not 
 
 ## Implementation Tasks
 
+## Execution Progress
+
+- [x] Read dispatch, required docs, current branch/worktree state, and opening verification.
+- [x] Implement server-only backend fetch helper, shared dossier cache/query config, and cached route handlers.
+- [x] Point fund dossier client queries at the same-origin cache proxy and align stale times.
+- [x] Add SSR `QueryClient` prefetch plus `HydrationBoundary` for the first fund dossier paint.
+- [x] Add/update unit coverage for query keys, proxy paths/headers/error propagation, and client query wiring.
+- [x] Run validation gates and browser evidence pass.
+
 ### 1. Create a server-side backend fetch helper
 
 Add a small server-only helper, for example:

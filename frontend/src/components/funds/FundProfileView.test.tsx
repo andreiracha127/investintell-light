@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -412,8 +413,9 @@ afterEach(() => {
 });
 
 describe("FundProfileView", () => {
-  it("loads the interactive NAV chart by range and the Tier B dossier endpoints", async () => {
+  it("loads first-paint queries immediately and defers tab/modal queries until opened", async () => {
     mockDossierResponses();
+    const user = userEvent.setup();
 
     renderFundProfile();
 
@@ -425,32 +427,13 @@ describe("FundProfileView", () => {
       ),
     );
 
+    expect(mocked.fetchFundProfile).toHaveBeenCalledWith(
+      FUND_ID,
+      expect.any(AbortSignal),
+    );
     expect(mocked.fetchFundAnalysis).toHaveBeenCalledWith(
       FUND_ID,
       { range: "1Y", window: 252 },
-      expect.any(AbortSignal),
-    );
-    expect(mocked.fetchFundHoldingsTop).toHaveBeenCalledWith(
-      FUND_ID,
-      { limit: 25 },
-      expect.any(AbortSignal),
-    );
-    expect(mocked.fetchFundPeers).toHaveBeenCalledWith(
-      FUND_ID,
-      { limit: 10 },
-      expect.any(AbortSignal),
-    );
-    expect(mocked.fetchFundsScatter).toHaveBeenCalledWith(
-      { limit: 250 },
-      expect.any(AbortSignal),
-    );
-    expect(mocked.fetchFundFactors).toHaveBeenCalledWith(
-      FUND_ID,
-      expect.any(AbortSignal),
-    );
-    expect(mocked.fetchFundStyleDrift).toHaveBeenCalledWith(
-      FUND_ID,
-      { quarters: 8 },
       expect.any(AbortSignal),
     );
     expect(mocked.fetchFundRiskTimeseries).toHaveBeenCalledWith(
@@ -458,16 +441,14 @@ describe("FundProfileView", () => {
       {},
       expect.any(AbortSignal),
     );
-    expect(mocked.fetchFundEntityAnalytics).toHaveBeenCalledWith(
-      FUND_ID,
-      { window: "1Y" },
-      expect.any(AbortSignal),
-    );
-    expect(mocked.fetchFundActiveShare).toHaveBeenCalledWith(
-      FUND_ID,
-      {},
-      expect.any(AbortSignal),
-    );
+
+    expect(mocked.fetchFundHoldingsTop).not.toHaveBeenCalled();
+    expect(mocked.fetchFundPeers).not.toHaveBeenCalled();
+    expect(mocked.fetchFundsScatter).not.toHaveBeenCalled();
+    expect(mocked.fetchFundFactors).not.toHaveBeenCalled();
+    expect(mocked.fetchFundStyleDrift).not.toHaveBeenCalled();
+    expect(mocked.fetchFundEntityAnalytics).not.toHaveBeenCalled();
+    expect(mocked.fetchFundActiveShare).not.toHaveBeenCalled();
 
     expect(await screen.findByText("Vanguard 500 Index Fund")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Performance" })).toBeInTheDocument();
@@ -477,5 +458,58 @@ describe("FundProfileView", () => {
     expect(screen.getByRole("tab", { name: "Peers" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Deep Analysis" })).toBeInTheDocument();
     expect(screen.getByTestId("interactive-chart")).toHaveTextContent("1Y");
+
+    await user.click(screen.getByRole("tab", { name: "Holdings" }));
+    await waitFor(() =>
+      expect(mocked.fetchFundHoldingsTop).toHaveBeenCalledWith(
+        FUND_ID,
+        { limit: 25 },
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(mocked.fetchFundActiveShare).toHaveBeenCalledWith(
+      FUND_ID,
+      {},
+      expect.any(AbortSignal),
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Style" }));
+    await waitFor(() =>
+      expect(mocked.fetchFundStyleDrift).toHaveBeenCalledWith(
+        FUND_ID,
+        { quarters: 8 },
+        expect.any(AbortSignal),
+      ),
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Factors" }));
+    await waitFor(() =>
+      expect(mocked.fetchFundFactors).toHaveBeenCalledWith(
+        FUND_ID,
+        expect.any(AbortSignal),
+      ),
+    );
+
+    await user.click(screen.getByRole("tab", { name: "Peers" }));
+    await waitFor(() =>
+      expect(mocked.fetchFundPeers).toHaveBeenCalledWith(
+        FUND_ID,
+        { limit: 10 },
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(mocked.fetchFundsScatter).toHaveBeenCalledWith(
+      { limit: 250 },
+      expect.any(AbortSignal),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Deep Analysis" }));
+    await waitFor(() =>
+      expect(mocked.fetchFundEntityAnalytics).toHaveBeenCalledWith(
+        FUND_ID,
+        { window: "1Y" },
+        expect.any(AbortSignal),
+      ),
+    );
   });
 });

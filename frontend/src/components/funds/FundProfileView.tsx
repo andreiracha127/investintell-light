@@ -53,6 +53,11 @@ import { buildHcHistogramOption } from "@/lib/charts/hc/histogram";
 import { buildHcRollingOption } from "@/lib/charts/hc/rolling";
 import { chartColors, type ChartColors } from "@/lib/charts/theme";
 import {
+  dossierQueryKeys,
+  FUND_DOSSIER_DEFAULTS,
+  FUND_DOSSIER_STALE_TIME_MS,
+} from "@/lib/funds/dossierQueries";
+import {
   formatCompact,
   formatDate,
   formatNumber,
@@ -121,13 +126,6 @@ function latestPoint(series: [string, number][]): [string, number] | null {
 }
 
 export function FundProfileView({ instrumentId }: { instrumentId: string }) {
-  const profileQuery = useQuery({
-    queryKey: ["fund-profile", instrumentId],
-    queryFn: ({ signal }) => fetchFundProfile(instrumentId, signal),
-    staleTime: 30_000,
-    retry: retryPolicy,
-  });
-
   const [colors, setColors] = useState<ChartColors | null>(null);
   useEffect(() => {
     setColors(chartColors());
@@ -148,82 +146,137 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
   }, [instrumentId]);
 
   const benchmarkQuery = benchmarkId ? { benchmark_id: benchmarkId } : {};
+  const isPerformanceTab = activeTab === "performance";
+  const isHoldingsTab = activeTab === "holdings";
+  const isStyleTab = activeTab === "style";
+  const isFactorsTab = activeTab === "factors";
+  const isPeersTab = activeTab === "peers";
+
+  const profileQuery = useQuery({
+    queryKey: dossierQueryKeys.profile(instrumentId),
+    queryFn: ({ signal }) => fetchFundProfile(instrumentId, signal),
+    staleTime: FUND_DOSSIER_STALE_TIME_MS.profile,
+    retry: retryPolicy,
+  });
 
   const timeseriesQuery = useQuery({
-    queryKey: ["fund-timeseries", instrumentId, range],
+    queryKey: dossierQueryKeys.timeseries(instrumentId, { range }),
     queryFn: ({ signal }) => fetchFundTimeseries(instrumentId, range, signal),
-    staleTime: 60 * 60 * 1000,
+    staleTime: FUND_DOSSIER_STALE_TIME_MS.timeseries,
+    enabled: isPerformanceTab,
     retry: retryPolicy,
   });
 
   const analysisQuery = useQuery({
-    queryKey: ["fund-analysis", instrumentId, range],
+    queryKey: dossierQueryKeys.analysis(instrumentId, {
+      range,
+      window: FUND_DOSSIER_DEFAULTS.analysisWindow,
+    }),
     queryFn: ({ signal }) =>
-      fetchFundAnalysis(instrumentId, { range, window: 252 }, signal),
-    staleTime: 60_000,
+      fetchFundAnalysis(
+        instrumentId,
+        { range, window: FUND_DOSSIER_DEFAULTS.analysisWindow },
+        signal,
+      ),
+    staleTime: FUND_DOSSIER_STALE_TIME_MS.analysis,
+    enabled: isPerformanceTab,
     retry: retryPolicy,
   });
 
   const holdingsTopQuery = useQuery({
-    queryKey: ["fund-holdings-top", instrumentId],
-    queryFn: ({ signal }) => fetchFundHoldingsTop(instrumentId, { limit: 25 }, signal),
-    staleTime: 60_000,
+    queryKey: dossierQueryKeys.holdingsTop(instrumentId, {
+      limit: FUND_DOSSIER_DEFAULTS.holdingsTopLimit,
+    }),
+    queryFn: ({ signal }) =>
+      fetchFundHoldingsTop(
+        instrumentId,
+        { limit: FUND_DOSSIER_DEFAULTS.holdingsTopLimit },
+        signal,
+      ),
+    staleTime: FUND_DOSSIER_STALE_TIME_MS["holdings-top"],
+    enabled: isHoldingsTab,
     retry: retryPolicy,
   });
 
   const peersQuery = useQuery({
-    queryKey: ["fund-peers", instrumentId],
-    queryFn: ({ signal }) => fetchFundPeers(instrumentId, { limit: 10 }, signal),
-    staleTime: 60_000,
+    queryKey: dossierQueryKeys.peers(instrumentId, {
+      limit: FUND_DOSSIER_DEFAULTS.peersLimit,
+    }),
+    queryFn: ({ signal }) =>
+      fetchFundPeers(
+        instrumentId,
+        { limit: FUND_DOSSIER_DEFAULTS.peersLimit },
+        signal,
+      ),
+    staleTime: FUND_DOSSIER_STALE_TIME_MS.peers,
+    enabled: isPeersTab,
     retry: retryPolicy,
   });
 
   const scatterQuery = useQuery({
-    queryKey: ["funds-scatter", 250],
-    queryFn: ({ signal }) => fetchFundsScatter({ limit: 250 }, signal),
-    staleTime: 60_000,
+    queryKey: dossierQueryKeys.scatter({
+      limit: FUND_DOSSIER_DEFAULTS.scatterLimit,
+    }),
+    queryFn: ({ signal }) =>
+      fetchFundsScatter({ limit: FUND_DOSSIER_DEFAULTS.scatterLimit }, signal),
+    staleTime: FUND_DOSSIER_STALE_TIME_MS.scatter,
+    enabled: isPeersTab,
     retry: retryPolicy,
   });
 
   const factorsQuery = useQuery({
-    queryKey: ["fund-factors", instrumentId],
+    queryKey: dossierQueryKeys.factors(instrumentId),
     queryFn: ({ signal }) => fetchFundFactors(instrumentId, signal),
-    staleTime: 60_000,
+    staleTime: FUND_DOSSIER_STALE_TIME_MS.factors,
+    enabled: isFactorsTab,
     retry: retryPolicy,
   });
 
   const styleDriftQuery = useQuery({
-    queryKey: ["fund-style-drift", instrumentId],
+    queryKey: dossierQueryKeys.styleDrift(instrumentId, {
+      quarters: FUND_DOSSIER_DEFAULTS.styleDriftQuarters,
+    }),
     queryFn: ({ signal }) =>
-      fetchFundStyleDrift(instrumentId, { quarters: 8 }, signal),
-    staleTime: 60_000,
+      fetchFundStyleDrift(
+        instrumentId,
+        { quarters: FUND_DOSSIER_DEFAULTS.styleDriftQuarters },
+        signal,
+      ),
+    staleTime: FUND_DOSSIER_STALE_TIME_MS["style-drift"],
+    enabled: isStyleTab,
     retry: retryPolicy,
   });
 
   const riskTimeseriesQuery = useQuery({
-    queryKey: ["fund-risk-timeseries", instrumentId],
+    queryKey: dossierQueryKeys.riskTimeseries(instrumentId),
     queryFn: ({ signal }) => fetchFundRiskTimeseries(instrumentId, {}, signal),
-    staleTime: 60_000,
+    staleTime: FUND_DOSSIER_STALE_TIME_MS["risk-timeseries"],
+    enabled: isPerformanceTab,
     retry: retryPolicy,
   });
 
   const entityAnalyticsQuery = useQuery({
-    queryKey: ["fund-entity-analytics", instrumentId, benchmarkId || null],
+    queryKey: dossierQueryKeys.entityAnalytics(instrumentId, {
+      window: FUND_DOSSIER_DEFAULTS.entityWindow,
+      ...benchmarkQuery,
+    }),
     queryFn: ({ signal }) =>
       fetchFundEntityAnalytics(
         instrumentId,
-        { window: "1Y", ...benchmarkQuery },
+        { window: FUND_DOSSIER_DEFAULTS.entityWindow, ...benchmarkQuery },
         signal,
       ),
-    staleTime: 60_000,
+    staleTime: FUND_DOSSIER_STALE_TIME_MS["entity-analytics"],
+    enabled: deepOpen,
     retry: retryPolicy,
   });
 
   const activeShareQuery = useQuery({
-    queryKey: ["fund-active-share", instrumentId, benchmarkId || null],
+    queryKey: dossierQueryKeys.activeShare(instrumentId, benchmarkQuery),
     queryFn: ({ signal }) =>
       fetchFundActiveShare(instrumentId, benchmarkQuery, signal),
-    staleTime: 60_000,
+    staleTime: FUND_DOSSIER_STALE_TIME_MS["active-share"],
+    enabled: isHoldingsTab,
     retry: retryPolicy,
   });
 
