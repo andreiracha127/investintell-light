@@ -9,6 +9,7 @@ from app.api.routes import builder as builder_router
 from app.api.routes import funds as funds_router
 from app.api.routes import health as health_router
 from app.api.routes import macro as macro_router
+from app.api.routes import monte_carlo as monte_carlo_router
 from app.api.routes import portfolio as portfolio_router
 from app.api.routes import portfolios as portfolios_router
 from app.api.routes import rebalance as rebalance_router
@@ -59,6 +60,7 @@ def create_app() -> FastAPI:
     application.include_router(backtest_router.router)
     application.include_router(builder_router.router)
     application.include_router(macro_router.router)
+    application.include_router(monte_carlo_router.router)
     application.include_router(rebalance_router.router)
     application.include_router(search_router.router)
     return application
