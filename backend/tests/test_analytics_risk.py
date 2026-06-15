@@ -224,3 +224,104 @@ def test_cvar_monotonicity() -> None:
     """
     r = _random_returns(500, seed=17)
     assert historical_cvar(r, 0.99) >= historical_cvar(r, 0.95)
+
+
+# --- exact Rockafellar–Uryasev realized_cvar (T1C) ----------------------------
+
+from app.analytics import realized_cvar  # noqa: E402  (export added in T1C-2)
+
+
+# Fixed 30-point return series: (1-0.95)*30 = 1.5 (non-integer tail) so the
+# exact RU estimator DIVERGES from the naive tail-mean historical_cvar.
+_RU_SERIES_30 = [
+    -0.012459, -0.004381, 0.017143, 0.002922, 0.012363, 0.007902, -0.007874,
+    0.007445, -0.003716, -0.003791, 0.001663, -0.019437, 0.015898, -0.008324,
+    0.013404, 0.002172, 0.020316, -0.00818, -0.003653, 0.004791, -0.028297,
+    0.011163, 0.020441, 0.015048, 0.010212, -0.001498, 0.017065, 0.014362,
+    0.005504, 0.000466,
+]
+
+
+def _ru_reference(returns: pd.Series, confidence: float) -> float:
+    """Independent RU empirical CVaR, mirroring the optimizer objective.
+
+    Single-asset losses = -returns; CVaR_alpha = var_loss + sum of positive
+    excess over the upper-quantile VaR, scaled by 1/((1-alpha)*T). Positive
+    decimal fraction (same sign convention as the production estimator).
+    """
+    losses = -returns.to_numpy(dtype=float)
+    t = losses.size
+    var_loss = float(np.quantile(losses, confidence, method="higher"))
+    excess = np.maximum(losses - var_loss, 0.0)
+    return var_loss + float(excess.sum()) / ((1.0 - confidence) * t)
+
+
+def test_realized_cvar_matches_ru_reference_non_integer_tail() -> None:
+    """On a 30-point series (1.5 expected tail obs) realized_cvar equals the
+    exact Rockafellar–Uryasev value used by the optimizer objective."""
+    returns = _dated(_RU_SERIES_30)
+    expected = _ru_reference(returns, 0.95)
+    assert realized_cvar(returns, 0.95) == pytest.approx(expected, abs=1e-12)
+    # Pin the literal so a regression to tail-mean is caught loudly.
+    assert realized_cvar(returns, 0.95) == pytest.approx(
+        0.025343666666666667, abs=1e-12
+    )
+
+
+def test_realized_cvar_diverges_from_naive_tail_mean() -> None:
+    """The whole point of the swap: with a non-integer expected tail size the
+    exact RU estimator differs from the naive historical_cvar tail-mean."""
+    returns = _dated(_RU_SERIES_30)
+    assert realized_cvar(returns, 0.95) != pytest.approx(
+        historical_cvar(returns, 0.95), abs=1e-9
+    )
+    # naive tail-mean of this series is 0.023867 (mean of the worst 2).
+    assert historical_cvar(returns, 0.95) == pytest.approx(0.023867, abs=1e-9)
+    assert realized_cvar(returns, 0.95) > historical_cvar(returns, 0.95)
+
+
+def test_realized_cvar_integer_tail_matches_tail_mean() -> None:
+    """Edge case: when (1-alpha)*T is an integer (here 20*0.05 = 1.0) the RU
+    estimator and the tail-mean coincide (single worst observation)."""
+    returns = _dated(
+        [
+            0.012, -0.034, 0.008, -0.021, 0.005, -0.058, 0.017, -0.009, 0.003,
+            -0.045, 0.022, -0.011, 0.006, -0.073, 0.014, -0.002, 0.019, -0.027,
+            0.001, -0.039,
+        ]
+    )
+    assert realized_cvar(returns, 0.95) == pytest.approx(0.073, abs=1e-12)
+    assert realized_cvar(returns, 0.95) == pytest.approx(
+        historical_cvar(returns, 0.95), abs=1e-12
+    )
+
+
+def test_realized_cvar_at_least_var() -> None:
+    """CVaR >= VaR (expected shortfall dominates the threshold)."""
+    r = _random_returns(500, seed=17)
+    assert realized_cvar(r, 0.95) >= historical_var(r, 0.95)
+
+
+def test_realized_cvar_positive_for_lossy_series() -> None:
+    assert realized_cvar(_random_returns(), 0.95) > 0
+
+
+def test_realized_cvar_monotonicity() -> None:
+    """CVaR(99%) >= CVaR(95%): a deeper tail is at least as costly."""
+    r = _random_returns(500, seed=17)
+    assert realized_cvar(r, 0.99) >= realized_cvar(r, 0.95)
+
+
+def test_realized_cvar_short_input_raises() -> None:
+    with pytest.raises(ValueError, match="at least 10"):
+        realized_cvar(_dated([0.01] * 9))
+
+
+def test_realized_cvar_bad_confidence_raises() -> None:
+    with pytest.raises(ValueError, match="confidence"):
+        realized_cvar(_random_returns(), confidence=95.0)
+
+
+def test_realized_cvar_nan_input_raises() -> None:
+    with pytest.raises(ValueError, match="NaN"):
+        realized_cvar(_dated([0.01, np.nan, -0.02] + [0.0] * 7))

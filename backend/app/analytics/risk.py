@@ -114,6 +114,45 @@ def historical_cvar(returns: pd.Series, confidence: float = 0.95) -> float:
     return cvar
 
 
+def realized_cvar(returns: pd.Series, confidence: float = 0.95) -> float:
+    """Exact Rockafellar–Uryasev empirical CVaR as a POSITIVE decimal fraction.
+
+    This is the estimator the min-CVaR optimizer minimizes
+    (``app.optimizer.engine.solve_min_cvar``): with single-asset losses
+    ``L = -returns`` and ``alpha = confidence``,
+
+        VaR_a  = upper alpha-quantile of L (``np.quantile(L, alpha, method="higher")``)
+        CVaR_a = VaR_a + (1/((1-alpha)*T)) * sum(max(L_t - VaR_a, 0))
+
+    At optimality this equals ``min_z [ z + sum(max(L - z, 0))/((1-alpha)*T) ]``,
+    i.e. the optimizer's objective value, so the builder's in-sample report is
+    consistent with the objective the weights were chosen to minimize. Unlike
+    :func:`historical_cvar` (a naive tail-mean), this is exact even when the
+    expected tail size ``(1-alpha)*T`` is non-integer.
+
+    Same sign convention as :func:`historical_cvar`: a result of 0.03 means "on
+    the worst ~5% of days the conditional expected loss is 3%". Inputs and
+    result are decimal fractions (0.05 = 5%), never 0-100.
+
+    Raises:
+        ValueError: if ``confidence`` is not in (0, 1), fewer than 10 returns
+            are supplied, or the input contains NaN/infinite values.
+    """
+    if not 0 < confidence < 1:
+        raise ValueError(f"confidence must be in (0, 1), got {confidence}")
+    if len(returns) < _MIN_TAIL_POINTS:
+        raise ValueError(
+            f"realized_cvar requires at least {_MIN_TAIL_POINTS} returns, got {len(returns)}"
+        )
+    reject_nan(returns, "realized_cvar")
+    losses = -returns.to_numpy(dtype=float)
+    t = losses.size
+    var_loss = float(np.quantile(losses, confidence, method="higher"))
+    excess = np.maximum(losses - var_loss, 0.0)
+    cvar = var_loss + float(excess.sum()) / ((1.0 - confidence) * t)
+    return cvar
+
+
 def max_drawdown(prices: pd.Series) -> DrawdownResult:
     """Maximum drawdown of a price/NAV series via running maximum.
 
