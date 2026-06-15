@@ -9,6 +9,7 @@ fiscal_balance/government_debt (see macro_ingestion._enrich_region).
 """
 
 import datetime as dt
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -23,7 +24,7 @@ class DataFreshnessOut(BaseModel):
     last_date: dt.date | None
     days_stale: int | None
     weight: float  # 0.0-1.0 staleness-adjusted weight
-    status: str  # 'fresh' | 'decaying' | 'stale'
+    status: Literal["fresh", "decaying", "stale"]
 
 
 class RegionScorecardOut(BaseModel):
@@ -42,7 +43,9 @@ class MacroRegionalResponse(BaseModel):
 
 
 class GlobalIndicatorsResponse(BaseModel):
-    """Global macro risk indicators (0-100; higher score = better conditions)."""
+    """Global macro risk indicators (0-100). Note: polarity varies by field —
+    geopolitical_risk_score and energy_stress are risk measures (higher = worse),
+    while commodity_stress and usd_strength reflect market stress/strength."""
 
     as_of_date: dt.date
     geopolitical_risk_score: float

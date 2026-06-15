@@ -10,6 +10,8 @@ canned rows; no live cloud, no live DB.
 import datetime as dt
 from typing import Any
 
+import pytest
+
 from app.services import macro_scorecards as ms
 
 _DATA_JSON: dict[str, Any] = {
@@ -81,6 +83,7 @@ class _FakeSession:
         return _FakeResult(self._row)
 
 
+@pytest.mark.anyio
 async def test_fetch_macro_scorecards_parses_latest_snapshot() -> None:
     session = _FakeSession(_FakeRow(dt.date(2026, 6, 14), _DATA_JSON))
     result = await ms.fetch_macro_scorecards(session)  # type: ignore[arg-type]
@@ -111,11 +114,13 @@ async def test_fetch_macro_scorecards_parses_latest_snapshot() -> None:
     assert g.usd_strength == 54.36
 
 
+@pytest.mark.anyio
 async def test_fetch_macro_scorecards_none_when_not_materialized() -> None:
     session = _FakeSession(None)
     assert await ms.fetch_macro_scorecards(session) is None  # type: ignore[arg-type]
 
 
+@pytest.mark.anyio
 async def test_fetch_macro_scorecards_tolerates_missing_freshness_keys() -> None:
     minimal = {
         "version": 1,
@@ -145,3 +150,25 @@ async def test_fetch_macro_scorecards_tolerates_missing_freshness_keys() -> None
     assert fr.days_stale is None
     assert fr.weight == 0.5
     assert fr.status == "decaying"
+
+
+@pytest.mark.anyio
+async def test_fetch_macro_scorecards_uses_data_json_as_of_date_fallback() -> None:
+    """as_of_date absent on DB column — must be read from data_json['as_of_date']."""
+    data_with_date = dict(_DATA_JSON)  # as_of_date present in JSON
+    # Simulate a row where the DB column is NULL (driver returns None).
+    row = _FakeRow(None, data_with_date)  # type: ignore[arg-type]
+    session = _FakeSession(row)
+    result = await ms.fetch_macro_scorecards(session)  # type: ignore[arg-type]
+    assert result is not None
+    assert result.as_of_date == dt.date(2026, 6, 14)
+
+
+@pytest.mark.anyio
+async def test_fetch_macro_scorecards_raises_when_no_as_of_date() -> None:
+    """Both DB column and data_json absent → ValueError (not a silent None)."""
+    data_no_date: dict[str, Any] = {k: v for k, v in _DATA_JSON.items() if k != "as_of_date"}
+    row = _FakeRow(None, data_no_date)  # type: ignore[arg-type]
+    session = _FakeSession(row)
+    with pytest.raises(ValueError, match="as_of_date"):
+        await ms.fetch_macro_scorecards(session)  # type: ignore[arg-type]

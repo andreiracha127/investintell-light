@@ -120,8 +120,11 @@ async def fetch_macro_scorecards(datalake: AsyncSession) -> MacroScorecards | No
         return None
     data = latest.data_json or {}
     gi = data.get("global_indicators") or {}
+    as_of_date = _parse_date(latest.as_of_date) or _parse_date(data.get("as_of_date"))
+    if as_of_date is None:
+        raise ValueError("macro_regional_snapshots row has no as_of_date")
     return MacroScorecards(
-        as_of_date=_parse_date(latest.as_of_date) or _parse_date(data.get("as_of_date")),
+        as_of_date=as_of_date,
         regions={
             name: _parse_region(name, raw)
             for name, raw in (data.get("regions") or {}).items()
