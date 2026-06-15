@@ -207,7 +207,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-surface-0 text-text-primary">
+    <div className="flex h-screen flex-col overflow-hidden bg-surface-0 pt-12 text-text-primary">
       {/* ── Top header (Carbon UI Shell) ─────────────────────────────────── */}
       <Header aria-label="Investintell Cockpit" className="ix-carbon-scope">
         <SkipToContent />

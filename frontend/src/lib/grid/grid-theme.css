@@ -58,11 +58,11 @@
   color: var(--color-accent);
 }
 .hcg-theme-graphite .ix-grid-link:hover { text-decoration: underline; }
-.hcg-theme-graphite .ix-grid-link-plain { color: var(--color-text-primary); text-decoration: none; }
+.hcg-theme-graphite .ix-grid-link-plain { display: block; color: var(--color-text-primary); text-decoration: none; }
 .hcg-theme-graphite .ix-grid-link-plain:hover { text-decoration: underline; }
 .hcg-theme-graphite .ix-grid-trunc {
-  display: inline-block;
-  max-width: 260px;
+  display: block;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
