@@ -37,7 +37,14 @@ export function HighchartsStockChart({
     let disposed = false;
     const el = containerRef.current;
     if (!el) return;
-    void import("highcharts/highstock").then((mod) => {
+    void (async () => {
+      // Use the ESM build so Stock modules register on the same Highcharts
+      // singleton. The UMD module paths do not self-register under Turbopack.
+      const mod = await import("highcharts/esm/highstock.js");
+      await import("highcharts/esm/indicators/indicators.js");
+      await import("highcharts/esm/indicators/rsi.js");
+      await import("highcharts/esm/modules/annotations.js");
+      await import("highcharts/esm/modules/stock-tools.js");
       if (disposed || !containerRef.current) return;
       const Highcharts = mod.default;
       Highcharts.setOptions(highchartsTheme(chartColors()));
@@ -48,7 +55,7 @@ export function HighchartsStockChart({
       }
       chartRef.current = chart;
       onReadyRef.current?.(chart);
-    });
+    })();
     const observer = new ResizeObserver(() => chartRef.current?.reflow());
     observer.observe(el);
     return () => {
