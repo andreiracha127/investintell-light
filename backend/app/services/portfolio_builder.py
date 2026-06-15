@@ -52,6 +52,11 @@ from app.schemas.builder import (
     WeightOut,
 )
 from app.services import funds_catalog
+from app.services import macro_regime
+
+
+# Test seam: when set, overrides the regime state read (bypasses the data-lake).
+_OVERRIDE_REGIME_STATE: str | None = None
 
 
 class BuilderError(ValueError):
@@ -311,7 +316,11 @@ async def _resolve_assets(
     return assets, label_map
 
 
-async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> OptimizeResponse:
+async def run_optimize(
+    session: AsyncSession,
+    payload: OptimizeRequest,
+    datalake: AsyncSession | None = None,
+) -> OptimizeResponse:
     assets, label_map = await _resolve_assets(session, payload)
     refs = [_to_data_ref(ref) for ref in assets]
     try:
@@ -399,8 +408,12 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
                     "max_return_cvar needs expected returns — provide views so the "
                     "Black-Litterman posterior exists (gate G5)"
                 )
+            state = _OVERRIDE_REGIME_STATE
+            if state is None and datalake is not None:
+                snap = await macro_regime.fetch_credit_regime(datalake)
+                state = snap.state if snap is not None else None
             limit = apply_regime_cvar_limit(
-                payload.cvar_limit, None, risk_off_factor=DEFAULT_RISK_OFF_CVAR_FACTOR
+                payload.cvar_limit, state, risk_off_factor=DEFAULT_RISK_OFF_CVAR_FACTOR
             )
             # Reuse cvar_bounds (already built above with the same promotion
             # logic) — the max_return_cvar engine path is structurally identical

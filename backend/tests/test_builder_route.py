@@ -667,3 +667,26 @@ async def test_optimize_max_return_cvar_without_bl_inputs_is_422(
         response = await client.post("/builder/optimize", json=payload)
     assert response.status_code == 422, response.text
     assert "expected returns" in response.text.lower()
+
+
+async def test_optimize_max_return_cvar_risk_off_smoke(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+    _stub_aum(monkeypatch)
+    from app.services import portfolio_builder
+
+    monkeypatch.setattr(portfolio_builder, "_OVERRIDE_REGIME_STATE", "risk_off", raising=False)
+    payload = {
+        "assets": [_fund_ref(i) for i in range(4)],
+        "objective": "max_return_cvar",
+        "cvar_limit": 0.20,
+        "views": [
+            {"type": "absolute", "asset": _fund_ref(0), "q": 0.15, "confidence": 0.6}
+        ],
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    monkeypatch.setattr(portfolio_builder, "_OVERRIDE_REGIME_STATE", None, raising=False)
+    assert response.status_code == 200, response.text
+    assert abs(sum(w["weight"] for w in response.json()["weights"]) - 1.0) < 1e-6

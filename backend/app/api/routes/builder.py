@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import get_current_user
 from app.core.db import get_session
+from app.core.datalake import get_optional_datalake_session
 from app.schemas.builder import (
     OptimizeRequest,
     OptimizeResponse,
@@ -31,20 +32,25 @@ from app.services.portfolio_builder import BuilderError
 router = APIRouter(prefix="/builder", tags=["builder"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+DatalakeDep = Annotated[AsyncSession | None, Depends(get_optional_datalake_session)]
 
 
 @router.post("/optimize", response_model=OptimizeResponse)
-async def optimize(payload: OptimizeRequest, session: SessionDep) -> OptimizeResponse:
+async def optimize(
+    payload: OptimizeRequest, session: SessionDep, datalake: DatalakeDep
+) -> OptimizeResponse:
     """Optimize weights over a mixed fund/equity universe.
 
     Default objective is ``min_cvar`` (Rockafellar–Uryasev, α=0.95) on raw
     historical scenarios. With Black-Litterman ``views``, scenarios are
     re-centered on the posterior μ_BL and floored at the equilibrium return;
-    ``bl_utility`` selects the explicit max-utility objective instead.
+    ``bl_utility`` selects the explicit max-utility objective instead;
+    ``max_return_cvar`` maximizes BL-posterior return under a CVaR cap, which
+    is tightened in a risk_off credit regime when the data-lake is configured.
     All fractional fields are decimal fractions (0.05 = 5%).
     """
     try:
-        return await portfolio_builder.run_optimize(session, payload)
+        return await portfolio_builder.run_optimize(session, payload, datalake=datalake)
     except BuilderError as exc:
         raise HTTPException(
             status_code=422, detail=portfolio_builder.humanize_error(str(exc))
