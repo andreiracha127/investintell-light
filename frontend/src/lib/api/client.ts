@@ -409,15 +409,17 @@ async function request<T>(
   path: string,
   signal?: AbortSignal,
   init?: { method: "POST" | "PUT" | "PATCH" | "DELETE"; json?: unknown },
+  authMode: "auth" | "public" = "auth",
 ): Promise<T> {
   const timeoutSignal = AbortSignal.timeout(15_000);
   const combinedSignal = signal
     ? AbortSignal.any([signal, timeoutSignal])
     : timeoutSignal;
+  const fetcher = authMode === "public" ? fetch : fetchWithAuth;
 
   let res: Response;
   try {
-    res = await fetchWithAuth(`${BASE_URL}${path}`, {
+    res = await fetcher(`${BASE_URL}${path}`, {
       signal: combinedSignal,
       ...(init && {
         method: init.method,
@@ -455,6 +457,10 @@ async function request<T>(
   return (await res.json()) as T;
 }
 
+function requestPublic<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return request<T>(path, signal, undefined, "public");
+}
+
 export function postPortfolioAnalysis(
   body: PortfolioAnalysisRequest,
   signal?: AbortSignal,
@@ -482,7 +488,7 @@ export function fetchStockAnalysis(
 }
 
 export function fetchMarketOverview(signal?: AbortSignal): Promise<MarketOverview> {
-  return request<MarketOverview>("/stocks/overview", signal);
+  return requestPublic<MarketOverview>("/stocks/overview", signal);
 }
 
 export function fetchStockHistory(
@@ -512,7 +518,7 @@ export function fetchFundHistory(
   bars = 2520,
   signal?: AbortSignal,
 ): Promise<FundHistory> {
-  return request<FundHistory>(
+  return requestPublic<FundHistory>(
     `/funds/${encodeURIComponent(instrumentId)}/history?bars=${bars}`,
     signal,
   );
@@ -523,7 +529,7 @@ export function fetchFundTimeseries(
   range: RangePreset,
   signal?: AbortSignal,
 ): Promise<FundTimeseries> {
-  return request<FundTimeseries>(
+  return requestPublic<FundTimeseries>(
     `/funds/${encodeURIComponent(instrumentId)}/timeseries?range=${range}`,
     signal,
   );
@@ -904,14 +910,14 @@ export function fetchFunds(
   signal?: AbortSignal,
 ): Promise<FundsList> {
   const qs = fundsParams(query);
-  return request<FundsList>(`/funds${qs ? `?${qs}` : ""}`, signal);
+  return requestPublic<FundsList>(`/funds${qs ? `?${qs}` : ""}`, signal);
 }
 
 export function fetchFundProfile(
   instrumentId: string,
   signal?: AbortSignal,
 ): Promise<FundProfile> {
-  return request<FundProfile>(
+  return requestPublic<FundProfile>(
     `/funds/${encodeURIComponent(instrumentId)}`,
     signal,
   );
@@ -926,7 +932,7 @@ export function fetchFundAnalysis(
   if (query.range !== undefined) params.set("range", query.range);
   if (query.window !== undefined) params.set("window", String(query.window));
   const qs = params.toString();
-  return request<FundAnalysis>(
+  return requestPublic<FundAnalysis>(
     `/funds/${encodeURIComponent(instrumentId)}/analysis${qs ? `?${qs}` : ""}`,
     signal,
   );
@@ -940,7 +946,7 @@ export function fetchFundHoldingsTop(
   const params = new URLSearchParams();
   if (query.limit !== undefined) params.set("limit", String(query.limit));
   const qs = params.toString();
-  return request<FundHoldingsTop>(
+  return requestPublic<FundHoldingsTop>(
     `/funds/${encodeURIComponent(instrumentId)}/holdings/top${
       qs ? `?${qs}` : ""
     }`,
@@ -956,7 +962,7 @@ export function fetchFundPeers(
   const params = new URLSearchParams();
   if (query.limit !== undefined) params.set("limit", String(query.limit));
   const qs = params.toString();
-  return request<FundPeers>(
+  return requestPublic<FundPeers>(
     `/funds/${encodeURIComponent(instrumentId)}/peers${qs ? `?${qs}` : ""}`,
     signal,
   );
@@ -969,14 +975,14 @@ export function fetchFundsScatter(
   const params = new URLSearchParams();
   if (query.limit !== undefined) params.set("limit", String(query.limit));
   const qs = params.toString();
-  return request<FundsScatter>(`/funds/scatter${qs ? `?${qs}` : ""}`, signal);
+  return requestPublic<FundsScatter>(`/funds/scatter${qs ? `?${qs}` : ""}`, signal);
 }
 
 export function fetchFundFactors(
   instrumentId: string,
   signal?: AbortSignal,
 ): Promise<FundFactors> {
-  return request<FundFactors>(
+  return requestPublic<FundFactors>(
     `/funds/${encodeURIComponent(instrumentId)}/factors`,
     signal,
   );
@@ -990,7 +996,7 @@ export function fetchFundStyleDrift(
   const params = new URLSearchParams();
   if (query.quarters !== undefined) params.set("quarters", String(query.quarters));
   const qs = params.toString();
-  return request<FundStyleDrift>(
+  return requestPublic<FundStyleDrift>(
     `/funds/${encodeURIComponent(instrumentId)}/style-drift${
       qs ? `?${qs}` : ""
     }`,
@@ -1007,7 +1013,7 @@ export function fetchFundEntityAnalytics(
   if (query.window !== undefined) params.set("window", query.window);
   if (query.benchmark_id != null) params.set("benchmark_id", query.benchmark_id);
   const qs = params.toString();
-  return request<FundEntityAnalytics>(
+  return requestPublic<FundEntityAnalytics>(
     `/funds/${encodeURIComponent(instrumentId)}/entity-analytics${
       qs ? `?${qs}` : ""
     }`,
@@ -1024,7 +1030,7 @@ export function fetchFundRiskTimeseries(
   if (query.from != null) params.set("from", query.from);
   if (query.to != null) params.set("to", query.to);
   const qs = params.toString();
-  return request<FundRiskTimeseries>(
+  return requestPublic<FundRiskTimeseries>(
     `/funds/${encodeURIComponent(instrumentId)}/risk-timeseries${
       qs ? `?${qs}` : ""
     }`,
@@ -1040,7 +1046,7 @@ export function fetchFundActiveShare(
   const params = new URLSearchParams();
   if (query.benchmark_id != null) params.set("benchmark_id", query.benchmark_id);
   const qs = params.toString();
-  return request<FundActiveShare>(
+  return requestPublic<FundActiveShare>(
     `/funds/${encodeURIComponent(instrumentId)}/active-share${
       qs ? `?${qs}` : ""
     }`,
@@ -1054,7 +1060,7 @@ export async function fetchFundsCsv(
   signal?: AbortSignal,
 ): Promise<Blob> {
   const qs = fundsParams(query);
-  const res = await fetchWithAuth(`${BASE_URL}/funds.csv${qs ? `?${qs}` : ""}`, {
+  const res = await fetch(`${BASE_URL}/funds.csv${qs ? `?${qs}` : ""}`, {
     signal: signal ?? AbortSignal.timeout(30_000),
   });
   if (!res.ok) {
@@ -1118,7 +1124,7 @@ export function fetchFundLookthrough(
   const params = new URLSearchParams();
   if (query.dimension != null) params.set("dimension", query.dimension); // schema allows explicit null — guard both
   const qs = params.toString();
-  return request<FundLookthrough>(
+  return requestPublic<FundLookthrough>(
     `/funds/${encodeURIComponent(instrumentId)}/lookthrough${qs ? `?${qs}` : ""}`,
     signal,
   );
@@ -1137,7 +1143,7 @@ export function fetchPortfolioLookthrough(
 
 /** Fetch the current macro regime signals and recent regime flips. */
 export function fetchMacroRegime(signal?: AbortSignal): Promise<MacroRegime> {
-  return request<MacroRegime>("/macro/regime", signal);
+  return requestPublic<MacroRegime>("/macro/regime", signal);
 }
 
 /** Fetch the rebalance policy (bands and frequency) for a portfolio. */

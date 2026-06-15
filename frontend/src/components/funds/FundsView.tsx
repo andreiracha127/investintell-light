@@ -38,7 +38,7 @@ import {
 } from "@/components/screener/shared";
 import { formatCompact, formatDate } from "@/lib/format";
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 30;
 type SortDir = "asc" | "desc";
 
 type FundType = NonNullable<FundsQuery["fund_type"]>;

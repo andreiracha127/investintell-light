@@ -2,8 +2,9 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 
-export default defineConfig({
+const config = {
   plugins: [react()],
+  oxc: false,
   resolve: { alias: { "@": path.resolve(__dirname, "src") } },
   test: {
     // Pure-logic suites run in the default `node` environment; React component
@@ -11,4 +12,6 @@ export default defineConfig({
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     setupFiles: ["./vitest.setup.ts"],
   },
-});
+};
+
+export default defineConfig(config as unknown as Parameters<typeof defineConfig>[0]);

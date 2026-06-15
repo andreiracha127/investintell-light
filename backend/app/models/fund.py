@@ -181,6 +181,59 @@ class FundRiskLatest(Base):
     equity_correlation_252d: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
 
 
+class FundListRow(Base):
+    # MV-backed rowset for GET /funds. The dynamic funds_v lineage remains the
+    # source of truth; this materialized projection removes expensive per-request
+    # joins/sorts from the interactive list page.
+    __tablename__ = "funds_list_mv"
+
+    instrument_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    series_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    ticker: Mapped[str | None] = mapped_column(String, nullable=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    fund_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    strategy_label: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    asset_class: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    is_index: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    expense_ratio: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    aum_usd: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    inception_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    calc_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    source_nav_max_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    return_1m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    return_3m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    return_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    return_3y_ann: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    return_5y_ann: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    volatility_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    max_drawdown_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    max_drawdown_3y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    sharpe_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    sharpe_3y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    sortino_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    calmar_ratio_3y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    alpha_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    beta_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    information_ratio_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    tracking_error_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    var_95_1m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    cvar_95_1m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    cvar_95_12m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    cvar_99_evt: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    peer_strategy_label: Mapped[str | None] = mapped_column(String, nullable=True)
+    peer_sharpe_pctl: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    peer_sortino_pctl: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    peer_return_pctl: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    peer_drawdown_pctl: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    peer_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    manager_score: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    elite_flag: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    downside_capture_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    upside_capture_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    equity_correlation_252d: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+
+
 class FundNav(Base):
     # Repointed (Task 4.3) to the LIVE nav_timeseries hypertable — the fund_nav
     # snapshot is retired (its sync was deleted in Task 4.2 and nothing writes it
