@@ -5847,11 +5847,17 @@
             }
           },
           "window_days": {
-            "type": "integer",
-            "maximum": 3650.0,
-            "minimum": 30.0,
-            "title": "Window Days",
-            "default": 730
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 3650.0,
+                "minimum": 30.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Days"
           },
           "views": {
             "anyOf": [
@@ -6511,6 +6517,26 @@
             "title": "Diversification Ratio",
             "description": "Weighted-average asset volatility divided by portfolio volatility at the effective initial weights; >= 1 for long-only portfolios (unitless)."
           },
+          "sharpe_ratio": {
+            "type": "number",
+            "title": "Sharpe Ratio",
+            "description": "Annualized Sharpe ratio of the replayed portfolio's daily returns at the canonical 4% risk-free rate (unitless)."
+          },
+          "sortino_ratio": {
+            "type": "number",
+            "title": "Sortino Ratio",
+            "description": "Annualized Sortino ratio (Target Downside Deviation denominator) at the canonical 4% risk-free rate (unitless)."
+          },
+          "information_ratio": {
+            "type": "number",
+            "title": "Information Ratio",
+            "description": "Annualized information ratio of the portfolio's active return vs the benchmark over the aligned daily grid (unitless)."
+          },
+          "effective_number_of_bets": {
+            "type": "number",
+            "title": "Effective Number Of Bets",
+            "description": "Entropy Effective Number of Bets over the per-asset risk contributions at the effective initial weights; in [1, n_positions] (unitless)."
+          },
           "max_drawdown": {
             "$ref": "#/components/schemas/DrawdownOut"
           },
@@ -6531,6 +6557,10 @@
           "beta",
           "correlation",
           "diversification_ratio",
+          "sharpe_ratio",
+          "sortino_ratio",
+          "information_ratio",
+          "effective_number_of_bets",
           "max_drawdown",
           "best_day",
           "worst_day"

@@ -2096,10 +2096,7 @@ export interface components {
              *     }
              */
             constraints: components["schemas"]["ConstraintsIn"];
-            /**
-             * Window Days
-             * @default null
-             */
+            /** Window Days */
             window_days?: number | null;
             /** Views */
             views?: (components["schemas"]["AbsoluteViewIn"] | components["schemas"]["RelativeViewIn"])[] | null;
@@ -2474,6 +2471,26 @@ export interface components {
              * @description Weighted-average asset volatility divided by portfolio volatility at the effective initial weights; >= 1 for long-only portfolios (unitless).
              */
             diversification_ratio: number;
+            /**
+             * Sharpe Ratio
+             * @description Annualized Sharpe ratio of the replayed portfolio's daily returns at the canonical 4% risk-free rate (unitless).
+             */
+            sharpe_ratio: number;
+            /**
+             * Sortino Ratio
+             * @description Annualized Sortino ratio (Target Downside Deviation denominator) at the canonical 4% risk-free rate (unitless).
+             */
+            sortino_ratio: number;
+            /**
+             * Information Ratio
+             * @description Annualized information ratio of the portfolio's active return vs the benchmark over the aligned daily grid (unitless).
+             */
+            information_ratio: number;
+            /**
+             * Effective Number Of Bets
+             * @description Entropy Effective Number of Bets over the per-asset risk contributions at the effective initial weights; in [1, n_positions] (unitless).
+             */
+            effective_number_of_bets: number;
             max_drawdown: components["schemas"]["DrawdownOut"];
             best_day: components["schemas"]["DatedValue"];
             worst_day: components["schemas"]["DatedValue"];

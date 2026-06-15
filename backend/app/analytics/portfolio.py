@@ -299,6 +299,22 @@ def effective_number_of_bets(
             also if all risk contributions floor to a non-positive total.
     """
     contributions = risk_contributions(returns, weights)
+    return enb_from_contributions(contributions)
+
+
+def enb_from_contributions(contributions: Mapping[str, float]) -> float:
+    """Entropy Effective Number of Bets over a precomputed CTR decomposition.
+
+    Splits the entropy step out of :func:`effective_number_of_bets` so callers
+    that have already solved :func:`risk_contributions` (e.g. the
+    portfolio-analysis assembler, which also emits the raw contributions) can
+    reuse them instead of paying for a second covariance solve. Same Meucci
+    (2009) ``ENB = exp(-Sum RC_i ln RC_i)`` with the floor-and-renormalize
+    guard, so ``ENB`` is bounded in ``[1, n_assets]``. Unitless.
+
+    Raises:
+        ValueError: if all risk contributions floor to a non-positive total.
+    """
     rc = np.array(list(contributions.values()), dtype=float)
     rc_pos = np.where(rc > 0.0, rc, 0.0)
     total = float(rc_pos.sum())
