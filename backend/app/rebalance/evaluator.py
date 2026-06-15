@@ -58,6 +58,7 @@ DEFAULT_BAND_ABS = 0.05   # 5 p.p. (fração decimal)
 DEFAULT_BAND_REL = 0.25   # 25% do peso-alvo
 DEFAULT_OBJECTIVE: Objective = "min_cvar"
 BUILDER_CAP = 0.25        # cap default do builder (ConstraintsIn)
+DEFAULT_TURNOVER_LAMBDA = 0.0  # advisory rebalance: report drift; do not bias toward holding
 
 
 class RebalanceError(ValueError):
@@ -308,10 +309,16 @@ async def evaluate_portfolio(
         else EquityRefIn(kind="equity", ticker=t)
         for t in tickers
     ]
+    label_current = {
+        (f"fund:{fund_ids[t]}" if t in fund_ids else f"equity:{t}"): current[t]
+        for t in tickers
+    }
     request = OptimizeRequest(
         assets=assets,
         objective=DEFAULT_OBJECTIVE,
         constraints=ConstraintsIn(cap=viable_cap(len(assets))),
+        turnover_lambda=DEFAULT_TURNOVER_LAMBDA,
+        current_weights=label_current if DEFAULT_TURNOVER_LAMBDA > 0 else None,
     )
     response = await portfolio_builder.run_optimize(session, request)
     id_to_ticker = {str(fund_ids[t]): t for t in fund_ids}

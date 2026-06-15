@@ -49,3 +49,21 @@ def test_constraints_block_budget_rejects_lo_above_hi() -> None:
 
     with pytest.raises(ValidationError):
         ConstraintsIn(block_budgets=[{"asset_class": "equity", "lo": 0.5, "hi": 0.2}])
+
+
+def test_optimize_request_accepts_turnover_and_current_weights() -> None:
+    req = OptimizeRequest(
+        assets=_assets(),
+        turnover_lambda=2.0,
+        current_weights={f"fund:{_A}": 0.6, f"fund:{_B}": 0.4},
+    )
+    assert req.turnover_lambda == 2.0
+    assert req.current_weights == {f"fund:{_A}": 0.6, f"fund:{_B}": 0.4}
+
+
+def test_optimize_request_turnover_requires_current_weights() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="current_weights"):
+        OptimizeRequest(assets=_assets(), turnover_lambda=2.0)

@@ -605,3 +605,28 @@ def test_humanize_error_passes_actionable_messages_through() -> None:
 
     msg = "insufficient common history: 120 overlapping observations"
     assert humanize_error(msg) == msg
+
+
+async def test_optimize_turnover_penalty_stays_near_current(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+    base = {
+        "assets": [_fund_ref(i) for i in range(4)],
+        "objective": "min_cvar",
+        "constraints": {"cap": None},
+    }
+    current = {f"fund:{_FUND_IDS[i]}": 0.25 for i in range(4)}
+    async with _client() as client:
+        free = await client.post("/builder/optimize", json=base)
+        sticky = await client.post(
+            "/builder/optimize",
+            json={**base, "turnover_lambda": 8.0, "current_weights": current},
+        )
+    assert free.status_code == 200, free.text
+    assert sticky.status_code == 200, sticky.text
+    free_w = {w["asset"]["id"]: w["weight"] for w in free.json()["weights"]}
+    sticky_w = {w["asset"]["id"]: w["weight"] for w in sticky.json()["weights"]}
+    free_l1 = sum(abs(free_w[str(_FUND_IDS[i])] - 0.25) for i in range(4))
+    sticky_l1 = sum(abs(sticky_w[str(_FUND_IDS[i])] - 0.25) for i in range(4))
+    assert sticky_l1 < free_l1

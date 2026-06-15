@@ -165,6 +165,11 @@ class OptimizeRequest(BaseModel):
     # funds only — equities have no market cap in the builder yet).
     views: list[ViewIn] | None = None
     bl: BLParamsIn = BLParamsIn()
+    # L1 turnover penalty λ·‖w − w₀‖₁ on the min_cvar objective. Requires
+    # ``current_weights`` (asset-label -> decimal fraction, label scheme
+    # 'fund:<uuid>' / 'equity:<TICKER>'). v1: honoured only by min_cvar.
+    turnover_lambda: Annotated[float, Field(ge=0)] = 0.0
+    current_weights: dict[str, float] | None = None
 
     @model_validator(mode="after")
     def _check_asset_source(self) -> "OptimizeRequest":
@@ -180,6 +185,11 @@ class OptimizeRequest(BaseModel):
                 "views cannot be combined with 'universe' — views reference "
                 "specific assets, which a universe optimization selects for you; "
                 "use an explicit 'assets' list to express views"
+            )
+        if self.turnover_lambda > 0 and not self.current_weights:
+            raise ValueError(
+                "turnover_lambda requires current_weights (a label -> fraction map "
+                "of the existing allocation)"
             )
         return self
 

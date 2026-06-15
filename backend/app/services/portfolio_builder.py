@@ -301,6 +301,17 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
     labels = list(frame.columns)
     index_of = {label: i for i, label in enumerate(labels)}
     scenarios = frame.to_numpy(dtype=float)
+    current_vec: np.ndarray | None = None
+    if payload.turnover_lambda > 0 and payload.current_weights:
+        try:
+            current_vec = np.array(
+                [payload.current_weights[label] for label in labels], dtype=float
+            )
+        except KeyError as exc:
+            raise BuilderError(
+                f"current_weights is missing an entry for asset {exc.args[0]} — it must "
+                "cover every asset in the request universe"
+            ) from exc
     try:
         sigma = engine.sigma_ledoit_wolf(scenarios)
     except engine.OptimizerError as exc:
@@ -374,11 +385,18 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
                 bounds=cvar_bounds,
                 ret_floor=ret_floor,
                 mu=mu_posterior,
+                current_weights=current_vec,
+                turnover_lambda=payload.turnover_lambda,
             )
         else:
             if payload.objective == "min_cvar":
                 weights, status = engine.solve_min_cvar(
-                    scenarios, cap=cap, min_weight=min_weight, bounds=cvar_bounds
+                    scenarios,
+                    cap=cap,
+                    min_weight=min_weight,
+                    bounds=cvar_bounds,
+                    current_weights=current_vec,
+                    turnover_lambda=payload.turnover_lambda,
                 )
             else:
                 weights, status = _solve_mu_free(
