@@ -190,13 +190,40 @@ def robust_sharpe(
         sigma_cf = (z_cf / z) * std_returns
     sr_cf = mean / sigma_cf * sqrt_ann
 
-    # Closed-form (Opdyke) CI.
-    var_period = _opdyke_variance(sr_period, skew, excess_kurt, T)
-    se_ann = float(np.sqrt(var_period)) * sqrt_ann
-    method: Literal["closed_form", "jackknife"] = "closed_form"
+    # CI method selection / auto-fallback.
+    requested = ci_method if ci_method in {"closed_form", "jackknife"} else "closed_form"
+    use_jackknife = (
+        requested == "jackknife"
+        or T < _JACKKNIFE_T_THRESHOLD
+        or abs(skew) > _JACKKNIFE_SKEW_THRESHOLD
+    )
+    method: Literal["closed_form", "jackknife"]
+    if use_jackknife:
+        se_ann = _jackknife_se(excess, periods_per_year)
+        method = "jackknife"
+    else:
+        var_period = _opdyke_variance(sr_period, skew, excess_kurt, T)
+        if var_period <= 0.0 or not np.isfinite(var_period):
+            se_ann = float("nan")
+        else:
+            se_ann = float(np.sqrt(var_period)) * sqrt_ann
+        method = "closed_form"
 
-    ci_lower = sr_traditional - _CI_Z_95 * se_ann
-    ci_upper = sr_traditional + _CI_Z_95 * se_ann
+    if np.isfinite(se_ann):
+        ci_lower = sr_traditional - _CI_Z_95 * se_ann
+        ci_upper = sr_traditional + _CI_Z_95 * se_ann
+    else:
+        ci_lower = float("nan")
+        ci_upper = float("nan")
+
+    degraded = cf_non_monotonic or not np.isfinite(se_ann)
+    reason: str | None
+    if cf_non_monotonic:
+        reason = "cornish_fisher_non_monotonic"
+    elif not np.isfinite(se_ann):
+        reason = "ci_unavailable"
+    else:
+        reason = None
 
     return RobustSharpeResult(
         sharpe_traditional=sr_traditional,
@@ -207,6 +234,6 @@ def robust_sharpe(
         excess_kurtosis=excess_kurt,
         n_observations=T,
         ci_method=method,
-        degraded=cf_non_monotonic,
-        degraded_reason="cornish_fisher_non_monotonic" if cf_non_monotonic else None,
+        degraded=degraded,
+        degraded_reason=reason,
     )

@@ -145,3 +145,68 @@ def test_cornish_fisher_non_monotonic_clamp() -> None:
     assert math.isfinite(res.sharpe_cornish_fisher)
     # Traditional Sharpe is still reported and finite.
     assert math.isfinite(res.sharpe_traditional)
+
+
+# --- jackknife SE fallback ----------------------------------------------------
+
+
+def test_explicit_jackknife_method() -> None:
+    """Requesting jackknife yields a jackknife CI even for a large sample."""
+    r = _normal_returns(120)
+    res = robust_sharpe(r, rf_rate=0.0, ci_method="jackknife")
+    assert res.ci_method == "jackknife"
+    assert math.isfinite(res.ci_lower_95)
+    assert math.isfinite(res.ci_upper_95)
+    assert res.ci_lower_95 < res.sharpe_traditional < res.ci_upper_95
+
+
+def test_auto_jackknife_when_T_below_60() -> None:
+    """T=48 (>= 36, so CF computed) auto-falls-back to jackknife for the CI."""
+    r = _normal_returns(48, seed=3)
+    res = robust_sharpe(r, rf_rate=0.0)  # default ci_method="closed_form"
+    assert res.n_observations == 48
+    assert res.ci_method == "jackknife"
+    assert math.isfinite(res.sharpe_cornish_fisher)  # CF still available at T>=36
+    assert math.isfinite(res.ci_lower_95)
+
+
+def test_auto_jackknife_when_skew_extreme() -> None:
+    """|skew| > 1.5 on a large sample forces jackknife even when T >= 60."""
+    rng = np.random.default_rng(9)
+    body = rng.standard_normal(98) * 0.02 + 0.01
+    r = np.concatenate([body, [0.5, 0.6]])  # heavy right tail -> |skew| ~ 6.39
+    res = robust_sharpe(r, rf_rate=0.0)
+    assert res.n_observations == 100
+    assert abs(res.skewness) > 1.5
+    assert res.ci_method == "jackknife"
+
+
+def test_closed_form_retained_for_large_low_skew() -> None:
+    """T=120, near-symmetric: stays closed_form (control for the triggers above)."""
+    r = _normal_returns(120)
+    res = robust_sharpe(r, rf_rate=0.0)
+    assert res.ci_method == "closed_form"
+    assert abs(res.skewness) <= 1.5
+    assert res.n_observations >= 60
+
+
+def test_jackknife_se_all_constant_returns_nan() -> None:
+    """_jackknife_se returns NaN when fewer than 3 finite replicates survive.
+
+    For an exactly-constant array every leave-one-out subset is constant, so
+    every replicate variance is 0 -> every replicate is NaN -> < 3 finite ->
+    SE is NaN. This is the deterministic unit of the degenerate-CI path
+    (the end-to-end robust_sharpe path is floating-point-fragile; see the
+    cluster open_questions). Note the helper has NO zero-vol guard — that guard
+    lives in robust_sharpe, added in Task T2A-4 — so the helper is exercised
+    directly here.
+    """
+    from app.analytics.robust_sharpe import _jackknife_se
+
+    se = _jackknife_se(np.array([0.5] * 10, dtype=float), periods_per_year=12)
+    assert math.isnan(se)
+    # A healthy small sample yields a finite, positive SE.
+    healthy = _normal_returns(48, seed=1)
+    se_ok = _jackknife_se(healthy, periods_per_year=12)
+    assert math.isfinite(se_ok)
+    assert se_ok > 0.0
