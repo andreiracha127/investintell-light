@@ -7,6 +7,10 @@
  */
 import type { components, paths } from "@/lib/api/api";
 import { getAccessToken, refreshSession } from "@/lib/auth/token";
+import {
+  buildFundProxyPath,
+  buildFundsScatterProxyPath,
+} from "@/lib/funds/dossierQueries";
 
 type AnalysisOperation = paths["/stocks/{ticker}/analysis"]["get"];
 type PricesOperation = paths["/stocks/{ticker}/prices"]["get"];
@@ -455,6 +459,48 @@ async function request<T>(
   return (await res.json()) as T;
 }
 
+async function requestSameOrigin<T>(
+  path: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  const timeoutSignal = AbortSignal.timeout(15_000);
+  const combinedSignal = signal
+    ? AbortSignal.any([signal, timeoutSignal])
+    : timeoutSignal;
+
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      signal: combinedSignal,
+      headers: { Accept: "application/json" },
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      if (timeoutSignal.aborted) {
+        throw new Error("Request timed out — is the backend running?");
+      }
+      throw new Error("Request cancelled");
+    }
+    throw err;
+  }
+
+  if (!res.ok) {
+    const fallback = `HTTP ${res.status} ${res.statusText}`.trim();
+    let detail = fallback;
+    try {
+      detail = extractDetail(await res.json(), fallback);
+    } catch {
+      // Non-JSON error body — keep the HTTP status as the message.
+    }
+    throw new ApiError(res.status, detail);
+  }
+
+  if (res.status === 204) {
+    return undefined as T;
+  }
+  return (await res.json()) as T;
+}
+
 export function postPortfolioAnalysis(
   body: PortfolioAnalysisRequest,
   signal?: AbortSignal,
@@ -512,8 +558,8 @@ export function fetchFundHistory(
   bars = 2520,
   signal?: AbortSignal,
 ): Promise<FundHistory> {
-  return request<FundHistory>(
-    `/funds/${encodeURIComponent(instrumentId)}/history?bars=${bars}`,
+  return requestSameOrigin<FundHistory>(
+    buildFundProxyPath("history", instrumentId, { bars }),
     signal,
   );
 }
@@ -523,8 +569,8 @@ export function fetchFundTimeseries(
   range: RangePreset,
   signal?: AbortSignal,
 ): Promise<FundTimeseries> {
-  return request<FundTimeseries>(
-    `/funds/${encodeURIComponent(instrumentId)}/timeseries?range=${range}`,
+  return requestSameOrigin<FundTimeseries>(
+    buildFundProxyPath("timeseries", instrumentId, { range }),
     signal,
   );
 }
@@ -911,8 +957,8 @@ export function fetchFundProfile(
   instrumentId: string,
   signal?: AbortSignal,
 ): Promise<FundProfile> {
-  return request<FundProfile>(
-    `/funds/${encodeURIComponent(instrumentId)}`,
+  return requestSameOrigin<FundProfile>(
+    buildFundProxyPath("profile", instrumentId),
     signal,
   );
 }
@@ -922,12 +968,8 @@ export function fetchFundAnalysis(
   query: FundAnalysisQuery = {},
   signal?: AbortSignal,
 ): Promise<FundAnalysis> {
-  const params = new URLSearchParams();
-  if (query.range !== undefined) params.set("range", query.range);
-  if (query.window !== undefined) params.set("window", String(query.window));
-  const qs = params.toString();
-  return request<FundAnalysis>(
-    `/funds/${encodeURIComponent(instrumentId)}/analysis${qs ? `?${qs}` : ""}`,
+  return requestSameOrigin<FundAnalysis>(
+    buildFundProxyPath("analysis", instrumentId, query),
     signal,
   );
 }
@@ -937,13 +979,8 @@ export function fetchFundHoldingsTop(
   query: FundHoldingsTopQuery = {},
   signal?: AbortSignal,
 ): Promise<FundHoldingsTop> {
-  const params = new URLSearchParams();
-  if (query.limit !== undefined) params.set("limit", String(query.limit));
-  const qs = params.toString();
-  return request<FundHoldingsTop>(
-    `/funds/${encodeURIComponent(instrumentId)}/holdings/top${
-      qs ? `?${qs}` : ""
-    }`,
+  return requestSameOrigin<FundHoldingsTop>(
+    buildFundProxyPath("holdings-top", instrumentId, query),
     signal,
   );
 }
@@ -953,11 +990,8 @@ export function fetchFundPeers(
   query: FundPeersQuery = {},
   signal?: AbortSignal,
 ): Promise<FundPeers> {
-  const params = new URLSearchParams();
-  if (query.limit !== undefined) params.set("limit", String(query.limit));
-  const qs = params.toString();
-  return request<FundPeers>(
-    `/funds/${encodeURIComponent(instrumentId)}/peers${qs ? `?${qs}` : ""}`,
+  return requestSameOrigin<FundPeers>(
+    buildFundProxyPath("peers", instrumentId, query),
     signal,
   );
 }
@@ -966,18 +1000,18 @@ export function fetchFundsScatter(
   query: FundsScatterQuery = {},
   signal?: AbortSignal,
 ): Promise<FundsScatter> {
-  const params = new URLSearchParams();
-  if (query.limit !== undefined) params.set("limit", String(query.limit));
-  const qs = params.toString();
-  return request<FundsScatter>(`/funds/scatter${qs ? `?${qs}` : ""}`, signal);
+  return requestSameOrigin<FundsScatter>(
+    buildFundsScatterProxyPath(query),
+    signal,
+  );
 }
 
 export function fetchFundFactors(
   instrumentId: string,
   signal?: AbortSignal,
 ): Promise<FundFactors> {
-  return request<FundFactors>(
-    `/funds/${encodeURIComponent(instrumentId)}/factors`,
+  return requestSameOrigin<FundFactors>(
+    buildFundProxyPath("factors", instrumentId),
     signal,
   );
 }
@@ -987,13 +1021,8 @@ export function fetchFundStyleDrift(
   query: FundStyleDriftQuery = {},
   signal?: AbortSignal,
 ): Promise<FundStyleDrift> {
-  const params = new URLSearchParams();
-  if (query.quarters !== undefined) params.set("quarters", String(query.quarters));
-  const qs = params.toString();
-  return request<FundStyleDrift>(
-    `/funds/${encodeURIComponent(instrumentId)}/style-drift${
-      qs ? `?${qs}` : ""
-    }`,
+  return requestSameOrigin<FundStyleDrift>(
+    buildFundProxyPath("style-drift", instrumentId, query),
     signal,
   );
 }
@@ -1003,14 +1032,8 @@ export function fetchFundEntityAnalytics(
   query: FundEntityAnalyticsQuery = {},
   signal?: AbortSignal,
 ): Promise<FundEntityAnalytics> {
-  const params = new URLSearchParams();
-  if (query.window !== undefined) params.set("window", query.window);
-  if (query.benchmark_id != null) params.set("benchmark_id", query.benchmark_id);
-  const qs = params.toString();
-  return request<FundEntityAnalytics>(
-    `/funds/${encodeURIComponent(instrumentId)}/entity-analytics${
-      qs ? `?${qs}` : ""
-    }`,
+  return requestSameOrigin<FundEntityAnalytics>(
+    buildFundProxyPath("entity-analytics", instrumentId, query),
     signal,
   );
 }
@@ -1020,14 +1043,8 @@ export function fetchFundRiskTimeseries(
   query: FundRiskTimeseriesQuery = {},
   signal?: AbortSignal,
 ): Promise<FundRiskTimeseries> {
-  const params = new URLSearchParams();
-  if (query.from != null) params.set("from", query.from);
-  if (query.to != null) params.set("to", query.to);
-  const qs = params.toString();
-  return request<FundRiskTimeseries>(
-    `/funds/${encodeURIComponent(instrumentId)}/risk-timeseries${
-      qs ? `?${qs}` : ""
-    }`,
+  return requestSameOrigin<FundRiskTimeseries>(
+    buildFundProxyPath("risk-timeseries", instrumentId, query),
     signal,
   );
 }
@@ -1037,13 +1054,8 @@ export function fetchFundActiveShare(
   query: FundActiveShareQuery = {},
   signal?: AbortSignal,
 ): Promise<FundActiveShare> {
-  const params = new URLSearchParams();
-  if (query.benchmark_id != null) params.set("benchmark_id", query.benchmark_id);
-  const qs = params.toString();
-  return request<FundActiveShare>(
-    `/funds/${encodeURIComponent(instrumentId)}/active-share${
-      qs ? `?${qs}` : ""
-    }`,
+  return requestSameOrigin<FundActiveShare>(
+    buildFundProxyPath("active-share", instrumentId, query),
     signal,
   );
 }
