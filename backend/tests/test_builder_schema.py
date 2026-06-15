@@ -67,3 +67,23 @@ def test_optimize_request_turnover_requires_current_weights() -> None:
 
     with pytest.raises(ValidationError, match="current_weights"):
         OptimizeRequest(assets=_assets(), turnover_lambda=2.0)
+
+
+def test_objective_accepts_max_return_cvar() -> None:
+    req = OptimizeRequest(
+        assets=_assets(), objective="max_return_cvar", cvar_limit=0.05,
+        views=[{"type": "absolute", "asset": {"kind": "fund", "id": _A}, "q": 0.1}],
+    )
+    assert req.objective == "max_return_cvar"
+    assert req.cvar_limit == 0.05
+
+
+def test_max_return_cvar_requires_cvar_limit() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="cvar_limit"):
+        OptimizeRequest(
+            assets=_assets(), objective="max_return_cvar",
+            views=[{"type": "absolute", "asset": {"kind": "fund", "id": _A}, "q": 0.1}],
+        )

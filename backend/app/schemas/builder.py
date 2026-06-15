@@ -63,7 +63,8 @@ class BLParamsIn(BaseModel):
 
 
 Objective = Literal[
-    "equal_weight", "min_vol", "erc", "max_diversification", "min_cvar", "bl_utility"
+    "equal_weight", "min_vol", "erc", "max_diversification", "min_cvar",
+    "bl_utility", "max_return_cvar",
 ]
 
 # Candidate-universe selection vocabulary — mirrors the GET /funds filters and
@@ -170,6 +171,9 @@ class OptimizeRequest(BaseModel):
     # 'fund:<uuid>' / 'equity:<TICKER>'). v1: honoured only by min_cvar.
     turnover_lambda: Annotated[float, Field(ge=0)] = 0.0
     current_weights: dict[str, float] | None = None
+    # Annual tail-loss cap for ``max_return_cvar`` (decimal fraction, e.g.
+    # 0.10 = 10% CVaR_95). Required for that objective, ignored otherwise.
+    cvar_limit: Annotated[float, Field(gt=0, le=1)] | None = None
 
     @model_validator(mode="after")
     def _check_asset_source(self) -> "OptimizeRequest":
@@ -191,6 +195,19 @@ class OptimizeRequest(BaseModel):
                 "turnover_lambda requires current_weights (a label -> fraction map "
                 "of the existing allocation)"
             )
+        if self.objective == "max_return_cvar":
+            if self.cvar_limit is None:
+                raise ValueError("max_return_cvar requires a cvar_limit (tail-loss cap)")
+            if self.universe is not None:
+                raise ValueError(
+                    "max_return_cvar needs expected returns and so requires views on an "
+                    "explicit 'assets' list — it cannot run over a 'universe'"
+                )
+            if not self.views:
+                raise ValueError(
+                    "max_return_cvar needs expected returns — supply Black-Litterman "
+                    "'views' (gate G5: no sample mean is ever used as the objective)"
+                )
         return self
 
 

@@ -630,3 +630,40 @@ async def test_optimize_turnover_penalty_stays_near_current(
     free_l1 = sum(abs(free_w[str(_FUND_IDS[i])] - 0.25) for i in range(4))
     sticky_l1 = sum(abs(sticky_w[str(_FUND_IDS[i])] - 0.25) for i in range(4))
     assert sticky_l1 < free_l1
+
+
+async def test_optimize_max_return_cvar_with_views_happy_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+    _stub_aum(monkeypatch)
+    payload = {
+        "assets": [_fund_ref(i) for i in range(4)],
+        "objective": "max_return_cvar",
+        "cvar_limit": 0.10,
+        "views": [
+            {"type": "absolute", "asset": _fund_ref(0), "q": 0.15, "confidence": 0.6}
+        ],
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert abs(sum(w["weight"] for w in body["weights"]) - 1.0) < 1e-6
+    assert body["diagnostics"]["mu_posterior"] is not None
+    assert body["diagnostics"]["status"] == "optimal"
+
+
+async def test_optimize_max_return_cvar_without_bl_inputs_is_422(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+    payload = {
+        "assets": [_fund_ref(i) for i in range(4)],
+        "objective": "max_return_cvar",
+        "cvar_limit": 0.10,
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 422, response.text
+    assert "expected returns" in response.text.lower()

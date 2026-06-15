@@ -89,6 +89,12 @@ def humanize_error(detail: str) -> str:
     return detail
 
 
+def _regime_cvar_limit(base_limit: float) -> float:
+    """Base CVaR limit, unmodified. T2C-7/T2C-8 replace this with a regime-aware
+    multiplier driven by the credit-regime stress series."""
+    return base_limit
+
+
 def _to_data_ref(ref: FundRefIn | EquityRefIn) -> optimizer_data.AssetRef:
     if isinstance(ref, FundRefIn):
         return optimizer_data.FundAssetRef(id=ref.id)
@@ -368,6 +374,27 @@ async def run_optimize(session: AsyncSession, payload: OptimizeRequest) -> Optim
             mu_for_utility = mu_posterior if mu_posterior is not None else mu_equilibrium
             weights, status = bl.solve_bl_utility(
                 mu_for_utility, sigma, delta=payload.bl.delta, cap=cap, min_weight=min_weight
+            )
+        elif payload.objective == "max_return_cvar":
+            assert payload.cvar_limit is not None  # schema validator guarantees it
+            if mu_posterior is None:
+                raise BuilderError(
+                    "max_return_cvar needs expected returns — provide views so the "
+                    "Black-Litterman posterior exists (gate G5)"
+                )
+            limit = _regime_cvar_limit(payload.cvar_limit)  # T2C-8 makes this regime-aware
+            bundle = (
+                engine.BoundsBundle(cap_vec=None, min_vec=None, blocks=blocks)
+                if blocks
+                else None
+            )
+            weights, status = engine.solve_max_return_cvar_capped(
+                scenarios,
+                mu=mu_posterior,
+                cvar_limit=limit,
+                cap=cap,
+                min_weight=min_weight,
+                bounds=bundle,
             )
         elif payload.objective == "min_cvar" and mu_posterior is not None:
             # Product default with views: re-centered scenarios + equilibrium
