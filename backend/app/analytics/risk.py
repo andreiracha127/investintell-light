@@ -90,6 +90,50 @@ def annualized_volatility(returns: pd.Series, periods_per_year: int = 252) -> fl
     return vol
 
 
+def downside_deviation(returns: pd.Series, mar: float = 0.0) -> float:
+    """Downside deviation below a Minimum Acceptable Return (MAR).
+
+    ``sqrt(mean(min(R - MAR, 0)^2))`` over the full sample (N denominator,
+    not N-1) — only shortfalls below ``mar`` contribute; upside is treated as
+    zero. ``mar`` and inputs/result are per-period decimal fractions
+    (0.05 = 5%), never 0-100. Mirrors the eVestment MAR-based downside
+    deviation (legacy return_statistics_service._compute_downside_deviation).
+
+    Raises:
+        ValueError: if fewer than 2 returns are supplied or the input contains
+            NaN values.
+    """
+    if len(returns) < 2:
+        raise ValueError(
+            f"downside_deviation requires at least 2 returns, got {len(returns)}"
+        )
+    reject_nan(returns, "downside_deviation")
+    shortfall = np.minimum(returns.to_numpy(dtype=float) - mar, 0.0)
+    return float(np.sqrt(np.mean(shortfall**2)))
+
+
+def semi_deviation(returns: pd.Series) -> float:
+    """Semi-deviation: downside deviation using the sample mean as threshold.
+
+    ``sqrt(mean(min(R - mean(R), 0)^2))`` over the full sample (N denominator).
+    Only returns below the series mean contribute. Inputs/result are per-period
+    decimal fractions (0.05 = 5%), never 0-100. Mirrors the eVestment
+    semi-deviation (legacy return_statistics_service._compute_semi_deviation).
+
+    Raises:
+        ValueError: if fewer than 2 returns are supplied or the input contains
+            NaN values.
+    """
+    if len(returns) < 2:
+        raise ValueError(
+            f"semi_deviation requires at least 2 returns, got {len(returns)}"
+        )
+    reject_nan(returns, "semi_deviation")
+    values = returns.to_numpy(dtype=float)
+    shortfall = np.minimum(values - values.mean(), 0.0)
+    return float(np.sqrt(np.mean(shortfall**2)))
+
+
 def sharpe_ratio(
     returns: pd.Series,
     risk_free_rate: float = DEFAULT_RISK_FREE_RATE,
@@ -541,3 +585,208 @@ def correlation(asset_returns: pd.Series, benchmark_returns: pd.Series) -> float
     if math.isnan(corr):
         raise ValueError("correlation is NaN; input contains NaN values")
     return corr
+
+
+# ---------------------------------------------------------------------------
+# Parametric Gaussian VaR / CVaR (fail-loud) and EVT POT-GPD (degraded carrier)
+# ---------------------------------------------------------------------------
+
+# EVT thresholds (ported from worker risk_metrics.evt_tail lines 250/254/264 and
+# legacy pot_gpd): >=100 finite returns, >=30 strictly-positive losses, >=20
+# exceedances over the POT threshold (90th pct, retried at 85th).
+_EVT_MIN_OBS = 100
+_EVT_MIN_LOSSES = 30
+_EVT_MIN_EXCEEDANCES = 20
+
+
+def parametric_var(returns: pd.Series, confidence: float = 0.95) -> float:
+    """Parametric (Normal) Value-at-Risk as a POSITIVE decimal-fraction loss.
+
+    ``VaR = -(mu + z*sigma)`` with ``z = norm.ppf(1 - confidence) < 0`` and
+    ``sigma`` the sample std (ddof=1). Ported from cvar_service.compute_cvar's
+    parametric branch (lines 222-242), negated to the Light positive-loss
+    convention.
+
+    Raises:
+        ValueError: confidence not in (0, 1), fewer than 10 returns, NaN/inf in
+            the input, or a (near-)zero-variance series (VaR undefined).
+    """
+    from scipy.stats import norm
+
+    if not 0 < confidence < 1:
+        raise ValueError(f"confidence must be in (0, 1), got {confidence}")
+    if len(returns) < _MIN_TAIL_POINTS:
+        raise ValueError(
+            f"parametric_var requires at least {_MIN_TAIL_POINTS} returns, got {len(returns)}"
+        )
+    reject_nan(returns, "parametric_var")
+    values = returns.to_numpy(dtype=float)
+    mu = float(np.mean(values))
+    sigma = float(np.std(values, ddof=1))
+    if sigma < 1e-12:
+        raise ValueError("parametric_var is undefined: returns have zero variance")
+    z = float(norm.ppf(1 - confidence))
+    return -(mu + z * sigma)
+
+
+def parametric_cvar(returns: pd.Series, confidence: float = 0.95) -> float:
+    """Parametric (Normal) Conditional VaR as a POSITIVE decimal-fraction loss.
+
+    ``CVaR = -mu + sigma * phi(z) / (1 - confidence)`` with ``z = norm.ppf(1 -
+    confidence)`` and ``phi`` the standard-normal pdf. Ported from
+    cvar_service.compute_cvar's parametric branch (lines 222-242, ``cvar = mu -
+    sigma*phi_z/(1-conf)``), negated to positive-loss.
+
+    Raises:
+        ValueError: confidence not in (0, 1), fewer than 10 returns, NaN/inf in
+            the input, or a (near-)zero-variance series (CVaR undefined).
+    """
+    from scipy.stats import norm
+
+    if not 0 < confidence < 1:
+        raise ValueError(f"confidence must be in (0, 1), got {confidence}")
+    if len(returns) < _MIN_TAIL_POINTS:
+        raise ValueError(
+            f"parametric_cvar requires at least {_MIN_TAIL_POINTS} returns, got {len(returns)}"
+        )
+    reject_nan(returns, "parametric_cvar")
+    values = returns.to_numpy(dtype=float)
+    mu = float(np.mean(values))
+    sigma = float(np.std(values, ddof=1))
+    if sigma < 1e-12:
+        raise ValueError("parametric_cvar is undefined: returns have zero variance")
+    z = float(norm.ppf(1 - confidence))
+    phi_z = float(norm.pdf(z))
+    return -mu + sigma * phi_z / (1 - confidence)
+
+
+@dataclass(frozen=True)
+class EvtTailResult:
+    """EVT POT-GPD tail estimate with an explicit fail-CLOSED degraded carrier.
+
+    Light analytics are normally fail-loud, but an EVT fit can legitimately be
+    non-estimable (too few losses/exceedances, GPD MLE non-convergence, an
+    infinite-mean tail). For those *data* conditions this carrier reports
+    ``degraded=True`` with ``var``/``cvar`` = NaN and a ``degraded_reason`` —
+    NEVER a silent 0.0 (a 0.0 would masquerade as "0% tail risk"). This mirrors
+    the legacy cvar_service.CVaRResult carrier (lines 125-139, 185-186). A
+    NaN/inf *input* is a caller bug and still raises ``ValueError`` up front.
+
+    ``var``/``cvar`` are POSITIVE decimal-fraction loss magnitudes when not
+    degraded; CVaR >= VaR by construction (xi < 1).
+    """
+
+    var: float
+    cvar: float
+    confidence: float
+    degraded: bool
+    degraded_reason: str | None
+    evt_xi: float  # GPD shape (NaN when degraded)
+    evt_beta: float  # GPD scale (NaN when degraded)
+    evt_threshold: float  # POT threshold u in loss space (NaN when degraded)
+    evt_n_exceedances: int  # exceedances over u (0 when degraded)
+
+
+def _degraded_evt(confidence: float, reason: str) -> EvtTailResult:
+    return EvtTailResult(
+        var=float("nan"),
+        cvar=float("nan"),
+        confidence=confidence,
+        degraded=True,
+        degraded_reason=reason,
+        evt_xi=float("nan"),
+        evt_beta=float("nan"),
+        evt_threshold=float("nan"),
+        evt_n_exceedances=0,
+    )
+
+
+def evt_tail_var_cvar(returns: pd.Series, confidence: float = 0.99) -> EvtTailResult:
+    """On-demand EVT POT-GPD VaR/CVaR for the deep loss tail (fail-closed carrier).
+
+    Ports the offline-proven recipe from the workers repo
+    (``src/workers/risk_metrics.py::evt_tail``, lines 243-293): work in loss
+    space (``losses = -returns``, keep the strictly-positive losses), pick a
+    peaks-over-threshold cut at the 90th loss percentile (retry at the 85th if
+    too few exceedances), fit a GPD to the exceedances via
+    ``scipy.stats.genpareto.fit(exceed, floc=0)``, then apply the McNeil-Frey
+    closed-form tail quantile and expected-shortfall:
+
+        ratio = (n / n_u) * (1 - confidence)
+        VaR   = u + (beta/xi) * (ratio**(-xi) - 1)            (xi != 0)
+              = u - beta * log(ratio)                          (xi ~ 0)
+        CVaR  = VaR/(1 - xi) + (beta - xi*u)/(1 - xi)          (xi < 1)
+
+    Returns POSITIVE loss magnitudes (the worker negates at the end for its
+    return-space table; here we keep them positive). The ``max(var_loss, u)``
+    clamp is from legacy pot_gpd.py line 205 (POT VaR is bounded below by the
+    threshold); harmless for the deep tail. Degrades fail-closed (NaN + reason)
+    on: fewer than 100 finite returns, fewer than 30 positive losses, fewer than
+    20 exceedances at either threshold, GPD MLE failure / non-positive scale, or
+    an infinite-mean tail (xi >= 1, ES undefined).
+
+    Raises:
+        ValueError: confidence not in (0, 1), or NaN/inf in the input.
+    """
+    from scipy.stats import genpareto
+
+    if not 0 < confidence < 1:
+        raise ValueError(f"confidence must be in (0, 1), got {confidence}")
+    reject_nan(returns, "evt_tail_var_cvar")
+    values = returns.to_numpy(dtype=float)
+    if values.size < _EVT_MIN_OBS:
+        return _degraded_evt(confidence, "insufficient_obs")
+
+    losses = -values
+    losses = losses[losses > 0]
+    if losses.size < _EVT_MIN_LOSSES:
+        return _degraded_evt(confidence, "insufficient_losses")
+
+    # POT threshold at the 90th loss percentile; drop to 85th if too few exceed.
+    exceed = np.array([])
+    u = float("nan")
+    for q in (0.90, 0.85):
+        u = float(np.quantile(losses, q))
+        exceed = losses[losses > u] - u
+        if exceed.size >= _EVT_MIN_EXCEEDANCES:
+            break
+    else:
+        return _degraded_evt(confidence, "insufficient_exceedances")
+
+    n = int(losses.size)
+    n_u = int(exceed.size)
+    try:
+        xi, _loc, beta = genpareto.fit(exceed, floc=0.0)
+    except Exception:
+        return _degraded_evt(confidence, "gpd_fit_failed")
+    xi = float(xi)
+    beta = float(beta)
+    if beta <= 0 or not np.isfinite(xi):
+        return _degraded_evt(confidence, "gpd_fit_invalid")
+    if xi >= 1.0:
+        # Infinite-mean tail — expected shortfall undefined.
+        return _degraded_evt(confidence, "infinite_mean_tail")
+
+    # McNeil-Frey closed form (worker recipe lines 277-286).
+    ratio = (n / n_u) * (1.0 - confidence)
+    if abs(xi) > 1e-8:
+        var_loss = u + (beta / xi) * (ratio ** (-xi) - 1.0)
+    else:
+        var_loss = u - beta * math.log(ratio)
+    var_loss = max(var_loss, u)  # POT VaR bounded below by threshold (pot_gpd L205)
+    cvar_loss = var_loss / (1.0 - xi) + (beta - xi * u) / (1.0 - xi)
+
+    if not (np.isfinite(var_loss) and np.isfinite(cvar_loss)):
+        return _degraded_evt(confidence, "non_finite_estimate")
+
+    return EvtTailResult(
+        var=float(var_loss),
+        cvar=float(cvar_loss),
+        confidence=confidence,
+        degraded=False,
+        degraded_reason=None,
+        evt_xi=xi,
+        evt_beta=beta,
+        evt_threshold=u,
+        evt_n_exceedances=n_u,
+    )

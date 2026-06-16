@@ -152,6 +152,7 @@ async def get_rebalance_preview(
                 drift_abs=d.drift_abs,
                 drift_rel=d.drift_rel,
                 breach=d.breach,
+                status=d.status,
             )
             for d in evaluation.drifts
         ],

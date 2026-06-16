@@ -746,6 +746,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/backtest/walk-forward": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Walk Forward
+         * @description Walk-forward / out-of-sample backtest of a mu-free objective.
+         *
+         *     Re-optimizes the objective on each expanding TimeSeriesSplit train fold and
+         *     scores the held-out test fold (Sharpe, CVaR 95, max drawdown), folding in a
+         *     one-way transaction cost on the L1 weight change vs the previous fold. The
+         *     response reports per-fold metrics plus the ``positive_folds`` consistency
+         *     count. All fractional fields are decimal fractions (0.05 = 5%).
+         */
+        post: operations["walk_forward_backtest_walk_forward_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/builder/optimize": {
         parameters: {
             query?: never;
@@ -762,7 +788,9 @@ export interface paths {
          *     Default objective is ``min_cvar`` (Rockafellar–Uryasev, α=0.95) on raw
          *     historical scenarios. With Black-Litterman ``views``, scenarios are
          *     re-centered on the posterior μ_BL and floored at the equilibrium return;
-         *     ``bl_utility`` selects the explicit max-utility objective instead.
+         *     ``bl_utility`` selects the explicit max-utility objective instead;
+         *     ``max_return_cvar`` maximizes BL-posterior return under a CVaR cap, which
+         *     is tightened in a risk_off credit regime when the data-lake is configured.
          *     All fractional fields are decimal fractions (0.05 = 5%).
          */
         post: operations["optimize_builder_optimize_post"];
@@ -876,6 +904,31 @@ export interface paths {
         get: operations["get_macro_fiscal_macro_fiscal_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/monte-carlo/projection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Project Monte Carlo
+         * @description Block-bootstrap Monte Carlo projection for one instrument — single call.
+         *
+         *     Returns the percentile distribution of the chosen statistic at the longest
+         *     horizon, a per-horizon confidence fan, and the historical value with its
+         *     bootstrap percentile rank. All drawdown/return fields are decimal fractions
+         *     (0.05 = 5%); sharpe is unitless.
+         */
+        post: operations["project_monte_carlo_monte_carlo_projection_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1227,6 +1280,28 @@ export interface components {
             ][];
         };
         /**
+         * BlockBudgetIn
+         * @description Σ of weights in an asset-class block must lie in [lo, hi] (decimal
+         *     fractions). ``asset_class`` matches ``Fund.asset_class``.
+         */
+        BlockBudgetIn: {
+            /**
+             * Asset Class
+             * @enum {string}
+             */
+            asset_class: "equity" | "fixed_income" | "cash" | "alternatives";
+            /**
+             * Lo
+             * @default 0
+             */
+            lo: number;
+            /**
+             * Hi
+             * @default 1
+             */
+            hi: number;
+        };
+        /**
          * BuildResponse
          * @description GET /screener/screens/{id}/build/{metric_code}.
          */
@@ -1268,8 +1343,47 @@ export interface components {
             volume: number;
         };
         /**
+         * ConfidenceBar
+         * @description One horizon's percentile fan of the projected statistic.
+         *
+         *     For max_drawdown/return the percentile fields are decimal fractions
+         *     (0.05 = 5%); for sharpe they are unitless.
+         */
+        ConfidenceBar: {
+            /**
+             * Horizon
+             * @description Human label, e.g. '1Y', '10Y' (or 'ND' for sub-year).
+             */
+            horizon: string;
+            /**
+             * Horizon Days
+             * @description Horizon length in trading days.
+             */
+            horizon_days: number;
+            /** Pct 5 */
+            pct_5: number;
+            /** Pct 10 */
+            pct_10: number;
+            /** Pct 25 */
+            pct_25: number;
+            /** Pct 50 */
+            pct_50: number;
+            /** Pct 75 */
+            pct_75: number;
+            /** Pct 90 */
+            pct_90: number;
+            /** Pct 95 */
+            pct_95: number;
+            /** Mean */
+            mean: number;
+        };
+        /**
          * ConstraintsIn
          * @description Long-only and sum(w)=1 are always enforced; these are the knobs.
+         *
+         *     ``block_budgets`` (per-asset-class Σ-weight bounds) are honoured ONLY by the
+         *     ``min_cvar`` objective in v1; they are resolved against ``Fund.asset_class``
+         *     server-side and IGNORED by the other objectives. Empty/None = no blocks.
          */
         ConstraintsIn: {
             /**
@@ -1279,6 +1393,8 @@ export interface components {
             cap: number | null;
             /** Min Weight */
             min_weight?: number | null;
+            /** Block Budgets */
+            block_budgets?: components["schemas"]["BlockBudgetIn"][] | null;
         };
         /**
          * CorrelationMatrixOut
@@ -1441,6 +1557,7 @@ export interface components {
             mu_equilibrium?: number[] | null;
             /** Mu Posterior */
             mu_posterior?: number[] | null;
+            view_consistency?: components["schemas"]["ViewConsistencyOut"] | null;
         };
         /** DimensionOut */
         DimensionOut: {
@@ -1595,6 +1712,27 @@ export interface components {
             series_id: string;
             /** Points */
             points: components["schemas"]["FiscalPointOut"][];
+        };
+        /** FoldMetricsOut */
+        FoldMetricsOut: {
+            /** Fold */
+            fold: number;
+            /** Train Size */
+            train_size: number;
+            /** N Obs */
+            n_obs: number;
+            /** Sharpe */
+            sharpe: number;
+            /** Cvar 95 */
+            cvar_95: number;
+            /** Max Drawdown */
+            max_drawdown: number;
+            /** Turnover */
+            turnover: number;
+            /** Gross Return */
+            gross_return: number;
+            /** Net Return */
+            net_return: number;
         };
         /**
          * FundClassOut
@@ -1870,6 +2008,14 @@ export interface components {
             cvar_95_12m: number | null;
             /** Cvar 99 Evt */
             cvar_99_evt: number | null;
+            /** Cvar 999 Evt */
+            cvar_999_evt: number | null;
+            /** Evt Xi Shape */
+            evt_xi_shape: number | null;
+            /** Volatility Garch */
+            volatility_garch: number | null;
+            /** Vol Model */
+            vol_model: string | null;
             /** Peer Strategy Label */
             peer_strategy_label: string | null;
             /** Peer Sharpe Pctl */
@@ -2180,6 +2326,133 @@ export interface components {
             presets: components["schemas"]["PresetBandOut"][];
         };
         /**
+         * MonteCarloParams
+         * @description Echo of the resolved request parameters.
+         */
+        MonteCarloParams: {
+            /** Ticker */
+            ticker: string;
+            /**
+             * Statistic
+             * @enum {string}
+             */
+            statistic: "max_drawdown" | "return" | "sharpe";
+            /**
+             * Range
+             * @enum {string}
+             */
+            range: "1M" | "6M" | "1Y" | "5Y" | "MAX";
+            /** N Simulations */
+            n_simulations: number;
+            /** Risk Free Rate */
+            risk_free_rate: number;
+            /**
+             * Seed
+             * @description Seed used, or null when unseeded.
+             */
+            seed: number | null;
+        };
+        /**
+         * MonteCarloRequest
+         * @description Block-bootstrap Monte Carlo projection request for one instrument.
+         */
+        MonteCarloRequest: {
+            /**
+             * Ticker
+             * @description Instrument ticker (normalized to uppercase).
+             */
+            ticker: string;
+            /**
+             * Statistic
+             * @description Which statistic to project: max_drawdown | return | sharpe.
+             * @default max_drawdown
+             * @enum {string}
+             */
+            statistic: "max_drawdown" | "return" | "sharpe";
+            /**
+             * Range
+             * @description History window used to estimate the return distribution; MAX = full available history.
+             * @default MAX
+             * @enum {string}
+             */
+            range: "1M" | "6M" | "1Y" | "5Y" | "MAX";
+            /**
+             * N Simulations
+             * @description Number of bootstrap paths (1000-50000).
+             * @default 10000
+             */
+            n_simulations: number;
+            /**
+             * Horizons
+             * @description Trading-day horizons for the confidence fan; default 1Y/3Y/5Y/7Y/10Y.
+             */
+            horizons?: number[] | null;
+            /**
+             * Risk Free Rate
+             * @description Annualized risk-free rate for the Sharpe statistic (decimal fraction).
+             * @default 0.04
+             */
+            risk_free_rate: number;
+            /**
+             * Seed
+             * @description Optional RNG seed for a reproducible projection.
+             */
+            seed?: number | null;
+        };
+        /**
+         * MonteCarloResponse
+         * @description Render-ready Monte Carlo projection payload.
+         *
+         *     The backend computes ALL finance; the frontend only draws. Percentiles for
+         *     max_drawdown/return are decimal fractions (0.05 = 5%); sharpe is unitless.
+         */
+        MonteCarloResponse: {
+            params: components["schemas"]["MonteCarloParams"];
+            /**
+             * Percentiles
+             * @description Distribution of the statistic at the longest horizon, keyed by percentile ('1st'..'99th').
+             */
+            percentiles: {
+                [key: string]: number;
+            };
+            /** Mean */
+            mean: number;
+            /** Median */
+            median: number;
+            /** Std */
+            std: number;
+            /**
+             * Historical Value
+             * @description The statistic computed on the ACTUAL historical series.
+             */
+            historical_value: number;
+            /**
+             * Historical Horizon Days
+             * @description Length of the historical series in trading days.
+             */
+            historical_horizon_days: number;
+            /**
+             * Historical Percentile Rank
+             * @description Percentile rank (0-100) of the historical value within a horizon-matched bootstrap; null for the sharpe statistic.
+             */
+            historical_percentile_rank: number | null;
+            /**
+             * Confidence Bars
+             * @description Per-horizon percentile fans (the projection chart).
+             */
+            confidence_bars: components["schemas"]["ConfidenceBar"][];
+            /**
+             * Degraded
+             * @description True only when a flat-NAV Sharpe collapse made the result uninformative.
+             */
+            degraded: boolean;
+            /**
+             * Degraded Reason
+             * @description Diagnostic when degraded is True, else null.
+             */
+            degraded_reason: string | null;
+        };
+        /**
          * NewsArticle
          * @description One news article linked to the requested ticker.
          */
@@ -2251,7 +2524,7 @@ export interface components {
              * @default min_cvar
              * @enum {string}
              */
-            objective: "equal_weight" | "min_vol" | "erc" | "max_diversification" | "min_cvar" | "bl_utility";
+            objective: "equal_weight" | "min_vol" | "erc" | "max_diversification" | "min_cvar" | "bl_utility" | "max_return_cvar";
             /**
              * @default {
              *       "cap": 0.25
@@ -2269,6 +2542,19 @@ export interface components {
              *     }
              */
             bl: components["schemas"]["BLParamsIn"];
+            /** Mandate */
+            mandate?: ("conservative" | "defensive" | "moderate_conservative" | "moderate" | "balanced" | "moderate_aggressive" | "aggressive" | "growth") | null;
+            /**
+             * Turnover Lambda
+             * @default 0
+             */
+            turnover_lambda: number;
+            /** Current Weights */
+            current_weights?: {
+                [key: string]: number;
+            } | null;
+            /** Cvar Limit */
+            cvar_limit?: number | null;
         };
         /** OptimizeResponse */
         OptimizeResponse: {
@@ -2742,6 +3028,11 @@ export interface components {
             drift_rel: number | null;
             /** Breach */
             breach: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "maintenance" | "urgent";
         };
         /**
          * PositionIn
@@ -3716,6 +4007,112 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * ViewConsistencyOut
+         * @description He-Litterman 3-sigma alarm: are any views fighting the equilibrium?
+         */
+        ViewConsistencyOut: {
+            /** Inconsistent */
+            inconsistent: boolean;
+            /** N Flagged */
+            n_flagged: number;
+            /** Max Z */
+            max_z: number;
+            /** Threshold Sigma */
+            threshold_sigma: number;
+        };
+        /** WalkForwardParams */
+        WalkForwardParams: {
+            /**
+             * Objective
+             * @enum {string}
+             */
+            objective: "equal_weight" | "min_vol" | "erc" | "max_diversification" | "min_cvar" | "bl_utility" | "max_return_cvar";
+            /** N Obs */
+            n_obs: number;
+            /** N Splits Computed */
+            n_splits_computed: number;
+            /** Gap */
+            gap: number;
+            /** Test Size */
+            test_size: number;
+            /** Min Train Size */
+            min_train_size: number;
+            /** Cost Bps */
+            cost_bps: number;
+        };
+        /**
+         * WalkForwardRequest
+         * @description Walk-forward / OOS backtest over an explicit asset list.
+         *
+         *     The objective is RE-OPTIMIZED on each expanding TimeSeriesSplit train fold
+         *     and held out-of-sample over the following test fold. ``min_cvar`` (the
+         *     product default) is mu-free; BL ``views`` are intentionally NOT accepted
+         *     here (a backtest must not peek at user views formed with hindsight) —
+         *     backtests run the mu-free objectives only.
+         */
+        WalkForwardRequest: {
+            /** Assets */
+            assets: (components["schemas"]["FundRefIn"] | components["schemas"]["EquityRefIn"])[];
+            /**
+             * Objective
+             * @default min_cvar
+             * @enum {string}
+             */
+            objective: "equal_weight" | "min_vol" | "erc" | "max_diversification" | "min_cvar" | "bl_utility" | "max_return_cvar";
+            /**
+             * @default {
+             *       "cap": 0.25
+             *     }
+             */
+            constraints: components["schemas"]["ConstraintsIn"];
+            /** Window Days */
+            window_days?: number | null;
+            /**
+             * N Splits
+             * @default 5
+             */
+            n_splits: number;
+            /**
+             * Gap
+             * @default 2
+             */
+            gap: number;
+            /**
+             * Test Size
+             * @default 63
+             */
+            test_size: number;
+            /**
+             * Min Train Size
+             * @default 252
+             */
+            min_train_size: number;
+            /**
+             * Cost Bps
+             * @default 10
+             */
+            cost_bps: number;
+            /**
+             * Risk Free Annual
+             * @default 0
+             */
+            risk_free_annual: number;
+        };
+        /** WalkForwardResponse */
+        WalkForwardResponse: {
+            /** Folds */
+            folds: components["schemas"]["FoldMetricsOut"][];
+            params: components["schemas"]["WalkForwardParams"];
+            /** Mean Sharpe */
+            mean_sharpe: number;
+            /** Std Sharpe */
+            std_sharpe: number;
+            /** Positive Folds */
+            positive_folds: number;
+            /** Mean Turnover */
+            mean_turnover: number;
         };
         /** WeightOut */
         WeightOut: {
@@ -4996,6 +5393,39 @@ export interface operations {
             };
         };
     };
+    walk_forward_backtest_walk_forward_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WalkForwardRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WalkForwardResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     optimize_builder_optimize_post: {
         parameters: {
             query?: never;
@@ -5141,6 +5571,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FiscalResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    project_monte_carlo_monte_carlo_projection_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MonteCarloRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonteCarloResponse"];
                 };
             };
             /** @description Validation Error */

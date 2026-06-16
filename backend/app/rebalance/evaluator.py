@@ -56,6 +56,13 @@ FREQUENCY_DAYS = {"weekly": 7, "monthly": 30, "quarterly": 91}
 DEFAULT_FREQUENCY: Frequency = "monthly"
 DEFAULT_BAND_ABS = 0.05   # 5 p.p. (fração decimal)
 DEFAULT_BAND_REL = 0.25   # 25% do peso-alvo
+# Banda "urgent" = 2× a banda de manutenção (T3D-1), travada em 100% de drift.
+# Espelha drift_service.urgent_trigger (0.10) quando band_abs é o default 0.05.
+DEFAULT_URGENT_MULTIPLE = 2.0
+# Tolerância de fronteira: a classificação de banda é INCLUSIVA e robusta a ruído
+# de ponto flutuante. Ex.: 0.45 - 0.40 == 0.04999999999999999 em IEEE 754 deve
+# contar como atingindo a banda de 0.05.
+_BAND_TOL = 1e-9
 DEFAULT_OBJECTIVE: Objective = "min_cvar"
 BUILDER_CAP = 0.25        # cap default do builder (ConstraintsIn)
 DEFAULT_TURNOVER_LAMBDA = 0.0  # advisory rebalance: report drift; do not bias toward holding
@@ -63,6 +70,9 @@ DEFAULT_TURNOVER_LAMBDA = 0.0  # advisory rebalance: report drift; do not bias t
 
 class RebalanceError(ValueError):
     """Avaliação impossível (posições insuficientes, dados ausentes…)."""
+
+
+DriftStatus = str  # "ok" | "maintenance" | "urgent"
 
 
 @dataclass(frozen=True)
@@ -73,6 +83,7 @@ class PositionDrift:
     drift_abs: float            # current − target (fração decimal, sinal)
     drift_rel: float | None     # |drift_abs| / target; None quando target = 0
     breach: bool
+    status: DriftStatus         # "ok" | "maintenance" | "urgent"
 
 
 @dataclass(frozen=True)
@@ -97,6 +108,11 @@ class Evaluation:
 # ---------------------------------------------------------------------------
 # Pure decision core
 # ---------------------------------------------------------------------------
+
+
+def default_urgent_band(band_abs: float) -> float:
+    """Banda urgent default = 2× banda de manutenção, travada em 1.0 (100%)."""
+    return min(band_abs * DEFAULT_URGENT_MULTIPLE, 1.0)
 
 
 def calendar_due(
@@ -128,17 +144,33 @@ def compute_drifts(
     target: dict[str, float],
     band_abs: float,
     band_rel: float,
+    band_urgent: float | None = None,
 ) -> list[PositionDrift]:
-    """Drift por posição contra as duas bandas (violação de QUALQUER uma)."""
+    """Drift por posição com classificação em três faixas (T3D-1).
+
+    status:
+      "urgent"      — |drift_abs| >= band_urgent (faixa crítica)
+      "maintenance" — breach de banda (abs >= band_abs OU rel > band_rel)
+                      mas abaixo da banda urgent
+      "ok"          — nenhuma banda violada
+    breach == status in {"maintenance", "urgent"} (compat. retroativa).
+    band_urgent default = default_urgent_band(band_abs) = 2× band_abs.
+    """
+    urgent = band_urgent if band_urgent is not None else default_urgent_band(band_abs)
     drifts: list[PositionDrift] = []
     for ticker in sorted(set(current) | set(target)):
         cur = current.get(ticker, 0.0)
         tgt = target.get(ticker, 0.0)
         drift_abs = cur - tgt
         drift_rel = abs(drift_abs) / tgt if tgt > 0 else None
-        breach = abs(drift_abs) > band_abs or (
-            drift_rel is not None and drift_rel > band_rel
-        )
+        abs_breach = abs(drift_abs) >= band_abs - _BAND_TOL
+        rel_breach = drift_rel is not None and drift_rel > band_rel
+        if abs(drift_abs) >= urgent - _BAND_TOL:
+            status: DriftStatus = "urgent"
+        elif abs_breach or rel_breach:
+            status = "maintenance"
+        else:
+            status = "ok"
         drifts.append(
             PositionDrift(
                 ticker=ticker,
@@ -146,7 +178,8 @@ def compute_drifts(
                 target_weight=tgt,
                 drift_abs=drift_abs,
                 drift_rel=drift_rel,
-                breach=breach,
+                breach=status != "ok",
+                status=status,
             )
         )
     return drifts
@@ -342,7 +375,9 @@ async def evaluate_portfolio(
             True, regime.state, regime.last_flip, last_evaluated
         )
 
-    drifts = compute_drifts(current, target, band_abs, band_rel)
+    drifts = compute_drifts(
+        current, target, band_abs, band_rel, default_urgent_band(band_abs)
+    )
     decision = decide(
         drifts, calendar_is_due=is_due, macro_is_triggered=macro_fired
     )

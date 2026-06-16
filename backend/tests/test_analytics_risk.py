@@ -11,10 +11,12 @@ from app.analytics import (
     best_worst_day,
     beta,
     correlation,
+    downside_deviation,
     historical_cvar,
     historical_var,
     max_drawdown,
     realized_cvar,
+    semi_deviation,
 )
 
 
@@ -456,3 +458,62 @@ def test_information_ratio_nan_input_raises() -> None:
     bench = _random_returns(15, seed=36)
     with pytest.raises(ValueError, match="NaN|overlapping"):
         information_ratio(port, bench)
+
+
+# --- downside / semi deviation (T3D-2) ---------------------------------------
+
+
+def test_downside_deviation_only_counts_shortfalls() -> None:
+    # returns: two below MAR=0, one above. shortfalls: -0.02, 0, -0.04
+    # sqrt(mean([0.02^2, 0, 0.04^2])) = sqrt((0.0004 + 0 + 0.0016) / 3)
+    r = _dated([-0.02, 0.05, -0.04])
+    expected = math.sqrt((0.02**2 + 0.0**2 + 0.04**2) / 3)
+    assert downside_deviation(r) == pytest.approx(expected)
+
+
+def test_downside_deviation_zero_when_all_returns_at_or_above_mar() -> None:
+    r = _dated([0.01, 0.02, 0.0, 0.03])
+    assert downside_deviation(r, mar=0.0) == pytest.approx(0.0)
+
+
+def test_downside_deviation_respects_nonzero_mar() -> None:
+    # MAR = 0.01: shortfalls vs 0.01 -> (0.00, -0.02, -0.03)
+    r = _dated([0.01, -0.01, -0.02])
+    expected = math.sqrt((0.0**2 + 0.02**2 + 0.03**2) / 3)
+    assert downside_deviation(r, mar=0.01) == pytest.approx(expected)
+
+
+def test_downside_deviation_short_input_raises() -> None:
+    with pytest.raises(ValueError, match="at least 2"):
+        downside_deviation(_dated([0.01]))
+
+
+def test_downside_deviation_nan_input_raises() -> None:
+    with pytest.raises(ValueError, match="NaN"):
+        downside_deviation(_dated([0.01, float("nan"), -0.02]))
+
+
+def test_semi_deviation_uses_mean_as_threshold() -> None:
+    # mean of [0.02, -0.01, 0.05, -0.03] = 0.0075
+    # shortfalls below mean: (0.02-0.0075)>0 ->0, (-0.01-0.0075)=-0.0175,
+    #   (0.05-0.0075)>0 ->0, (-0.03-0.0075)=-0.0375
+    r = _dated([0.02, -0.01, 0.05, -0.03])
+    mean_r = (0.02 - 0.01 + 0.05 - 0.03) / 4
+    shortfalls = [min(x - mean_r, 0.0) for x in [0.02, -0.01, 0.05, -0.03]]
+    expected = math.sqrt(sum(s**2 for s in shortfalls) / 4)
+    assert semi_deviation(r) == pytest.approx(expected)
+
+
+def test_semi_deviation_zero_for_constant_series() -> None:
+    # constant series: every point equals the mean -> no shortfall
+    assert semi_deviation(_dated([0.01, 0.01, 0.01, 0.01])) == pytest.approx(0.0)
+
+
+def test_semi_deviation_short_input_raises() -> None:
+    with pytest.raises(ValueError, match="at least 2"):
+        semi_deviation(_dated([0.01]))
+
+
+def test_semi_deviation_nan_input_raises() -> None:
+    with pytest.raises(ValueError, match="NaN"):
+        semi_deviation(_dated([0.01, float("nan")]))

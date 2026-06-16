@@ -31,6 +31,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.analytics.expense_ratio import to_decimal_fraction
 from app.api._shared import ensure_eod_or_http_error
 from app.core.datalake import get_datalake_session
 from app.core.db import get_session
@@ -277,7 +278,7 @@ async def get_fund_profile(
         strategy_label=fund.strategy_label,
         asset_class=fund.asset_class,
         is_index=fund.is_index,
-        expense_ratio=float(fund.expense_ratio) if fund.expense_ratio is not None else None,
+        expense_ratio=to_decimal_fraction(fund.expense_ratio),
         aum_usd=float(fund.aum_usd) if fund.aum_usd is not None else None,
         primary_benchmark=fund.primary_benchmark,
         inception_date=fund.inception_date,

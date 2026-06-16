@@ -405,3 +405,65 @@ async def test_put_policy_validates_bands(
                   "macro_trigger_enabled": False},
         )
         assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# T3D-1 — two-tier drift classification (ok / maintenance / urgent)
+# ---------------------------------------------------------------------------
+
+
+def test_drift_status_default_urgent_is_twice_band_abs() -> None:
+    assert ev.default_urgent_band(0.05) == pytest.approx(0.10)
+    assert ev.default_urgent_band(0.25) == pytest.approx(0.50)
+    # never exceeds a full 100% drift
+    assert ev.default_urgent_band(0.60) == pytest.approx(1.0)
+
+
+def test_compute_drifts_classifies_three_tiers() -> None:
+    current = {"OK": 0.41, "MAINT": 0.47, "URG": 0.62}
+    target = {"OK": 0.40, "MAINT": 0.40, "URG": 0.40}
+    drifts = ev.compute_drifts(
+        current, target, band_abs=0.05, band_rel=0.25, band_urgent=0.10
+    )
+    by = {d.ticker: d for d in drifts}
+    # |0.01| < 0.05 -> ok, not a breach
+    assert by["OK"].status == "ok"
+    assert by["OK"].breach is False
+    # 0.05 <= |0.07| < 0.10 -> maintenance, still a breach
+    assert by["MAINT"].status == "maintenance"
+    assert by["MAINT"].breach is True
+    # |0.22| >= 0.10 -> urgent, a breach
+    assert by["URG"].status == "urgent"
+    assert by["URG"].breach is True
+
+
+def test_compute_drifts_status_boundaries_are_inclusive() -> None:
+    # exactly at the maintenance band -> maintenance; exactly at urgent -> urgent
+    drifts = ev.compute_drifts(
+        {"M": 0.45, "U": 0.50}, {"M": 0.40, "U": 0.40},
+        band_abs=0.05, band_rel=10.0, band_urgent=0.10,
+    )
+    by = {d.ticker: d for d in drifts}
+    assert by["M"].status == "maintenance"  # |0.05| == band_abs (inclusive)
+    assert by["U"].status == "urgent"       # |0.10| == band_urgent (inclusive)
+
+
+def test_compute_drifts_relative_only_breach_is_maintenance() -> None:
+    # small abs drift but big relative drift -> breach, classified maintenance
+    drifts = ev.compute_drifts(
+        {"X": 0.08, "Y": 0.92}, {"X": 0.05, "Y": 0.95},
+        band_abs=0.05, band_rel=0.25, band_urgent=0.10,
+    )
+    x = next(d for d in drifts if d.ticker == "X")
+    assert abs(x.drift_abs) < 0.05          # below the absolute maintenance band
+    assert x.drift_rel == pytest.approx(0.60)
+    assert x.breach is True
+    assert x.status == "maintenance"
+
+
+def test_compute_drifts_defaults_urgent_when_band_urgent_omitted() -> None:
+    # band_urgent omitted -> defaults to 2 x band_abs (= 0.10 here)
+    drifts = ev.compute_drifts(
+        {"A": 0.62}, {"A": 0.40}, band_abs=0.05, band_rel=0.25
+    )
+    assert drifts[0].status == "urgent"
