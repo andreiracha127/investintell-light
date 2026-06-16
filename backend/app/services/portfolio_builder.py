@@ -428,7 +428,7 @@ async def run_optimize(
             raise BuilderError(
                 f"per-asset cap {cap:.2%} is infeasible for a {n}-position "
                 f"broad-universe portfolio (needs cap ≥ {min_feasible_cap:.2%}); "
-                "raise the cap or lower max_positions"
+                "raise the cap or increase max_positions"
             )
         # Default (unset) cap: relax it to 1/K so K positions can sum to 1.
         cap = min_feasible_cap

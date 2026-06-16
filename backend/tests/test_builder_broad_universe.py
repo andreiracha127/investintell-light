@@ -131,6 +131,7 @@ async def test_broad_universe_explicit_infeasible_cap_fails_loud(
         response = await client.post("/builder/optimize", json=payload)
     assert response.status_code == 422, response.text
     assert "cap" in response.text or "infeasible" in response.text
+    assert "increase max_positions" in response.text
 
 
 async def test_broad_universe_explicit_feasible_cap_is_respected(
