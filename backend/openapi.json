@@ -1425,6 +1425,59 @@
         }
       }
     },
+    "/screener/screens/{screen_id}/filters/reorder": {
+      "patch": {
+        "tags": [
+          "screener"
+        ],
+        "summary": "Reorder Filters",
+        "description": "Reorder a screen's filters; position drives the Results column order.",
+        "operationId": "reorder_filters_screener_screens__screen_id__filters_reorder_patch",
+        "parameters": [
+          {
+            "name": "screen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Screen Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FilterReorder"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScreenOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/screener/screens/{screen_id}/build/{metric_code}": {
       "get": {
         "tags": [
@@ -1460,6 +1513,49 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BuildResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/screener/screens/{screen_id}/build": {
+      "get": {
+        "tags": [
+          "screener"
+        ],
+        "summary": "Build All",
+        "description": "Every filter's universe distribution + the live headline count, one round-trip.\n\nFeeds the Build panel's per-row sparklines and the active-row distribution\nin a single request (vs. one GET /build/{metric_code} per filter).",
+        "operationId": "build_all_screener_screens__screen_id__build_get",
+        "parameters": [
+          {
+            "name": "screen_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Screen Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildAllResponse"
                 }
               }
             }
@@ -2171,6 +2267,470 @@
         }
       }
     },
+    "/funds/scatter": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Funds Scatter",
+        "description": "Columnar risk/return scatter payload for the funds landing page.",
+        "operationId": "get_funds_scatter_funds_scatter_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "description": "Maximum funds returned.",
+              "default": 250,
+              "title": "Limit"
+            },
+            "description": "Maximum funds returned."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundScatterResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/funds/{instrument_id}/factors": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Fund Factors",
+        "description": "Tier B factor sensitivities and style-bias snapshot.",
+        "operationId": "get_fund_factors_funds__instrument_id__factors_get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instrument Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundFactorsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/funds/{instrument_id}/style-drift": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Fund Style Drift",
+        "description": "Tier B historical sector drift from N-PORT reports.",
+        "operationId": "get_fund_style_drift_funds__instrument_id__style_drift_get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instrument Id"
+            }
+          },
+          {
+            "name": "quarters",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 20,
+              "minimum": 1,
+              "description": "Historical N-PORT periods returned.",
+              "default": 8,
+              "title": "Quarters"
+            },
+            "description": "Historical N-PORT periods returned."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundStyleDriftResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/funds/{instrument_id}/entity-analytics": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Fund Entity Analytics",
+        "description": "Tier B Deep Analysis analytics for one fund.",
+        "operationId": "get_fund_entity_analytics_funds__instrument_id__entity_analytics_get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instrument Id"
+            }
+          },
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "3M",
+                "6M",
+                "1Y",
+                "3Y",
+                "5Y"
+              ],
+              "type": "string",
+              "description": "Lookback window for Deep Analysis metrics.",
+              "default": "1Y",
+              "title": "Window"
+            },
+            "description": "Lookback window for Deep Analysis metrics."
+          },
+          {
+            "name": "benchmark_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional benchmark fund UUID for capture and relative stats.",
+              "title": "Benchmark Id"
+            },
+            "description": "Optional benchmark fund UUID for capture and relative stats."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundEntityAnalyticsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/funds/{instrument_id}/risk-timeseries": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Fund Risk Timeseries",
+        "description": "Tier B drawdown, conditional volatility, and regime overlay.",
+        "operationId": "get_fund_risk_timeseries_funds__instrument_id__risk_timeseries_get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instrument Id"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional inclusive start date.",
+              "title": "From"
+            },
+            "description": "Optional inclusive start date."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional inclusive end date.",
+              "title": "To"
+            },
+            "description": "Optional inclusive end date."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundRiskTimeseriesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/funds/{instrument_id}/active-share": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Fund Active Share",
+        "description": "Tier B holdings-based active share against a benchmark fund.",
+        "operationId": "get_fund_active_share_funds__instrument_id__active_share_get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instrument Id"
+            }
+          },
+          {
+            "name": "benchmark_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Benchmark fund UUID with N-PORT holdings.",
+              "title": "Benchmark Id"
+            },
+            "description": "Benchmark fund UUID with N-PORT holdings."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundActiveShareResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/funds/{instrument_id}/institutional-reveal": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Fund Institutional Reveal",
+        "description": "Tier C 13F institutional overlap and holder network.",
+        "operationId": "get_fund_institutional_reveal_funds__instrument_id__institutional_reveal_get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instrument Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundInstitutionalRevealResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/holdings/{cusip}/reverse-lookup": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Holding Reverse Lookup",
+        "description": "Tier C reverse lookup from CUSIP to institutional and fund holders.",
+        "operationId": "get_holding_reverse_lookup_holdings__cusip__reverse_lookup_get",
+        "parameters": [
+          {
+            "name": "cusip",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Cusip"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HoldingReverseLookupResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/funds/{instrument_id}": {
       "get": {
         "tags": [
@@ -2198,6 +2758,199 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/FundProfileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/funds/{instrument_id}/analysis": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Fund Analysis",
+        "description": "Render-ready analysis payload for one fund NAV series.",
+        "operationId": "get_fund_analysis_funds__instrument_id__analysis_get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instrument Id"
+            }
+          },
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "1M",
+                "6M",
+                "1Y",
+                "5Y",
+                "MAX"
+              ],
+              "type": "string",
+              "description": "Visible-range preset; MAX = full NAV history.",
+              "default": "1Y",
+              "title": "Range"
+            },
+            "description": "Visible-range preset; MAX = full NAV history."
+          },
+          {
+            "name": "window",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 252,
+              "minimum": 10,
+              "description": "Rolling window in NAV days (10..252).",
+              "default": 252,
+              "title": "Window"
+            },
+            "description": "Rolling window in NAV days (10..252)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundAnalysisResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/funds/{instrument_id}/holdings/top": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Fund Holdings Top",
+        "description": "Top holdings and sector breakdown for one fund.",
+        "operationId": "get_fund_holdings_top_funds__instrument_id__holdings_top_get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instrument Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "description": "Maximum top holdings returned.",
+              "default": 25,
+              "title": "Limit"
+            },
+            "description": "Maximum top holdings returned."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundHoldingsTopResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/funds/{instrument_id}/peers": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "Get Fund Peers",
+        "description": "Peer cohort by fund strategy/risk classification.",
+        "operationId": "get_fund_peers_funds__instrument_id__peers_get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instrument Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "description": "Maximum peer rows returned.",
+              "default": 10,
+              "title": "Limit"
+            },
+            "description": "Maximum peer rows returned."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundPeersResponse"
                 }
               }
             }
@@ -3466,6 +4219,28 @@
         "title": "BlockBudgetIn",
         "description": "\u03a3 of weights in an asset-class block must lie in [lo, hi] (decimal\nfractions). ``asset_class`` matches ``Fund.asset_class``."
       },
+      "BuildAllResponse": {
+        "properties": {
+          "headline_count": {
+            "type": "integer",
+            "title": "Headline Count"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/MetricBuildOut"
+            },
+            "type": "array",
+            "title": "Metrics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "headline_count",
+          "metrics"
+        ],
+        "title": "BuildAllResponse",
+        "description": "GET /screener/screens/{id}/build \u2014 every filter's distribution in one round-trip.\n\nheadline_count honors ALL filters (the live match count); each metric's\ndistribution is the universe-wide histogram (null when the snapshot has no\ndata for it), feeding the per-row sparklines and the active-row panel."
+      },
       "BuildResponse": {
         "properties": {
           "distribution": {
@@ -4264,6 +5039,32 @@
         "title": "DrawdownOut",
         "description": "Maximum drawdown of the in-range ADJUSTED close series."
       },
+      "EmptyState": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "EmptyState",
+        "description": "Explicit reason why a real data source cannot populate a panel."
+      },
       "EquityRefIn": {
         "properties": {
           "kind": {
@@ -4385,6 +5186,24 @@
         "type": "object",
         "title": "FilterBody",
         "description": "Bounds for PUT /screener/screens/{id}/filters/{metric_code}.\n\nBoth bounds null is legitimate: the metric is selected (results column,\nNULL exclusion) without numeric constraints."
+      },
+      "FilterReorder": {
+        "properties": {
+          "metric_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Metric Codes",
+            "description": "All of the screen's current filter metric codes, in the new order."
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric_codes"
+        ],
+        "title": "FilterReorder",
+        "description": "Body for PATCH /screener/screens/{id}/filters/reorder.\n\nMust list EXACTLY the screen's current filter codes, in the desired order."
       },
       "FilterUpdateResponse": {
         "properties": {
@@ -4554,6 +5373,445 @@
         ],
         "title": "FoldMetricsOut"
       },
+      "FundActiveShareResponse": {
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instrument Id"
+          },
+          "benchmark_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Id"
+          },
+          "benchmark_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Name"
+          },
+          "active_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Share"
+          },
+          "overlap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap"
+          },
+          "n_portfolio_positions": {
+            "type": "integer",
+            "title": "N Portfolio Positions",
+            "default": 0
+          },
+          "n_benchmark_positions": {
+            "type": "integer",
+            "title": "N Benchmark Positions",
+            "default": 0
+          },
+          "n_common_positions": {
+            "type": "integer",
+            "title": "N Common Positions",
+            "default": 0
+          },
+          "as_of_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of Date"
+          },
+          "empty_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmptyState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrument_id"
+        ],
+        "title": "FundActiveShareResponse",
+        "description": "Holdings-based active share versus a benchmark fund."
+      },
+      "FundAnalysisHeader": {
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instrument Id"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "last_nav": {
+            "type": "number",
+            "title": "Last Nav"
+          },
+          "prev_nav": {
+            "type": "number",
+            "title": "Prev Nav"
+          },
+          "change": {
+            "type": "number",
+            "title": "Change",
+            "description": "last_nav - prev_nav, in NAV units."
+          },
+          "change_pct": {
+            "type": "number",
+            "title": "Change Pct",
+            "description": "One-period NAV change as a decimal fraction."
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date",
+            "title": "As Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "instrument_id",
+          "ticker",
+          "name",
+          "last_nav",
+          "prev_nav",
+          "change",
+          "change_pct",
+          "as_of"
+        ],
+        "title": "FundAnalysisHeader",
+        "description": "Render-ready fund header values from NAV history."
+      },
+      "FundAnalysisParams": {
+        "properties": {
+          "range": {
+            "type": "string",
+            "enum": [
+              "1M",
+              "6M",
+              "1Y",
+              "5Y",
+              "MAX"
+            ],
+            "title": "Range",
+            "description": "Requested range preset."
+          },
+          "window": {
+            "type": "integer",
+            "title": "Window",
+            "description": "Rolling window length in trading/NAV days."
+          },
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date",
+            "description": "Resolved visible-range start date."
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date",
+            "description": "Latest NAV date used by the analysis."
+          }
+        },
+        "type": "object",
+        "required": [
+          "range",
+          "window",
+          "start_date",
+          "end_date"
+        ],
+        "title": "FundAnalysisParams",
+        "description": "Echo of the resolved fund-analysis request parameters."
+      },
+      "FundAnalysisResponse": {
+        "properties": {
+          "params": {
+            "$ref": "#/components/schemas/FundAnalysisParams"
+          },
+          "header": {
+            "$ref": "#/components/schemas/FundAnalysisHeader"
+          },
+          "growth_of_100": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Growth Of 100",
+            "description": "[date, value] growth series rebased to 100.0."
+          },
+          "monthly_returns": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Monthly Returns",
+            "description": "[month_end, monthly return] points as decimal fractions."
+          },
+          "rolling_volatility": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Rolling Volatility",
+            "description": "[date, annualized volatility] points as decimal fractions."
+          },
+          "rolling_sharpe": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Rolling Sharpe",
+            "description": "[date, rolling Sharpe] points using zero risk-free rate."
+          },
+          "drawdown": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Drawdown",
+            "description": "[date, underwater drawdown] points as negative decimal fractions."
+          },
+          "histogram": {
+            "$ref": "#/components/schemas/HistogramOut"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/FundAnalysisStats"
+          }
+        },
+        "type": "object",
+        "required": [
+          "params",
+          "header",
+          "growth_of_100",
+          "monthly_returns",
+          "rolling_volatility",
+          "rolling_sharpe",
+          "drawdown",
+          "histogram",
+          "stats"
+        ],
+        "title": "FundAnalysisResponse",
+        "description": "Single-call payload for the fund Performance dossier tab."
+      },
+      "FundAnalysisStats": {
+        "properties": {
+          "annualized_volatility": {
+            "type": "number",
+            "title": "Annualized Volatility"
+          },
+          "var_95": {
+            "type": "number",
+            "title": "Var 95"
+          },
+          "cvar_95": {
+            "type": "number",
+            "title": "Cvar 95"
+          },
+          "total_return": {
+            "type": "number",
+            "title": "Total Return"
+          },
+          "max_drawdown": {
+            "$ref": "#/components/schemas/DrawdownOut"
+          },
+          "best_day": {
+            "$ref": "#/components/schemas/DatedValue"
+          },
+          "worst_day": {
+            "$ref": "#/components/schemas/DatedValue"
+          }
+        },
+        "type": "object",
+        "required": [
+          "annualized_volatility",
+          "var_95",
+          "cvar_95",
+          "total_return",
+          "max_drawdown",
+          "best_day",
+          "worst_day"
+        ],
+        "title": "FundAnalysisStats",
+        "description": "Point statistics over in-range daily NAV returns only."
+      },
+      "FundCaptureRatios": {
+        "properties": {
+          "up_capture": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Up Capture"
+          },
+          "down_capture": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Down Capture"
+          },
+          "up_periods": {
+            "type": "integer",
+            "title": "Up Periods",
+            "default": 0
+          },
+          "down_periods": {
+            "type": "integer",
+            "title": "Down Periods",
+            "default": 0
+          },
+          "benchmark_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Id"
+          },
+          "benchmark_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Label"
+          },
+          "empty_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmptyState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "FundCaptureRatios",
+        "description": "Monthly up/down capture versus the requested benchmark."
+      },
       "FundClassOut": {
         "properties": {
           "class_id": {
@@ -4596,6 +5854,235 @@
         ],
         "title": "FundClassOut",
         "description": "One share class of the fund's series (F8.6b).\n\nNOTE: only the series' representative class has a NAV in the source \u2014\nany class ticker is priced/analyzed with the SERIES NAV as a proxy.\n``expense_ratio`` is a fraction (0.0069 = 0.69%)."
+      },
+      "FundDrawdownAnalysis": {
+        "properties": {
+          "dates": {
+            "items": {
+              "type": "string",
+              "format": "date"
+            },
+            "type": "array",
+            "title": "Dates"
+          },
+          "values": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Values"
+          },
+          "max_drawdown": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown"
+          },
+          "current_drawdown": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Drawdown"
+          },
+          "worst_periods": {
+            "items": {
+              "$ref": "#/components/schemas/FundDrawdownPeriod"
+            },
+            "type": "array",
+            "title": "Worst Periods"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "dates",
+          "values",
+          "worst_periods"
+        ],
+        "title": "FundDrawdownAnalysis",
+        "description": "Drawdown series and worst periods for the requested NAV window."
+      },
+      "FundDrawdownPeriod": {
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date"
+          },
+          "trough_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Trough Date"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Date"
+          },
+          "depth": {
+            "type": "number",
+            "title": "Depth"
+          },
+          "duration_days": {
+            "type": "integer",
+            "title": "Duration Days"
+          },
+          "recovery_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Days"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "start_date",
+          "trough_date",
+          "depth",
+          "duration_days"
+        ],
+        "title": "FundDrawdownPeriod",
+        "description": "One peak-to-trough drawdown interval."
+      },
+      "FundEntityAnalyticsResponse": {
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instrument Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "as_of_date": {
+            "type": "string",
+            "format": "date",
+            "title": "As Of Date"
+          },
+          "window": {
+            "type": "string",
+            "enum": [
+              "3M",
+              "6M",
+              "1Y",
+              "3Y",
+              "5Y"
+            ],
+            "title": "Window"
+          },
+          "risk_statistics": {
+            "$ref": "#/components/schemas/FundRiskStatistics"
+          },
+          "drawdown": {
+            "$ref": "#/components/schemas/FundDrawdownAnalysis"
+          },
+          "capture": {
+            "$ref": "#/components/schemas/FundCaptureRatios"
+          },
+          "rolling_returns": {
+            "$ref": "#/components/schemas/FundRollingReturns"
+          },
+          "distribution": {
+            "$ref": "#/components/schemas/FundReturnDistribution"
+          },
+          "return_statistics": {
+            "$ref": "#/components/schemas/FundReturnStatistics"
+          },
+          "tail_risk": {
+            "$ref": "#/components/schemas/FundTailRiskMetrics"
+          },
+          "insider_data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InsiderData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrument_id",
+          "name",
+          "as_of_date",
+          "window",
+          "risk_statistics",
+          "drawdown",
+          "capture",
+          "rolling_returns",
+          "distribution",
+          "return_statistics",
+          "tail_risk"
+        ],
+        "title": "FundEntityAnalyticsResponse",
+        "description": "Deep Analysis modal payload for one fund."
+      },
+      "FundFactorsResponse": {
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instrument Id"
+          },
+          "market_sensitivities": {
+            "items": {
+              "$ref": "#/components/schemas/FundMarketSensitivity"
+            },
+            "type": "array",
+            "title": "Market Sensitivities"
+          },
+          "style_bias": {
+            "items": {
+              "$ref": "#/components/schemas/FundStyleBias"
+            },
+            "type": "array",
+            "title": "Style Bias"
+          },
+          "source_metadata": {
+            "items": {
+              "$ref": "#/components/schemas/FundSourceMetadata"
+            },
+            "type": "array",
+            "title": "Source Metadata"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrument_id",
+          "market_sensitivities",
+          "style_bias",
+          "source_metadata"
+        ],
+        "title": "FundFactorsResponse",
+        "description": "Market sensitivities and style-bias snapshot for one fund."
       },
       "FundHistoryResponse": {
         "properties": {
@@ -4796,6 +6283,147 @@
         ],
         "title": "FundHoldingsOut",
         "description": "Latest N-PORT report for the fund's series (full, untruncated source).\n\nThe profile still serves a display-capped list (HOLDINGS_CAP); the\nconsolidated exposure lives in GET /funds/{id}/lookthrough (Frente C)."
+      },
+      "FundHoldingsTopResponse": {
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instrument Id"
+          },
+          "series_id": {
+            "type": "string",
+            "title": "Series Id"
+          },
+          "report_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Date"
+          },
+          "top_holdings": {
+            "items": {
+              "$ref": "#/components/schemas/FundTopHolding"
+            },
+            "type": "array",
+            "title": "Top Holdings"
+          },
+          "sector_breakdown": {
+            "items": {
+              "$ref": "#/components/schemas/FundSectorExposure"
+            },
+            "type": "array",
+            "title": "Sector Breakdown"
+          },
+          "pct_of_nav_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pct Of Nav Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "instrument_id",
+          "series_id",
+          "report_date",
+          "top_holdings",
+          "sector_breakdown",
+          "pct_of_nav_total"
+        ],
+        "title": "FundHoldingsTopResponse",
+        "description": "Top holdings plus sector breakdown for one fund series."
+      },
+      "FundInstitutionalRevealResponse": {
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instrument Id"
+          },
+          "series_id": {
+            "type": "string",
+            "title": "Series Id"
+          },
+          "fund_name": {
+            "type": "string",
+            "title": "Fund Name"
+          },
+          "holdings_report_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdings Report Date"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          },
+          "top_holders": {
+            "items": {
+              "$ref": "#/components/schemas/InstitutionalHolder"
+            },
+            "type": "array",
+            "title": "Top Holders"
+          },
+          "overlap": {
+            "items": {
+              "$ref": "#/components/schemas/InstitutionalOverlapSecurity"
+            },
+            "type": "array",
+            "title": "Overlap"
+          },
+          "holder_network": {
+            "$ref": "#/components/schemas/HolderNetwork"
+          },
+          "empty_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmptyState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrument_id",
+          "series_id",
+          "fund_name",
+          "top_holders",
+          "overlap",
+          "holder_network"
+        ],
+        "title": "FundInstitutionalRevealResponse",
+        "description": "Tier C institutional reveal for one fund's underlying holdings."
       },
       "FundListItem": {
         "properties": {
@@ -5004,6 +6632,54 @@
         ],
         "title": "FundLookthroughResponse"
       },
+      "FundMarketSensitivity": {
+        "properties": {
+          "factor": {
+            "type": "string",
+            "title": "Factor"
+          },
+          "beta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beta"
+          },
+          "t_stat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "T Stat"
+          },
+          "significance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Significance"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "factor"
+        ],
+        "title": "FundMarketSensitivity",
+        "description": "OLS beta of fund returns against one factor return series."
+      },
       "FundNavPoint": {
         "properties": {
           "date": {
@@ -5030,6 +6706,158 @@
         ],
         "title": "FundNavPoint",
         "description": "One decimated NAV observation (last 2 years, ~260 points)."
+      },
+      "FundPeerItem": {
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instrument Id"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "strategy_label": {
+            "type": "string",
+            "title": "Strategy Label"
+          },
+          "expense_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expense Ratio"
+          },
+          "return_1y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return 1Y"
+          },
+          "volatility_1y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volatility 1Y"
+          },
+          "sharpe_1y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe 1Y"
+          },
+          "max_drawdown_1y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown 1Y"
+          },
+          "cvar_95_12m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cvar 95 12M"
+          },
+          "is_target": {
+            "type": "boolean",
+            "title": "Is Target"
+          }
+        },
+        "type": "object",
+        "required": [
+          "instrument_id",
+          "ticker",
+          "name",
+          "strategy_label",
+          "expense_ratio",
+          "return_1y",
+          "volatility_1y",
+          "sharpe_1y",
+          "max_drawdown_1y",
+          "cvar_95_12m",
+          "is_target"
+        ],
+        "title": "FundPeerItem",
+        "description": "Peer row for the Peers dossier tab."
+      },
+      "FundPeersResponse": {
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instrument Id"
+          },
+          "cohort_label": {
+            "type": "string",
+            "title": "Cohort Label"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FundPeerItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "classification_note": {
+            "type": "string",
+            "title": "Classification Note",
+            "default": "Labels da fonte podem conter erros do classificador autom\u00e1tico"
+          }
+        },
+        "type": "object",
+        "required": [
+          "instrument_id",
+          "cohort_label",
+          "count",
+          "items"
+        ],
+        "title": "FundPeersResponse",
+        "description": "Funds in the same peer cohort as the target fund."
       },
       "FundProfileResponse": {
         "properties": {
@@ -5305,6 +7133,225 @@
           "id"
         ],
         "title": "FundRefIn"
+      },
+      "FundRegimeBand": {
+        "properties": {
+          "time": {
+            "type": "string",
+            "format": "date",
+            "title": "Time"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value"
+          },
+          "regime": {
+            "type": "string",
+            "enum": [
+              "Expansion",
+              "Cautious",
+              "Stress"
+            ],
+            "title": "Regime"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "time",
+          "value",
+          "regime"
+        ],
+        "title": "FundRegimeBand",
+        "description": "One regime label point for the risk-timeseries overlay."
+      },
+      "FundReturnDistribution": {
+        "properties": {
+          "bin_edges": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Bin Edges"
+          },
+          "bin_counts": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Bin Counts"
+          },
+          "skewness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skewness"
+          },
+          "kurtosis": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kurtosis"
+          },
+          "var_95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Var 95"
+          },
+          "cvar_95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cvar 95"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "bin_edges",
+          "bin_counts"
+        ],
+        "title": "FundReturnDistribution",
+        "description": "Freedman-Diaconis histogram and distribution moments."
+      },
+      "FundReturnStatistics": {
+        "properties": {
+          "arithmetic_mean_monthly": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arithmetic Mean Monthly"
+          },
+          "geometric_mean_monthly": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometric Mean Monthly"
+          },
+          "avg_monthly_gain": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Monthly Gain"
+          },
+          "avg_monthly_loss": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Monthly Loss"
+          },
+          "gain_loss_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gain Loss Ratio"
+          },
+          "downside_deviation": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Downside Deviation"
+          },
+          "semi_deviation": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Semi Deviation"
+          },
+          "omega_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Omega Ratio"
+          },
+          "up_percentage_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Up Percentage Ratio"
+          },
+          "down_percentage_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Down Percentage Ratio"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "FundReturnStatistics",
+        "description": "eVestment-style return statistics over monthly returns."
       },
       "FundRiskOut": {
         "properties": {
@@ -5785,6 +7832,802 @@
         "title": "FundRiskOut",
         "description": "The full precomputed risk snapshot (latest calc_date in the source)."
       },
+      "FundRiskStatistics": {
+        "properties": {
+          "annualized_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annualized Return"
+          },
+          "annualized_volatility": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annualized Volatility"
+          },
+          "sharpe_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe Ratio"
+          },
+          "sortino_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sortino Ratio"
+          },
+          "calmar_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calmar Ratio"
+          },
+          "max_drawdown": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown"
+          },
+          "alpha": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alpha"
+          },
+          "beta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beta"
+          },
+          "tracking_error": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tracking Error"
+          },
+          "information_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Information Ratio"
+          },
+          "n_observations": {
+            "type": "integer",
+            "title": "N Observations"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "n_observations"
+        ],
+        "title": "FundRiskStatistics",
+        "description": "Institutional risk statistics over the requested NAV window."
+      },
+      "FundRiskTimeseriesResponse": {
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instrument Id"
+          },
+          "drawdown": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Drawdown",
+            "description": "Drawdown in percent points."
+          },
+          "conditional_volatility": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Conditional Volatility",
+            "description": "Annualized conditional volatility in percent points."
+          },
+          "volatility_model": {
+            "type": "string",
+            "enum": [
+              "garch",
+              "ewma"
+            ],
+            "title": "Volatility Model"
+          },
+          "regime_bands": {
+            "items": {
+              "$ref": "#/components/schemas/FundRegimeBand"
+            },
+            "type": "array",
+            "title": "Regime Bands"
+          },
+          "empty_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmptyState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrument_id",
+          "drawdown",
+          "conditional_volatility",
+          "volatility_model",
+          "regime_bands"
+        ],
+        "title": "FundRiskTimeseriesResponse",
+        "description": "Drawdown, conditional volatility, and regime overlay series."
+      },
+      "FundRollingReturns": {
+        "properties": {
+          "series": {
+            "additionalProperties": {
+              "items": {
+                "prefixItems": [
+                  {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array",
+                "maxItems": 2,
+                "minItems": 2
+              },
+              "type": "array"
+            },
+            "propertyNames": {
+              "enum": [
+                "1M",
+                "3M",
+                "6M",
+                "1Y"
+              ]
+            },
+            "type": "object",
+            "title": "Series"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "series"
+        ],
+        "title": "FundRollingReturns",
+        "description": "Rolling compounded return series by window label."
+      },
+      "FundScatterResponse": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "instrument_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Instrument Ids"
+          },
+          "names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Names"
+          },
+          "tickers": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Tickers"
+          },
+          "expected_returns": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Expected Returns"
+          },
+          "volatilities": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Volatilities"
+          },
+          "tail_risks": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Tail Risks"
+          },
+          "strategies": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Strategies"
+          },
+          "classification_note": {
+            "type": "string",
+            "title": "Classification Note",
+            "default": "Labels da fonte podem conter erros do classificador autom\u00e1tico"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "instrument_ids",
+          "names",
+          "tickers",
+          "expected_returns",
+          "volatilities",
+          "tail_risks",
+          "strategies"
+        ],
+        "title": "FundScatterResponse",
+        "description": "Columnar risk/return scatter payload for the funds landing page."
+      },
+      "FundSectorExposure": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "direct_pct": {
+            "type": "number",
+            "title": "Direct Pct"
+          },
+          "indirect_pct": {
+            "type": "number",
+            "title": "Indirect Pct"
+          },
+          "total_pct": {
+            "type": "number",
+            "title": "Total Pct"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "lookthrough",
+              "holdings"
+            ],
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "label",
+          "direct_pct",
+          "indirect_pct",
+          "total_pct",
+          "source"
+        ],
+        "title": "FundSectorExposure",
+        "description": "Sector exposure for Holdings tab bars/donut."
+      },
+      "FundSourceMetadata": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "empty_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmptyState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "title": "FundSourceMetadata",
+        "description": "Source table and as-of information for DB-first dossier payloads."
+      },
+      "FundStyleBias": {
+        "properties": {
+          "factor": {
+            "type": "string",
+            "title": "Factor"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "z_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Z Score"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "factor"
+        ],
+        "title": "FundStyleBias",
+        "description": "Cross-sectional characteristic z-score for the latest available month."
+      },
+      "FundStyleDriftPeriod": {
+        "properties": {
+          "report_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Report Date"
+          },
+          "quarter": {
+            "type": "string",
+            "title": "Quarter"
+          },
+          "sectors": {
+            "items": {
+              "$ref": "#/components/schemas/FundStyleSectorWeight"
+            },
+            "type": "array",
+            "title": "Sectors"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "report_date",
+          "quarter",
+          "sectors"
+        ],
+        "title": "FundStyleDriftPeriod",
+        "description": "Sector exposure for one N-PORT report date."
+      },
+      "FundStyleDriftResponse": {
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instrument Id"
+          },
+          "series_id": {
+            "type": "string",
+            "title": "Series Id"
+          },
+          "periods": {
+            "items": {
+              "$ref": "#/components/schemas/FundStyleDriftPeriod"
+            },
+            "type": "array",
+            "title": "Periods"
+          },
+          "empty_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmptyState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrument_id",
+          "series_id",
+          "periods"
+        ],
+        "title": "FundStyleDriftResponse",
+        "description": "Historical sector weights from N-PORT reports."
+      },
+      "FundStyleSectorWeight": {
+        "properties": {
+          "sector": {
+            "type": "string",
+            "title": "Sector"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight",
+            "description": "Sector weight as a decimal fraction (0.25 = 25%)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "sector",
+          "weight"
+        ],
+        "title": "FundStyleSectorWeight",
+        "description": "One sector bucket in one historical holdings period."
+      },
+      "FundTailRiskMetrics": {
+        "properties": {
+          "var_parametric_90": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Var Parametric 90"
+          },
+          "var_parametric_95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Var Parametric 95"
+          },
+          "var_parametric_99": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Var Parametric 99"
+          },
+          "var_modified_95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Var Modified 95"
+          },
+          "var_modified_99": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Var Modified 99"
+          },
+          "etl_95": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etl 95"
+          },
+          "starr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starr"
+          },
+          "rachev": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rachev"
+          },
+          "jarque_bera": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jarque Bera"
+          },
+          "jarque_bera_pvalue": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jarque Bera Pvalue"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "FundTailRiskMetrics",
+        "description": "Tail-risk ladder using parametric and Cornish-Fisher modified VaR."
+      },
+      "FundTopHolding": {
+        "properties": {
+          "rank": {
+            "type": "integer",
+            "title": "Rank"
+          },
+          "issuer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issuer Name"
+          },
+          "cusip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cusip"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "asset_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Class"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          },
+          "gics_sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gics Sector"
+          },
+          "sector_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector Label"
+          },
+          "market_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Value"
+          },
+          "pct_of_nav": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pct Of Nav"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rank",
+          "issuer_name",
+          "cusip",
+          "isin",
+          "asset_class",
+          "sector",
+          "gics_sector",
+          "sector_label",
+          "market_value",
+          "pct_of_nav"
+        ],
+        "title": "FundTopHolding",
+        "description": "Top holding row enriched with a display sector label."
+      },
       "FundsListResponse": {
         "properties": {
           "items": {
@@ -6044,6 +8887,179 @@
         ],
         "title": "HistoryResponse"
       },
+      "HolderNetwork": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/HolderNetworkNode"
+            },
+            "type": "array",
+            "title": "Nodes"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/HolderNetworkEdge"
+            },
+            "type": "array",
+            "title": "Edges"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "nodes",
+          "edges"
+        ],
+        "title": "HolderNetwork",
+        "description": "Small network payload for institutional relationships."
+      },
+      "HolderNetworkEdge": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source",
+          "target"
+        ],
+        "title": "HolderNetworkEdge",
+        "description": "Edge for the Relationships modal holder/security network."
+      },
+      "HolderNetworkNode": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "fund",
+              "institution",
+              "security"
+            ],
+            "title": "Type"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "type"
+        ],
+        "title": "HolderNetworkNode",
+        "description": "Node for the Relationships modal holder/security network."
+      },
+      "HoldingReverseLookupResponse": {
+        "properties": {
+          "cusip": {
+            "type": "string",
+            "title": "Cusip"
+          },
+          "security_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Security Name"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          },
+          "institutions": {
+            "items": {
+              "$ref": "#/components/schemas/ReverseLookupInstitution"
+            },
+            "type": "array",
+            "title": "Institutions"
+          },
+          "fund_exposures": {
+            "items": {
+              "$ref": "#/components/schemas/ReverseLookupFundExposure"
+            },
+            "type": "array",
+            "title": "Fund Exposures"
+          },
+          "empty_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmptyState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cusip",
+          "institutions",
+          "fund_exposures"
+        ],
+        "title": "HoldingReverseLookupResponse",
+        "description": "Tier C reverse lookup from CUSIP to institutions and fund exposures."
+      },
       "IndexCard": {
         "properties": {
           "ticker": {
@@ -6079,6 +9095,261 @@
           "spark"
         ],
         "title": "IndexCard"
+      },
+      "InsiderData": {
+        "properties": {
+          "issuer_ciks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Issuer Ciks"
+          },
+          "matched_cusips": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Matched Cusips"
+          },
+          "quarters": {
+            "items": {
+              "$ref": "#/components/schemas/InsiderQuarterSentiment"
+            },
+            "type": "array",
+            "title": "Quarters"
+          },
+          "total_buy_value": {
+            "type": "number",
+            "title": "Total Buy Value",
+            "default": 0.0
+          },
+          "total_sell_value": {
+            "type": "number",
+            "title": "Total Sell Value",
+            "default": 0.0
+          },
+          "net_value": {
+            "type": "number",
+            "title": "Net Value",
+            "default": 0.0
+          },
+          "sentiment_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sentiment Score",
+            "description": "Net/(buy+sell), bounded to [-1, 1] when volume exists."
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "default": "sec_insider_sentiment"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "empty_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmptyState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "InsiderData",
+        "description": "Insider sentiment mapped from fund holdings to issuer CIKs."
+      },
+      "InsiderQuarterSentiment": {
+        "properties": {
+          "quarter": {
+            "type": "string",
+            "format": "date",
+            "title": "Quarter"
+          },
+          "buy_value": {
+            "type": "number",
+            "title": "Buy Value",
+            "default": 0.0
+          },
+          "sell_value": {
+            "type": "number",
+            "title": "Sell Value",
+            "default": 0.0
+          },
+          "net_value": {
+            "type": "number",
+            "title": "Net Value",
+            "default": 0.0
+          },
+          "buy_count": {
+            "type": "integer",
+            "title": "Buy Count",
+            "default": 0
+          },
+          "sell_count": {
+            "type": "integer",
+            "title": "Sell Count",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "quarter"
+        ],
+        "title": "InsiderQuarterSentiment",
+        "description": "Quarterly Form 4 buy/sell aggregate for issuers held by the fund."
+      },
+      "InstitutionalHolder": {
+        "properties": {
+          "cik": {
+            "type": "string",
+            "title": "Cik"
+          },
+          "manager_name": {
+            "type": "string",
+            "title": "Manager Name"
+          },
+          "value_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Usd"
+          },
+          "shares": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shares"
+          },
+          "holding_count": {
+            "type": "integer",
+            "title": "Holding Count",
+            "default": 0
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          },
+          "report_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Date"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cik",
+          "manager_name"
+        ],
+        "title": "InstitutionalHolder",
+        "description": "Institutional manager exposure across the fund's underlying CUSIPs."
+      },
+      "InstitutionalOverlapSecurity": {
+        "properties": {
+          "cusip": {
+            "type": "string",
+            "title": "Cusip"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "fund_pct_of_nav": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fund Pct Of Nav"
+          },
+          "institutional_value_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Institutional Value Usd"
+          },
+          "institution_count": {
+            "type": "integer",
+            "title": "Institution Count",
+            "default": 0
+          },
+          "top_managers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Top Managers"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cusip"
+        ],
+        "title": "InstitutionalOverlapSecurity",
+        "description": "One fund holding with matching 13F institutional ownership."
       },
       "LeaderRow": {
         "properties": {
@@ -6504,6 +9775,36 @@
           "sectors"
         ],
         "title": "MarketOverviewResponse"
+      },
+      "MetricBuildOut": {
+        "properties": {
+          "metric_code": {
+            "type": "string",
+            "title": "Metric Code"
+          },
+          "distribution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DistributionOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "available_count": {
+            "type": "integer",
+            "title": "Available Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric_code",
+          "distribution",
+          "available_count"
+        ],
+        "title": "MetricBuildOut",
+        "description": "One filter's distribution + availability for the batch build payload."
       },
       "MetricDefOut": {
         "properties": {
@@ -8860,6 +12161,154 @@
         ],
         "title": "ResultsColumnOut",
         "description": "One results-table column (ticker/name are data_type 'string')."
+      },
+      "ReverseLookupFundExposure": {
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instrument Id"
+          },
+          "series_id": {
+            "type": "string",
+            "title": "Series Id"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "issuer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issuer Name"
+          },
+          "pct_of_nav": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pct Of Nav"
+          },
+          "market_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Value"
+          },
+          "report_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Date"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrument_id",
+          "series_id",
+          "name"
+        ],
+        "title": "ReverseLookupFundExposure",
+        "description": "Fund/series exposure to a requested CUSIP from local N-PORT holdings."
+      },
+      "ReverseLookupInstitution": {
+        "properties": {
+          "cik": {
+            "type": "string",
+            "title": "Cik"
+          },
+          "manager_name": {
+            "type": "string",
+            "title": "Manager Name"
+          },
+          "value_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Usd"
+          },
+          "shares": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shares"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          },
+          "report_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Date"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cik",
+          "manager_name"
+        ],
+        "title": "ReverseLookupInstitution",
+        "description": "Institutional manager holding a requested CUSIP."
       },
       "RiskContributionOut": {
         "properties": {

@@ -544,6 +544,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/screener/screens/{screen_id}/filters/reorder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Reorder Filters
+         * @description Reorder a screen's filters; position drives the Results column order.
+         */
+        patch: operations["reorder_filters_screener_screens__screen_id__filters_reorder_patch"];
+        trace?: never;
+    };
     "/screener/screens/{screen_id}/build/{metric_code}": {
         parameters: {
             query?: never;
@@ -560,6 +580,29 @@ export interface paths {
          *     never pixel heights.
          */
         get: operations["build_metric_screener_screens__screen_id__build__metric_code__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/screener/screens/{screen_id}/build": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Build All
+         * @description Every filter's universe distribution + the live headline count, one round-trip.
+         *
+         *     Feeds the Build panel's per-row sparklines and the active-row distribution
+         *     in a single request (vs. one GET /build/{metric_code} per filter).
+         */
+        get: operations["build_all_screener_screens__screen_id__build_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -652,6 +695,166 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/funds/scatter": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Funds Scatter
+         * @description Columnar risk/return scatter payload for the funds landing page.
+         */
+        get: operations["get_funds_scatter_funds_scatter_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/funds/{instrument_id}/factors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fund Factors
+         * @description Tier B factor sensitivities and style-bias snapshot.
+         */
+        get: operations["get_fund_factors_funds__instrument_id__factors_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/funds/{instrument_id}/style-drift": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fund Style Drift
+         * @description Tier B historical sector drift from N-PORT reports.
+         */
+        get: operations["get_fund_style_drift_funds__instrument_id__style_drift_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/funds/{instrument_id}/entity-analytics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fund Entity Analytics
+         * @description Tier B Deep Analysis analytics for one fund.
+         */
+        get: operations["get_fund_entity_analytics_funds__instrument_id__entity_analytics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/funds/{instrument_id}/risk-timeseries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fund Risk Timeseries
+         * @description Tier B drawdown, conditional volatility, and regime overlay.
+         */
+        get: operations["get_fund_risk_timeseries_funds__instrument_id__risk_timeseries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/funds/{instrument_id}/active-share": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fund Active Share
+         * @description Tier B holdings-based active share against a benchmark fund.
+         */
+        get: operations["get_fund_active_share_funds__instrument_id__active_share_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/funds/{instrument_id}/institutional-reveal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fund Institutional Reveal
+         * @description Tier C 13F institutional overlap and holder network.
+         */
+        get: operations["get_fund_institutional_reveal_funds__instrument_id__institutional_reveal_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/holdings/{cusip}/reverse-lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Holding Reverse Lookup
+         * @description Tier C reverse lookup from CUSIP to institutional and fund holders.
+         */
+        get: operations["get_holding_reverse_lookup_holdings__cusip__reverse_lookup_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/funds/{instrument_id}": {
         parameters: {
             query?: never;
@@ -666,6 +869,66 @@ export interface paths {
          *     consolidated exposure lives in /funds/{id}/lookthrough).
          */
         get: operations["get_fund_profile_funds__instrument_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/funds/{instrument_id}/analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fund Analysis
+         * @description Render-ready analysis payload for one fund NAV series.
+         */
+        get: operations["get_fund_analysis_funds__instrument_id__analysis_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/funds/{instrument_id}/holdings/top": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fund Holdings Top
+         * @description Top holdings and sector breakdown for one fund.
+         */
+        get: operations["get_fund_holdings_top_funds__instrument_id__holdings_top_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/funds/{instrument_id}/peers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Fund Peers
+         * @description Peer cohort by fund strategy/risk classification.
+         */
+        get: operations["get_fund_peers_funds__instrument_id__peers_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1323,6 +1586,20 @@ export interface components {
             hi: number;
         };
         /**
+         * BuildAllResponse
+         * @description GET /screener/screens/{id}/build — every filter's distribution in one round-trip.
+         *
+         *     headline_count honors ALL filters (the live match count); each metric's
+         *     distribution is the universe-wide histogram (null when the snapshot has no
+         *     data for it), feeding the per-row sparklines and the active-row panel.
+         */
+        BuildAllResponse: {
+            /** Headline Count */
+            headline_count: number;
+            /** Metrics */
+            metrics: components["schemas"]["MetricBuildOut"][];
+        };
+        /**
          * BuildResponse
          * @description GET /screener/screens/{id}/build/{metric_code}.
          */
@@ -1691,6 +1968,16 @@ export interface components {
              */
             trough_date: string;
         };
+        /**
+         * EmptyState
+         * @description Explicit reason why a real data source cannot populate a panel.
+         */
+        EmptyState: {
+            /** Reason */
+            reason: string;
+            /** Source */
+            source?: string | null;
+        };
         /** EquityRefIn */
         EquityRefIn: {
             /**
@@ -1741,6 +2028,19 @@ export interface components {
              * @description Upper bound; null = unbounded.
              */
             max_value?: number | null;
+        };
+        /**
+         * FilterReorder
+         * @description Body for PATCH /screener/screens/{id}/filters/reorder.
+         *
+         *     Must list EXACTLY the screen's current filter codes, in the desired order.
+         */
+        FilterReorder: {
+            /**
+             * Metric Codes
+             * @description All of the screen's current filter metric codes, in the new order.
+             */
+            metric_codes: string[];
         };
         /**
          * FilterUpdateResponse
@@ -1817,6 +2117,198 @@ export interface components {
             net_return: number;
         };
         /**
+         * FundActiveShareResponse
+         * @description Holdings-based active share versus a benchmark fund.
+         */
+        FundActiveShareResponse: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Benchmark Id */
+            benchmark_id?: string | null;
+            /** Benchmark Name */
+            benchmark_name?: string | null;
+            /** Active Share */
+            active_share?: number | null;
+            /** Overlap */
+            overlap?: number | null;
+            /**
+             * N Portfolio Positions
+             * @default 0
+             */
+            n_portfolio_positions: number;
+            /**
+             * N Benchmark Positions
+             * @default 0
+             */
+            n_benchmark_positions: number;
+            /**
+             * N Common Positions
+             * @default 0
+             */
+            n_common_positions: number;
+            /** As Of Date */
+            as_of_date?: string | null;
+            empty_state?: components["schemas"]["EmptyState"] | null;
+        };
+        /**
+         * FundAnalysisHeader
+         * @description Render-ready fund header values from NAV history.
+         */
+        FundAnalysisHeader: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Ticker */
+            ticker: string | null;
+            /** Name */
+            name: string;
+            /** Last Nav */
+            last_nav: number;
+            /** Prev Nav */
+            prev_nav: number;
+            /**
+             * Change
+             * @description last_nav - prev_nav, in NAV units.
+             */
+            change: number;
+            /**
+             * Change Pct
+             * @description One-period NAV change as a decimal fraction.
+             */
+            change_pct: number;
+            /**
+             * As Of
+             * Format: date
+             */
+            as_of: string;
+        };
+        /**
+         * FundAnalysisParams
+         * @description Echo of the resolved fund-analysis request parameters.
+         */
+        FundAnalysisParams: {
+            /**
+             * Range
+             * @description Requested range preset.
+             * @enum {string}
+             */
+            range: "1M" | "6M" | "1Y" | "5Y" | "MAX";
+            /**
+             * Window
+             * @description Rolling window length in trading/NAV days.
+             */
+            window: number;
+            /**
+             * Start Date
+             * Format: date
+             * @description Resolved visible-range start date.
+             */
+            start_date: string;
+            /**
+             * End Date
+             * Format: date
+             * @description Latest NAV date used by the analysis.
+             */
+            end_date: string;
+        };
+        /**
+         * FundAnalysisResponse
+         * @description Single-call payload for the fund Performance dossier tab.
+         */
+        FundAnalysisResponse: {
+            params: components["schemas"]["FundAnalysisParams"];
+            header: components["schemas"]["FundAnalysisHeader"];
+            /**
+             * Growth Of 100
+             * @description [date, value] growth series rebased to 100.0.
+             */
+            growth_of_100: [
+                string,
+                number
+            ][];
+            /**
+             * Monthly Returns
+             * @description [month_end, monthly return] points as decimal fractions.
+             */
+            monthly_returns: [
+                string,
+                number
+            ][];
+            /**
+             * Rolling Volatility
+             * @description [date, annualized volatility] points as decimal fractions.
+             */
+            rolling_volatility: [
+                string,
+                number
+            ][];
+            /**
+             * Rolling Sharpe
+             * @description [date, rolling Sharpe] points using zero risk-free rate.
+             */
+            rolling_sharpe: [
+                string,
+                number
+            ][];
+            /**
+             * Drawdown
+             * @description [date, underwater drawdown] points as negative decimal fractions.
+             */
+            drawdown: [
+                string,
+                number
+            ][];
+            histogram: components["schemas"]["HistogramOut"];
+            stats: components["schemas"]["FundAnalysisStats"];
+        };
+        /**
+         * FundAnalysisStats
+         * @description Point statistics over in-range daily NAV returns only.
+         */
+        FundAnalysisStats: {
+            /** Annualized Volatility */
+            annualized_volatility: number;
+            /** Var 95 */
+            var_95: number;
+            /** Cvar 95 */
+            cvar_95: number;
+            /** Total Return */
+            total_return: number;
+            max_drawdown: components["schemas"]["DrawdownOut"];
+            best_day: components["schemas"]["DatedValue"];
+            worst_day: components["schemas"]["DatedValue"];
+        };
+        /**
+         * FundCaptureRatios
+         * @description Monthly up/down capture versus the requested benchmark.
+         */
+        FundCaptureRatios: {
+            /** Up Capture */
+            up_capture?: number | null;
+            /** Down Capture */
+            down_capture?: number | null;
+            /**
+             * Up Periods
+             * @default 0
+             */
+            up_periods: number;
+            /**
+             * Down Periods
+             * @default 0
+             */
+            down_periods: number;
+            /** Benchmark Id */
+            benchmark_id?: string | null;
+            /** Benchmark Label */
+            benchmark_label?: string | null;
+            empty_state?: components["schemas"]["EmptyState"] | null;
+        };
+        /**
          * FundClassOut
          * @description One share class of the fund's series (F8.6b).
          *
@@ -1833,6 +2325,94 @@ export interface components {
             ticker: string;
             /** Expense Ratio */
             expense_ratio: number | null;
+        };
+        /**
+         * FundDrawdownAnalysis
+         * @description Drawdown series and worst periods for the requested NAV window.
+         */
+        FundDrawdownAnalysis: {
+            /** Dates */
+            dates: string[];
+            /** Values */
+            values: number[];
+            /** Max Drawdown */
+            max_drawdown?: number | null;
+            /** Current Drawdown */
+            current_drawdown?: number | null;
+            /** Worst Periods */
+            worst_periods: components["schemas"]["FundDrawdownPeriod"][];
+        };
+        /**
+         * FundDrawdownPeriod
+         * @description One peak-to-trough drawdown interval.
+         */
+        FundDrawdownPeriod: {
+            /**
+             * Start Date
+             * Format: date
+             */
+            start_date: string;
+            /**
+             * Trough Date
+             * Format: date
+             */
+            trough_date: string;
+            /** End Date */
+            end_date?: string | null;
+            /** Depth */
+            depth: number;
+            /** Duration Days */
+            duration_days: number;
+            /** Recovery Days */
+            recovery_days?: number | null;
+        };
+        /**
+         * FundEntityAnalyticsResponse
+         * @description Deep Analysis modal payload for one fund.
+         */
+        FundEntityAnalyticsResponse: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Name */
+            name: string;
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /**
+             * Window
+             * @enum {string}
+             */
+            window: "3M" | "6M" | "1Y" | "3Y" | "5Y";
+            risk_statistics: components["schemas"]["FundRiskStatistics"];
+            drawdown: components["schemas"]["FundDrawdownAnalysis"];
+            capture: components["schemas"]["FundCaptureRatios"];
+            rolling_returns: components["schemas"]["FundRollingReturns"];
+            distribution: components["schemas"]["FundReturnDistribution"];
+            return_statistics: components["schemas"]["FundReturnStatistics"];
+            tail_risk: components["schemas"]["FundTailRiskMetrics"];
+            insider_data?: components["schemas"]["InsiderData"] | null;
+        };
+        /**
+         * FundFactorsResponse
+         * @description Market sensitivities and style-bias snapshot for one fund.
+         */
+        FundFactorsResponse: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Market Sensitivities */
+            market_sensitivities: components["schemas"]["FundMarketSensitivity"][];
+            /** Style Bias */
+            style_bias: components["schemas"]["FundStyleBias"][];
+            /** Source Metadata */
+            source_metadata: components["schemas"]["FundSourceMetadata"][];
         };
         /** FundHistoryResponse */
         FundHistoryResponse: {
@@ -1892,6 +2472,52 @@ export interface components {
             items: components["schemas"]["FundHoldingItem"][];
             /** Pct Of Nav Total */
             pct_of_nav_total: number | null;
+        };
+        /**
+         * FundHoldingsTopResponse
+         * @description Top holdings plus sector breakdown for one fund series.
+         */
+        FundHoldingsTopResponse: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Series Id */
+            series_id: string;
+            /** Report Date */
+            report_date: string | null;
+            /** Top Holdings */
+            top_holdings: components["schemas"]["FundTopHolding"][];
+            /** Sector Breakdown */
+            sector_breakdown: components["schemas"]["FundSectorExposure"][];
+            /** Pct Of Nav Total */
+            pct_of_nav_total: number | null;
+        };
+        /**
+         * FundInstitutionalRevealResponse
+         * @description Tier C institutional reveal for one fund's underlying holdings.
+         */
+        FundInstitutionalRevealResponse: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Series Id */
+            series_id: string;
+            /** Fund Name */
+            fund_name: string;
+            /** Holdings Report Date */
+            holdings_report_date?: string | null;
+            /** Period */
+            period?: string | null;
+            /** Top Holders */
+            top_holders: components["schemas"]["InstitutionalHolder"][];
+            /** Overlap */
+            overlap: components["schemas"]["InstitutionalOverlapSecurity"][];
+            holder_network: components["schemas"]["HolderNetwork"];
+            empty_state?: components["schemas"]["EmptyState"] | null;
         };
         /**
          * FundListItem
@@ -1955,6 +2581,20 @@ export interface components {
             summary: components["schemas"]["LookthroughSummaryOut"];
         };
         /**
+         * FundMarketSensitivity
+         * @description OLS beta of fund returns against one factor return series.
+         */
+        FundMarketSensitivity: {
+            /** Factor */
+            factor: string;
+            /** Beta */
+            beta?: number | null;
+            /** T Stat */
+            t_stat?: number | null;
+            /** Significance */
+            significance?: string | null;
+        };
+        /**
          * FundNavPoint
          * @description One decimated NAV observation (last 2 years, ~260 points).
          */
@@ -1966,6 +2606,59 @@ export interface components {
             date: string;
             /** Nav */
             nav: number | null;
+        };
+        /**
+         * FundPeerItem
+         * @description Peer row for the Peers dossier tab.
+         */
+        FundPeerItem: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Ticker */
+            ticker: string | null;
+            /** Name */
+            name: string;
+            /** Strategy Label */
+            strategy_label: string;
+            /** Expense Ratio */
+            expense_ratio: number | null;
+            /** Return 1Y */
+            return_1y: number | null;
+            /** Volatility 1Y */
+            volatility_1y: number | null;
+            /** Sharpe 1Y */
+            sharpe_1y: number | null;
+            /** Max Drawdown 1Y */
+            max_drawdown_1y: number | null;
+            /** Cvar 95 12M */
+            cvar_95_12m: number | null;
+            /** Is Target */
+            is_target: boolean;
+        };
+        /**
+         * FundPeersResponse
+         * @description Funds in the same peer cohort as the target fund.
+         */
+        FundPeersResponse: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Cohort Label */
+            cohort_label: string;
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["FundPeerItem"][];
+            /**
+             * Classification Note
+             * @default Labels da fonte podem conter erros do classificador automático
+             */
+            classification_note: string;
         };
         /**
          * FundProfileResponse
@@ -2039,6 +2732,68 @@ export interface components {
              * Format: uuid
              */
             id: string;
+        };
+        /**
+         * FundRegimeBand
+         * @description One regime label point for the risk-timeseries overlay.
+         */
+        FundRegimeBand: {
+            /**
+             * Time
+             * Format: date
+             */
+            time: string;
+            /** Value */
+            value: number;
+            /**
+             * Regime
+             * @enum {string}
+             */
+            regime: "Expansion" | "Cautious" | "Stress";
+        };
+        /**
+         * FundReturnDistribution
+         * @description Freedman-Diaconis histogram and distribution moments.
+         */
+        FundReturnDistribution: {
+            /** Bin Edges */
+            bin_edges: number[];
+            /** Bin Counts */
+            bin_counts: number[];
+            /** Skewness */
+            skewness?: number | null;
+            /** Kurtosis */
+            kurtosis?: number | null;
+            /** Var 95 */
+            var_95?: number | null;
+            /** Cvar 95 */
+            cvar_95?: number | null;
+        };
+        /**
+         * FundReturnStatistics
+         * @description eVestment-style return statistics over monthly returns.
+         */
+        FundReturnStatistics: {
+            /** Arithmetic Mean Monthly */
+            arithmetic_mean_monthly?: number | null;
+            /** Geometric Mean Monthly */
+            geometric_mean_monthly?: number | null;
+            /** Avg Monthly Gain */
+            avg_monthly_gain?: number | null;
+            /** Avg Monthly Loss */
+            avg_monthly_loss?: number | null;
+            /** Gain Loss Ratio */
+            gain_loss_ratio?: number | null;
+            /** Downside Deviation */
+            downside_deviation?: number | null;
+            /** Semi Deviation */
+            semi_deviation?: number | null;
+            /** Omega Ratio */
+            omega_ratio?: number | null;
+            /** Up Percentage Ratio */
+            up_percentage_ratio?: number | null;
+            /** Down Percentage Ratio */
+            down_percentage_ratio?: number | null;
         };
         /**
          * FundRiskOut
@@ -2128,6 +2883,251 @@ export interface components {
             inflation_beta?: number | null;
             /** Crisis Alpha Score */
             crisis_alpha_score?: number | null;
+        };
+        /**
+         * FundRiskStatistics
+         * @description Institutional risk statistics over the requested NAV window.
+         */
+        FundRiskStatistics: {
+            /** Annualized Return */
+            annualized_return?: number | null;
+            /** Annualized Volatility */
+            annualized_volatility?: number | null;
+            /** Sharpe Ratio */
+            sharpe_ratio?: number | null;
+            /** Sortino Ratio */
+            sortino_ratio?: number | null;
+            /** Calmar Ratio */
+            calmar_ratio?: number | null;
+            /** Max Drawdown */
+            max_drawdown?: number | null;
+            /** Alpha */
+            alpha?: number | null;
+            /** Beta */
+            beta?: number | null;
+            /** Tracking Error */
+            tracking_error?: number | null;
+            /** Information Ratio */
+            information_ratio?: number | null;
+            /** N Observations */
+            n_observations: number;
+        };
+        /**
+         * FundRiskTimeseriesResponse
+         * @description Drawdown, conditional volatility, and regime overlay series.
+         */
+        FundRiskTimeseriesResponse: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /**
+             * Drawdown
+             * @description Drawdown in percent points.
+             */
+            drawdown: [
+                string,
+                number
+            ][];
+            /**
+             * Conditional Volatility
+             * @description Annualized conditional volatility in percent points.
+             */
+            conditional_volatility: [
+                string,
+                number
+            ][];
+            /**
+             * Volatility Model
+             * @enum {string}
+             */
+            volatility_model: "garch" | "ewma";
+            /** Regime Bands */
+            regime_bands: components["schemas"]["FundRegimeBand"][];
+            empty_state?: components["schemas"]["EmptyState"] | null;
+        };
+        /**
+         * FundRollingReturns
+         * @description Rolling compounded return series by window label.
+         */
+        FundRollingReturns: {
+            /** Series */
+            series: {
+                [key: string]: [
+                    string,
+                    number
+                ][];
+            };
+        };
+        /**
+         * FundScatterResponse
+         * @description Columnar risk/return scatter payload for the funds landing page.
+         */
+        FundScatterResponse: {
+            /** Count */
+            count: number;
+            /** Instrument Ids */
+            instrument_ids: string[];
+            /** Names */
+            names: string[];
+            /** Tickers */
+            tickers: (string | null)[];
+            /** Expected Returns */
+            expected_returns: number[];
+            /** Volatilities */
+            volatilities: number[];
+            /** Tail Risks */
+            tail_risks: number[];
+            /** Strategies */
+            strategies: string[];
+            /**
+             * Classification Note
+             * @default Labels da fonte podem conter erros do classificador automático
+             */
+            classification_note: string;
+        };
+        /**
+         * FundSectorExposure
+         * @description Sector exposure for Holdings tab bars/donut.
+         */
+        FundSectorExposure: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Direct Pct */
+            direct_pct: number;
+            /** Indirect Pct */
+            indirect_pct: number;
+            /** Total Pct */
+            total_pct: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "lookthrough" | "holdings";
+        };
+        /**
+         * FundSourceMetadata
+         * @description Source table and as-of information for DB-first dossier payloads.
+         */
+        FundSourceMetadata: {
+            /** Source */
+            source: string;
+            /** As Of */
+            as_of?: string | null;
+            empty_state?: components["schemas"]["EmptyState"] | null;
+        };
+        /**
+         * FundStyleBias
+         * @description Cross-sectional characteristic z-score for the latest available month.
+         */
+        FundStyleBias: {
+            /** Factor */
+            factor: string;
+            /** Value */
+            value?: number | null;
+            /** Z Score */
+            z_score?: number | null;
+            /** As Of */
+            as_of?: string | null;
+        };
+        /**
+         * FundStyleDriftPeriod
+         * @description Sector exposure for one N-PORT report date.
+         */
+        FundStyleDriftPeriod: {
+            /**
+             * Report Date
+             * Format: date
+             */
+            report_date: string;
+            /** Quarter */
+            quarter: string;
+            /** Sectors */
+            sectors: components["schemas"]["FundStyleSectorWeight"][];
+        };
+        /**
+         * FundStyleDriftResponse
+         * @description Historical sector weights from N-PORT reports.
+         */
+        FundStyleDriftResponse: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Series Id */
+            series_id: string;
+            /** Periods */
+            periods: components["schemas"]["FundStyleDriftPeriod"][];
+            empty_state?: components["schemas"]["EmptyState"] | null;
+        };
+        /**
+         * FundStyleSectorWeight
+         * @description One sector bucket in one historical holdings period.
+         */
+        FundStyleSectorWeight: {
+            /** Sector */
+            sector: string;
+            /**
+             * Weight
+             * @description Sector weight as a decimal fraction (0.25 = 25%).
+             */
+            weight: number | null;
+        };
+        /**
+         * FundTailRiskMetrics
+         * @description Tail-risk ladder using parametric and Cornish-Fisher modified VaR.
+         */
+        FundTailRiskMetrics: {
+            /** Var Parametric 90 */
+            var_parametric_90?: number | null;
+            /** Var Parametric 95 */
+            var_parametric_95?: number | null;
+            /** Var Parametric 99 */
+            var_parametric_99?: number | null;
+            /** Var Modified 95 */
+            var_modified_95?: number | null;
+            /** Var Modified 99 */
+            var_modified_99?: number | null;
+            /** Etl 95 */
+            etl_95?: number | null;
+            /** Starr */
+            starr?: number | null;
+            /** Rachev */
+            rachev?: number | null;
+            /** Jarque Bera */
+            jarque_bera?: number | null;
+            /** Jarque Bera Pvalue */
+            jarque_bera_pvalue?: number | null;
+        };
+        /**
+         * FundTopHolding
+         * @description Top holding row enriched with a display sector label.
+         */
+        FundTopHolding: {
+            /** Rank */
+            rank: number;
+            /** Issuer Name */
+            issuer_name: string | null;
+            /** Cusip */
+            cusip: string | null;
+            /** Isin */
+            isin: string | null;
+            /** Asset Class */
+            asset_class: string | null;
+            /** Sector */
+            sector: string | null;
+            /** Gics Sector */
+            gics_sector: string | null;
+            /** Sector Label */
+            sector_label: string | null;
+            /** Market Value */
+            market_value: number | null;
+            /** Pct Of Nav */
+            pct_of_nav: number | null;
         };
         /** FundsListResponse */
         FundsListResponse: {
@@ -2241,6 +3241,64 @@ export interface components {
             /** Bars */
             bars: components["schemas"]["HistoryBar"][];
         };
+        /**
+         * HolderNetwork
+         * @description Small network payload for institutional relationships.
+         */
+        HolderNetwork: {
+            /** Nodes */
+            nodes: components["schemas"]["HolderNetworkNode"][];
+            /** Edges */
+            edges: components["schemas"]["HolderNetworkEdge"][];
+        };
+        /**
+         * HolderNetworkEdge
+         * @description Edge for the Relationships modal holder/security network.
+         */
+        HolderNetworkEdge: {
+            /** Source */
+            source: string;
+            /** Target */
+            target: string;
+            /** Weight */
+            weight?: number | null;
+            /** Label */
+            label?: string | null;
+        };
+        /**
+         * HolderNetworkNode
+         * @description Node for the Relationships modal holder/security network.
+         */
+        HolderNetworkNode: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "fund" | "institution" | "security";
+            /** Value */
+            value?: number | null;
+        };
+        /**
+         * HoldingReverseLookupResponse
+         * @description Tier C reverse lookup from CUSIP to institutions and fund exposures.
+         */
+        HoldingReverseLookupResponse: {
+            /** Cusip */
+            cusip: string;
+            /** Security Name */
+            security_name?: string | null;
+            /** Period */
+            period?: string | null;
+            /** Institutions */
+            institutions: components["schemas"]["ReverseLookupInstitution"][];
+            /** Fund Exposures */
+            fund_exposures: components["schemas"]["ReverseLookupFundExposure"][];
+            empty_state?: components["schemas"]["EmptyState"] | null;
+        };
         /** IndexCard */
         IndexCard: {
             /** Ticker */
@@ -2253,6 +3311,126 @@ export interface components {
             change_pct: number;
             /** Spark */
             spark: number[];
+        };
+        /**
+         * InsiderData
+         * @description Insider sentiment mapped from fund holdings to issuer CIKs.
+         */
+        InsiderData: {
+            /** Issuer Ciks */
+            issuer_ciks?: string[];
+            /** Matched Cusips */
+            matched_cusips?: string[];
+            /** Quarters */
+            quarters?: components["schemas"]["InsiderQuarterSentiment"][];
+            /**
+             * Total Buy Value
+             * @default 0
+             */
+            total_buy_value: number;
+            /**
+             * Total Sell Value
+             * @default 0
+             */
+            total_sell_value: number;
+            /**
+             * Net Value
+             * @default 0
+             */
+            net_value: number;
+            /**
+             * Sentiment Score
+             * @description Net/(buy+sell), bounded to [-1, 1] when volume exists.
+             */
+            sentiment_score?: number | null;
+            /**
+             * Source
+             * @default sec_insider_sentiment
+             */
+            source: string;
+            /** As Of */
+            as_of?: string | null;
+            empty_state?: components["schemas"]["EmptyState"] | null;
+        };
+        /**
+         * InsiderQuarterSentiment
+         * @description Quarterly Form 4 buy/sell aggregate for issuers held by the fund.
+         */
+        InsiderQuarterSentiment: {
+            /**
+             * Quarter
+             * Format: date
+             */
+            quarter: string;
+            /**
+             * Buy Value
+             * @default 0
+             */
+            buy_value: number;
+            /**
+             * Sell Value
+             * @default 0
+             */
+            sell_value: number;
+            /**
+             * Net Value
+             * @default 0
+             */
+            net_value: number;
+            /**
+             * Buy Count
+             * @default 0
+             */
+            buy_count: number;
+            /**
+             * Sell Count
+             * @default 0
+             */
+            sell_count: number;
+        };
+        /**
+         * InstitutionalHolder
+         * @description Institutional manager exposure across the fund's underlying CUSIPs.
+         */
+        InstitutionalHolder: {
+            /** Cik */
+            cik: string;
+            /** Manager Name */
+            manager_name: string;
+            /** Value Usd */
+            value_usd?: number | null;
+            /** Shares */
+            shares?: number | null;
+            /**
+             * Holding Count
+             * @default 0
+             */
+            holding_count: number;
+            /** Period */
+            period?: string | null;
+            /** Report Date */
+            report_date?: string | null;
+        };
+        /**
+         * InstitutionalOverlapSecurity
+         * @description One fund holding with matching 13F institutional ownership.
+         */
+        InstitutionalOverlapSecurity: {
+            /** Cusip */
+            cusip: string;
+            /** Name */
+            name?: string | null;
+            /** Fund Pct Of Nav */
+            fund_pct_of_nav?: number | null;
+            /** Institutional Value Usd */
+            institutional_value_usd?: number | null;
+            /**
+             * Institution Count
+             * @default 0
+             */
+            institution_count: number;
+            /** Top Managers */
+            top_managers?: string[];
         };
         /** LeaderRow */
         LeaderRow: {
@@ -2384,6 +3562,17 @@ export interface components {
             lows_52w: components["schemas"]["LeaderRow"][];
             /** Sectors */
             sectors: components["schemas"]["SectorPerf"][];
+        };
+        /**
+         * MetricBuildOut
+         * @description One filter's distribution + availability for the batch build payload.
+         */
+        MetricBuildOut: {
+            /** Metric Code */
+            metric_code: string;
+            distribution: components["schemas"]["DistributionOut"] | null;
+            /** Available Count */
+            available_count: number;
         };
         /**
          * MetricDefOut
@@ -3522,6 +4711,49 @@ export interface components {
             name: string;
             /** Data Type */
             data_type: string;
+        };
+        /**
+         * ReverseLookupFundExposure
+         * @description Fund/series exposure to a requested CUSIP from local N-PORT holdings.
+         */
+        ReverseLookupFundExposure: {
+            /**
+             * Instrument Id
+             * Format: uuid
+             */
+            instrument_id: string;
+            /** Series Id */
+            series_id: string;
+            /** Ticker */
+            ticker?: string | null;
+            /** Name */
+            name: string;
+            /** Issuer Name */
+            issuer_name?: string | null;
+            /** Pct Of Nav */
+            pct_of_nav?: number | null;
+            /** Market Value */
+            market_value?: number | null;
+            /** Report Date */
+            report_date?: string | null;
+        };
+        /**
+         * ReverseLookupInstitution
+         * @description Institutional manager holding a requested CUSIP.
+         */
+        ReverseLookupInstitution: {
+            /** Cik */
+            cik: string;
+            /** Manager Name */
+            manager_name: string;
+            /** Value Usd */
+            value_usd?: number | null;
+            /** Shares */
+            shares?: number | null;
+            /** Period */
+            period?: string | null;
+            /** Report Date */
+            report_date?: string | null;
         };
         /**
          * RiskContributionOut
@@ -5158,6 +6390,41 @@ export interface operations {
             };
         };
     };
+    reorder_filters_screener_screens__screen_id__filters_reorder_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                screen_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FilterReorder"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScreenOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     build_metric_screener_screens__screen_id__build__metric_code__get: {
         parameters: {
             query?: never;
@@ -5177,6 +6444,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BuildResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    build_all_screener_screens__screen_id__build_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                screen_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildAllResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5358,6 +6656,271 @@ export interface operations {
             };
         };
     };
+    get_funds_scatter_funds_scatter_get: {
+        parameters: {
+            query?: {
+                /** @description Maximum funds returned. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundScatterResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_factors_funds__instrument_id__factors_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundFactorsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_style_drift_funds__instrument_id__style_drift_get: {
+        parameters: {
+            query?: {
+                /** @description Historical N-PORT periods returned. */
+                quarters?: number;
+            };
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundStyleDriftResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_entity_analytics_funds__instrument_id__entity_analytics_get: {
+        parameters: {
+            query?: {
+                /** @description Lookback window for Deep Analysis metrics. */
+                window?: "3M" | "6M" | "1Y" | "3Y" | "5Y";
+                /** @description Optional benchmark fund UUID for capture and relative stats. */
+                benchmark_id?: string | null;
+            };
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundEntityAnalyticsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_risk_timeseries_funds__instrument_id__risk_timeseries_get: {
+        parameters: {
+            query?: {
+                /** @description Optional inclusive start date. */
+                from?: string | null;
+                /** @description Optional inclusive end date. */
+                to?: string | null;
+            };
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundRiskTimeseriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_active_share_funds__instrument_id__active_share_get: {
+        parameters: {
+            query?: {
+                /** @description Benchmark fund UUID with N-PORT holdings. */
+                benchmark_id?: string | null;
+            };
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundActiveShareResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_institutional_reveal_funds__instrument_id__institutional_reveal_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundInstitutionalRevealResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_holding_reverse_lookup_holdings__cusip__reverse_lookup_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cusip: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HoldingReverseLookupResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_fund_profile_funds__instrument_id__get: {
         parameters: {
             query?: never;
@@ -5376,6 +6939,110 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FundProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_analysis_funds__instrument_id__analysis_get: {
+        parameters: {
+            query?: {
+                /** @description Visible-range preset; MAX = full NAV history. */
+                range?: "1M" | "6M" | "1Y" | "5Y" | "MAX";
+                /** @description Rolling window in NAV days (10..252). */
+                window?: number;
+            };
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundAnalysisResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_holdings_top_funds__instrument_id__holdings_top_get: {
+        parameters: {
+            query?: {
+                /** @description Maximum top holdings returned. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundHoldingsTopResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_peers_funds__instrument_id__peers_get: {
+        parameters: {
+            query?: {
+                /** @description Maximum peer rows returned. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundPeersResponse"];
                 };
             };
             /** @description Validation Error */
