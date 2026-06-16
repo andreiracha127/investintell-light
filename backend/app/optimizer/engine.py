@@ -143,10 +143,10 @@ def sigma_robust(
         var_ann = std**2 * TRADING_DAYS
         std_ann = np.sqrt(var_ann)
         cov_ann = corr_denoised * np.outer(std_ann, std_ann)
-        return repair_psd(cov_ann)
     except ValueError:
         # Deterministic fallback: RMT denoise could not produce a usable matrix.
         return repair_psd(sigma_ledoit_wolf(arr))
+    return repair_psd(cov_ann)
 
 
 def _check_constraint_params(n: int, cap: float | None, min_weight: float | None) -> None:

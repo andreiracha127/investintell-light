@@ -37,8 +37,10 @@ def test_sigma_robust_high_q_uses_rmt_path_and_is_psd() -> None:
     assert np.linalg.eigvalsh(robust).min() > -1e-9  # PSD after repair
     lw = engine.sigma_ledoit_wolf(x)
     assert not np.allclose(robust, lw)  # RMT denoise changed the estimate
-    # Annualized: diagonal variances are on the ×252 scale, same order as LW.
-    assert np.median(np.diag(robust)) > np.median(np.diag(lw)) * 0.1
+    # Both are annualized (×252); the RMT denoise must not collapse or blow up
+    # the per-asset variances — they stay within a factor of 2 of plain LW.
+    np.testing.assert_array_less(np.diag(robust), np.diag(lw) * 2.0)
+    np.testing.assert_array_less(np.diag(lw) * 0.5, np.diag(robust))
 
 
 def test_sigma_robust_threshold_is_configurable() -> None:
