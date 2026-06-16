@@ -80,6 +80,11 @@ export interface UniverseDraft {
   rankDir: "asc" | "desc";
   /** How many top-ranked candidates the optimizer runs over (2–50). */
   maxAssets: number;
+  /** Broad-universe mode: optimize the FULL filtered universe (Gates 1–3) via
+   * the two-stage pipeline, returning a lean K-position portfolio. */
+  broadUniverse: boolean;
+  /** Target portfolio cardinality K in broad mode (5–50). Ignored when ranked. */
+  maxPositions: number;
 }
 
 export const RANK_BY_LABELS: Record<UniverseRankBy, string> = {
@@ -100,6 +105,8 @@ export function defaultUniverseDraft(): UniverseDraft {
     rankBy: "aum_usd",
     rankDir: "desc",
     maxAssets: 30,
+    broadUniverse: false,
+    maxPositions: 30,
   };
 }
 
@@ -137,13 +144,14 @@ export function universeDraftToSpec(
     rank_by: draft.rankBy,
     rank_dir: draft.rankDir,
     max_assets: draft.maxAssets,
-    // Broad-universe mode is opt-in elsewhere; ranked mode keeps these at their
-    // defaults (the backend ignores max_positions/min_pair_overlap unless
-    // broad_universe is true).
-    broad_universe: false,
-    max_positions: draft.maxAssets,
+    broad_universe: draft.broadUniverse,
+    // In broad mode K = maxPositions; in ranked mode this field is ignored by
+    // the backend, so mirror max_assets to keep a valid (ge=2, le=50) value.
+    max_positions: draft.broadUniverse ? draft.maxPositions : draft.maxAssets,
     min_pair_overlap: 252,
-    ...(includeIds && includeIds.length >= 2
+    // Manual prune (include_instrument_ids) is a ranked-mode concept; broad mode
+    // selects representatives automatically, so never pin a list there.
+    ...(!draft.broadUniverse && includeIds && includeIds.length >= 2
       ? { include_instrument_ids: [...includeIds] }
       : {}),
   };
