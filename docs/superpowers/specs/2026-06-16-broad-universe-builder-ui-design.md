@@ -131,6 +131,28 @@ Padrão: vitest + @testing-library/react (`// @vitest-environment jsdom`), `user
 - Expor `min_pair_overlap` como controle avançado (decidido manter oculto).
 - Pré-cálculo no worker para universos >2000 (Fase 2 do design do optimizer).
 
+## Output — results em tree grid (Asset Class → Strategy → Fund)
+
+**Requisito (adicionado pelo dono):** no modo fund-universe a saída atual é uma tabela flat que inclui TODOS os fundos do universo (inclusive peso zero), sem agrupamento. Substituir por uma **Highcharts Grid Pro tree** de 3 níveis (Asset Class → Strategy → Fund), mostrando **apenas posições com peso não nulo**, com **peso agregado nas linhas-pai**, e o **ticker do fundo linkando ao dossiê** (`/funds/[instrument_id]`).
+
+**Decisões (do brainstorming):**
+- Escopo: tree **só no modo fund-universe** (ranked + broad). O modo Simulate (ações à mão, sem asset_class/strategy) mantém a tabela flat existente.
+- Linhas-pai com **peso agregado** (soma dos filhos) → adapter **parentId** (linhas-pai explícitas construídas no frontend).
+
+**Mudança de contrato (backend):** `WeightOut` não carrega asset_class/strategy hoje → adicionar dois campos opcionais:
+- `asset_class: str | None` (de `Fund.asset_class`, nullable; None p/ equities).
+- `strategy_label: str | None` (de `Fund.strategy_label`, non-null nos fundos com fallback 'Unclassified'; None p/ equities).
+`load_fund_asset_class` já existe; criar `load_fund_strategy_label` (mesmo padrão). Popular no builder do `OptimizeResponse`. Regenerar `openapi.json` + `api.d.ts`.
+
+**Grid Pro tree (verificado):** Grid Pro 3.0.0 tem o módulo `Grid/Pro/TreeView`; opção `dataTable...treeView: { enabled, input: { type: 'parentId', parentIdColumn }, treeColumn, expandedRowIds }`. Não há tree grid existente no repo (será o primeiro) — a colocação exata de `treeView` nas `Options` deve ser confirmada contra os tipos instalados e o `@sample grid-pro/tree-view/parent-id`.
+
+**Unidades:**
+- `buildWeightsTree(weights)` (puro, testável): filtra peso ≤ `WEIGHT_FLOOR` (1e-6), agrupa por asset_class → strategy_label, soma pesos nos pais, e emite linhas `{ id, parentId, label, weight, instrumentId }` (instrumentId só nas folhas-fundo, p/ o link). Equities/asset_class nulo caem num nó 'Other'. Ordena por peso desc dentro de cada nível.
+- `weightsTreeToGridOptions(rows)` (adapter, padrão `fundsGridOptions`): colunas `label` (treeColumn; formatter com link `/funds/<id>` nas folhas) + `weight` (formatter `%`); `dataTable.columns` column-oriented; `treeView` parentId, `expandedRowIds: 'all'`; tema `GRAPHITE_THEME`.
+- `ResultsPanel`: quando `grouped` (modo universe), renderiza `<DataGrid>` com a tree em vez da tabela flat de pesos; o resto (KPIs, donuts, diagnósticos) inalterado. `BuilderView` passa `grouped={mode === "universe"}`.
+
+**Fora de escopo:** agregação de "Current/Δ" por grupo (a tabela flat tem colunas vs-current; a tree v1 mostra só peso proposto agregado — colunas vs-current ficam para follow-up).
+
 ## Pontos a confirmar na implementação
 
 - Nome/forma exatos do objeto `diagnostics` e do tipo `SelectionDiagnosticsOut` no `api.d.ts` gerado (campos `n_candidates`/`n_selected`/`excluded[].{fund,reason}`/`clusters`).

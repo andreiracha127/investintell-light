@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Expor no builder UI o modo broad-universe do optimizer (toggle no Fund Universe card, gating de objetivo, painel de diagnóstico de seleção), sem mudança de contrato (o backend já serve tudo).
+**Goal:** Expor no builder UI o modo broad-universe do optimizer (Parte 1: toggle no Fund Universe card, gating de objetivo, painel de diagnóstico de seleção) E redesenhar o output do modo fund-universe (Parte 2: tree grid Asset Class → Strategy → Fund, só pesos não nulos, peso agregado nos pais, ticker → dossiê).
 
-**Architecture:** Mudança de frontend (React + design system próprio; estado local em `UniverseDraft` fluindo por `universeDraftToSpec`) mais um fix de mensagem de 1 linha no backend. A lógica testável é isolada em funções puras de `assets.ts`; componentes apresentacionais (`SelectionDiagnostics`) e morphing de controles (`FundUniverseCard`) são testados via @testing-library; o wiring fino em `BuilderView` consome as funções puras já testadas.
+**Architecture:** Parte 1 é frontend puro (estado em `UniverseDraft` → `universeDraftToSpec`) + um fix de mensagem de 1 linha no backend; lógica testável isolada em funções puras de `assets.ts`. Parte 2 adiciona dois campos de taxonomia ao `WeightOut` (mudança de contrato pequena, regenerada) e troca a tabela flat de pesos por uma Highcharts Grid Pro tree no modo universe; o core (`buildWeightsTree`) é puro e testado, o adapter de grid segue o padrão de `fundsGridOptions.ts`.
 
 **Tech Stack:** TypeScript, React 19, @tanstack/react-query, vitest + @testing-library/react (jsdom, jest-dom global em `frontend/vitest.setup.ts`), Tailwind (design system Investintell Cockpit). Backend: Python 3.13/pydantic.
 
@@ -39,8 +39,16 @@
 | `frontend/src/components/builder/SelectionDiagnostics.tsx` | Create | Painel colapsável do `SelectionDiagnosticsOut`. |
 | `frontend/src/components/builder/SelectionDiagnostics.test.tsx` | Create | Render condicional/expansão. |
 | `frontend/src/components/builder/ResultsPanel.tsx` | Modify | Renderiza `<SelectionDiagnostics>` quando `diagnostics.selection != null`. |
-| `backend/app/services/portfolio_builder.py` | Modify (1 linha) | Mensagem de cap infeasível: "lower" → "increase" max_positions. |
-| `backend/tests/test_builder_broad_universe.py` | Modify | Assert da nova mensagem. |
+| `backend/app/services/portfolio_builder.py` | Modify | Mensagem de cap (T5); popular `asset_class`/`strategy_label` no `WeightOut` (T7). |
+| `backend/tests/test_builder_broad_universe.py` | Modify | Assert da mensagem (T5); asserts de asset_class/strategy nos weights (T7). |
+| `backend/app/schemas/builder.py` | Modify | `WeightOut` += `asset_class`/`strategy_label` (T7). |
+| `backend/app/optimizer/data.py` | Modify | Novo `load_fund_strategy_label` (T7). |
+| `backend/openapi.json` + `frontend/src/lib/api/api.d.ts` | Modify (gerado) | Regen do contrato com os campos novos (T8). |
+| `frontend/src/lib/builder/weightsTree.ts` | Create | `buildWeightsTree` (puro): filtra peso-zero, agrupa AC→Strategy→Fund, agrega pesos nos pais (T9). |
+| `frontend/src/lib/builder/weightsTree.test.ts` | Create | Unit de `buildWeightsTree` (T9). |
+| `frontend/src/lib/grid/weightsTreeGridOptions.ts` | Create | Adapter Grid Pro tree (treeView parentId + link no ticker) (T10). |
+| `frontend/src/components/builder/ResultsPanel.tsx` | Modify | Renderiza a tree grid quando `grouped` (modo universe); flat caso contrário (T10). |
+| `frontend/src/components/builder/BuilderView.tsx` | Modify | Passa `grouped={mode === "universe"}` ao `ResultsPanel` (T10). |
 
 ---
 
@@ -811,9 +819,562 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ---
 
+# Parte 2 — Output: results tree grid (Asset Class → Strategy → Fund)
+
+> Tarefas 7–11 redesenham o output do modo fund-universe: uma Highcharts Grid Pro **tree** de 3 níveis, só pesos não nulos, peso agregado nos pais, ticker → dossiê. O modo Simulate mantém a tabela flat. Requer mudança de contrato (T7/T8) antes do frontend (T9/T10).
+
+## Task 7: Backend — `WeightOut` ganha `asset_class` + `strategy_label`
+
+**Files:**
+- Modify: `backend/app/schemas/builder.py` (`WeightOut`, ~line 268)
+- Modify: `backend/app/optimizer/data.py` (novo loader após `load_fund_asset_class`, ~line 225)
+- Modify: `backend/app/services/portfolio_builder.py` (popular no `OptimizeResponse`, ~line 571–582)
+- Modify: `backend/tests/test_builder_broad_universe.py` (stubs + asserts)
+
+- [ ] **Step 1: Write the failing test.** In `backend/tests/test_builder_broad_universe.py`, in `_stub_broad`, add two loader stubs and register them (alongside the existing `monkeypatch.setattr(optimizer_data, ...)` calls):
+```python
+    async def fake_asset_class(
+        session: Any, fund_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, str | None]:
+        return {fid: "equity" for fid in fund_ids}
+
+    async def fake_strategy(
+        session: Any, fund_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, str | None]:
+        return {fid: "Large-Cap Growth" for fid in fund_ids}
+
+    monkeypatch.setattr(optimizer_data, "load_fund_asset_class", fake_asset_class)
+    monkeypatch.setattr(optimizer_data, "load_fund_strategy_label", fake_strategy)
+```
+And in `test_broad_universe_returns_lean_portfolio_with_diagnostics`, after the existing weight assertions, add:
+```python
+    assert all(w["asset_class"] == "equity" for w in body["weights"])
+    assert all(w["strategy_label"] == "Large-Cap Growth" for w in body["weights"])
+```
+
+- [ ] **Step 2: Run, expect FAIL.** Run: `cd backend && python -m pytest tests/test_builder_broad_universe.py -k lean_portfolio -v`
+  Expected: FAIL — `KeyError`/`AttributeError`: `optimizer_data` has no `load_fund_strategy_label`, and `WeightOut` has no `asset_class`.
+
+- [ ] **Step 3a: Schema.** In `backend/app/schemas/builder.py`, in `WeightOut`, after the `name` field, add:
+```python
+    # Fund taxonomy for the grouped (tree) results view — None for equities.
+    asset_class: str | None = None
+    strategy_label: str | None = None
+```
+
+- [ ] **Step 3b: Loader.** In `backend/app/optimizer/data.py`, immediately after `load_fund_asset_class` (ends ~line 224), add:
+```python
+async def load_fund_strategy_label(
+    session: AsyncSession, fund_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, str | None]:
+    """strategy_label (funds.strategy_label) per instrument — None where unknown."""
+    if not fund_ids:
+        return {}
+    result = await session.execute(
+        select(Fund.instrument_id, Fund.strategy_label).where(
+            Fund.instrument_id.in_(fund_ids)
+        )
+    )
+    found = {row[0]: row[1] for row in result.all()}
+    return {fund_id: found.get(fund_id) for fund_id in fund_ids}
+```
+
+- [ ] **Step 3c: Populate.** In `backend/app/services/portfolio_builder.py`, immediately BEFORE `return OptimizeResponse(` (~line 573), add:
+```python
+    result_fund_ids = [ref.id for ref in assets if isinstance(ref, FundRefIn)]
+    asset_class_of = await optimizer_data.load_fund_asset_class(session, result_fund_ids)
+    strategy_of = await optimizer_data.load_fund_strategy_label(session, result_fund_ids)
+```
+Then in the `WeightOut(...)` constructor inside the `weights=[...]` comprehension, add the two fields after `name=...`:
+```python
+                asset_class=(
+                    asset_class_of.get(ref.id) if isinstance(ref, FundRefIn) else None
+                ),
+                strategy_label=(
+                    strategy_of.get(ref.id) if isinstance(ref, FundRefIn) else None
+                ),
+```
+> `optimizer_data` and `FundRefIn` are already imported in this module (used by the T6 broad block). Keep the loader calls as `optimizer_data.load_fund_*` (module-attribute) so the test monkeypatch applies.
+
+- [ ] **Step 4: Run, expect PASS.** Run: `cd backend && python -m pytest tests/test_builder_broad_universe.py tests/test_builder_route.py -q`
+  Expected: green (the explicit-assets route returns `asset_class=None` for equities — no regression).
+
+- [ ] **Step 5: Commit.**
+```bash
+git add backend/app/schemas/builder.py backend/app/optimizer/data.py backend/app/services/portfolio_builder.py backend/tests/test_builder_broad_universe.py
+git commit -m "feat(builder): WeightOut carries asset_class + strategy_label for grouped results (T7)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
+## Task 8: Regenerate the API contract
+
+**Files:**
+- Modify (generated): `backend/openapi.json`, `frontend/src/lib/api/api.d.ts`
+
+- [ ] **Step 1: Regenerate.** Run:
+```
+cd backend && python scripts/export_openapi.py
+cd frontend && pnpm dlx openapi-typescript ../backend/openapi.json -o src/lib/api/api.d.ts
+```
+
+- [ ] **Step 2: Confirm.** Run: `cd frontend && grep -A8 '"WeightOut"\|WeightOut:' src/lib/api/api.d.ts | grep -E "asset_class|strategy_label"`
+  Expected: both `asset_class?: string | null;` and `strategy_label?: string | null;` present. Also confirm `backend/openapi.json` contains them.
+
+- [ ] **Step 3: Commit.**
+```bash
+git add backend/openapi.json frontend/src/lib/api/api.d.ts
+git commit -m "chore(contract): regen openapi + api.d.ts with WeightOut taxonomy fields (T8)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
+## Task 9: Frontend — `buildWeightsTree` (pure transform)
+
+**Files:**
+- Create: `frontend/src/lib/builder/weightsTree.ts`
+- Create: `frontend/src/lib/builder/weightsTree.test.ts`
+
+- [ ] **Step 1: Write the failing test.** Create `frontend/src/lib/builder/weightsTree.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+
+import { buildWeightsTree, type WeightInput } from "./weightsTree";
+
+function w(over: Partial<WeightInput> = {}): WeightInput {
+  return {
+    kind: "fund",
+    instrumentId: "id-1",
+    ticker: "AAA",
+    name: "Fund A",
+    weight: 0.1,
+    assetClass: "equity",
+    strategyLabel: "Growth",
+    ...over,
+  };
+}
+
+describe("buildWeightsTree", () => {
+  it("drops zero-weight positions", () => {
+    const rows = buildWeightsTree([
+      w({ instrumentId: "a", ticker: "A", weight: 0.6 }),
+      w({ instrumentId: "b", ticker: "B", weight: 0 }),
+    ]);
+    const leaves = rows.filter((r) => r.instrumentId !== null);
+    expect(leaves.map((l) => l.label)).toEqual(["A"]);
+  });
+
+  it("builds 3 levels and aggregates parent weights", () => {
+    const rows = buildWeightsTree([
+      w({ instrumentId: "a", ticker: "A", weight: 0.2, strategyLabel: "Growth" }),
+      w({ instrumentId: "b", ticker: "B", weight: 0.3, strategyLabel: "Growth" }),
+      w({ instrumentId: "c", ticker: "C", weight: 0.5, assetClass: "fixed_income", strategyLabel: "Core" }),
+    ]);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    // Asset-class parents carry the aggregated weight.
+    expect(byId.get("ac:equity")?.weight).toBeCloseTo(0.5, 9);
+    expect(byId.get("ac:fixed_income")?.weight).toBeCloseTo(0.5, 9);
+    // Strategy parent aggregates its funds.
+    expect(byId.get("st:equity/Growth")?.weight).toBeCloseTo(0.5, 9);
+    // Leaf chain: fund -> strategy -> asset class.
+    const leafA = rows.find((r) => r.label === "A");
+    expect(leafA?.parentId).toBe("st:equity/Growth");
+    expect(byId.get("st:equity/Growth")?.parentId).toBe("ac:equity");
+    expect(byId.get("ac:equity")?.parentId).toBeNull();
+    // Parents carry no instrumentId; leaves do.
+    expect(byId.get("ac:equity")?.instrumentId).toBeNull();
+    expect(leafA?.instrumentId).toBe("a");
+  });
+
+  it("orders asset classes and funds by descending weight", () => {
+    const rows = buildWeightsTree([
+      w({ instrumentId: "a", ticker: "A", weight: 0.1, assetClass: "equity", strategyLabel: "G" }),
+      w({ instrumentId: "c", ticker: "C", weight: 0.9, assetClass: "fixed_income", strategyLabel: "Core" }),
+    ]);
+    // Fixed income (0.9) precedes equity (0.1) in the flat pre-order array.
+    const acOrder = rows.filter((r) => r.id.startsWith("ac:")).map((r) => r.id);
+    expect(acOrder).toEqual(["ac:fixed_income", "ac:equity"]);
+  });
+
+  it("groups funds with no asset_class under 'Other'", () => {
+    const rows = buildWeightsTree([
+      w({ instrumentId: "a", ticker: "A", weight: 0.5, assetClass: null, strategyLabel: null }),
+    ]);
+    const ac = rows.find((r) => r.id.startsWith("ac:"));
+    expect(ac?.label).toBe("Other");
+  });
+});
+```
+
+- [ ] **Step 2: Run, expect FAIL.** Run: `cd frontend && pnpm vitest run src/lib/builder/weightsTree.test.ts`
+  Expected: FAIL — module `./weightsTree` does not exist.
+
+- [ ] **Step 3: Implement.** Create `frontend/src/lib/builder/weightsTree.ts`:
+
+```ts
+/**
+ * Pure transform: a flat list of optimizer weights → ordered tree rows for the
+ * Grid Pro parent-id tree (Asset Class → Strategy → Fund). Zero-weight
+ * positions are dropped; parent rows carry the aggregated weight of their
+ * children. Leaves carry the fund `instrumentId` (for the dossier link); parent
+ * rows do not. Funds without an asset_class fall under "Other".
+ */
+
+/** One optimizer position, decoupled from the generated API type. */
+export interface WeightInput {
+  kind: "fund" | "equity";
+  instrumentId: string | null;
+  ticker: string | null;
+  name: string | null;
+  weight: number;
+  assetClass: string | null;
+  strategyLabel: string | null;
+}
+
+/** A row for the Grid Pro parent-id tree. */
+export interface WeightTreeRow {
+  id: string;
+  parentId: string | null;
+  label: string;
+  weight: number;
+  /** Fund instrument id for the dossier link; null for parent/aggregate rows. */
+  instrumentId: string | null;
+}
+
+const WEIGHT_FLOOR = 1e-6;
+
+const ASSET_CLASS_LABEL: Record<string, string> = {
+  equity: "Equity",
+  fixed_income: "Fixed income",
+  cash: "Cash",
+  alternatives: "Alternatives",
+};
+
+export function buildWeightsTree(weights: WeightInput[]): WeightTreeRow[] {
+  const kept = weights.filter((w) => w.weight > WEIGHT_FLOOR);
+
+  // Group by asset_class code → strategy label, summing weights.
+  interface Strat {
+    label: string;
+    weight: number;
+    funds: WeightInput[];
+  }
+  interface Group {
+    code: string; // "equity" | ... | "__other__"
+    label: string;
+    weight: number;
+    strategies: Map<string, Strat>;
+  }
+  const groups = new Map<string, Group>();
+
+  for (const w of kept) {
+    const code = w.assetClass ?? "__other__";
+    const acLabel = w.assetClass
+      ? (ASSET_CLASS_LABEL[w.assetClass] ?? w.assetClass)
+      : "Other";
+    const stratLabel = w.strategyLabel ?? "Unclassified";
+    let g = groups.get(code);
+    if (!g) {
+      g = { code, label: acLabel, weight: 0, strategies: new Map() };
+      groups.set(code, g);
+    }
+    g.weight += w.weight;
+    let s = g.strategies.get(stratLabel);
+    if (!s) {
+      s = { label: stratLabel, weight: 0, funds: [] };
+      g.strategies.set(stratLabel, s);
+    }
+    s.weight += w.weight;
+    s.funds.push(w);
+  }
+
+  const byWeightDesc = <T extends { weight: number }>(a: T, b: T) =>
+    b.weight - a.weight;
+
+  const rows: WeightTreeRow[] = [];
+  let leafSeq = 0; // stable, deterministic unique suffix for identity-less leaves
+  for (const g of [...groups.values()].sort(byWeightDesc)) {
+    const acId = `ac:${g.code}`;
+    rows.push({ id: acId, parentId: null, label: g.label, weight: g.weight, instrumentId: null });
+    for (const s of [...g.strategies.values()].sort(byWeightDesc)) {
+      const stId = `st:${g.code}/${s.label}`;
+      rows.push({ id: stId, parentId: acId, label: s.label, weight: s.weight, instrumentId: null });
+      for (const f of [...s.funds].sort(byWeightDesc)) {
+        rows.push({
+          id: `leaf:${f.instrumentId ?? f.ticker ?? f.name ?? `seq${leafSeq}`}`,
+          parentId: stId,
+          label: f.ticker ?? f.name ?? "—",
+          weight: f.weight,
+          instrumentId: f.kind === "fund" ? f.instrumentId : null,
+        });
+        leafSeq += 1;
+      }
+    }
+  }
+  return rows;
+}
+```
+
+- [ ] **Step 4: Run, expect PASS.** Run: `cd frontend && pnpm vitest run src/lib/builder/weightsTree.test.ts`
+  Expected: 4 passed.
+
+- [ ] **Step 5: Commit.**
+```bash
+git add frontend/src/lib/builder/weightsTree.ts frontend/src/lib/builder/weightsTree.test.ts
+git commit -m "feat(builder): pure weights→tree transform (group by class/strategy, aggregate) (T9)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
+## Task 10: Frontend — Grid Pro tree options + ResultsPanel wiring
+
+**Files:**
+- Create: `frontend/src/lib/grid/weightsTreeGridOptions.ts`
+- Create: `frontend/src/lib/grid/weightsTreeGridOptions.test.ts`
+- Modify: `frontend/src/components/builder/ResultsPanel.tsx`
+- Modify: `frontend/src/components/builder/BuilderView.tsx`
+
+> **Antes de codar:** confirme a forma exata do tree na API do Grid Pro 3.0.0 lendo o tipo `TreeViewOptions` em `node_modules/@highcharts/grid-pro/es-modules/Grid/Pro/TreeView/TreeViewTypes.d.ts` e o sample `grid-pro/tree-view/parent-id`. A colocação de `treeView` é em `dataTable...treeView` (LocalDataProviderOptions). Ajuste o objeto `Options` abaixo se a chave/aninhamento divergir; as colunas/formatters seguem o padrão de `fundsGridOptions.ts` (verificado).
+
+- [ ] **Step 1: Write the failing test.** Create `frontend/src/lib/grid/weightsTreeGridOptions.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+
+import { weightsTreeGridOptions, weightLabelFormatter } from "./weightsTreeGridOptions";
+import type { WeightTreeRow } from "@/lib/builder/weightsTree";
+
+const ROWS: WeightTreeRow[] = [
+  { id: "ac:equity", parentId: null, label: "Equity", weight: 0.5, instrumentId: null },
+  { id: "st:equity/Growth", parentId: "ac:equity", label: "Growth", weight: 0.5, instrumentId: null },
+  { id: "leaf:a", parentId: "st:equity/Growth", label: "AAA", weight: 0.5, instrumentId: "uuid-a" },
+];
+
+describe("weightsTreeGridOptions", () => {
+  it("feeds every tree row as a column-oriented dataTable with a label tree column", () => {
+    const opts = weightsTreeGridOptions(ROWS);
+    const cols = opts.dataTable?.columns as Record<string, unknown[]>;
+    expect(cols.id).toHaveLength(3);
+    expect(cols.parentId).toEqual(["", "ac:equity", "st:equity/Growth"]);
+    const colIds = (opts.columns ?? []).map((c) => c.id);
+    expect(colIds).toContain("label");
+    expect(colIds).toContain("weight");
+  });
+});
+
+describe("weightLabelFormatter", () => {
+  it("links a leaf label to the fund dossier and leaves parents plain", () => {
+    const leaf = weightLabelFormatter.call({
+      value: "AAA",
+      row: { getCell: (k: string) => ({ value: k === "instrumentId" ? "uuid-a" : "" }) },
+    } as never);
+    expect(leaf).toContain('href="/funds/uuid-a"');
+    const parent = weightLabelFormatter.call({
+      value: "Equity",
+      row: { getCell: () => ({ value: "" }) },
+    } as never);
+    expect(parent).not.toContain("href");
+  });
+});
+```
+
+- [ ] **Step 2: Run, expect FAIL.** Run: `cd frontend && pnpm vitest run src/lib/grid/weightsTreeGridOptions.test.ts`
+  Expected: FAIL — module does not exist.
+
+- [ ] **Step 3: Implement.** Create `frontend/src/lib/grid/weightsTreeGridOptions.ts`:
+
+```ts
+/**
+ * Pure adapter: weight tree rows → Highcharts Grid Pro Options for the grouped
+ * results view (Asset Class → Strategy → Fund). Uses the Grid Pro TreeView
+ * parent-id input; the `label` column is the tree column (expand/collapse) and
+ * links fund leaves to their dossier. Mirrors the column/formatter pattern of
+ * `fundsGridOptions.ts`.
+ */
+import type { Column, Options } from "@highcharts/grid-pro";
+
+import type { WeightTreeRow } from "@/lib/builder/weightsTree";
+import { formatPercent } from "@/lib/format";
+import { GRAPHITE_THEME } from "./gridOptions";
+
+type GridColumns = NonNullable<Options["columns"]>;
+type CellFormatter = NonNullable<NonNullable<GridColumns[number]["cells"]>["formatter"]>;
+type GridCell = ThisParameterType<CellFormatter>;
+
+function escapeHtml(value: unknown): string {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Tree column: leaf labels link to `/funds/<instrumentId>`; parents are plain. */
+export function weightLabelFormatter(this: GridCell): string {
+  const label = escapeHtml(this.value ?? "—");
+  const id = this.row.getCell("instrumentId")?.value;
+  return id === null || id === undefined || id === ""
+    ? label
+    : `<a class="ix-grid-link" href="/funds/${encodeURIComponent(String(id))}">${label}</a>`;
+}
+
+function weightFormatter(this: GridCell): string {
+  const v = this.value;
+  return v === null || v === undefined || v === "" ? "—" : formatPercent(Number(v));
+}
+
+export function weightsTreeGridOptions(rows: WeightTreeRow[]): Options {
+  return {
+    ...GRAPHITE_THEME,
+    dataTable: {
+      columns: {
+        id: rows.map((r) => r.id),
+        parentId: rows.map((r) => r.parentId ?? ""),
+        label: rows.map((r) => r.label),
+        weight: rows.map((r) => r.weight),
+        instrumentId: rows.map((r) => r.instrumentId ?? ""),
+      },
+      // Grid Pro TreeView (parent-id input): `label` is the expand/collapse
+      // column; parentId references the `id` column. VERIFY this nesting against
+      // TreeViewTypes.d.ts / the grid-pro/tree-view/parent-id sample.
+      treeView: {
+        enabled: true,
+        input: { type: "parentId", parentIdColumn: "parentId" },
+        treeColumn: "label",
+        expandedRowIds: "all",
+      },
+    },
+    rendering: { rows: { strictHeights: true } },
+    columns: [
+      {
+        id: "label",
+        header: { format: "Asset class / strategy / fund" },
+        cells: { formatter: weightLabelFormatter },
+      },
+      {
+        id: "weight",
+        header: { format: "Weight" },
+        cells: { formatter: weightFormatter },
+      },
+      { id: "id", enabled: false },
+      { id: "parentId", enabled: false },
+      { id: "instrumentId", enabled: false },
+    ] as Column[],
+  } as Options;
+}
+```
+> Se o type-check reclamar do shape de `dataTable.treeView`/`treeView`, ajuste conforme `TreeViewTypes.d.ts` (a chave existe em `LocalDataProviderOptions.treeView`). Mantenha as colunas e formatters.
+
+- [ ] **Step 4: Run the options test, expect PASS.** Run: `cd frontend && pnpm vitest run src/lib/grid/weightsTreeGridOptions.test.ts`
+  Expected: 2 passed. (Se o teste de `dataTable.columns` falhar pelo shape exato, alinhe o teste ao shape real do `Options["dataTable"]`.)
+
+- [ ] **Step 5: Wire into ResultsPanel.** In `frontend/src/components/builder/ResultsPanel.tsx`:
+
+(a) Add imports:
+```tsx
+import { DataGrid } from "@/components/ui/DataGrid";
+import { buildWeightsTree, type WeightInput } from "@/lib/builder/weightsTree";
+import { weightsTreeGridOptions } from "@/lib/grid/weightsTreeGridOptions";
+```
+
+(b) Add a `grouped` prop to the component props (in the `ResultsPanel({ ... }: { ... })` destructure/type), defaulting nothing — it is required:
+```tsx
+  grouped,
+```
+and in the props type add:
+```tsx
+  grouped: boolean;
+```
+
+(c) Build the tree options from `result.weights` near the top of the component body (after `const { weights, expected, diagnostics } = result;`):
+```tsx
+  const treeRows = buildWeightsTree(
+    weights.map<WeightInput>((w) => ({
+      kind: w.asset.kind,
+      instrumentId: w.asset.kind === "fund" ? w.asset.id : null,
+      ticker: w.ticker ?? null,
+      name: w.name ?? null,
+      weight: w.weight,
+      assetClass: w.asset_class ?? null,
+      strategyLabel: w.strategy_label ?? null,
+    })),
+  );
+```
+
+(d) Replace the main weights `<table>...</table>` (the proposal table, ~lines 548–604) so it only renders in the non-grouped path, and render the tree grid when grouped. Wrap the existing `<table>` JSX:
+```tsx
+        {grouped ? (
+          <DataGrid
+            options={weightsTreeGridOptions(treeRows)}
+            className="h-[420px] w-full"
+            emptyMessage="No positions with weight."
+          />
+        ) : (
+          <table className="w-full min-w-[560px] border-collapse ix-fs tabular-nums lining-nums">
+            {/* …existing flat proposal table unchanged… */}
+          </table>
+        )}
+```
+> Mantenha a tabela flat existente EXATAMENTE como está dentro do ramo `: (`. Só envelope-a no ternário. As demais seções (KPIs, donuts, MuDiagnostics, SelectionDiagnostics) não mudam.
+
+(e) In `frontend/src/components/builder/BuilderView.tsx`, where `<ResultsPanel .../>` is rendered, add the prop:
+```tsx
+            grouped={mode === "universe"}
+```
+
+- [ ] **Step 6: Type-check (no new errors in touched files).** Run: `cd frontend && pnpm run typecheck 2>&1 | grep -E "weightsTree|ResultsPanel|BuilderView"`
+  Expected: only the 2 pre-existing `BuilderView.tsx` `turnover_lambda` errors; nothing about `weightsTree`, `ResultsPanel`, `grouped`, or the grid options. Fix any NEW error (most likely the `treeView` option shape — align to `TreeViewTypes.d.ts`).
+
+- [ ] **Step 7: Commit.**
+```bash
+git add frontend/src/lib/grid/weightsTreeGridOptions.ts frontend/src/lib/grid/weightsTreeGridOptions.test.ts frontend/src/components/builder/ResultsPanel.tsx frontend/src/components/builder/BuilderView.tsx
+git commit -m "feat(builder): grouped tree-grid results (class→strategy→fund, dossier links) (T10)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
+## Task 11: Final gate — type-check + tests + visual check
+
+**Files:** (verificação)
+
+- [ ] **Step 1: Frontend type-check.** Run: `cd frontend && pnpm run typecheck`
+  Expected: SOMENTE os 6 erros pré-existentes (2 `BuilderView.tsx` `turnover_lambda`, 4 `rebalance.test.ts` `status`). Nenhum novo nos arquivos tocados.
+
+- [ ] **Step 2: Frontend tests.** Run: `cd frontend && pnpm vitest run src/components/builder src/lib/builder src/lib/grid/weightsTreeGridOptions.test.ts`
+  Expected: todas as suítes novas verdes.
+
+- [ ] **Step 3: Backend tests + lint.** Run:
+  ```
+  cd backend && python -m pytest tests/test_builder_broad_universe.py tests/test_builder_schema.py tests/test_builder_route.py -q
+  cd backend && python -m ruff check app/services/portfolio_builder.py app/optimizer/data.py app/schemas/builder.py
+  ```
+  Expected: verde; ruff limpo.
+
+- [ ] **Step 4: Visual check.** Rode o app (`cd frontend && pnpm dev` + backend) e abra `/builder`: modo "Fund universe" → Broad → rode um optimize. Confirme: (a) o resultado é uma tree de 3 níveis (Asset Class → Strategy → Fund), expandida; (b) só posições com peso > 0; (c) pesos agregados nas linhas-pai; (d) clicar num ticker abre `/funds/<id>` (dossiê). No modo Simulate, o resultado continua a tabela flat.
+
+- [ ] **Step 5: Commit (se o gate exigiu ajustes).**
+```bash
+git add -A
+git commit -m "test(builder): broad-universe UI + tree-grid output gate (T11)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
 ## Notas de escopo
 
-- **Não há regen de contrato:** os campos de request (`broad_universe`/`max_positions`/`min_pair_overlap`) e o tipo de resposta (`SelectionDiagnosticsOut`/`ExcludedFundOut`/`DiagnosticsOut.selection`) já estão no `api.d.ts` gerado (T7 do optimizer). Nenhuma task regenera o contrato.
+- **Contrato:** a Parte 1 NÃO regenera (os campos de request `broad_universe`/`max_positions`/`min_pair_overlap` e o tipo `SelectionDiagnosticsOut`/`DiagnosticsOut.selection` já estão no `api.d.ts` gerado pelo optimizer). A Parte 2 (T7→T8) adiciona `asset_class`/`strategy_label` ao `WeightOut` e regenera `openapi.json` + `api.d.ts`.
+- **Task 6 é um checkpoint da Parte 1** (gate da UI de input); a Task 11 é o gate final cobrindo tudo (input + output).
 - **Sem teste de render do `BuilderView` inteiro:** o gating de objetivo é exercido pelas funções puras `objectivesForBroad`/`resolveObjectiveForBroad` (Task 3, testadas em `assets.test.ts`); o wiring em `BuilderView` é mecânico e coberto pelo type-check. Um render completo do `BuilderView` exigiria mock pesado (next/navigation, postBuilderOptimize, todos os cards) com baixo retorno de cobertura — deliberadamente fora de escopo.
 - **Follow-up conhecido (não neste plano):** a degenerescência do auto-relax do cap (erguer para exatamente `1/K` força peso igual; ocorre p/ K≤4) — evitada na UI pela faixa K≥5; um follow-up de backend poderia erguer o cap para `>1/K` ou sinalizá-lo no diagnóstico.
 ```
