@@ -222,3 +222,21 @@ export const OBJECTIVES: {
       "Mean-variance utility on the Black-Litterman posterior — requires views to tilt away from market weights.",
   },
 ];
+
+/** Objectives selectable in the current mode. Broad-universe mode is
+ * risk-structure-only (gate G5), so the backend rejects mu-based objectives
+ * (bl_utility / max_return_cvar) — hide bl_utility here (max_return_cvar is not
+ * in OBJECTIVES; it is reached only via the views path). */
+export function objectivesForBroad(broad: boolean): typeof OBJECTIVES {
+  return broad ? OBJECTIVES.filter((o) => o.value !== "bl_utility") : OBJECTIVES;
+}
+
+/** Fall a now-unavailable objective back to the mu-free default. In broad mode
+ * bl_utility becomes min_cvar; everything else (and all of ranked mode) is
+ * left untouched. */
+export function resolveObjectiveForBroad(
+  objective: BuilderObjective,
+  broad: boolean,
+): BuilderObjective {
+  return broad && objective === "bl_utility" ? "min_cvar" : objective;
+}

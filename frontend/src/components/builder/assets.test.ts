@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { defaultUniverseDraft, universeDraftToSpec } from "./assets";
+import {
+  defaultUniverseDraft,
+  objectivesForBroad,
+  resolveObjectiveForBroad,
+  universeDraftToSpec,
+} from "./assets";
 
 describe("universeDraftToSpec", () => {
   it("ranked mode: broad_universe false, max_positions mirrors max_assets, keeps include ids", () => {
@@ -30,5 +35,25 @@ describe("universeDraftToSpec", () => {
     const draft = defaultUniverseDraft();
     expect(draft.broadUniverse).toBe(false);
     expect(draft.maxPositions).toBe(30);
+  });
+});
+
+describe("objective gating for broad mode", () => {
+  it("ranked mode keeps every objective including bl_utility", () => {
+    const values = objectivesForBroad(false).map((o) => o.value);
+    expect(values).toContain("bl_utility");
+    expect(values).toContain("min_cvar");
+  });
+
+  it("broad mode drops the mu-based bl_utility objective", () => {
+    const values = objectivesForBroad(true).map((o) => o.value);
+    expect(values).not.toContain("bl_utility");
+    expect(values).toContain("min_cvar");
+  });
+
+  it("resolveObjectiveForBroad falls bl_utility back to min_cvar only in broad mode", () => {
+    expect(resolveObjectiveForBroad("bl_utility", true)).toBe("min_cvar");
+    expect(resolveObjectiveForBroad("bl_utility", false)).toBe("bl_utility");
+    expect(resolveObjectiveForBroad("min_vol", true)).toBe("min_vol");
   });
 });

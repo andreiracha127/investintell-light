@@ -36,6 +36,8 @@ import {
   type UniverseAsset,
   type UniverseDraft,
   OBJECTIVES,
+  objectivesForBroad,
+  resolveObjectiveForBroad,
 } from "./assets";
 import { UniverseCard } from "./UniverseCard";
 import { FundUniverseCard } from "./FundUniverseCard";
@@ -227,6 +229,14 @@ export function BuilderView() {
   };
 
   const objectiveDef = OBJECTIVES.find((o) => o.value === objective);
+  const broadUniverse = mode === "universe" && universeDraft.broadUniverse;
+  const visibleObjectives = objectivesForBroad(broadUniverse);
+  // Entering broad mode while a mu-based objective is selected silently resets
+  // it to the mu-free default (the dropdown also hides it). Functional update
+  // keeps `objective` out of the dependency list.
+  useEffect(() => {
+    setObjective((o) => resolveObjectiveForBroad(o, broadUniverse));
+  }, [broadUniverse]);
 
   return (
     <div className="mx-auto max-w-[1400px] px-5 py-5">
@@ -292,7 +302,7 @@ export function BuilderView() {
                 aria-label="Optimization objective"
                 className={INPUT_CLASS}
               >
-                {OBJECTIVES.map((o) => (
+                {visibleObjectives.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
                   </option>
@@ -324,6 +334,12 @@ export function BuilderView() {
           {objectiveDef && (
             <p className="ix-fs mb-0 mt-2.5 text-text-muted">
               {objectiveDef.description}
+            </p>
+          )}
+          {broadUniverse && (
+            <p className="ix-fs mb-0 mt-2 text-text-muted">
+              Broad mode is risk-structure-only (gate G5) — return-based
+              objectives (BL max utility) are unavailable.
             </p>
           )}
         </Card>
