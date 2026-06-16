@@ -14,7 +14,7 @@ def _planted_clusters(
     """(T, N) returns with ``n_clusters`` blocks; each block shares a factor."""
     rng = np.random.default_rng(seed)
     cols = []
-    for c in range(n_clusters):
+    for _c in range(n_clusters):
         common = rng.standard_normal((t, 1))
         for _ in range(per_cluster):
             idio = rng.standard_normal((t, 1))
