@@ -231,6 +231,12 @@ class OptimizeRequest(BaseModel):
         if self.objective == "max_return_cvar":
             if self.cvar_limit is None:
                 raise ValueError("max_return_cvar requires a cvar_limit (tail-loss cap)")
+            if self.universe is not None and self.universe.broad_universe:
+                raise ValueError(
+                    "max_return_cvar cannot run in broad_universe mode — it needs "
+                    "expected returns (Black-Litterman views on an explicit 'assets' "
+                    "list); broad_universe is risk-structure-only (gate G5)"
+                )
             if self.universe is not None:
                 raise ValueError(
                     "max_return_cvar needs expected returns and so requires views on an "

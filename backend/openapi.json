@@ -4942,6 +4942,16 @@
                 "type": "null"
               }
             ]
+          },
+          "selection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SelectionDiagnosticsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -5085,6 +5095,25 @@
           "ticker"
         ],
         "title": "EquityRefIn"
+      },
+      "ExcludedFundOut": {
+        "properties": {
+          "fund": {
+            "type": "string",
+            "title": "Fund"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fund",
+          "reason"
+        ],
+        "title": "ExcludedFundOut",
+        "description": "A fund dropped by Stage-1 with its reason (fail-loud transparency)."
       },
       "ExpectedOut": {
         "properties": {
@@ -12958,6 +12987,41 @@
         ],
         "title": "SectorPerf"
       },
+      "SelectionDiagnosticsOut": {
+        "properties": {
+          "n_candidates": {
+            "type": "integer",
+            "title": "N Candidates"
+          },
+          "n_selected": {
+            "type": "integer",
+            "title": "N Selected"
+          },
+          "excluded": {
+            "items": {
+              "$ref": "#/components/schemas/ExcludedFundOut"
+            },
+            "type": "array",
+            "title": "Excluded"
+          },
+          "clusters": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Clusters"
+          }
+        },
+        "type": "object",
+        "required": [
+          "n_candidates",
+          "n_selected",
+          "excluded",
+          "clusters"
+        ],
+        "title": "SelectionDiagnosticsOut",
+        "description": "Stage-1 selection summary (broad-universe mode only)."
+      },
       "StackedSeries": {
         "properties": {
           "ticker": {
@@ -13418,6 +13482,24 @@
               }
             ],
             "title": "Include Instrument Ids"
+          },
+          "broad_universe": {
+            "type": "boolean",
+            "title": "Broad Universe",
+            "default": false
+          },
+          "max_positions": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 2.0,
+            "title": "Max Positions",
+            "default": 30
+          },
+          "min_pair_overlap": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Min Pair Overlap",
+            "default": 252
           }
         },
         "type": "object",
