@@ -45,6 +45,10 @@ describe("buildWeightsTree", () => {
     // Parents carry no instrumentId; leaves do.
     expect(byId.get("ac:equity")?.instrumentId).toBeNull();
     expect(leafA?.instrumentId).toBe("a");
+    // Leaves carry the fund name; parents do not.
+    expect(leafA?.name).toBe("Fund A");
+    expect(byId.get("ac:equity")?.name).toBeNull();
+    expect(byId.get("st:equity/Growth")?.name).toBeNull();
   });
 
   it("orders asset classes and funds by descending weight", () => {

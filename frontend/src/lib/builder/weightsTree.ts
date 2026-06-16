@@ -25,6 +25,8 @@ export interface WeightTreeRow {
   weight: number;
   /** Fund instrument id for the dossier link; null for parent/aggregate rows. */
   instrumentId: string | null;
+  /** Fund display name (leaf rows); null for parent/aggregate rows. */
+  name: string | null;
 }
 
 const WEIGHT_FLOOR = 1e-6;
@@ -81,10 +83,10 @@ export function buildWeightsTree(weights: WeightInput[]): WeightTreeRow[] {
   let leafSeq = 0; // stable, deterministic unique suffix for identity-less leaves
   for (const g of [...groups.values()].sort(byWeightDesc)) {
     const acId = `ac:${g.code}`;
-    rows.push({ id: acId, parentId: null, label: g.label, weight: g.weight, instrumentId: null });
+    rows.push({ id: acId, parentId: null, label: g.label, weight: g.weight, instrumentId: null, name: null });
     for (const s of [...g.strategies.values()].sort(byWeightDesc)) {
       const stId = `st:${g.code}/${s.label}`;
-      rows.push({ id: stId, parentId: acId, label: s.label, weight: s.weight, instrumentId: null });
+      rows.push({ id: stId, parentId: acId, label: s.label, weight: s.weight, instrumentId: null, name: null });
       for (const f of [...s.funds].sort(byWeightDesc)) {
         rows.push({
           id: `leaf:${f.instrumentId ?? f.ticker ?? f.name ?? `seq${leafSeq}`}`,
@@ -92,6 +94,7 @@ export function buildWeightsTree(weights: WeightInput[]): WeightTreeRow[] {
           label: f.ticker ?? f.name ?? "—",
           weight: f.weight,
           instrumentId: f.kind === "fund" ? f.instrumentId : null,
+          name: f.name,
         });
         leafSeq += 1;
       }

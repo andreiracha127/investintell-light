@@ -51,13 +51,25 @@ function weightFormatter(this: GridCell): string {
   return v === null || v === undefined || v === "" ? "—" : formatPercent(Number(v));
 }
 
+/** Fund name column: leaf names; blank for parent (asset-class/strategy) rows. */
+function nameFormatter(this: GridCell): string {
+  const v = this.value;
+  return v === null || v === undefined || v === ""
+    ? ""
+    : `<span class="ix-grid-trunc">${escapeHtml(v)}</span>`;
+}
+
 export function weightsTreeGridOptions(rows: WeightTreeRow[]): Options {
-  const data: LocalGridData & { treeView: TreeViewOptionsLocal } = {
+  const data: LocalGridData & { treeView: TreeViewOptionsLocal; idColumn?: string } = {
     providerType: "local",
+    // TreeView parent-id input resolves parents via this row-id column; without
+    // it the grid logs "data.idColumn is required" and renders a flat list.
+    idColumn: "id",
     columns: {
       id: rows.map((r) => r.id),
       parentId: rows.map((r) => r.parentId ?? ""),
       label: rows.map((r) => r.label),
+      name: rows.map((r) => r.name ?? ""),
       weight: rows.map((r) => r.weight),
       instrumentId: rows.map((r) => r.instrumentId ?? ""),
     },
@@ -76,6 +88,11 @@ export function weightsTreeGridOptions(rows: WeightTreeRow[]): Options {
       id: "label",
       header: { format: "Asset class / strategy / fund" },
       cells: { formatter: weightLabelFormatter },
+    },
+    {
+      id: "name",
+      header: { format: "Name" },
+      cells: { formatter: nameFormatter },
     },
     {
       id: "weight",
