@@ -283,6 +283,79 @@ def realized_cvar(returns: pd.Series, confidence: float = 0.95) -> float:
     return float(cvar)
 
 
+@dataclass(frozen=True)
+class RealizedCVaRCheck:
+    """Out-of-sample realized-CVaR verification against a stated limit.
+
+    ``realized_cvar`` and ``cvar_limit`` are POSITIVE decimal-fraction loss
+    magnitudes (same convention as :func:`historical_cvar`). ``utilization`` is
+    realized_cvar / cvar_limit; ``breach`` is True when utilization > 1.
+    """
+
+    realized_cvar: float
+    cvar_limit: float
+    utilization: float
+    breach: bool
+    confidence: float
+    n_obs: int
+
+
+def annualize_cvar(cvar_periodic: float, periods_per_year: int = 252) -> float:
+    """Scale a per-period CVaR to an annual horizon via square-root-of-time.
+
+    Matches the √(periods_per_year) convention of :func:`annualized_volatility`
+    (CVaR of an i.i.d. sum scales like the standard deviation under the
+    Gaussian/√h approximation). ``cvar_periodic`` is a POSITIVE loss magnitude
+    (decimal fraction); the annualized result is likewise positive.
+
+    Raises:
+        ValueError: if ``cvar_periodic`` is negative (wrong sign convention) or
+            ``periods_per_year`` is not a positive integer.
+    """
+    if cvar_periodic < 0:
+        raise ValueError(
+            f"cvar_periodic must be a positive loss magnitude (decimal fraction), "
+            f"got {cvar_periodic}"
+        )
+    if periods_per_year <= 0:
+        raise ValueError(f"periods_per_year must be positive, got {periods_per_year}")
+    return cvar_periodic * math.sqrt(periods_per_year)
+
+
+def verify_realized_cvar(
+    returns: pd.Series,
+    cvar_limit: float,
+    confidence: float = 0.95,
+) -> RealizedCVaRCheck:
+    """Recompute realized CVaR on a held-out window and compare to a limit.
+
+    The realized CVaR is computed by :func:`historical_cvar` (same estimator,
+    same per-period horizon as ``cvar_limit``). ``utilization`` is the ratio to
+    the limit; ``breach`` fires when realized CVaR exceeds the limit. Used to
+    audit whether an ex-ante optimizer CVaR cap held out-of-sample.
+
+    Raises:
+        ValueError: if ``cvar_limit`` is not a positive decimal fraction, or any
+            condition that :func:`historical_cvar` rejects (confidence not in
+            (0,1), < 10 returns, empty tail, NaN input).
+    """
+    if cvar_limit <= 0:
+        raise ValueError(
+            f"cvar_limit must be a positive loss magnitude (decimal fraction), "
+            f"got {cvar_limit}"
+        )
+    realized = historical_cvar(returns, confidence=confidence)
+    utilization = realized / cvar_limit
+    return RealizedCVaRCheck(
+        realized_cvar=realized,
+        cvar_limit=cvar_limit,
+        utilization=utilization,
+        breach=utilization > 1.0,
+        confidence=confidence,
+        n_obs=int(len(returns)),
+    )
+
+
 def max_drawdown(prices: pd.Series) -> DrawdownResult:
     """Maximum drawdown of a price/NAV series via running maximum.
 
