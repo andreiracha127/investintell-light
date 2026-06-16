@@ -254,7 +254,8 @@ async def load_fund_quality_metrics(
             "expense_ratio": float(expense) if expense is not None else None,
             "aum_usd": float(aum) if aum is not None else None,
         }
-    return {fid: found.get(fid, {"sharpe_1y": None, "expense_ratio": None, "aum_usd": None}) for fid in fund_ids}
+    default = {"sharpe_1y": None, "expense_ratio": None, "aum_usd": None}
+    return {fid: found.get(fid, dict(default)) for fid in fund_ids}
 
 
 @dataclass(frozen=True)
@@ -279,7 +280,14 @@ async def select_universe_funds(
     min_obs: int = MIN_COMMON_OBS,
     today: dt.date | None = None,
 ) -> list[UniverseFund]:
-    """Resolve a universe spec to ranked fund candidates (top ``max_assets``).
+    """Resolve a universe spec to ranked fund candidates.
+
+    When ``max_assets`` is an int, returns up to that many top-ranked candidates
+    (hard ``LIMIT`` in SQL). When ``max_assets`` is ``None`` (broad-universe
+    mode), returns ALL matching funds up to the hard ceiling
+    ``MAX_UNIVERSE_CANDIDATES``; if the DB returns more than that, raises
+    ``ValueError`` (fail-loud — a pre-computed worker path is planned for
+    larger universes).
 
     Reuses the GET /funds filter predicates and sort whitelist, and only keeps
     funds that EACH have at least ``min_obs`` non-null NAV observations in the

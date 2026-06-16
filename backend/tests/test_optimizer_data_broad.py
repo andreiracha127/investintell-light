@@ -5,11 +5,11 @@
 """
 
 import datetime as dt
+import decimal
 import uuid
 from typing import Any
 
 import numpy as np
-import pandas as pd
 import pytest
 
 from app.optimizer import data as optimizer_data
@@ -87,3 +87,99 @@ async def test_load_returns_matrix_rejects_fewer_than_two() -> None:
 
 def test_max_universe_candidates_default_is_2000() -> None:
     assert optimizer_data.MAX_UNIVERSE_CANDIDATES == 2000
+
+
+_FUND_C = uuid.UUID("00000000-0000-0000-0000-00000000000c")
+
+
+async def test_load_fund_quality_metrics_fills_defaults_for_missing_fund() -> None:
+    """Funds present in DB get real values; a fund absent from DB gets all-None."""
+    # DB rows: (instrument_id, expense_ratio, aum_usd, sharpe_1y) — matches the
+    # SELECT column order in load_fund_quality_metrics.
+    db_rows: list[tuple[Any, ...]] = [
+        # FUND_A: fully populated, values as Decimal to exercise float cast.
+        (
+            _FUND_A,
+            decimal.Decimal("0.0050"),   # expense_ratio
+            decimal.Decimal("1_500_000_000"),  # aum_usd
+            decimal.Decimal("1.23"),     # sharpe_1y
+        ),
+        # FUND_B: partially populated — sharpe_1y is NULL.
+        (
+            _FUND_B,
+            decimal.Decimal("0.0075"),   # expense_ratio
+            None,                        # aum_usd
+            None,                        # sharpe_1y
+        ),
+        # FUND_C is intentionally absent from DB rows → should get all-None default.
+    ]
+
+    class _SimpleSession:
+        async def execute(self, stmt: Any) -> _FakeResult:
+            return _FakeResult(db_rows)
+
+    result = await optimizer_data.load_fund_quality_metrics(
+        _SimpleSession(), [_FUND_A, _FUND_B, _FUND_C]  # type: ignore[arg-type]
+    )
+
+    # Every requested id must be present.
+    assert set(result.keys()) == {_FUND_A, _FUND_B, _FUND_C}
+
+    # FUND_A: all three fields present and cast to float.
+    a = result[_FUND_A]
+    assert set(a.keys()) == {"sharpe_1y", "expense_ratio", "aum_usd"}
+    assert isinstance(a["expense_ratio"], float)
+    assert isinstance(a["aum_usd"], float)
+    assert isinstance(a["sharpe_1y"], float)
+    assert abs(a["expense_ratio"] - 0.005) < 1e-9
+    assert abs(a["sharpe_1y"] - 1.23) < 1e-9
+
+    # FUND_B: partial — aum_usd and sharpe_1y are None.
+    b = result[_FUND_B]
+    assert set(b.keys()) == {"sharpe_1y", "expense_ratio", "aum_usd"}
+    assert isinstance(b["expense_ratio"], float)
+    assert b["aum_usd"] is None
+    assert b["sharpe_1y"] is None
+
+    # FUND_C: not in DB → all-None default.
+    c = result[_FUND_C]
+    assert set(c.keys()) == {"sharpe_1y", "expense_ratio", "aum_usd"}
+    assert c["sharpe_1y"] is None
+    assert c["expense_ratio"] is None
+    assert c["aum_usd"] is None
+
+    # Each missing fund must get its OWN dict (not a shared mutable object).
+    # Two separate missing funds must have distinct dict objects — confirm by
+    # adding a second absent fund and checking identity.
+    _FUND_X = uuid.UUID("00000000-0000-0000-0000-0000000000ff")
+    result2 = await optimizer_data.load_fund_quality_metrics(
+        _SimpleSession(), [_FUND_C, _FUND_X]  # type: ignore[arg-type]
+    )
+    assert result2[_FUND_C] is not result2[_FUND_X]
+
+
+async def test_select_universe_funds_raises_when_exceeds_ceiling() -> None:
+    """max_assets=None: raises ValueError (matching 'more than') when the DB
+    returns more than MAX_UNIVERSE_CANDIDATES rows."""
+    ceiling = optimizer_data.MAX_UNIVERSE_CANDIDATES
+    # Build ceiling+1 minimal rows shaped as (instrument_id, ticker, name).
+    oversized_rows: list[tuple[Any, ...]] = [
+        (uuid.uuid4(), f"T{i:04d}", f"Fund {i}")
+        for i in range(ceiling + 1)
+    ]
+
+    class _CeilingSession:
+        async def execute(self, stmt: Any) -> _FakeResult:
+            return _FakeResult(oversized_rows)
+
+    from app.services import funds_catalog
+
+    filters = funds_catalog.FundFilters()
+    with pytest.raises(ValueError, match="more than"):
+        await optimizer_data.select_universe_funds(
+            _CeilingSession(),  # type: ignore[arg-type]
+            filters,
+            rank_by="aum_usd",
+            rank_dir="desc",
+            max_assets=None,
+        )
