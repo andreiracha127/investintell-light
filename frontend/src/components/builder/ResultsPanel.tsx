@@ -33,6 +33,7 @@ import {
 } from "@/components/screener/shared";
 
 import { assetKey, assetName, assetTicker, type UniverseAsset } from "./assets";
+import { SelectionDiagnostics } from "./SelectionDiagnostics";
 
 /** Current allocation of the base portfolio (when seeded from a saved one). */
 export interface BaseAllocation {
@@ -623,6 +624,11 @@ export function ResultsPanel({
           equilibrium={diagnostics.mu_equilibrium}
           posterior={diagnostics.mu_posterior}
         />
+      )}
+
+      {/* ── Selection diagnostics (broad-universe mode only) ────────────── */}
+      {diagnostics.selection != null && (
+        <SelectionDiagnostics selection={diagnostics.selection} />
       )}
     </div>
   );
