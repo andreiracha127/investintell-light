@@ -85,3 +85,29 @@ def rolling_correlation(
     a, b = align_returns(asset_returns, benchmark_returns)
     _validate_window(window, len(a), "rolling_correlation")
     return a.rolling(window, min_periods=window).corr(b)
+
+
+def rolling_annualized_return(
+    returns: pd.Series, window: int = 63, periods_per_year: int = 252
+) -> pd.Series:
+    """Rolling annualized total return (decimal fraction, 0.05 = 5%).
+
+    For each trailing window of ``window`` daily returns, compounds them
+    (``prod(1 + r)``) and annualizes by raising to ``periods_per_year / window``
+    minus 1 — the legacy fact-sheet convention
+    (``quant_engine/rolling_service.py`` line 78). Uses ``min_periods=window``
+    so the first ``window - 1`` values are NaN by construction; an upstream
+    filter is expected to drop the leading NaNs before serving. Inputs and
+    result are decimal fractions (0.05 = 5%), never 0-100.
+
+    Standard institutional windows (caller-chosen): 21 (1M), 63 (3M),
+    126 (6M), 252 (1Y).
+
+    Raises:
+        ValueError: if ``window < 2`` or ``len(returns) < window``.
+    """
+    _validate_window(window, len(returns), "rolling_annualized_return")
+    growth = (1.0 + returns).rolling(window, min_periods=window).apply(
+        np.prod, raw=True
+    )
+    return growth ** (periods_per_year / window) - 1.0

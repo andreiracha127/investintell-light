@@ -7,6 +7,7 @@ VaR, CVaR, drawdown) are decimal fractions (0.05 = 5%), never 0-100.
 
 from app.analytics.absorption import AbsorptionResult, absorption_ratio
 from app.analytics.active_share import active_share
+from app.analytics.benchmark_composite import composite_benchmark_nav
 from app.analytics.distribution import Histogram, return_histogram
 from app.analytics.portfolio import (
     DEFAULT_INITIAL_NAV,
@@ -26,6 +27,7 @@ from app.analytics.returns import (
     align_returns,
     cumulative_return_series,
     simple_returns,
+    to_monthly_returns,
     total_return,
 )
 from app.analytics.risk import (
@@ -62,7 +64,19 @@ from app.analytics.robust_sharpe import (
     RobustSharpeResult,
     robust_sharpe,
 )
+from app.analytics.return_statistics import (
+    ReturnStatistics,
+    down_proficiency_ratio,
+    geometric_mean_monthly,
+    jensen_alpha,
+    omega_ratio,
+    r_squared,
+    sterling_ratio,
+    treynor_ratio,
+    up_proficiency_ratio,
+)
 from app.analytics.rolling import (
+    rolling_annualized_return,
     rolling_beta,
     rolling_correlation,
     rolling_volatility,
@@ -78,6 +92,7 @@ __all__ = [
     "EtlRiskBudget",
     "Histogram",
     "MIN_IN_RANGE_RETURNS",
+    "ReturnStatistics",
     "RobustSharpeResult",
     "VarianceRiskBudget",
     "absorption_ratio",
@@ -87,27 +102,34 @@ __all__ = [
     "asset_returns_frame",
     "best_worst_day",
     "beta",
+    "composite_benchmark_nav",
     "correlation",
     "correlation_matrix",
     "cumulative_return_series",
     "diversification_ratio",
+    "down_proficiency_ratio",
     "drawdown_episodes",
     "effective_number_of_bets",
     "enb_from_contributions",
     "etl_implied_returns",
     "etl_risk_budget",
+    "geometric_mean_monthly",
     "historical_cvar",
     "historical_var",
     "information_ratio",
+    "jensen_alpha",
     "max_drawdown",
     "nav_by_position",
+    "omega_ratio",
     "portfolio_nav",
     "portfolio_returns",
     "portfolio_starr",
+    "r_squared",
     "realized_cvar",
     "return_histogram",
     "risk_contributions",
     "robust_sharpe",
+    "rolling_annualized_return",
     "rolling_beta",
     "rolling_correlation",
     "rolling_volatility",
@@ -115,7 +137,11 @@ __all__ = [
     "sharpe_ratio",
     "simple_returns",
     "sortino_ratio",
+    "sterling_ratio",
+    "to_monthly_returns",
     "total_return",
+    "treynor_ratio",
+    "up_proficiency_ratio",
     "variance_risk_budget",
     "weight_series",
     "weights_to_quantities",

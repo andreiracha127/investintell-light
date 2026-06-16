@@ -4,6 +4,7 @@ Scale contract (project-wide): all fractional quantities (returns,
 cumulative returns, totals) are decimal fractions (0.05 = 5%), never 0-100.
 """
 
+import numpy as np
 import pandas as pd
 
 from app.analytics._validation import reject_nan
@@ -76,3 +77,39 @@ def align_returns(a: pd.Series, b: pd.Series) -> tuple[pd.Series, pd.Series]:
             f"align_returns requires at least 2 overlapping points, got {len(joined)}"
         )
     return joined["a"], joined["b"]
+
+
+TRADING_DAYS_PER_MONTH = 21
+
+
+def to_monthly_returns(daily_returns: pd.Series) -> pd.Series:
+    """Aggregate daily returns into monthly geometric returns.
+
+    Groups by fixed 21-trading-day blocks anchored to the END of the series so
+    the most recent (as-of-date) observations are always preserved; the oldest
+    ``len % 21`` returns are dropped when the length is not a multiple of 21.
+    Each block is geometrically compounded: ``prod(1 + r) - 1``. This mirrors
+    the legacy fact-sheet aggregator (``return_statistics_service`` lines
+    136-151); calendar months are approximated as 21 trading days. Inputs and
+    result are decimal fractions (0.05 = 5%), never 0-100.
+
+    The returned series is indexed by the LAST date of each block (the
+    as-of date for that month), so it can be aligned with other monthly series
+    via :func:`align_returns`.
+
+    Raises:
+        ValueError: if fewer than 21 returns are supplied or the input
+            contains NaN/infinite values.
+    """
+    if len(daily_returns) < TRADING_DAYS_PER_MONTH:
+        raise ValueError(
+            f"to_monthly_returns requires at least {TRADING_DAYS_PER_MONTH} "
+            f"returns, got {len(daily_returns)}"
+        )
+    reject_nan(daily_returns, "to_monthly_returns")
+    n_months = len(daily_returns) // TRADING_DAYS_PER_MONTH
+    trimmed = daily_returns.iloc[-n_months * TRADING_DAYS_PER_MONTH :]
+    values = trimmed.to_numpy(dtype=float).reshape(n_months, TRADING_DAYS_PER_MONTH)
+    monthly = np.prod(1.0 + values, axis=1) - 1.0
+    block_end_dates = trimmed.index[TRADING_DAYS_PER_MONTH - 1 :: TRADING_DAYS_PER_MONTH]
+    return pd.Series(monthly, index=block_end_dates)
