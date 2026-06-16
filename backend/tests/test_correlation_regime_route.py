@@ -86,3 +86,94 @@ def test_request_window_days_bounds() -> None:
             assets=[{"kind": "equity", "ticker": "SPY"}, {"kind": "equity", "ticker": "QQQ"}],
             window_days=10,  # below the 30 floor
         )
+
+
+# ── T3F-7: route ─────────────────────────────────────────────────────────────
+
+from httpx import ASGITransport, AsyncClient
+
+from app.core.db import get_session
+from app.main import create_app
+from app.services import correlation_regime as cr_service
+
+
+def _route_client() -> AsyncClient:
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: None
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+def _sample_out() -> CorrelationRegimeOut:
+    return CorrelationRegimeOut(
+        instrument_count=2,
+        labels=["equity:SPY", "equity:QQQ"],
+        window_days=60,
+        correlation_matrix=[[1.0, 0.85], [0.85, 1.0]],
+        pair_correlations=[
+            PairCorrelationOut(
+                label_a="equity:SPY",
+                label_b="equity:QQQ",
+                current_correlation=0.85,
+                baseline_correlation=0.5,
+                correlation_change=0.35,
+                is_contagion=True,
+            )
+        ],
+        concentration=_concentration(),
+        diversification_ratio=1.05,
+        dr_alert=True,
+        average_correlation=0.85,
+        baseline_average_correlation=0.5,
+        regime_shift_detected=True,
+        sufficient_data=True,
+    )
+
+
+async def test_route_returns_regime_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_run(session, refs, window_days=None, today=None):
+        # Echo that the two equity refs were translated correctly.
+        assert [r.label for r in refs] == ["equity:SPY", "equity:QQQ"]
+        return _sample_out()
+
+    monkeypatch.setattr(cr_service, "run_correlation_regime", fake_run)
+    async with _route_client() as client:
+        resp = await client.post(
+            "/correlation-regime",
+            json={
+                "assets": [
+                    {"kind": "equity", "ticker": "SPY"},
+                    {"kind": "equity", "ticker": "QQQ"},
+                ]
+            },
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["regime_shift_detected"] is True
+    assert body["pair_correlations"][0]["is_contagion"] is True
+    assert body["concentration"]["absorption_status"] == "warning"
+
+
+async def test_route_maps_value_error_to_422(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_run(session, refs, window_days=None, today=None):
+        raise ValueError("insufficient common history: 12 overlapping observations")
+
+    monkeypatch.setattr(cr_service, "run_correlation_regime", fake_run)
+    async with _route_client() as client:
+        resp = await client.post(
+            "/correlation-regime",
+            json={
+                "assets": [
+                    {"kind": "equity", "ticker": "SPY"},
+                    {"kind": "equity", "ticker": "QQQ"},
+                ]
+            },
+        )
+    assert resp.status_code == 422
+    assert "insufficient common history" in resp.json()["detail"]
+
+
+async def test_route_rejects_missing_source_422() -> None:
+    async with _route_client() as client:
+        resp = await client.post("/correlation-regime", json={})
+    # Pydantic request validation → 422.
+    assert resp.status_code == 422
