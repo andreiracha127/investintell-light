@@ -95,6 +95,53 @@ async def _load_fund_returns(
     return _fund_return_series(rows)
 
 
+async def _load_fund_returns_batch(
+    session: AsyncSession,
+    fund_refs: list[FundAssetRef],
+    since: dt.date | None,
+) -> dict[str, pd.Series]:
+    """Daily-return Series per fund, loaded in ONE query (no N+1).
+
+    The broad-universe Stage-1 resolves hundreds of candidate funds; loading them
+    with one query per fund serialized hundreds of round-trips. This fetches every
+    fund's NAV history in a single ``instrument_id IN (...)`` scan (the
+    ``(instrument_id, nav_date)`` index serves it), groups the rows per fund in
+    date order, and reuses ``_fund_return_series`` so the output is identical to
+    the per-fund loader. A fund with no NAV rows in the window raises ValueError
+    (matching ``_load_fund_returns``); the candidate set is pre-filtered to funds
+    with history, so that is an edge.
+    """
+    if not fund_refs:
+        return {}
+    ids = [ref.id for ref in fund_refs]
+    stmt = select(
+        FundNav.instrument_id, FundNav.nav_date, FundNav.nav, FundNav.return_1d
+    ).where(FundNav.instrument_id.in_(ids))
+    if since is not None:
+        stmt = stmt.where(FundNav.nav_date >= since)
+    result = await session.execute(
+        stmt.order_by(FundNav.instrument_id, FundNav.nav_date)
+    )
+    rows_by_id: dict[uuid.UUID, list[tuple[dt.date, float | None, float | None]]] = {}
+    for iid, nav_date, nav, r1d in result.all():
+        rows_by_id.setdefault(iid, []).append(
+            (
+                nav_date,
+                float(nav) if nav is not None else None,
+                float(r1d) if r1d is not None else None,
+            )
+        )
+    out: dict[str, pd.Series] = {}
+    for ref in fund_refs:
+        rows = rows_by_id.get(ref.id)
+        if not rows:
+            raise ValueError(
+                f"unknown asset or no NAV history in window: {ref.label}"
+            )
+        out[ref.label] = _fund_return_series(rows)
+    return out
+
+
 async def _load_equity_returns(
     session: AsyncSession, ref: EquityAssetRef, since: dt.date | None
 ) -> pd.Series:
@@ -184,10 +231,17 @@ async def load_returns_matrix(
     today = today or dt.date.today()
     since = None if window_days is None else today - dt.timedelta(days=window_days)
 
+    # Funds are loaded in ONE batched query (avoids the N+1 that dominated the
+    # broad-universe Stage-1 latency); the rare equity in this path stays per-ref.
+    # Column order MUST follow ``assets`` — the broad orchestrator maps kept
+    # indices back to assets by column position.
+    fund_series = await _load_fund_returns_batch(
+        session, [ref for ref in assets if isinstance(ref, FundAssetRef)], since
+    )
     series: dict[str, pd.Series] = {}
     for ref in assets:
         if isinstance(ref, FundAssetRef):
-            series[ref.label] = await _load_fund_returns(session, ref, since)
+            series[ref.label] = fund_series[ref.label]
         else:
             series[ref.label] = await _load_equity_returns(session, ref, since)
 

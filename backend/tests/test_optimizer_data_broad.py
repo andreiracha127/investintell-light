@@ -45,20 +45,33 @@ def _nav_rows(
 
 
 class _FakeSession:
+    """Stubs the batched NAV query: one ``execute`` returns the rows for ALL
+    requested fund ids, each prefixed with its instrument_id (matching the
+    ``SELECT instrument_id, nav_date, nav, return_1d`` shape)."""
+
     def __init__(self, fund_rows: dict[uuid.UUID, list[tuple[Any, ...]]]) -> None:
         self._fund_rows = fund_rows
+        self.calls = 0
 
     async def execute(self, stmt: Any) -> _FakeResult:
-        params = stmt.compile().params
+        self.calls += 1
+        requested: set[Any] = set()
+        for v in stmt.compile().params.values():
+            if isinstance(v, (list, tuple, set)):
+                requested.update(v)
+            else:
+                requested.add(v)
+        out: list[tuple[Any, ...]] = []
         for fund_id, rows in self._fund_rows.items():
-            if fund_id in params.values():
-                return _FakeResult(rows)
-        return _FakeResult([])
+            if fund_id in requested:
+                out.extend((fund_id, *row) for row in rows)
+        return _FakeResult(out)
 
 
 async def test_load_returns_matrix_preserves_nan_no_global_dropna() -> None:
     """Fund A: 500 obs from 2024-01; Fund B: 500 obs from 2024-06 (younger).
     The union index keeps ALL dates; the early rows for B are NaN, not dropped.
+    The two funds are loaded in ONE batched query (no N+1).
     """
     rows_a = _nav_rows(500, dt.date(2024, 1, 2))
     rows_b = _nav_rows(500, dt.date(2024, 6, 3))
@@ -74,6 +87,8 @@ async def test_load_returns_matrix_preserves_nan_no_global_dropna() -> None:
     assert len(frame) > 500
     assert frame.isna().any().any()  # NaN preserved (B's early dates)
     assert list(frame.columns) == [r.label for r in refs]
+    # Batched: a single round-trip for both funds, not one query per fund.
+    assert session.calls == 1
 
 
 async def test_load_returns_matrix_rejects_fewer_than_two() -> None:
