@@ -12,7 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { postBeta, type BetaRequest, type BetaResponse } from "@/lib/api/client";
 import { buildHcScatterOption } from "@/lib/charts/hc/scatter";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { Card, KpiTile, valueTone } from "@/components/ui/panels";

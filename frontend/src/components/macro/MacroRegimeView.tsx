@@ -20,7 +20,7 @@ import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
 import { Card, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
 import { buildHcRegimeStripOption } from "@/lib/charts/hc/regime";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { formatDate, formatNumber } from "@/lib/format";
 
 // ── State badge ────────────────────────────────────────────────────────────

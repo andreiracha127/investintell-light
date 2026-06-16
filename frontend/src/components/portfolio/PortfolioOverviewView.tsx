@@ -36,9 +36,9 @@ import {
   formatPercent,
 } from "@/lib/format";
 import { parseDecimal } from "@/lib/parse";
-import { type AllocationSlice } from "@/lib/charts/allocation";
+import { type AllocationSlice } from "@/lib/charts/types";
 import { buildHcAllocationOption } from "@/lib/charts/hc/allocation";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { DataGrid } from "@/components/ui/DataGrid";
 import { positionsToGridOptions, POSITION_COLS } from "@/lib/grid/positionsGridOptions";

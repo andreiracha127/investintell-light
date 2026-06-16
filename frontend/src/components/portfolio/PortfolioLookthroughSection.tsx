@@ -25,7 +25,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ApiError, fetchPortfolioLookthrough } from "@/lib/api/client";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
 import { LookthroughPanel } from "@/components/lookthrough/LookthroughPanel";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { formatDate, formatNumber } from "@/lib/format";
 import type { LookthroughSummary } from "@/lib/api/client";
 

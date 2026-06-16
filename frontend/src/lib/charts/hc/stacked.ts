@@ -13,7 +13,7 @@
 import type { Options, Point } from "highcharts";
 
 import type { StackedSeries } from "@/lib/api/client";
-import type { ChartColors } from "@/lib/charts/theme";
+import type { ChartColors } from "@/lib/charts/chartColors";
 import { formatCompact, formatCurrency, formatNumber, formatPercent } from "@/lib/format";
 
 /**

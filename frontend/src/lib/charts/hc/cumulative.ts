@@ -7,7 +7,7 @@
 import type { Options } from "highcharts";
 
 import type { CumulativeReturns } from "@/lib/api/client";
-import type { ChartColors } from "@/lib/charts/theme";
+import type { ChartColors } from "@/lib/charts/chartColors";
 import { formatPercent } from "@/lib/format";
 
 export function buildHcCumulativeOption(

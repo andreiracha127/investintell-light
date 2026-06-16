@@ -1,4 +1,4 @@
-import type { ChartColors } from "@/lib/charts/theme";
+import type { ChartColors } from "@/lib/charts/chartColors";
 
 /** Graphite light-theme token values, for pure-builder unit tests. */
 export const TEST_COLORS: ChartColors = {

@@ -590,11 +590,7 @@ export function fetchFundTimeseries(
   );
 }
 
-/**
- * Compatibility bridge while the checked-out InteractiveChart still consumes
- * ixchart bars. P2 will remove this once the Highcharts Stock component owns
- * the native OHLC/line arrays directly.
- */
+/** Convert stock OHLC/volume arrays into the chart bar contract. */
 export function stockTimeseriesToHistoryBars(
   data: StockTimeseries,
 ): HistoryBar[] {
@@ -611,10 +607,7 @@ export function stockTimeseriesToHistoryBars(
     }));
 }
 
-/**
- * Compatibility bridge for fund NAV line arrays into the legacy chart bar
- * shape. NAV has no true OHLC/volume, so o/h/l/c all carry the NAV print.
- */
+/** Convert fund NAV line arrays into chart bars for the Stock chart. */
 export function fundTimeseriesToHistoryBars(data: FundTimeseries): HistoryBar[] {
   return data.series
     .filter((point) => point.length >= 2)

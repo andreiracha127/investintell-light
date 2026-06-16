@@ -20,7 +20,7 @@ import {
   type OptimizeRequest,
   type PortfolioOverview,
 } from "@/lib/api/client";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { Card, PageTitle } from "@/components/ui/panels";
 import {
   ErrorPanel,

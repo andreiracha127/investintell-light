@@ -34,7 +34,7 @@ import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
 import { Card } from "@/components/ui/panels";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { buildHcDriftBandsOption } from "@/lib/charts/hc/rebalance";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { formatCurrency, formatDate, formatNumber, formatPercent } from "@/lib/format";
 
 // ── Optimizer label helpers ───────────────────────────────────────────────────
@@ -384,7 +384,7 @@ export function PortfolioRebalanceSection({
               Position drift
             </p>
             {/* Height calculated from row count: 32px per bar row + 40px grid margins,
-                minimum 120px. EChart does not accept a style prop so we wrap. */}
+                minimum 120px. The chart wrapper receives its height from here. */}
             <div
               style={{
                 height: `${Math.max(120, preview.drifts.length * 32 + 40)}px`, // 32px per bar row + 40px grid margins

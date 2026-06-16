@@ -10,7 +10,7 @@
 import { useEffect, useRef } from "react";
 import type { Chart, Options } from "highcharts";
 
-import { chartColors } from "@/lib/charts/theme";
+import { chartColors } from "@/lib/charts/chartColors";
 import { highchartsTheme } from "@/lib/charts/hc/theme";
 
 export function HighchartsChart({

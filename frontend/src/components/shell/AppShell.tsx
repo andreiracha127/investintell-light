@@ -310,8 +310,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
         )}
 
-        {/* Keyed on settings so ECharts options (built from chartColors() in
-            useMemo) are rebuilt when theme/accent/density tokens change. */}
+        {/* Keyed on settings so chart options built from chartColors() in useMemo
+            are rebuilt when theme/accent/density tokens change. */}
         <main
           id="main-content"
           key={`${settings.theme}-${settings.accent}-${settings.density}`}

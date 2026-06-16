@@ -22,7 +22,7 @@ import {
 import { buildHcCumulativeOption } from "@/lib/charts/hc/cumulative";
 import { buildHcHistogramOption } from "@/lib/charts/hc/histogram";
 import { buildHcRollingOption } from "@/lib/charts/hc/rolling";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import {
   formatCurrency,
   formatDate,
@@ -226,7 +226,7 @@ function AnalysisContent({
         </div>
       </div>
 
-      {/* ── Interactive chart (IXChart + livefeed) ── */}
+      {/* ── Interactive chart (Highcharts Stock + livefeed) ── */}
       <div className="mb-px">
         <InteractiveChart
           symbol={header.ticker}

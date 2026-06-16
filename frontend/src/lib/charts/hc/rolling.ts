@@ -9,7 +9,7 @@
 import type { Options } from "highcharts";
 
 import type { SeriesPoint } from "@/lib/api/client";
-import type { ChartColors } from "@/lib/charts/theme";
+import type { ChartColors } from "@/lib/charts/chartColors";
 import { formatNumber, formatPercent } from "@/lib/format";
 
 export interface RollingAxisOptions {

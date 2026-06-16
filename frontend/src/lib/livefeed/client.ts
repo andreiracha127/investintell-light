@@ -10,7 +10,7 @@
  * Sem NEXT_PUBLIC_LIVEFEED_WS_URL o módulo degrada para no-op silencioso
  * (status "off") — páginas funcionam 100% com REST.
  */
-import type { Tick } from "@/lib/ixchart/types";
+import type { Tick } from "@/lib/livefeed/types";
 
 export type FeedStatus = "off" | "connecting" | "live" | "error";
 export type TickHandler = (tick: Tick) => void;

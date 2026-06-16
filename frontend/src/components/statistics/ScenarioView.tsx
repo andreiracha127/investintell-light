@@ -22,7 +22,7 @@ import {
   buildHcStackedPercentOption,
 } from "@/lib/charts/hc/stacked";
 import { buildHcHistogramOption } from "@/lib/charts/hc/histogram";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { formatCurrency, formatDate, formatPercent } from "@/lib/format";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { Card, StatRow } from "@/components/ui/panels";

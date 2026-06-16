@@ -33,7 +33,7 @@ import { buildHcCumulativeOption } from "@/lib/charts/hc/cumulative";
 import { buildHcHeatmapOption } from "@/lib/charts/hc/heatmap";
 import { buildHcHistogramOption } from "@/lib/charts/hc/histogram";
 import { buildHcNavOption } from "@/lib/charts/hc/nav";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import {
   formatCurrency,
   formatDate,

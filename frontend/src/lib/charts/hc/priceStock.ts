@@ -1,7 +1,7 @@
 import type { DataGroupingOptionsObject, Options, SeriesOptionsType } from "highcharts";
 
 import type { RangePreset, SymbolSearchResult } from "@/lib/api/client";
-import type { ChartColors } from "@/lib/charts/theme";
+import type { ChartColors } from "@/lib/charts/chartColors";
 
 export type PriceChartType = "candles" | "ohlc" | "line" | "area";
 export type PricePeriod = "D" | "W" | "M";

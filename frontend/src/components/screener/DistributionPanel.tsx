@@ -6,7 +6,7 @@ import type { MetricBuild, MetricDef, ScreenFilter } from "@/lib/api/client";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { FIELD_LABEL_CLASS } from "@/components/screener/shared";
 import { buildHcDistributionOption } from "@/lib/charts/hc/distribution";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { formatCompact } from "@/lib/format";
 import { parseBound, toDisplayText } from "@/lib/screener/bounds";
 

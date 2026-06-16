@@ -15,7 +15,7 @@ import {
   type CorrelationResponse,
 } from "@/lib/api/client";
 import { buildHcRollingOption } from "@/lib/charts/hc/rolling";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { formatNumber } from "@/lib/format";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { Card, KpiTile } from "@/components/ui/panels";

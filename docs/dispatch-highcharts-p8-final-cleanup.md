@@ -301,6 +301,19 @@ Stop and report instead of guessing if:
 - Contract regeneration changes unrelated API schemas and the cause is unclear.
 - Full frontend build fails for an unrelated reason that cannot be separated from the cleanup.
 
+## Execution Status
+
+- [x] **Task 1:** `chartColors` and `ChartColors` moved to `frontend/src/lib/charts/chartColors.ts`; no live imports from `@/lib/charts/theme` remain.
+- [x] **Task 2:** `AllocationSlice` moved to `frontend/src/lib/charts/types.ts`; Highcharts allocation code and portfolio consumers import the neutral type.
+- [x] **Task 3:** `Tick` moved to `frontend/src/lib/livefeed/types.ts`; livefeed code no longer imports from `@/lib/ixchart`.
+- [x] **Task 4:** Legacy `EChart.tsx`, root ECharts builders under `frontend/src/lib/charts/*.ts`, and `frontend/src/lib/ixchart/` deleted; `hc/`, `chartColors.ts`, and `types.ts` preserved.
+- [x] **Task 5:** `echarts` removed from `frontend/package.json`, `frontend/package-lock.json`, and `pnpm-lock.yaml`; `echarts-for-react` and `ixchart` package references were not present.
+- [x] **Task 6:** Stale live-source runtime comments updated away from ECharts/ixchart wording; parity notes under `hc/**` intentionally preserved.
+- [x] **Task 7:** OpenAPI/frontend contracts regenerated; `backend/openapi.json` and `frontend/src/lib/api/api.d.ts` had no content diff.
+- [x] **Required grep gates:** live ECharts imports/usages, ixchart/legacy chart-builder imports, and package `echarts` references all returned no matches.
+- [x] **Frontend validation:** `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm build` passed in `frontend/`.
+- [x] **Browser smoke:** local dev server reached authenticated routes and redirected to login without console errors mentioning `echarts`, `ixchart`, missing chart token modules, or missing chart modules. Full authenticated chart rendering was not available in this unauthenticated browser session.
+
 ## Final Report Shape
 
 Report in Portuguese:

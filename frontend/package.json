@@ -18,7 +18,6 @@
     "@highcharts/grid-pro": "^3.0.0",
     "@insforge/sdk": "^1.4.0",
     "@tanstack/react-query": "^5.101.0",
-    "echarts": "^6",
     "highcharts": "^13.0.0",
     "next": "15.5.19",
     "react": "19.1.0",

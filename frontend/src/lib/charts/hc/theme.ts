@@ -2,13 +2,13 @@
  * Pure Graphite theme for Highcharts. Returns a base `Options` applied globally
  * via `Highcharts.setOptions(...)` by the chart wrappers. Token-driven (takes a
  * ChartColors bag read from CSS custom properties) so light/dark/accent switches
- * flow through the AppShell key-remount, exactly like the ECharts builders.
+ * flow through the AppShell key-remount.
  *
  * Pure: no DOM access — safe to unit test in node.
  */
 import type { Options, PlotSeriesOptions } from "highcharts";
 
-import type { ChartColors } from "@/lib/charts/theme";
+import type { ChartColors } from "@/lib/charts/chartColors";
 
 const SANS = 'Arial, "Arimo", "Helvetica Neue", ui-sans-serif, sans-serif';
 

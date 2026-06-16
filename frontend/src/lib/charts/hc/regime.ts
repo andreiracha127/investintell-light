@@ -24,7 +24,7 @@ import type Highcharts from "highcharts";
 import type { Options } from "highcharts";
 
 import type { RegimeFlip } from "@/lib/api/client";
-import type { ChartColors } from "@/lib/charts/theme";
+import type { ChartColors } from "@/lib/charts/chartColors";
 
 // ── Color math ─────────────────────────────────────────────────────────────
 

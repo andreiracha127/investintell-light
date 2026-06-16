@@ -12,7 +12,7 @@
 import type { Options, Point } from "highcharts";
 
 import type { BetaResponse } from "@/lib/api/client";
-import type { ChartColors } from "@/lib/charts/theme";
+import type { ChartColors } from "@/lib/charts/chartColors";
 import { formatPercent } from "@/lib/format";
 
 type Pair = [number, number];

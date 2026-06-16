@@ -27,7 +27,7 @@ import {
   mergeTickIntoBars,
   parseTickTimeMs,
 } from "@/lib/charts/hc/priceStockLive";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { onFeedStatus, subscribeTicks, type FeedStatus } from "@/lib/livefeed/client";
 
 const PERIODS: PricePeriod[] = ["D", "W", "M"];

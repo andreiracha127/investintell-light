@@ -58,7 +58,7 @@ import {
 } from "@/lib/charts/hc/fundDossier";
 import { buildHcHistogramOption } from "@/lib/charts/hc/histogram";
 import { buildHcRollingOption } from "@/lib/charts/hc/rolling";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import {
   dossierQueryKeys,
   FUND_DOSSIER_DEFAULTS,

@@ -19,7 +19,7 @@ import { useEffect, useMemo, useState } from "react";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { Card, KpiTile } from "@/components/ui/panels";
 import { buildHcExposureBarsOption } from "@/lib/charts/hc/lookthrough";
-import { type ChartColors } from "@/lib/charts/theme";
+import { type ChartColors } from "@/lib/charts/chartColors";
 import { formatDate, formatNumber } from "@/lib/format";
 import type { ExposureItem, LookthroughSummary } from "@/lib/api/client";
 

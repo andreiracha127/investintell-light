@@ -8,7 +8,7 @@ import type {
   FundStyleDrift,
   FundsScatter,
 } from "@/lib/api/client";
-import type { ChartColors } from "@/lib/charts/theme";
+import type { ChartColors } from "@/lib/charts/chartColors";
 import {
   buildHcFactorSensitivityOption,
   buildHcFundsScatterOption,

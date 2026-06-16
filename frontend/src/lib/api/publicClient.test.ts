@@ -8,6 +8,10 @@ import {
   fetchMarketOverview,
 } from "@/lib/api/client";
 
+function hasAuthorizationHeader(init: RequestInit): boolean {
+  return new Headers(init.headers).has("Authorization");
+}
+
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status: 200,
@@ -41,7 +45,7 @@ describe("public catalog fetches", () => {
     const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/funds?");
     expect(url).toContain("page_size=30");
-    expect(init.headers).toBeUndefined();
+    expect(hasAuthorizationHeader(init)).toBe(false);
   });
 
   it("fetches public catalog endpoints without Authorization", async () => {
@@ -59,7 +63,7 @@ describe("public catalog fetches", () => {
     await fetchFundsCsv({ sort: "aum_usd" });
 
     for (const [, init] of fetchImpl.mock.calls as [string, RequestInit][]) {
-      expect(init.headers).toBeUndefined();
+      expect(hasAuthorizationHeader(init)).toBe(false);
     }
   });
 });

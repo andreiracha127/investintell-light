@@ -11,7 +11,7 @@
 import type { Options, Point } from "highcharts";
 
 import type { Distribution } from "@/lib/api/client";
-import type { ChartColors } from "@/lib/charts/theme";
+import type { ChartColors } from "@/lib/charts/chartColors";
 import { formatCompact, formatMetricValue } from "@/lib/format";
 
 export function buildHcDistributionOption(

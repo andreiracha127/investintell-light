@@ -7,12 +7,12 @@
  * (tooltip background, legend styling, grid, animation) is owned by the
  * Graphite theme applied via `Highcharts.setOptions(...)`.
  *
- * Input types are reused from the legacy ECharts builder for signature parity.
+ * Input types live in the neutral chart types module for shared consumers.
  */
 import type { Options, Point } from "highcharts";
 
-import type { AllocationSlice } from "@/lib/charts/allocation";
-import type { ChartColors } from "@/lib/charts/theme";
+import type { AllocationSlice } from "@/lib/charts/types";
+import type { ChartColors } from "@/lib/charts/chartColors";
 import { formatNumber } from "@/lib/format";
 
 export function buildHcAllocationOption(

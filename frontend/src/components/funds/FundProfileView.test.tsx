@@ -35,7 +35,7 @@ vi.mock("@/components/funds/FundLookthroughSection", () => ({
   FundLookthroughSection: () => <div data-testid="lookthrough-section" />,
 }));
 
-vi.mock("@/lib/charts/theme", () => ({
+vi.mock("@/lib/charts/chartColors", () => ({
   chartColors: () => ({
     gain: "#198038",
     loss: "#da1e28",

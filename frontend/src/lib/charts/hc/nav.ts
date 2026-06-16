@@ -7,7 +7,7 @@
 import type { Options } from "highcharts";
 
 import type { SeriesPoint } from "@/lib/api/client";
-import type { ChartColors } from "@/lib/charts/theme";
+import type { ChartColors } from "@/lib/charts/chartColors";
 import { formatCurrency } from "@/lib/format";
 
 export function buildHcNavOption(nav: SeriesPoint[], colors: ChartColors): Options {

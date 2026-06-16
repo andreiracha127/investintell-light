@@ -15,7 +15,7 @@ import type { Options } from "highcharts";
 import type { Point } from "highcharts";
 
 import type { CorrelationMatrix } from "@/lib/api/client";
-import type { ChartColors } from "@/lib/charts/theme";
+import type { ChartColors } from "@/lib/charts/chartColors";
 import { formatNumber } from "@/lib/format";
 
 /** Above this correlation the accent fill is dark enough for light text. */

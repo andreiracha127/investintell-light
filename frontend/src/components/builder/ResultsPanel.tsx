@@ -20,7 +20,7 @@ import {
 } from "@/lib/api/client";
 import { parseDecimal } from "@/lib/parse";
 import { buildHcAllocationOption } from "@/lib/charts/hc/allocation";
-import type { ChartColors } from "@/lib/charts/theme";
+import type { ChartColors } from "@/lib/charts/chartColors";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { Card, KpiTile, valueTone } from "@/components/ui/panels";

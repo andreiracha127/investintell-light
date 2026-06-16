@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildHcAllocationOption } from "@/lib/charts/hc/allocation";
 import { TEST_COLORS } from "@/lib/charts/hc/__fixtures__/colors";
-import type { AllocationSlice } from "@/lib/charts/allocation";
+import type { AllocationSlice } from "@/lib/charts/types";
 import { formatNumber } from "@/lib/format";
 
 const SLICES: AllocationSlice[] = [

@@ -14,7 +14,7 @@ import {
   type StockCorrelationResponse,
 } from "@/lib/api/client";
 import { buildHcHeatmapOption } from "@/lib/charts/hc/heatmap";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { formatDate, formatNumber } from "@/lib/format";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { Card } from "@/components/ui/panels";

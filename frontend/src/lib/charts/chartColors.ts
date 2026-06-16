@@ -1,7 +1,7 @@
 /**
- * Chart color bridge — reads the Graphite design tokens (CSS custom
- * properties emitted by Tailwind's @theme in globals.css) at runtime so
- * ECharts options stay token-driven with zero hardcoded hex values.
+ * Chart color bridge: reads the Graphite design tokens (CSS custom properties)
+ * at runtime so Highcharts options stay token-driven with zero hardcoded hex
+ * values.
  *
  * Client-only: call after mount (uses `getComputedStyle`).
  */
@@ -16,7 +16,7 @@ export interface ChartColors {
   textMuted: string;
   grid: string;
   surface: string;
-  /** Faint accent tint — low end of the heatmap gradient. */
+  /** Faint accent tint: low end of the heatmap gradient. */
   accentWash: string;
   /** Text rendered on top of accent-filled surfaces. */
   textOnAccent: string;
@@ -24,7 +24,7 @@ export interface ChartColors {
   bar: string;
   /** Muted comparison bar / benchmark line (grey). */
   barMute: string;
-  /** Categorical palette for multi-asset series (allocation donut, …). */
+  /** Categorical palette for multi-asset series. */
   categories: string[];
 }
 
