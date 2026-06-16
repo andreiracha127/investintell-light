@@ -220,3 +220,123 @@ def test_view_consistency_relative_view_uses_predictive_dispersion() -> None:
     result = bl.view_consistency_he_litterman(p, q, pi, omega, sigma, tau=bl.DEFAULT_TAU)
     assert result["inconsistent"] is False
     assert 0.0 <= result["max_z"] <= 3.0
+
+
+# ── T3F-3: robust / ellipsoidal mean-uncertainty SOCP ────────────────────────
+
+import pytest as _pytest
+from scipy.stats import chi2 as _chi2
+
+from app.optimizer import black_litterman as _bl
+from app.optimizer.engine import OptimizerError as _OptErr
+
+
+def test_kappa_from_chi2_matches_sqrt_ppf() -> None:
+    kappa = _bl._kappa_from_chi2(0.95, n=4, uncertainty_level=None)
+    assert kappa == _pytest.approx(float(np.sqrt(_chi2.ppf(0.95, 4))), rel=1e-9)
+
+
+def test_kappa_scales_with_uncertainty_level() -> None:
+    base = _bl._kappa_from_chi2(0.95, n=3, uncertainty_level=None)
+    half = _bl._kappa_from_chi2(0.95, n=3, uncertainty_level=0.5)
+    assert half == _pytest.approx(0.5 * base, rel=1e-9)
+
+
+def test_solve_bl_robust_returns_valid_weights() -> None:
+    mu = np.array([0.10, 0.08, 0.06])
+    sigma = np.diag([0.04, 0.06, 0.09])
+    weights, status = _bl.solve_bl_robust(mu, sigma, cap=None)
+    assert status == "optimal"
+    assert abs(float(weights.sum()) - 1.0) < 1e-6
+    assert (weights >= -1e-6).all()
+
+
+def test_solve_bl_robust_more_uncertainty_shrinks_toward_min_vol() -> None:
+    """Higher κ penalizes risky concentration; with strong uncertainty the
+    robust portfolio is LESS concentrated than the near-zero-κ (pure-μ) tilt."""
+    mu = np.array([0.20, 0.05, 0.05])
+    sigma = np.diag([0.09, 0.04, 0.04])
+    low, _ = _bl.solve_bl_robust(mu, sigma, cap=None, uncertainty_level=0.01)
+    high, _ = _bl.solve_bl_robust(mu, sigma, cap=None, uncertainty_level=3.0)
+    assert high[0] < low[0]
+
+
+def test_solve_bl_robust_respects_cap() -> None:
+    mu = np.array([0.20, 0.05, 0.05, 0.05])
+    sigma = np.diag([0.04, 0.04, 0.04, 0.04])
+    weights, status = _bl.solve_bl_robust(mu, sigma, cap=0.4)
+    assert status == "optimal"
+    assert (weights <= 0.4 + 1e-6).all()
+
+
+def test_solve_bl_robust_rejects_mu_shape_mismatch() -> None:
+    mu = np.array([0.1, 0.1])  # 2 assets
+    sigma = np.diag([0.04, 0.04, 0.04])  # 3x3
+    with _pytest.raises(_OptErr, match="mu has shape"):
+        _bl.solve_bl_robust(mu, sigma, cap=None)
+
+
+def test_solve_bl_robust_infeasible_cap_reports_loud() -> None:
+    mu = np.array([0.1, 0.1])
+    sigma = np.diag([0.04, 0.04])
+    with _pytest.raises(_OptErr, match="infeasible"):
+        _bl.solve_bl_robust(mu, sigma, cap=0.25)  # 0.25*2 < 1
+
+
+def test_solve_bl_robust_rejects_bad_confidence() -> None:
+    mu = np.array([0.1, 0.1])
+    sigma = np.diag([0.04, 0.04])
+    with _pytest.raises(_OptErr, match="confidence"):
+        _bl.solve_bl_robust(mu, sigma, cap=None, confidence=1.5)
+
+
+# ── T3F-4: volatility-target SOCP ────────────────────────────────────────────
+
+
+def test_solve_bl_vol_target_caps_realized_volatility() -> None:
+    mu = np.array([0.12, 0.08, 0.05])
+    sigma = np.diag([0.09, 0.04, 0.01])  # vols 0.30, 0.20, 0.10
+    target = 0.15
+    weights, status = _bl.solve_bl_vol_target(mu, sigma, vol_target=target, cap=None)
+    assert status == "optimal"
+    realized = float(np.sqrt(weights @ sigma @ weights))
+    assert realized <= target + 1e-4
+    assert abs(float(weights.sum()) - 1.0) < 1e-6
+
+
+def test_solve_bl_vol_target_tilts_toward_high_mu_when_slack() -> None:
+    """With a generous vol cap, the optimizer loads the highest-μ asset more
+    than equal weight."""
+    mu = np.array([0.20, 0.05, 0.05])
+    sigma = np.diag([0.04, 0.04, 0.04])
+    weights, _ = _bl.solve_bl_vol_target(mu, sigma, vol_target=0.19, cap=None)
+    assert weights[0] > 1.0 / 3.0
+
+
+def test_solve_bl_vol_target_infeasible_when_target_below_floor_vol() -> None:
+    mu = np.array([0.10, 0.10])
+    sigma = np.diag([0.04, 0.04])  # every long-only portfolio has vol 0.2
+    with _pytest.raises(_OptErr, match="infeasible|vol_target"):
+        _bl.solve_bl_vol_target(mu, sigma, vol_target=0.05, cap=None)
+
+
+def test_solve_bl_vol_target_rejects_nonpositive_target() -> None:
+    mu = np.array([0.1, 0.1])
+    sigma = np.diag([0.04, 0.04])
+    with _pytest.raises(_OptErr, match="vol_target must be > 0"):
+        _bl.solve_bl_vol_target(mu, sigma, vol_target=0.0, cap=None)
+
+
+def test_solve_bl_vol_target_rejects_mu_shape_mismatch() -> None:
+    mu = np.array([0.1, 0.1, 0.1])
+    sigma = np.diag([0.04, 0.04])
+    with _pytest.raises(_OptErr, match="mu has shape"):
+        _bl.solve_bl_vol_target(mu, sigma, vol_target=0.3, cap=None)
+
+
+def test_solve_bl_vol_target_respects_cap() -> None:
+    mu = np.array([0.30, 0.05, 0.05, 0.05])
+    sigma = np.diag([0.04, 0.04, 0.04, 0.04])
+    weights, status = _bl.solve_bl_vol_target(mu, sigma, vol_target=0.19, cap=0.4)
+    assert status == "optimal"
+    assert (weights <= 0.4 + 1e-6).all()

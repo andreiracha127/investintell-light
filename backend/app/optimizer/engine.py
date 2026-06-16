@@ -29,6 +29,24 @@ DEFAULT_CVAR_ALPHA = 0.95
 
 _WEIGHT_ATOL = 1e-6
 
+# CLARABEL is cvxpy's conic default for these QPs/SOCPs; SCS is the robust
+# fallback (handles ill-conditioned cones the default may reject). Both are
+# confirmed in cp.installed_solvers() (1.8.1). cp.CLARABEL/cp.SCS are the
+# string constants "CLARABEL"/"SCS".
+_SOLVER_LADDER = (cp.CLARABEL, cp.SCS)
+
+
+@dataclass(frozen=True)
+class SolveTelemetry:
+    """Observability for a single engine solve."""
+
+    solver: str
+    status: str
+    used_fallback: bool
+    realized_sum: float
+    realized_max_weight: float
+    n_assets: int
+
 
 class OptimizerError(ValueError):
     """Solver failed / problem infeasible / invalid inputs. Mapped to 422."""
@@ -224,17 +242,61 @@ def bounds_constraints(
     return cons
 
 
-def _finalize(problem: cp.Problem, w: cp.Variable, label: str) -> tuple[np.ndarray, str]:
-    """Solve, demand ``optimal``, clean tiny numerical noise, verify sum=1."""
-    try:
-        problem.solve()
-    except cp.error.SolverError as exc:  # pragma: no cover - solver-dependent
-        raise OptimizerError(f"{label}: solver error: {exc}") from exc
-    status = str(problem.status)
-    if status != cp.OPTIMAL:
-        raise OptimizerError(f"{label}: solver status '{status}' (expected 'optimal')")
+def _verify_constraints(
+    weights: np.ndarray, cap: float | None, min_weight: float | None
+) -> tuple[bool, str]:
+    """Post-solve re-verification of the realized weight vector.
+
+    Returns (ok, reason). ``ok`` is False with a human reason on the first
+    violation (long-only, sum=1, cap, min_weight); empty reason when valid.
+    """
+    w = np.asarray(weights, dtype=float).ravel()
+    if (w < -_WEIGHT_ATOL).any():
+        return False, f"negative weight {float(w.min())}"
+    total = float(w.sum())
+    if abs(total - 1.0) > 1e-4:
+        return False, f"weights sum to {total}, expected 1"
+    if cap is not None and (w > cap + 1e-6).any():
+        return False, f"cap {cap} violated (max weight {float(w.max())})"
+    if min_weight is not None and (w < min_weight - 1e-6).any():
+        return False, f"min_weight {min_weight} violated (min weight {float(w.min())})"
+    return True, ""
+
+
+def _finalize(
+    problem: cp.Problem,
+    w: cp.Variable,
+    label: str,
+    cap: float | None = None,
+    min_weight: float | None = None,
+    with_telemetry: bool = False,
+) -> tuple[np.ndarray, str] | tuple[np.ndarray, str, SolveTelemetry]:
+    """Solve with an SCS fallback ladder, demand ``optimal``, clean numerical
+    noise, then RE-VERIFY the realized constraints before returning.
+
+    Returns ``(weights, status)`` by default; with ``with_telemetry=True``
+    returns ``(weights, status, SolveTelemetry)``.
+    """
+    used_fallback = False
+    last_status = "unknown"
+    solver_name = _SOLVER_LADDER[0]
+    for i, solver in enumerate(_SOLVER_LADDER):
+        try:
+            problem.solve(solver=solver)
+        except cp.error.SolverError:  # pragma: no cover - solver-dependent
+            last_status = "solver_error"
+            used_fallback = i > 0
+            continue
+        last_status = str(problem.status)
+        solver_name = solver
+        used_fallback = i > 0
+        if last_status == cp.OPTIMAL and w.value is not None:
+            break
+    if last_status != cp.OPTIMAL:
+        raise OptimizerError(f"{label}: solver status '{last_status}' (expected 'optimal')")
     if w.value is None:  # pragma: no cover - defensive
         raise OptimizerError(f"{label}: solver returned no solution")
+
     weights = np.asarray(w.value, dtype=float).ravel()
     weights[np.abs(weights) < 1e-10] = 0.0
     if (weights < -_WEIGHT_ATOL).any():
@@ -244,7 +306,22 @@ def _finalize(problem: cp.Problem, w: cp.Variable, label: str) -> tuple[np.ndarr
     if abs(total - 1.0) > 1e-4:
         raise OptimizerError(f"{label}: weights sum to {total}, expected 1")
     weights = weights / total
-    return weights, status
+
+    ok, reason = _verify_constraints(weights, cap, min_weight)
+    if not ok:
+        raise OptimizerError(f"{label}: post-solve constraint check failed: {reason}")
+
+    if with_telemetry:
+        telemetry = SolveTelemetry(
+            solver=solver_name,
+            status=last_status,
+            used_fallback=used_fallback,
+            realized_sum=float(weights.sum()),
+            realized_max_weight=float(weights.max()),
+            n_assets=int(weights.size),
+        )
+        return weights, last_status, telemetry
+    return weights, last_status
 
 
 def _validate_sigma(sigma: np.ndarray, label: str) -> np.ndarray:
@@ -285,7 +362,7 @@ def solve_min_vol(
         cp.Minimize(cp.quad_form(w, cp.psd_wrap(sigma))),
         base_constraints(w, cap, min_weight),
     )
-    return _finalize(problem, w, "min_vol")
+    return _finalize(problem, w, "min_vol", cap=cap, min_weight=min_weight)
 
 
 def solve_erc(
@@ -439,7 +516,13 @@ def solve_min_cvar(
         objective_expr = cvar + turnover_lambda * cp.norm1(w - w0)
 
     problem = cp.Problem(cp.Minimize(objective_expr), cons)
-    return _finalize(problem, w, "min_cvar")
+    # Re-verify against the SCALAR (cap, min_weight) block only when it is the
+    # active constraint set. With a BoundsBundle the realized weights are bound
+    # by per-asset vectors / block budgets (not the scalar cap), so passing the
+    # default scalar cap here would spuriously reject valid solutions.
+    if bounds is not None:
+        return _finalize(problem, w, "min_cvar")
+    return _finalize(problem, w, "min_cvar", cap=cap, min_weight=min_weight)
 
 
 def _realized_cvar(
@@ -466,9 +549,6 @@ def _realized_cvar(
     var_threshold = float(np.partition(losses, -k)[-k])
     u = np.maximum(losses - var_threshold, 0.0)
     return float(var_threshold + u.sum() / ((1.0 - alpha) * t))
-
-
-_SOLVER_LADDER = (cp.CLARABEL, cp.SCS)
 
 
 def _solve_with_ladder(

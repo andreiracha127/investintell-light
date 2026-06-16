@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import backtest as backtest_router
 from app.api.routes import builder as builder_router
+from app.api.routes import correlation_regime as correlation_regime_router
 from app.api.routes import funds as funds_router
 from app.api.routes import health as health_router
 from app.api.routes import macro as macro_router
@@ -61,6 +62,7 @@ def create_app() -> FastAPI:
     application.include_router(backtest_router.router)
     application.include_router(builder_router.router)
     application.include_router(macro_router.router)
+    application.include_router(correlation_regime_router.router)
     application.include_router(treasury_router.router)
     application.include_router(monte_carlo_router.router)
     application.include_router(rebalance_router.router)
