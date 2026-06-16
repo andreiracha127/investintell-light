@@ -206,6 +206,10 @@ export function BuilderView() {
       objective,
       constraints,
       window_days: windowVal,
+      // turnover_lambda has a backend default (0.0) but the generated contract
+      // types it as required; the builder has no turnover control, so send 0
+      // (no turnover penalty — the backend skips the current_weights guard).
+      turnover_lambda: 0,
       // Always send valid BL params; non-BL objectives fall back to defaults
       // (the backend schema validates δ>0, τ>0 regardless of objective).
       bl: {
