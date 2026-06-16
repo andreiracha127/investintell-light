@@ -22,6 +22,8 @@ from dataclasses import dataclass
 import cvxpy as cp
 import numpy as np
 
+from app.analytics import rmt
+
 TRADING_DAYS = 252
 
 DEFAULT_CAP = 0.25
@@ -96,6 +98,55 @@ def sigma_ledoit_wolf(returns: np.ndarray) -> np.ndarray:
     sigma: np.ndarray = np.asarray(lw.covariance_, dtype=float) * TRADING_DAYS
     # Symmetrize (numerical hygiene for cvxpy's PSD checks).
     return np.asarray((sigma + sigma.T) / 2.0)
+
+
+RMT_Q_THRESHOLD = 0.5  # q = N/T above which the RMT denoise path activates
+
+
+def sigma_robust(
+    returns: np.ndarray, *, q_threshold: float = RMT_Q_THRESHOLD
+) -> np.ndarray:
+    """Annualized (×252) covariance, method chosen by q = N/T.
+
+    When ``q = N/T > q_threshold`` (a large universe relative to its history)
+    the sample correlation is cleaned with the Tier-3 RMT pipeline —
+    constant-correlation Ledoit-Wolf shrinkage → Marchenko-Pastur denoise —
+    then rescaled by the per-asset volatilities to a covariance. Otherwise the
+    plain ``sigma_ledoit_wolf`` is used. BOTH paths end in ``repair_psd`` so the
+    result is PSD and well-conditioned. The RMT branch falls back deterministically
+    to Ledoit-Wolf if the denoise raises (fail-closed only on an unusable matrix,
+    via ``repair_psd``). The ``solve_*`` interfaces are unchanged.
+    """
+    arr = np.asarray(returns, dtype=float)
+    if arr.ndim != 2:
+        raise OptimizerError(f"returns must be a T×n matrix, got ndim={arr.ndim}")
+    t, n = arr.shape
+    if t < 2 or n < 1:
+        raise OptimizerError(
+            f"returns matrix too small for covariance: shape={arr.shape}"
+        )
+    if not np.isfinite(arr).all():
+        raise OptimizerError(
+            "returns matrix contains NaN/inf — refusing to estimate covariance"
+        )
+
+    q = n / t
+    if n < 2 or q <= q_threshold:
+        return repair_psd(sigma_ledoit_wolf(arr))
+    try:
+        cov_shrunk, _delta = rmt.ledoit_wolf_constant_correlation(arr)
+        std = np.sqrt(np.maximum(np.diag(cov_shrunk), 1e-20))
+        corr = cov_shrunk / np.outer(std, std)
+        np.fill_diagonal(corr, 1.0)
+        corr_denoised = rmt.marchenko_pastur_denoise(corr, q)
+        # Re-attach the (annualized) per-asset variances to the denoised corr.
+        var_ann = std**2 * TRADING_DAYS
+        std_ann = np.sqrt(var_ann)
+        cov_ann = corr_denoised * np.outer(std_ann, std_ann)
+        return repair_psd(cov_ann)
+    except ValueError:
+        # Deterministic fallback: RMT denoise could not produce a usable matrix.
+        return repair_psd(sigma_ledoit_wolf(arr))
 
 
 def _check_constraint_params(n: int, cap: float | None, min_weight: float | None) -> None:
