@@ -170,11 +170,11 @@ def select_diversified(
     k_eff = min(k, n)
     if k_eff >= n:
         # Every asset is its own cluster — keep them all.
-        selected: list[int] = list(range(n))
+        all_idx = list(range(n))
         return SelectionResult(
-            selected=selected,
-            cluster_of={i: i for i in selected},
-            score_of={i: float(sc[i]) for i in selected},
+            selected=all_idx,
+            cluster_of={i: i for i in all_idx},
+            score_of={i: float(sc[i]) for i in all_idx},
         )
 
     # Distance 1 − ρ, clamped to [0, 2], zero diagonal for squareform.
