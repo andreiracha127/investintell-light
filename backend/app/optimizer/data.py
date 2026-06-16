@@ -29,6 +29,9 @@ from app.services import funds_catalog
 # estimation window.
 DEFAULT_WINDOW_DAYS: int | None = None
 MIN_COMMON_OBS = 400
+# Hard ceiling for the on-demand broad-universe path (design §8). Above this the
+# pipeline fails loud (a worker pre-compute path is phase 2, not built here).
+MAX_UNIVERSE_CANDIDATES = 2000
 
 
 @dataclass(frozen=True)
@@ -152,6 +155,47 @@ async def load_aligned_returns(
     return frame
 
 
+async def load_returns_matrix(
+    session: AsyncSession,
+    assets: list[AssetRef],
+    window_days: int | None = DEFAULT_WINDOW_DAYS,
+    today: dt.date | None = None,
+) -> pd.DataFrame:
+    """T×N daily-return frame over the UNION of dates — NaN preserved.
+
+    Stage-1 loader for the broad-universe optimizer: unlike
+    ``load_aligned_returns`` (which ``dropna`` to the common-history window),
+    this keeps every asset's full series and aligns on the UNION index, so a
+    young fund contributes NaN before its inception instead of truncating the
+    whole panel. Pairwise covariance (``app.analytics.pairwise_cov``) consumes
+    the NaN directly.
+
+    Raises ValueError (→ 422) on: fewer than 2 assets, duplicate assets, an
+    unknown asset / empty window.
+    """
+    if len(assets) < 2:
+        raise ValueError("at least 2 assets are required to optimize")
+    labels = [ref.label for ref in assets]
+    duplicates = sorted({label for label in labels if labels.count(label) > 1})
+    if duplicates:
+        raise ValueError(f"duplicate assets in request: {', '.join(duplicates)}")
+    if window_days is not None and window_days < 1:
+        raise ValueError(f"window_days must be >= 1, got {window_days}")
+    today = today or dt.date.today()
+    since = None if window_days is None else today - dt.timedelta(days=window_days)
+
+    series: dict[str, pd.Series] = {}
+    for ref in assets:
+        if isinstance(ref, FundAssetRef):
+            series[ref.label] = await _load_fund_returns(session, ref, since)
+        else:
+            series[ref.label] = await _load_equity_returns(session, ref, since)
+
+    # Union index, NO dropna — the pairwise estimator handles the NaN mask.
+    frame = pd.DataFrame(series)
+    return frame
+
+
 async def load_fund_aum(
     session: AsyncSession, fund_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, float | None]:
@@ -180,6 +224,39 @@ async def load_fund_asset_class(
     return {fund_id: found.get(fund_id) for fund_id in fund_ids}
 
 
+async def load_fund_quality_metrics(
+    session: AsyncSession, fund_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, dict[str, float | None]]:
+    """Per-fund quality signals for the Stage-1 score (G5-safe).
+
+    Returns ``{instrument_id: {"sharpe_1y": .., "expense_ratio": .., "aum_usd":
+    ..}}`` — each value ``None`` where the source lacks it. ``sharpe_1y`` comes
+    from ``FundRiskLatest``; ``expense_ratio`` / ``aum_usd`` from ``Fund``. NO
+    expected-return field is read (gate G5).
+    """
+    if not fund_ids:
+        return {}
+    result = await session.execute(
+        select(
+            Fund.instrument_id,
+            Fund.expense_ratio,
+            Fund.aum_usd,
+            FundRiskLatest.sharpe_1y,
+        )
+        .select_from(Fund)
+        .outerjoin(FundRiskLatest, FundRiskLatest.instrument_id == Fund.instrument_id)
+        .where(Fund.instrument_id.in_(fund_ids))
+    )
+    found: dict[uuid.UUID, dict[str, float | None]] = {}
+    for iid, expense, aum, sharpe in result.all():
+        found[iid] = {
+            "sharpe_1y": float(sharpe) if sharpe is not None else None,
+            "expense_ratio": float(expense) if expense is not None else None,
+            "aum_usd": float(aum) if aum is not None else None,
+        }
+    return {fid: found.get(fid, {"sharpe_1y": None, "expense_ratio": None, "aum_usd": None}) for fid in fund_ids}
+
+
 @dataclass(frozen=True)
 class UniverseFund:
     """A fund selected by a universe spec — id plus display labels."""
@@ -195,7 +272,7 @@ async def select_universe_funds(
     *,
     rank_by: str,
     rank_dir: str,
-    max_assets: int,
+    max_assets: int | None,
     require_aum: bool = False,
     include_ids: Sequence[str] | None = None,
     window_days: int | None = DEFAULT_WINDOW_DAYS,
@@ -243,7 +320,23 @@ async def select_universe_funds(
         .join(nav_counts, nav_counts.c.instrument_id == Fund.instrument_id)
         .where(*conditions, nav_counts.c.n >= min_obs)
         .order_by(order.nulls_last(), Fund.ticker.nulls_last(), Fund.instrument_id)
-        .limit(max_assets)
     )
+    if max_assets is not None:
+        stmt = stmt.limit(max_assets)
+    else:
+        # Broad-universe path: no LIMIT, but cap at the hard ceiling + 1 so we
+        # can detect (and fail loud on) an over-large universe without scanning
+        # the whole table.
+        stmt = stmt.limit(MAX_UNIVERSE_CANDIDATES + 1)
     result = await session.execute(stmt)
-    return [UniverseFund(id=iid, ticker=ticker, name=name) for iid, ticker, name in result.all()]
+    funds = [
+        UniverseFund(id=iid, ticker=ticker, name=name)
+        for iid, ticker, name in result.all()
+    ]
+    if max_assets is None and len(funds) > MAX_UNIVERSE_CANDIDATES:
+        raise ValueError(
+            f"universe matched more than {MAX_UNIVERSE_CANDIDATES} funds — "
+            "narrow the filters (this on-demand path is capped; a pre-computed "
+            "worker path is planned for larger universes)"
+        )
+    return funds
