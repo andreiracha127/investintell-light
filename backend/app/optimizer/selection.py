@@ -17,8 +17,12 @@ primitives (routes map → 422).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 from numpy.typing import NDArray
+from scipy.cluster.hierarchy import fcluster, linkage
+from scipy.spatial.distance import squareform
 
 from app.analytics import pairwise_cov, rmt
 from app.optimizer.engine import repair_psd
@@ -67,3 +71,131 @@ def robust_selection_covariance(
     repaired = repair_psd(corr_denoised)
     corr_clean = _corr_from_cov(repaired)
     return corr_clean, kept, excluded
+
+
+# Default quality-score weights (sum to 1). Sharpe dominates; expense/AUM tie.
+_W_SHARPE = 0.5
+_W_EXPENSE = 0.25
+_W_AUM = 0.25
+_NEUTRAL = 0.5
+
+
+def _minmax(values: list[float | None], *, invert: bool) -> NDArray[np.float64]:
+    """Min-max normalize a signal to [0, 1]; missing → neutral 0.5.
+
+    ``invert=True`` flips the scale (lower raw value ⇒ higher score, e.g. the
+    expense ratio). A degenerate signal (all equal / all missing) maps every
+    present entry to the neutral 0.5 so it neither helps nor hurts.
+    """
+    arr = np.array(
+        [np.nan if v is None else float(v) for v in values], dtype=float
+    )
+    present = np.isfinite(arr)
+    out = np.full(arr.shape, _NEUTRAL, dtype=float)
+    if present.sum() < 2:
+        return out
+    lo = float(arr[present].min())
+    hi = float(arr[present].max())
+    if hi - lo < 1e-12:
+        return out
+    norm = (arr[present] - lo) / (hi - lo)
+    if invert:
+        norm = 1.0 - norm
+    out[present] = norm
+    return out
+
+
+def quality_score(
+    metrics: list[dict[str, float | None]],
+    *,
+    w_sharpe: float = _W_SHARPE,
+    w_expense: float = _W_EXPENSE,
+    w_aum: float = _W_AUM,
+) -> NDArray[np.float64]:
+    """G5-safe per-fund quality score in [0, 1].
+
+    ``metrics[i]`` carries ``sharpe_1y`` / ``expense_ratio`` / ``aum_usd``
+    (any may be ``None``). The score combines normalized Sharpe (↑), inverted
+    expense (↓ is better), and AUM (↑). NO expected-return / sample-mean input
+    is consumed (gate G5).
+    """
+    if not metrics:
+        raise ValueError("metrics must be non-empty")
+    s_sharpe = _minmax([m.get("sharpe_1y") for m in metrics], invert=False)
+    s_expense = _minmax([m.get("expense_ratio") for m in metrics], invert=True)
+    s_aum = _minmax([m.get("aum_usd") for m in metrics], invert=False)
+    return np.asarray(
+        w_sharpe * s_sharpe + w_expense * s_expense + w_aum * s_aum, dtype=float
+    )
+
+
+@dataclass(frozen=True)
+class SelectionResult:
+    """Stage-1 output: chosen representatives + cluster/score bookkeeping.
+
+    ``selected`` are 0-based indices INTO the correlation matrix passed to
+    ``select_diversified`` (i.e. positions within the kept/survivor set).
+    ``cluster_of`` maps each selected index → its cluster label;
+    ``score_of`` maps it → its quality score.
+    """
+
+    selected: list[int]
+    cluster_of: dict[int, int]
+    score_of: dict[int, float]
+
+
+def select_diversified(
+    corr_denoised: NDArray[np.floating],
+    scores: NDArray[np.floating],
+    k: int,
+) -> SelectionResult:
+    """Pick ≤ K representatives: 1 per cluster, max quality within the cluster.
+
+    Agglomerative (average-linkage) clustering on the distance ``d = 1 − ρ``
+    over the denoised correlation, cut into ``min(k, N)`` clusters; the
+    highest-``scores`` member of each cluster is its representative.
+    """
+    corr = np.asarray(corr_denoised, dtype=float)
+    if corr.ndim != 2 or corr.shape[0] != corr.shape[1]:
+        raise ValueError(f"corr_denoised must be square, got shape {corr.shape}")
+    n = corr.shape[0]
+    sc = np.asarray(scores, dtype=float).ravel()
+    if sc.shape != (n,):
+        raise ValueError(f"scores has shape {sc.shape}, expected ({n},)")
+    if k < 1:
+        raise ValueError(f"k must be >= 1, got {k}")
+    if not np.isfinite(corr).all():
+        raise ValueError("corr_denoised contains NaN/inf")
+
+    k_eff = min(k, n)
+    if k_eff >= n:
+        # Every asset is its own cluster — keep them all.
+        selected: list[int] = list(range(n))
+        return SelectionResult(
+            selected=selected,
+            cluster_of={i: i for i in selected},
+            score_of={i: float(sc[i]) for i in selected},
+        )
+
+    # Distance 1 − ρ, clamped to [0, 2], zero diagonal for squareform.
+    dist = 1.0 - corr
+    dist = np.clip((dist + dist.T) / 2.0, 0.0, 2.0)
+    np.fill_diagonal(dist, 0.0)
+    condensed = squareform(dist, checks=False)
+    z = linkage(condensed, method="average")
+    labels = fcluster(z, t=k_eff, criterion="maxclust")
+
+    selected: list[int] = []
+    cluster_of: dict[int, int] = {}
+    score_of: dict[int, float] = {}
+    for cluster_id in np.unique(labels):
+        members = np.where(labels == cluster_id)[0]
+        # Highest quality within the cluster; ties broken by lowest index.
+        rep = int(members[np.argmax(sc[members])])
+        selected.append(rep)
+        cluster_of[rep] = int(cluster_id)
+        score_of[rep] = float(sc[rep])
+    selected.sort()
+    return SelectionResult(
+        selected=selected, cluster_of=cluster_of, score_of=score_of
+    )
