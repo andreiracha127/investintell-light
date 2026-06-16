@@ -5495,6 +5495,10 @@ export interface components {
             ticker?: string | null;
             /** Name */
             name?: string | null;
+            /** Asset Class */
+            asset_class?: string | null;
+            /** Strategy Label */
+            strategy_label?: string | null;
         };
     };
     responses: never;
