@@ -38,6 +38,7 @@ class PositionDriftOut(BaseModel):
     drift_abs: float
     drift_rel: float | None
     breach: bool
+    status: Literal["ok", "maintenance", "urgent"]
 
 
 class ProposalOut(BaseModel):
