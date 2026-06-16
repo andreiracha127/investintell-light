@@ -1827,6 +1827,26 @@ function RiskRows({
       {peers.map((row) => (
         <StatRow key={row.label} label={row.label} value={row.value} detail={row.detail} />
       ))}
+      {(risk.empirical_duration != null ||
+        risk.credit_beta != null ||
+        risk.inflation_beta != null ||
+        risk.crisis_alpha_score != null) && (
+        <>
+          <RiskGroupHeader>FI/Alt analytics</RiskGroupHeader>
+          {risk.empirical_duration != null && (
+            <StatRow label="Empirical duration" value={num(risk.empirical_duration)} />
+          )}
+          {risk.credit_beta != null && (
+            <StatRow label="Credit beta" value={num(risk.credit_beta)} />
+          )}
+          {risk.inflation_beta != null && (
+            <StatRow label="Inflation beta" value={num(risk.inflation_beta)} />
+          )}
+          {risk.crisis_alpha_score != null && (
+            <StatRow label="Crisis alpha score" value={num(risk.crisis_alpha_score)} />
+          )}
+        </>
+      )}
     </>
   );
 }
