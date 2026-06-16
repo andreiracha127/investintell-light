@@ -30,6 +30,27 @@ def _client() -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
+@pytest.fixture(autouse=True)
+def _stub_result_taxonomy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default stubs for the result-taxonomy loaders the response path calls
+    unconditionally (asset_class + strategy_label). The DB session is None in
+    this suite, so the real loaders cannot run; tests needing a specific
+    asset_class (block budgets) override via ``_stub_asset_class`` afterwards."""
+
+    async def fake_class(
+        session: Any, fund_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, str | None]:
+        return {fid: "equity" for fid in fund_ids}
+
+    async def fake_strategy(
+        session: Any, fund_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, str | None]:
+        return {fid: "Core" for fid in fund_ids}
+
+    monkeypatch.setattr(optimizer_data, "load_fund_asset_class", fake_class)
+    monkeypatch.setattr(optimizer_data, "load_fund_strategy_label", fake_strategy)
+
+
 def _fund_ref(i: int) -> dict[str, str]:
     return {"kind": "fund", "id": str(_FUND_IDS[i])}
 

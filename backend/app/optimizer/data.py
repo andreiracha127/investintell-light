@@ -224,6 +224,21 @@ async def load_fund_asset_class(
     return {fund_id: found.get(fund_id) for fund_id in fund_ids}
 
 
+async def load_fund_strategy_label(
+    session: AsyncSession, fund_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, str | None]:
+    """strategy_label (funds.strategy_label) per instrument — None where unknown."""
+    if not fund_ids:
+        return {}
+    result = await session.execute(
+        select(Fund.instrument_id, Fund.strategy_label).where(
+            Fund.instrument_id.in_(fund_ids)
+        )
+    )
+    found = {row[0]: row[1] for row in result.all()}
+    return {fund_id: found.get(fund_id) for fund_id in fund_ids}
+
+
 async def load_fund_quality_metrics(
     session: AsyncSession, fund_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, dict[str, float | None]]:

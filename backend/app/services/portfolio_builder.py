@@ -570,6 +570,10 @@ async def run_optimize(
         raise BuilderError(f"in-sample CVaR undefined: {exc}") from exc
     return_ann_bl = float(mu_posterior @ weights) if mu_posterior is not None else None
 
+    result_fund_ids = [ref.id for ref in assets if isinstance(ref, FundRefIn)]
+    asset_class_of = await optimizer_data.load_fund_asset_class(session, result_fund_ids)
+    strategy_of = await optimizer_data.load_fund_strategy_label(session, result_fund_ids)
+
     return OptimizeResponse(
         weights=[
             WeightOut(
@@ -577,6 +581,12 @@ async def run_optimize(
                 weight=float(weights[index_of[_ref_key(ref)]]),
                 ticker=label_map.get(_ref_key(ref), (None, ""))[0],
                 name=label_map.get(_ref_key(ref), (None, None))[1] or None,
+                asset_class=(
+                    asset_class_of.get(ref.id) if isinstance(ref, FundRefIn) else None
+                ),
+                strategy_label=(
+                    strategy_of.get(ref.id) if isinstance(ref, FundRefIn) else None
+                ),
             )
             for ref in assets
         ],

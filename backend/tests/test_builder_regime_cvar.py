@@ -54,6 +54,12 @@ async def test_run_optimize_risk_off_halves_the_cvar_limit(
     async def fake_aum(session, fund_ids):
         return {fid: 1e9 * (i + 1) for i, fid in enumerate(fund_ids)}
 
+    async def fake_class(session, fund_ids):
+        return {fid: "equity" for fid in fund_ids}
+
+    async def fake_strategy(session, fund_ids):
+        return {fid: "Core" for fid in fund_ids}
+
     captured: dict[str, float] = {}
 
     def fake_solver(scenarios, *, mu, cvar_limit, cap=None, min_weight=None,
@@ -64,6 +70,8 @@ async def test_run_optimize_risk_off_halves_the_cvar_limit(
 
     monkeypatch.setattr(optimizer_data, "load_aligned_returns", fake_load)
     monkeypatch.setattr(optimizer_data, "load_fund_aum", fake_aum)
+    monkeypatch.setattr(optimizer_data, "load_fund_asset_class", fake_class)
+    monkeypatch.setattr(optimizer_data, "load_fund_strategy_label", fake_strategy)
     monkeypatch.setattr(engine, "solve_max_return_cvar_capped", fake_solver)
     monkeypatch.setattr(pb, "_OVERRIDE_REGIME_STATE", "risk_off", raising=False)
 

@@ -273,6 +273,9 @@ class WeightOut(BaseModel):
     # path, where the client already knows the labels it sent.
     ticker: str | None = None
     name: str | None = None
+    # Fund taxonomy for the grouped (tree) results view — None for equities.
+    asset_class: str | None = None
+    strategy_label: str | None = None
 
 
 class ExpectedOut(BaseModel):

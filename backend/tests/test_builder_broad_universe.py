@@ -68,10 +68,22 @@ def _stub_broad(monkeypatch: pytest.MonkeyPatch, n_funds: int = 12) -> list[uuid
             for i, fid in enumerate(fund_ids)
         }
 
+    async def fake_asset_class(
+        session: Any, fund_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, str | None]:
+        return {fid: "equity" for fid in fund_ids}
+
+    async def fake_strategy(
+        session: Any, fund_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, str | None]:
+        return {fid: "Large-Cap Growth" for fid in fund_ids}
+
     monkeypatch.setattr(optimizer_data, "select_universe_funds", fake_select)
     monkeypatch.setattr(optimizer_data, "load_returns_matrix", fake_matrix)
     monkeypatch.setattr(optimizer_data, "load_aligned_returns", fake_aligned)
     monkeypatch.setattr(optimizer_data, "load_fund_quality_metrics", fake_quality)
+    monkeypatch.setattr(optimizer_data, "load_fund_asset_class", fake_asset_class)
+    monkeypatch.setattr(optimizer_data, "load_fund_strategy_label", fake_strategy)
     return ids
 
 
@@ -96,6 +108,8 @@ async def test_broad_universe_returns_lean_portfolio_with_diagnostics(
     assert sel["n_candidates"] == 12
     assert sel["n_selected"] == 3
     assert sel["excluded"] == []
+    assert all(w["asset_class"] == "equity" for w in body["weights"])
+    assert all(w["strategy_label"] == "Large-Cap Growth" for w in body["weights"])
 
 
 async def test_broad_universe_too_small_fails_loud(
