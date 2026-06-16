@@ -69,6 +69,10 @@ from app.analytics.rolling import (
     rolling_correlation,
     rolling_volatility,
 )
+from app.analytics.tail import (
+    TailPanel,
+    tail_panel,
+)
 
 __all__ = [
     "AbsorptionResult",
@@ -81,6 +85,7 @@ __all__ = [
     "Histogram",
     "MIN_IN_RANGE_RETURNS",
     "RobustSharpeResult",
+    "TailPanel",
     "VarianceRiskBudget",
     "absorption_ratio",
     "active_share",
@@ -119,6 +124,7 @@ __all__ = [
     "sharpe_ratio",
     "simple_returns",
     "sortino_ratio",
+    "tail_panel",
     "total_return",
     "variance_risk_budget",
     "weight_series",
