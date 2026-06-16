@@ -111,3 +111,43 @@ async def test_broad_universe_too_small_fails_loud(
     async with _client() as client:
         response = await client.post("/builder/optimize", json=payload)
     assert response.status_code == 422
+
+
+async def test_broad_universe_explicit_infeasible_cap_fails_loud(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An EXPLICIT cap that can't fill a K-position broad portfolio is a 422.
+
+    K=3 with cap=0.2 → 3×0.2=0.6 < 1, so the lean portfolio cannot be fully
+    invested. We refuse to silently raise the user's chosen cap.
+    """
+    _stub_broad(monkeypatch, n_funds=12)
+    payload = {
+        "universe": {"broad_universe": True, "max_positions": 3},
+        "objective": "min_cvar",
+        "constraints": {"cap": 0.2},
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 422, response.text
+    assert "cap" in response.text or "infeasible" in response.text
+
+
+async def test_broad_universe_explicit_feasible_cap_is_respected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An EXPLICIT feasible cap is honored, never overridden.
+
+    K=3 with cap=0.5 → 3×0.5=1.5 ≥ 1, so the cap is feasible and must bind.
+    """
+    _stub_broad(monkeypatch, n_funds=12)
+    payload = {
+        "universe": {"broad_universe": True, "max_positions": 3},
+        "objective": "min_cvar",
+        "constraints": {"cap": 0.5},
+    }
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert all(w["weight"] <= 0.5 + 1e-6 for w in body["weights"])

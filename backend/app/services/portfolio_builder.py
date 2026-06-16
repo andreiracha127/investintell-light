@@ -415,13 +415,23 @@ async def run_optimize(
     cap = payload.constraints.cap
     min_weight = payload.constraints.min_weight
     # Broad-universe mode yields a LEAN portfolio (K ≈ max_positions): with few
-    # final assets the default per-asset cap (0.25) can be mathematically
-    # infeasible (cap·K < 1). Lift the cap to 1/K in that case so K large
-    # positions can sum to 1 — the lean portfolio's whole point. A cap that is
-    # already feasible (cap·K ≥ 1) is left untouched; this never TIGHTENS the
-    # user's choice.
+    # final assets a per-asset cap can be mathematically infeasible (cap·K < 1),
+    # since long-only weights must still sum to 1. We auto-relax this ONLY when
+    # the cap is the framework default (user did not set it) — silently raising
+    # a cap the user EXPLICITLY chose would violate least-surprise. An explicit
+    # infeasible cap fails loud; a feasible cap (cap·K ≥ 1) is always left as-is.
     if broad and cap is not None and cap * len(assets) < 1.0:
-        cap = 1.0 / len(assets)
+        n = len(assets)
+        min_feasible_cap = 1.0 / n
+        cap_was_explicit = "cap" in payload.constraints.model_fields_set
+        if cap_was_explicit:
+            raise BuilderError(
+                f"per-asset cap {cap:.2%} is infeasible for a {n}-position "
+                f"broad-universe portfolio (needs cap ≥ {min_feasible_cap:.2%}); "
+                "raise the cap or lower max_positions"
+            )
+        # Default (unset) cap: relax it to 1/K so K positions can sum to 1.
+        cap = min_feasible_cap
     has_views = bool(payload.views)
     needs_bl = has_views or payload.objective in ("bl_utility", "max_return_cvar")
     # Effective risk-aversion: explicit bl.delta override beats the mandate
