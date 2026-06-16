@@ -90,6 +90,50 @@ def annualized_volatility(returns: pd.Series, periods_per_year: int = 252) -> fl
     return vol
 
 
+def downside_deviation(returns: pd.Series, mar: float = 0.0) -> float:
+    """Downside deviation below a Minimum Acceptable Return (MAR).
+
+    ``sqrt(mean(min(R - MAR, 0)^2))`` over the full sample (N denominator,
+    not N-1) — only shortfalls below ``mar`` contribute; upside is treated as
+    zero. ``mar`` and inputs/result are per-period decimal fractions
+    (0.05 = 5%), never 0-100. Mirrors the eVestment MAR-based downside
+    deviation (legacy return_statistics_service._compute_downside_deviation).
+
+    Raises:
+        ValueError: if fewer than 2 returns are supplied or the input contains
+            NaN values.
+    """
+    if len(returns) < 2:
+        raise ValueError(
+            f"downside_deviation requires at least 2 returns, got {len(returns)}"
+        )
+    reject_nan(returns, "downside_deviation")
+    shortfall = np.minimum(returns.to_numpy(dtype=float) - mar, 0.0)
+    return float(np.sqrt(np.mean(shortfall**2)))
+
+
+def semi_deviation(returns: pd.Series) -> float:
+    """Semi-deviation: downside deviation using the sample mean as threshold.
+
+    ``sqrt(mean(min(R - mean(R), 0)^2))`` over the full sample (N denominator).
+    Only returns below the series mean contribute. Inputs/result are per-period
+    decimal fractions (0.05 = 5%), never 0-100. Mirrors the eVestment
+    semi-deviation (legacy return_statistics_service._compute_semi_deviation).
+
+    Raises:
+        ValueError: if fewer than 2 returns are supplied or the input contains
+            NaN values.
+    """
+    if len(returns) < 2:
+        raise ValueError(
+            f"semi_deviation requires at least 2 returns, got {len(returns)}"
+        )
+    reject_nan(returns, "semi_deviation")
+    values = returns.to_numpy(dtype=float)
+    shortfall = np.minimum(values - values.mean(), 0.0)
+    return float(np.sqrt(np.mean(shortfall**2)))
+
+
 def sharpe_ratio(
     returns: pd.Series,
     risk_free_rate: float = DEFAULT_RISK_FREE_RATE,
