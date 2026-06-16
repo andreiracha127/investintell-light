@@ -3987,7 +3987,8 @@ def _stub_returns(monkeypatch: pytest.MonkeyPatch, n_obs: int = 600) -> None:
 
 async def test_walk_forward_min_cvar_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_returns(monkeypatch)
-    payload = {"assets": [_fund(0), _fund(1), _fund(2)], "objective": "min_cvar"}
+    payload = {"assets": [_fund(0), _fund(1), _fund(2)], "objective": "min_cvar",
+               "constraints": {"cap": 0.5}}  # cap*n>=1 feasibility (default 0.25*3<1 is infeasible)
     async with _client() as client:
         response = await client.post("/backtest/walk-forward", json=payload)
     assert response.status_code == 200, response.text
