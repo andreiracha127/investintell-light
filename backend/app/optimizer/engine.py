@@ -34,6 +34,29 @@ class OptimizerError(ValueError):
     """Solver failed / problem infeasible / invalid inputs. Mapped to 422."""
 
 
+def compute_regime_adjusted_limit(base_limit: float, regime_multiplier: float) -> float:
+    """Scale a base CVaR loss limit by a regime multiplier.
+
+    ``base_limit`` is a POSITIVE loss magnitude (decimal fraction). A
+    ``regime_multiplier`` < 1 tightens the limit under stress (legacy intent:
+    in a detected stress regime the institutional CVaR budget shrinks); > 1
+    loosens it in calm regimes. The multiplier is supplied by the caller from
+    the regime detector — this function performs no estimation (gate G5).
+
+    Raises:
+        OptimizerError: if ``base_limit`` or ``regime_multiplier`` is not > 0.
+    """
+    if not base_limit > 0:
+        raise OptimizerError(
+            f"base_limit must be > 0 (loss magnitude), got {base_limit}"
+        )
+    if not regime_multiplier > 0:
+        raise OptimizerError(
+            f"regime_multiplier must be > 0, got {regime_multiplier}"
+        )
+    return base_limit * regime_multiplier
+
+
 def sigma_ledoit_wolf(returns: np.ndarray) -> np.ndarray:
     """Annualized (×252) Ledoit-Wolf shrunk covariance of daily returns.
 
@@ -406,6 +429,7 @@ def solve_min_cvar(
     turnover_lambda: float = 0.0,
     ret_floor: float | None = None,
     mu: np.ndarray | None = None,
+    cvar_limit: float | None = None,
 ) -> tuple[np.ndarray, str]:
     """Min-CVaR (Rockafellar–Uryasev) on historical daily scenarios (T×n).
 
@@ -415,6 +439,10 @@ def solve_min_cvar(
     default. The optional return floor ``muᵀw ≥ ret_floor`` requires an
     EXPLICIT ``mu`` vector (annualized, from the BL posterior — gate G5: this
     function never estimates a mean itself).
+
+    The optional ``cvar_limit`` (positive loss magnitude) adds the hard
+    constraint CVaR_α(w) ≤ cvar_limit; infeasibility fails loud via the solver
+    status (gate G5: no mean involved).
     """
     scenarios = np.asarray(scenarios, dtype=float)
     if scenarios.ndim != 2:
@@ -460,6 +488,16 @@ def solve_min_cvar(
         if mu_arr.shape != (n,):
             raise OptimizerError(f"min_cvar: mu has shape {mu_arr.shape}, expected ({n},)")
         cons.append(mu_arr @ w >= ret_floor)
+
+    if cvar_limit is not None:
+        if not cvar_limit > 0:
+            raise OptimizerError(
+                f"min_cvar: cvar_limit must be > 0 (loss magnitude), got {cvar_limit}"
+            )
+        # cvar is the RU loss expression (return-space loss; positive = loss).
+        # Cap it at the regime-adjusted limit; infeasibility -> solver status
+        # not optimal -> _finalize raises OptimizerError (fail-loud).
+        cons.append(cvar <= cvar_limit)
 
     objective_expr = cvar
     if turnover_lambda > 0 and w0 is not None:
