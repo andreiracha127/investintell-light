@@ -78,7 +78,7 @@ export function FundUniverseCard({
     queryKey: ["builder-universe-preview", universeDraftToPreviewQuery(draft, effectiveN)],
     queryFn: ({ signal }) =>
       fetchFunds(universeDraftToPreviewQuery(draft, effectiveN), signal),
-    enabled: effectiveN >= 2,
+    enabled: !draft.broadUniverse && effectiveN >= 2,
     placeholderData: keepPreviousData,
     staleTime: 30_000,
     retry: retryPolicy,
@@ -161,9 +161,32 @@ export function FundUniverseCard({
         />
       </div>
 
+      <div className="mt-3 flex items-stretch border border-border-strong w-fit">
+        {[
+          { broad: false, label: "Ranked top-N" },
+          { broad: true, label: "Broad → lean" },
+        ].map((opt) => (
+          <button
+            key={String(opt.broad)}
+            type="button"
+            onClick={() => patch({ broadUniverse: opt.broad })}
+            aria-pressed={draft.broadUniverse === opt.broad}
+            className={`flex h-[34px] items-center px-3.5 text-[12.5px] transition-colors ${
+              draft.broadUniverse === opt.broad
+                ? "bg-accent font-bold text-on-accent"
+                : "bg-field font-medium text-text-secondary hover:bg-layer-hover"
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
       <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-3">
-        <label className="flex min-w-[170px] flex-col gap-1">
-          <span className={FIELD_LABEL_CLASS}>Rank by</span>
+        {!draft.broadUniverse && (
+          <>
+            <label className="flex min-w-[170px] flex-col gap-1">
+              <span className={FIELD_LABEL_CLASS}>Rank by</span>
           <select
             value={draft.rankBy}
             onChange={(e) => patch({ rankBy: e.target.value as UniverseRankBy })}
@@ -177,33 +200,56 @@ export function FundUniverseCard({
             ))}
           </select>
         </label>
-        <Select
-          label="Order"
-          value={draft.rankDir}
-          onChange={(v) => patch({ rankDir: v as "asc" | "desc" })}
-          options={[
-            { value: "desc", label: "Best first (high→low)" },
-            { value: "asc", label: "Low→high" },
-          ]}
-        />
-        <label className="flex w-[200px] flex-col gap-1">
-          <span className={FIELD_LABEL_CLASS}>
-            How many funds{" "}
-            <span className="tabular-nums normal-case text-text-secondary">
-              {draft.maxAssets}
+            <Select
+              label="Order"
+              value={draft.rankDir}
+              onChange={(v) => patch({ rankDir: v as "asc" | "desc" })}
+              options={[
+                { value: "desc", label: "Best first (high→low)" },
+                { value: "asc", label: "Low→high" },
+              ]}
+            />
+          </>
+        )}
+        {draft.broadUniverse ? (
+          <label className="flex w-[200px] flex-col gap-1">
+            <span className={FIELD_LABEL_CLASS}>
+              Target positions (K){" "}
+              <span className="tabular-nums normal-case text-text-secondary">
+                {draft.maxPositions}
+              </span>
             </span>
-          </span>
-          <input
-            type="range"
-            min={2}
-            max={50}
-            step={1}
-            value={draft.maxAssets}
-            onChange={(e) => patch({ maxAssets: Number(e.target.value) })}
-            aria-label="Number of funds to optimize (2 to 50)"
-            className="h-[34px] accent-[var(--color-accent)]"
-          />
-        </label>
+            <input
+              type="range"
+              min={5}
+              max={50}
+              step={1}
+              value={draft.maxPositions}
+              onChange={(e) => patch({ maxPositions: Number(e.target.value) })}
+              aria-label="Target number of positions (5 to 50)"
+              className="h-[34px] accent-[var(--color-accent)]"
+            />
+          </label>
+        ) : (
+          <label className="flex w-[200px] flex-col gap-1">
+            <span className={FIELD_LABEL_CLASS}>
+              How many funds{" "}
+              <span className="tabular-nums normal-case text-text-secondary">
+                {draft.maxAssets}
+              </span>
+            </span>
+            <input
+              type="range"
+              min={2}
+              max={50}
+              step={1}
+              value={draft.maxAssets}
+              onChange={(e) => patch({ maxAssets: Number(e.target.value) })}
+              aria-label="Number of funds to optimize (2 to 50)"
+              className="h-[34px] accent-[var(--color-accent)]"
+            />
+          </label>
+        )}
       </div>
 
       <p className="ix-fs mb-0 mt-3 border-l-[3px] border-accent bg-accent-wash px-2.5 py-1.5 text-text-secondary">
@@ -216,6 +262,14 @@ export function FundUniverseCard({
             Only <span className="font-bold tabular-nums">{formatNumber(total, 0)}</span>{" "}
             fund{total === 1 ? "" : "s"} match — relax the filters (need at least 2).
           </>
+        ) : draft.broadUniverse ? (
+          <>
+            ≈ <span className="font-bold tabular-nums">{formatNumber(total, 0)}</span>{" "}
+            funds in the universe → selecting ≈{" "}
+            <span className="font-bold tabular-nums">{draft.maxPositions}</span>{" "}
+            positions across risk clusters. Funds without enough overlapping NAV
+            history are excluded automatically.
+          </>
         ) : (
           <>
             ≈ <span className="font-bold tabular-nums">{formatNumber(total, 0)}</span>{" "}
@@ -227,7 +281,7 @@ export function FundUniverseCard({
         )}
       </p>
 
-      {effectiveN >= 2 && (
+      {!draft.broadUniverse && effectiveN >= 2 && (
         <div className="mt-3">
           <div className="mb-1.5 flex items-center justify-between">
             <span className={FIELD_LABEL_CLASS}>
