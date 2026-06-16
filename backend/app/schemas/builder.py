@@ -247,6 +247,18 @@ class OptimizeRequest(BaseModel):
                     "max_return_cvar needs expected returns — supply Black-Litterman "
                     "'views' (gate G5: no sample mean is ever used as the objective)"
                 )
+        if (
+            self.objective == "bl_utility"
+            and self.universe is not None
+            and self.universe.broad_universe
+        ):
+            raise ValueError(
+                "bl_utility cannot run in broad_universe mode — it needs "
+                "Black-Litterman equilibrium returns (market-cap/AUM weights for the "
+                "selected funds), which broad_universe selection does not guarantee; "
+                "broad_universe is risk-structure-only (gate G5). Use the ranked "
+                "universe mode or an explicit 'assets' list for bl_utility."
+            )
         return self
 
 

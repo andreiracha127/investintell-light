@@ -154,3 +154,26 @@ def test_broad_universe_accepts_min_cvar_default() -> None:
     assert req.universe.broad_universe is True
     assert req.universe.max_positions == 25
     assert req.objective == "min_cvar"
+
+
+def test_broad_universe_incompatible_with_bl_utility() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from app.schemas.builder import OptimizeRequest
+
+    with pytest.raises(ValidationError, match="bl_utility"):
+        OptimizeRequest.model_validate(
+            {"universe": {"broad_universe": True}, "objective": "bl_utility"}
+        )
+
+
+def test_bl_utility_accepts_ranked_universe() -> None:
+    from app.schemas.builder import OptimizeRequest
+
+    req = OptimizeRequest.model_validate(
+        {"universe": {"broad_universe": False}, "objective": "bl_utility"}
+    )
+    assert req.objective == "bl_utility"
+    assert req.universe is not None
+    assert req.universe.broad_universe is False
