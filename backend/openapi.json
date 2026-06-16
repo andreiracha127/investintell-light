@@ -2402,13 +2402,55 @@
         }
       }
     },
+    "/backtest/walk-forward": {
+      "post": {
+        "tags": [
+          "backtest"
+        ],
+        "summary": "Walk Forward",
+        "description": "Walk-forward / out-of-sample backtest of a mu-free objective.\n\nRe-optimizes the objective on each expanding TimeSeriesSplit train fold and\nscores the held-out test fold (Sharpe, CVaR 95, max drawdown), folding in a\none-way transaction cost on the L1 weight change vs the previous fold. The\nresponse reports per-fold metrics plus the ``positive_folds`` consistency\ncount. All fractional fields are decimal fractions (0.05 = 5%).",
+        "operationId": "walk_forward_backtest_walk_forward_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WalkForwardRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WalkForwardResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/builder/optimize": {
       "post": {
         "tags": [
           "builder"
         ],
         "summary": "Optimize",
-        "description": "Optimize weights over a mixed fund/equity universe.\n\nDefault objective is ``min_cvar`` (Rockafellar\u2013Uryasev, \u03b1=0.95) on raw\nhistorical scenarios. With Black-Litterman ``views``, scenarios are\nre-centered on the posterior \u03bc_BL and floored at the equilibrium return;\n``bl_utility`` selects the explicit max-utility objective instead.\nAll fractional fields are decimal fractions (0.05 = 5%).",
+        "description": "Optimize weights over a mixed fund/equity universe.\n\nDefault objective is ``min_cvar`` (Rockafellar\u2013Uryasev, \u03b1=0.95) on raw\nhistorical scenarios. With Black-Litterman ``views``, scenarios are\nre-centered on the posterior \u03bc_BL and floored at the equilibrium return;\n``bl_utility`` selects the explicit max-utility objective instead;\n``max_return_cvar`` maximizes BL-posterior return under a CVaR cap, which\nis tightened in a risk_off credit regime when the data-lake is configured.\nAll fractional fields are decimal fractions (0.05 = 5%).",
         "operationId": "optimize_builder_optimize_post",
         "requestBody": {
           "content": {
@@ -2603,6 +2645,48 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/FiscalResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/monte-carlo/projection": {
+      "post": {
+        "tags": [
+          "monte-carlo"
+        ],
+        "summary": "Project Monte Carlo",
+        "description": "Block-bootstrap Monte Carlo projection for one instrument \u2014 single call.\n\nReturns the percentile distribution of the chosen statistic at the longest\nhorizon, a per-horizon confidence fan, and the historical value with its\nbootstrap percentile rank. All drawdown/return fields are decimal fractions\n(0.05 = 5%); sharpe is unitless.",
+        "operationId": "project_monte_carlo_monte_carlo_projection_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MonteCarloRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonteCarloResponse"
                 }
               }
             }
@@ -3306,6 +3390,40 @@
         "title": "BetaResponse",
         "description": "Scatter + regression of two pseudo-assets' daily returns."
       },
+      "BlockBudgetIn": {
+        "properties": {
+          "asset_class": {
+            "type": "string",
+            "enum": [
+              "equity",
+              "fixed_income",
+              "cash",
+              "alternatives"
+            ],
+            "title": "Asset Class"
+          },
+          "lo": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Lo",
+            "default": 0.0
+          },
+          "hi": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Hi",
+            "default": 1.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "asset_class"
+        ],
+        "title": "BlockBudgetIn",
+        "description": "\u03a3 of weights in an asset-class block must lie in [lo, hi] (decimal\nfractions). ``asset_class`` matches ``Fund.asset_class``."
+      },
       "BuildResponse": {
         "properties": {
           "distribution": {
@@ -3371,6 +3489,67 @@
         "title": "Candle",
         "description": "One OHLCV candle built from RAW (un-adjusted) prices.\n\nDaily for ranges up to 5Y; weekly (W-FRI buckets: open=first, high=max,\nlow=min, close=last, volume=sum) for range MAX."
       },
+      "ConfidenceBar": {
+        "properties": {
+          "horizon": {
+            "type": "string",
+            "title": "Horizon",
+            "description": "Human label, e.g. '1Y', '10Y' (or 'ND' for sub-year)."
+          },
+          "horizon_days": {
+            "type": "integer",
+            "title": "Horizon Days",
+            "description": "Horizon length in trading days."
+          },
+          "pct_5": {
+            "type": "number",
+            "title": "Pct 5"
+          },
+          "pct_10": {
+            "type": "number",
+            "title": "Pct 10"
+          },
+          "pct_25": {
+            "type": "number",
+            "title": "Pct 25"
+          },
+          "pct_50": {
+            "type": "number",
+            "title": "Pct 50"
+          },
+          "pct_75": {
+            "type": "number",
+            "title": "Pct 75"
+          },
+          "pct_90": {
+            "type": "number",
+            "title": "Pct 90"
+          },
+          "pct_95": {
+            "type": "number",
+            "title": "Pct 95"
+          },
+          "mean": {
+            "type": "number",
+            "title": "Mean"
+          }
+        },
+        "type": "object",
+        "required": [
+          "horizon",
+          "horizon_days",
+          "pct_5",
+          "pct_10",
+          "pct_25",
+          "pct_50",
+          "pct_75",
+          "pct_90",
+          "pct_95",
+          "mean"
+        ],
+        "title": "ConfidenceBar",
+        "description": "One horizon's percentile fan of the projected statistic.\n\nFor max_drawdown/return the percentile fields are decimal fractions\n(0.05 = 5%); for sharpe they are unitless."
+      },
       "ConstraintsIn": {
         "properties": {
           "cap": {
@@ -3399,11 +3578,25 @@
               }
             ],
             "title": "Min Weight"
+          },
+          "block_budgets": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/BlockBudgetIn"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Block Budgets"
           }
         },
         "type": "object",
         "title": "ConstraintsIn",
-        "description": "Long-only and sum(w)=1 are always enforced; these are the knobs."
+        "description": "Long-only and sum(w)=1 are always enforced; these are the knobs.\n\n``block_budgets`` (per-asset-class \u03a3-weight bounds) are honoured ONLY by the\n``min_cvar`` objective in v1; they are resolved against ``Fund.asset_class``\nserver-side and IGNORED by the other objectives. Empty/None = no blocks."
       },
       "CorrelationMatrixOut": {
         "properties": {
@@ -3727,6 +3920,16 @@
               }
             ],
             "title": "Mu Posterior"
+          },
+          "view_consistency": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ViewConsistencyOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -4060,6 +4263,59 @@
           "points"
         ],
         "title": "FiscalSeriesOut"
+      },
+      "FoldMetricsOut": {
+        "properties": {
+          "fold": {
+            "type": "integer",
+            "title": "Fold"
+          },
+          "train_size": {
+            "type": "integer",
+            "title": "Train Size"
+          },
+          "n_obs": {
+            "type": "integer",
+            "title": "N Obs"
+          },
+          "sharpe": {
+            "type": "number",
+            "title": "Sharpe"
+          },
+          "cvar_95": {
+            "type": "number",
+            "title": "Cvar 95"
+          },
+          "max_drawdown": {
+            "type": "number",
+            "title": "Max Drawdown"
+          },
+          "turnover": {
+            "type": "number",
+            "title": "Turnover"
+          },
+          "gross_return": {
+            "type": "number",
+            "title": "Gross Return"
+          },
+          "net_return": {
+            "type": "number",
+            "title": "Net Return"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fold",
+          "train_size",
+          "n_obs",
+          "sharpe",
+          "cvar_95",
+          "max_drawdown",
+          "turnover",
+          "gross_return",
+          "net_return"
+        ],
+        "title": "FoldMetricsOut"
       },
       "FundClassOut": {
         "properties": {
@@ -5040,6 +5296,50 @@
             ],
             "title": "Cvar 99 Evt"
           },
+          "cvar_999_evt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cvar 999 Evt"
+          },
+          "evt_xi_shape": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evt Xi Shape"
+          },
+          "volatility_garch": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volatility Garch"
+          },
+          "vol_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vol Model"
+          },
           "peer_strategy_label": {
             "anyOf": [
               {
@@ -5229,6 +5529,10 @@
           "cvar_95_1m",
           "cvar_95_12m",
           "cvar_99_evt",
+          "cvar_999_evt",
+          "evt_xi_shape",
+          "volatility_garch",
+          "vol_model",
           "peer_strategy_label",
           "peer_sharpe_pctl",
           "peer_sortino_pctl",
@@ -6016,6 +6320,235 @@
         "title": "MetricDefOut",
         "description": "One catalog metric \u2014 ``code`` is the screener_metrics column name."
       },
+      "MonteCarloParams": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "statistic": {
+            "type": "string",
+            "enum": [
+              "max_drawdown",
+              "return",
+              "sharpe"
+            ],
+            "title": "Statistic"
+          },
+          "range": {
+            "type": "string",
+            "enum": [
+              "1M",
+              "6M",
+              "1Y",
+              "5Y",
+              "MAX"
+            ],
+            "title": "Range"
+          },
+          "n_simulations": {
+            "type": "integer",
+            "title": "N Simulations"
+          },
+          "risk_free_rate": {
+            "type": "number",
+            "title": "Risk Free Rate"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "Seed used, or null when unseeded."
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "statistic",
+          "range",
+          "n_simulations",
+          "risk_free_rate",
+          "seed"
+        ],
+        "title": "MonteCarloParams",
+        "description": "Echo of the resolved request parameters."
+      },
+      "MonteCarloRequest": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker",
+            "description": "Instrument ticker (normalized to uppercase)."
+          },
+          "statistic": {
+            "type": "string",
+            "enum": [
+              "max_drawdown",
+              "return",
+              "sharpe"
+            ],
+            "title": "Statistic",
+            "description": "Which statistic to project: max_drawdown | return | sharpe.",
+            "default": "max_drawdown"
+          },
+          "range": {
+            "type": "string",
+            "enum": [
+              "1M",
+              "6M",
+              "1Y",
+              "5Y",
+              "MAX"
+            ],
+            "title": "Range",
+            "description": "History window used to estimate the return distribution; MAX = full available history.",
+            "default": "MAX"
+          },
+          "n_simulations": {
+            "type": "integer",
+            "maximum": 50000.0,
+            "minimum": 1000.0,
+            "title": "N Simulations",
+            "description": "Number of bootstrap paths (1000-50000).",
+            "default": 10000
+          },
+          "horizons": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Horizons",
+            "description": "Trading-day horizons for the confidence fan; default 1Y/3Y/5Y/7Y/10Y."
+          },
+          "risk_free_rate": {
+            "type": "number",
+            "title": "Risk Free Rate",
+            "description": "Annualized risk-free rate for the Sharpe statistic (decimal fraction).",
+            "default": 0.04
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "Optional RNG seed for a reproducible projection."
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker"
+        ],
+        "title": "MonteCarloRequest",
+        "description": "Block-bootstrap Monte Carlo projection request for one instrument."
+      },
+      "MonteCarloResponse": {
+        "properties": {
+          "params": {
+            "$ref": "#/components/schemas/MonteCarloParams"
+          },
+          "percentiles": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Percentiles",
+            "description": "Distribution of the statistic at the longest horizon, keyed by percentile ('1st'..'99th')."
+          },
+          "mean": {
+            "type": "number",
+            "title": "Mean"
+          },
+          "median": {
+            "type": "number",
+            "title": "Median"
+          },
+          "std": {
+            "type": "number",
+            "title": "Std"
+          },
+          "historical_value": {
+            "type": "number",
+            "title": "Historical Value",
+            "description": "The statistic computed on the ACTUAL historical series."
+          },
+          "historical_horizon_days": {
+            "type": "integer",
+            "title": "Historical Horizon Days",
+            "description": "Length of the historical series in trading days."
+          },
+          "historical_percentile_rank": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Historical Percentile Rank",
+            "description": "Percentile rank (0-100) of the historical value within a horizon-matched bootstrap; null for the sharpe statistic."
+          },
+          "confidence_bars": {
+            "items": {
+              "$ref": "#/components/schemas/ConfidenceBar"
+            },
+            "type": "array",
+            "title": "Confidence Bars",
+            "description": "Per-horizon percentile fans (the projection chart)."
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded",
+            "description": "True only when a flat-NAV Sharpe collapse made the result uninformative."
+          },
+          "degraded_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degraded Reason",
+            "description": "Diagnostic when degraded is True, else null."
+          }
+        },
+        "type": "object",
+        "required": [
+          "params",
+          "percentiles",
+          "mean",
+          "median",
+          "std",
+          "historical_value",
+          "historical_horizon_days",
+          "historical_percentile_rank",
+          "confidence_bars",
+          "degraded",
+          "degraded_reason"
+        ],
+        "title": "MonteCarloResponse",
+        "description": "Render-ready Monte Carlo projection payload.\n\nThe backend computes ALL finance; the frontend only draws. Percentiles for\nmax_drawdown/return are decimal fractions (0.05 = 5%); sharpe is unitless."
+      },
       "NewsArticle": {
         "properties": {
           "id": {
@@ -6198,7 +6731,8 @@
               "erc",
               "max_diversification",
               "min_cvar",
-              "bl_utility"
+              "bl_utility",
+              "max_return_cvar"
             ],
             "title": "Objective",
             "default": "min_cvar"
@@ -6256,6 +6790,60 @@
               "delta": 2.5,
               "tau": 0.05
             }
+          },
+          "mandate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "conservative",
+                  "defensive",
+                  "moderate_conservative",
+                  "moderate",
+                  "balanced",
+                  "moderate_aggressive",
+                  "aggressive",
+                  "growth"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mandate"
+          },
+          "turnover_lambda": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Turnover Lambda",
+            "default": 0.0
+          },
+          "current_weights": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Weights"
+          },
+          "cvar_limit": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cvar Limit"
           }
         },
         "type": "object",
@@ -7111,6 +7699,15 @@
           "breach": {
             "type": "boolean",
             "title": "Breach"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "maintenance",
+              "urgent"
+            ],
+            "title": "Status"
           }
         },
         "type": "object",
@@ -7120,7 +7717,8 @@
           "target_weight",
           "drift_abs",
           "drift_rel",
-          "breach"
+          "breach",
+          "status"
         ],
         "title": "PositionDriftOut"
       },
@@ -9141,6 +9739,235 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "ViewConsistencyOut": {
+        "properties": {
+          "inconsistent": {
+            "type": "boolean",
+            "title": "Inconsistent"
+          },
+          "n_flagged": {
+            "type": "integer",
+            "title": "N Flagged"
+          },
+          "max_z": {
+            "type": "number",
+            "title": "Max Z"
+          },
+          "threshold_sigma": {
+            "type": "number",
+            "title": "Threshold Sigma"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inconsistent",
+          "n_flagged",
+          "max_z",
+          "threshold_sigma"
+        ],
+        "title": "ViewConsistencyOut",
+        "description": "He-Litterman 3-sigma alarm: are any views fighting the equilibrium?"
+      },
+      "WalkForwardParams": {
+        "properties": {
+          "objective": {
+            "type": "string",
+            "enum": [
+              "equal_weight",
+              "min_vol",
+              "erc",
+              "max_diversification",
+              "min_cvar",
+              "bl_utility",
+              "max_return_cvar"
+            ],
+            "title": "Objective"
+          },
+          "n_obs": {
+            "type": "integer",
+            "title": "N Obs"
+          },
+          "n_splits_computed": {
+            "type": "integer",
+            "title": "N Splits Computed"
+          },
+          "gap": {
+            "type": "integer",
+            "title": "Gap"
+          },
+          "test_size": {
+            "type": "integer",
+            "title": "Test Size"
+          },
+          "min_train_size": {
+            "type": "integer",
+            "title": "Min Train Size"
+          },
+          "cost_bps": {
+            "type": "number",
+            "title": "Cost Bps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "objective",
+          "n_obs",
+          "n_splits_computed",
+          "gap",
+          "test_size",
+          "min_train_size",
+          "cost_bps"
+        ],
+        "title": "WalkForwardParams"
+      },
+      "WalkForwardRequest": {
+        "properties": {
+          "assets": {
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/FundRefIn"
+                },
+                {
+                  "$ref": "#/components/schemas/EquityRefIn"
+                }
+              ],
+              "discriminator": {
+                "propertyName": "kind",
+                "mapping": {
+                  "equity": "#/components/schemas/EquityRefIn",
+                  "fund": "#/components/schemas/FundRefIn"
+                }
+              }
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 2,
+            "title": "Assets"
+          },
+          "objective": {
+            "type": "string",
+            "enum": [
+              "equal_weight",
+              "min_vol",
+              "erc",
+              "max_diversification",
+              "min_cvar",
+              "bl_utility",
+              "max_return_cvar"
+            ],
+            "title": "Objective",
+            "default": "min_cvar"
+          },
+          "constraints": {
+            "$ref": "#/components/schemas/ConstraintsIn",
+            "default": {
+              "cap": 0.25
+            }
+          },
+          "window_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 3650.0,
+                "minimum": 30.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Days"
+          },
+          "n_splits": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 2.0,
+            "title": "N Splits",
+            "default": 5
+          },
+          "gap": {
+            "type": "integer",
+            "maximum": 63.0,
+            "minimum": 0.0,
+            "title": "Gap",
+            "default": 2
+          },
+          "test_size": {
+            "type": "integer",
+            "maximum": 504.0,
+            "minimum": 20.0,
+            "title": "Test Size",
+            "default": 63
+          },
+          "min_train_size": {
+            "type": "integer",
+            "maximum": 5000.0,
+            "minimum": 60.0,
+            "title": "Min Train Size",
+            "default": 252
+          },
+          "cost_bps": {
+            "type": "number",
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Cost Bps",
+            "default": 10.0
+          },
+          "risk_free_annual": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Risk Free Annual",
+            "default": 0.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "assets"
+        ],
+        "title": "WalkForwardRequest",
+        "description": "Walk-forward / OOS backtest over an explicit asset list.\n\nThe objective is RE-OPTIMIZED on each expanding TimeSeriesSplit train fold\nand held out-of-sample over the following test fold. ``min_cvar`` (the\nproduct default) is mu-free; BL ``views`` are intentionally NOT accepted\nhere (a backtest must not peek at user views formed with hindsight) \u2014\nbacktests run the mu-free objectives only."
+      },
+      "WalkForwardResponse": {
+        "properties": {
+          "folds": {
+            "items": {
+              "$ref": "#/components/schemas/FoldMetricsOut"
+            },
+            "type": "array",
+            "title": "Folds"
+          },
+          "params": {
+            "$ref": "#/components/schemas/WalkForwardParams"
+          },
+          "mean_sharpe": {
+            "type": "number",
+            "title": "Mean Sharpe"
+          },
+          "std_sharpe": {
+            "type": "number",
+            "title": "Std Sharpe"
+          },
+          "positive_folds": {
+            "type": "integer",
+            "title": "Positive Folds"
+          },
+          "mean_turnover": {
+            "type": "number",
+            "title": "Mean Turnover"
+          }
+        },
+        "type": "object",
+        "required": [
+          "folds",
+          "params",
+          "mean_sharpe",
+          "std_sharpe",
+          "positive_folds",
+          "mean_turnover"
+        ],
+        "title": "WalkForwardResponse"
       },
       "WeightOut": {
         "properties": {
