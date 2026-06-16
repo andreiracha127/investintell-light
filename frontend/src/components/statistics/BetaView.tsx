@@ -11,10 +11,10 @@ import { useMutation } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
 import { postBeta, type BetaRequest, type BetaResponse } from "@/lib/api/client";
-import { buildScatterOption } from "@/lib/charts/scatter";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import { buildHcScatterOption } from "@/lib/charts/hc/scatter";
+import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { formatNumber, formatPercent } from "@/lib/format";
-import { EChart } from "@/components/charts/EChart";
+import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { Card, KpiTile, valueTone } from "@/components/ui/panels";
 import {
   AssetRefPicker,
@@ -105,7 +105,7 @@ function Results({
   const { labels, regression } = data;
 
   const scatterOption = useMemo(
-    () => buildScatterOption(data.scatter, data.regression_line, labels, colors),
+    () => buildHcScatterOption(data.scatter, data.regression_line, labels, colors),
     [data.scatter, data.regression_line, labels, colors],
   );
 
@@ -128,7 +128,7 @@ function Results({
       </div>
 
       <Card title="Daily Returns" subtitle={`${labels.y} vs ${labels.x}`}>
-        <EChart option={scatterOption} className="h-[440px] w-full" />
+        <HighchartsChart options={scatterOption} className="h-[440px] w-full" />
       </Card>
     </div>
   );

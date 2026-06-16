@@ -33,10 +33,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.expense_ratio import to_decimal_fraction
 from app.api._shared import ensure_eod_or_http_error
+from app.core.config import get_settings
 from app.core.datalake import get_datalake_session
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
 from app.models.fund import Fund
+from app.schemas.fund_analysis import (
+    FundActiveShareResponse,
+    FundAnalysisResponse,
+    FundEntityAnalyticsResponse,
+    FundFactorsResponse,
+    FundHoldingsTopResponse,
+    FundInstitutionalRevealResponse,
+    HoldingReverseLookupResponse,
+    FundPeersResponse,
+    FundRiskTimeseriesResponse,
+    FundScatterResponse,
+    FundStyleDriftResponse,
+)
 from app.schemas.funds import (
     FundClassOut,
     FundHoldingItem,
@@ -55,8 +69,8 @@ from app.schemas.lookthrough import (
 )
 from app.schemas.market import FundHistoryResponse, HistoryBar
 from app.schemas.timeseries import LineSeriesResponse
+from app.services import fund_analysis, fund_dossier_tier_b, lookthrough
 from app.services import funds_catalog as catalog
-from app.services import lookthrough
 from app.services._series import select_adj_ohlcv_rows as _select_adj_ohlcv_rows_impl
 from app.services.screener import render_csv
 from app.services.timeseries import (
@@ -253,6 +267,196 @@ async def list_funds_csv(
     )
 
 
+@router.get("/funds/scatter", response_model=FundScatterResponse)
+async def get_funds_scatter(
+    session: SessionDep,
+    limit: Annotated[
+        int, Query(ge=1, le=500, description="Maximum funds returned.")
+    ] = 250,
+) -> FundScatterResponse:
+    """Columnar risk/return scatter payload for the funds landing page."""
+    return await fund_analysis.fetch_funds_scatter(session, limit=limit)
+
+
+@router.get(
+    "/funds/{instrument_id}/factors",
+    response_model=FundFactorsResponse,
+)
+async def get_fund_factors(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    datalake: DatalakeDep,
+) -> FundFactorsResponse:
+    """Tier B factor sensitivities and style-bias snapshot."""
+    try:
+        payload = await fund_dossier_tier_b.fetch_fund_factors(
+            session, datalake, instrument_id
+        )
+    except fund_dossier_tier_b.TierBSourceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Fund {instrument_id} not found.")
+    return payload
+
+
+@router.get(
+    "/funds/{instrument_id}/style-drift",
+    response_model=FundStyleDriftResponse,
+)
+async def get_fund_style_drift(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    datalake: DatalakeDep,
+    quarters: Annotated[
+        int, Query(ge=1, le=20, description="Historical N-PORT periods returned.")
+    ] = 8,
+) -> FundStyleDriftResponse:
+    """Tier B historical sector drift from N-PORT reports."""
+    try:
+        payload = await fund_dossier_tier_b.fetch_fund_style_drift(
+            session, datalake, instrument_id, quarters=quarters
+        )
+    except fund_dossier_tier_b.TierBSourceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Fund {instrument_id} not found.")
+    return payload
+
+
+@router.get(
+    "/funds/{instrument_id}/entity-analytics",
+    response_model=FundEntityAnalyticsResponse,
+)
+async def get_fund_entity_analytics(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    datalake: DatalakeDep,
+    window: Annotated[
+        fund_dossier_tier_b.WindowKey,
+        Query(description="Lookback window for Deep Analysis metrics."),
+    ] = "1Y",
+    benchmark_id: Annotated[
+        uuid.UUID | None,
+        Query(description="Optional benchmark fund UUID for capture and relative stats."),
+    ] = None,
+) -> FundEntityAnalyticsResponse:
+    """Tier B Deep Analysis analytics for one fund."""
+    try:
+        payload = await fund_dossier_tier_b.fetch_fund_entity_analytics(
+            session, datalake, instrument_id, window=window, benchmark_id=benchmark_id
+        )
+    except (
+        fund_analysis.FundAnalysisError,
+        fund_dossier_tier_b.InvalidBenchmarkError,
+    ) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Fund {instrument_id} not found.")
+    return payload
+
+
+@router.get(
+    "/funds/{instrument_id}/risk-timeseries",
+    response_model=FundRiskTimeseriesResponse,
+)
+async def get_fund_risk_timeseries(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    datalake: DatalakeDep,
+    from_date: Annotated[
+        dt.date | None,
+        Query(alias="from", description="Optional inclusive start date."),
+    ] = None,
+    to_date: Annotated[
+        dt.date | None,
+        Query(alias="to", description="Optional inclusive end date."),
+    ] = None,
+) -> FundRiskTimeseriesResponse:
+    """Tier B drawdown, conditional volatility, and regime overlay."""
+    try:
+        payload = await fund_dossier_tier_b.fetch_fund_risk_timeseries(
+            session,
+            datalake,
+            instrument_id,
+            from_date=from_date,
+            to_date=to_date,
+        )
+    except (fund_analysis.FundAnalysisError, fund_dossier_tier_b.TierBSourceError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Fund {instrument_id} not found.")
+    return payload
+
+
+@router.get(
+    "/funds/{instrument_id}/active-share",
+    response_model=FundActiveShareResponse,
+)
+async def get_fund_active_share(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    datalake: DatalakeDep,
+    benchmark_id: Annotated[
+        uuid.UUID | None,
+        Query(description="Benchmark fund UUID with N-PORT holdings."),
+    ] = None,
+) -> FundActiveShareResponse:
+    """Tier B holdings-based active share against a benchmark fund."""
+    try:
+        payload = await fund_dossier_tier_b.fetch_fund_active_share(
+            session, datalake, instrument_id, benchmark_id=benchmark_id
+        )
+    except (
+        fund_dossier_tier_b.InvalidBenchmarkError,
+        fund_dossier_tier_b.TierBSourceError,
+    ) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Fund {instrument_id} not found.")
+    return payload
+
+
+@router.get(
+    "/funds/{instrument_id}/institutional-reveal",
+    response_model=FundInstitutionalRevealResponse,
+)
+async def get_fund_institutional_reveal(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    datalake: DatalakeDep,
+) -> FundInstitutionalRevealResponse:
+    """Tier C 13F institutional overlap and holder network."""
+    try:
+        payload = await fund_dossier_tier_b.fetch_fund_institutional_reveal(
+            session, datalake, instrument_id
+        )
+    except fund_dossier_tier_b.TierBSourceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Fund {instrument_id} not found.")
+    return payload
+
+
+@router.get(
+    "/holdings/{cusip}/reverse-lookup",
+    response_model=HoldingReverseLookupResponse,
+)
+async def get_holding_reverse_lookup(
+    cusip: str,
+    session: SessionDep,
+    datalake: DatalakeDep,
+) -> HoldingReverseLookupResponse:
+    """Tier C reverse lookup from CUSIP to institutional and fund holders."""
+    try:
+        return await fund_dossier_tier_b.fetch_holding_reverse_lookup(
+            session, datalake, cusip
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except fund_dossier_tier_b.TierBSourceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/funds/{instrument_id}", response_model=FundProfileResponse)
 async def get_fund_profile(
     instrument_id: uuid.UUID, session: SessionDep
@@ -300,6 +504,76 @@ async def get_fund_profile(
         # priced with the series NAV as a proxy.
         classes=[FundClassOut.model_validate(c) for c in profile.classes],
     )
+
+
+@router.get(
+    "/funds/{instrument_id}/analysis",
+    response_model=FundAnalysisResponse,
+)
+async def get_fund_analysis(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    range_: Annotated[
+        RangeKey,
+        Query(alias="range", description="Visible-range preset; MAX = full NAV history."),
+    ] = "1Y",
+    window: Annotated[
+        int, Query(ge=10, le=252, description="Rolling window in NAV days (10..252).")
+    ] = 252,
+) -> FundAnalysisResponse:
+    """Render-ready analysis payload for one fund NAV series."""
+    try:
+        payload = await fund_analysis.fetch_fund_analysis(
+            session,
+            instrument_id,
+            range_key=range_,
+            window=window,
+            max_points=get_settings().price_series_max_points,
+        )
+    except fund_analysis.FundAnalysisError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Fund {instrument_id} not found.")
+    return payload
+
+
+@router.get(
+    "/funds/{instrument_id}/holdings/top",
+    response_model=FundHoldingsTopResponse,
+)
+async def get_fund_holdings_top(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    datalake: DatalakeDep,
+    limit: Annotated[
+        int, Query(ge=1, le=50, description="Maximum top holdings returned.")
+    ] = 25,
+) -> FundHoldingsTopResponse:
+    """Top holdings and sector breakdown for one fund."""
+    payload = await fund_analysis.fetch_fund_holdings_top(
+        session, datalake, instrument_id, limit=limit
+    )
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Fund {instrument_id} not found.")
+    return payload
+
+
+@router.get(
+    "/funds/{instrument_id}/peers",
+    response_model=FundPeersResponse,
+)
+async def get_fund_peers(
+    instrument_id: uuid.UUID,
+    session: SessionDep,
+    limit: Annotated[
+        int, Query(ge=1, le=50, description="Maximum peer rows returned.")
+    ] = 10,
+) -> FundPeersResponse:
+    """Peer cohort by fund strategy/risk classification."""
+    payload = await fund_analysis.fetch_fund_peers(session, instrument_id, limit=limit)
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Fund {instrument_id} not found.")
+    return payload
 
 
 @router.get(

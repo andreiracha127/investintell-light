@@ -28,10 +28,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_session
 from app.models.screen import Screen
 from app.schemas.screener import (
+    BuildAllResponse,
     BuildResponse,
     DistributionOut,
     FilterBody,
+    FilterReorder,
     FilterUpdateResponse,
+    MetricBuildOut,
     MetricDefOut,
     ResultsColumnOut,
     ScreenCreate,
@@ -203,6 +206,27 @@ async def delete_filter(
     )
 
 
+@router.patch("/screens/{screen_id}/filters/reorder", response_model=ScreenOut)
+async def reorder_filters(
+    screen_id: int, payload: FilterReorder, session: SessionDep
+) -> ScreenOut:
+    """Reorder a screen's filters; position drives the Results column order."""
+    screen = await _screen_or_404(session, screen_id)
+    requested = list(payload.metric_codes)
+    existing = {f.metric_code for f in screen.filters}
+    if len(requested) != len(set(requested)):
+        raise HTTPException(
+            status_code=422, detail="Duplicate metric codes in reorder payload."
+        )
+    if set(requested) != existing:
+        raise HTTPException(
+            status_code=422,
+            detail="Reorder payload must list exactly the screen's current filter codes.",
+        )
+    await screener_service.reorder_filters(session, screen_id, requested)
+    return ScreenOut.model_validate(await _screen_or_404(session, screen_id))
+
+
 # ---------------------------------------------------------------------------
 # Build: distribution + headline count
 # ---------------------------------------------------------------------------
@@ -233,6 +257,33 @@ async def build_metric(
         headline_count=headline_count,
         available_count=available_count,
     )
+
+
+@router.get("/screens/{screen_id}/build", response_model=BuildAllResponse)
+async def build_all(screen_id: int, session: SessionDep) -> BuildAllResponse:
+    """Every filter's universe distribution + the live headline count, one round-trip.
+
+    Feeds the Build panel's per-row sparklines and the active-row distribution
+    in a single request (vs. one GET /build/{metric_code} per filter).
+    """
+    screen = await _screen_or_404(session, screen_id)
+    headline_count = await screener_service.count_matching(session, screen.filters)
+    metrics: list[MetricBuildOut] = []
+    for item in sorted(screen.filters, key=lambda f: f.position):
+        metric = _metric_or_422(item.metric_code)
+        available = await screener_service.count_metric_available(session, metric.code)
+        try:
+            distribution: DistributionOut | None = DistributionOut.model_validate(
+                await screener_service.compute_distribution(session, metric)
+            )
+        except screener_service.MetricDataUnavailableError:
+            distribution = None
+        metrics.append(
+            MetricBuildOut(
+                metric_code=metric.code, distribution=distribution, available_count=available
+            )
+        )
+    return BuildAllResponse(headline_count=headline_count, metrics=metrics)
 
 
 # ---------------------------------------------------------------------------

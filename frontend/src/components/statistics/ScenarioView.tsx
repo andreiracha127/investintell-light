@@ -17,14 +17,14 @@ import {
   type ScenarioResponse,
 } from "@/lib/api/client";
 import {
-  buildMultiLineOption,
-  buildStackedAreaOption,
-  buildStackedPercentOption,
-} from "@/lib/charts/stacked";
-import { buildHistogramOption } from "@/lib/charts/histogram";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
+  buildHcMultiLineOption,
+  buildHcStackedAreaOption,
+  buildHcStackedPercentOption,
+} from "@/lib/charts/hc/stacked";
+import { buildHcHistogramOption } from "@/lib/charts/hc/histogram";
+import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { formatCurrency, formatDate, formatPercent } from "@/lib/format";
-import { EChart } from "@/components/charts/EChart";
+import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { Card, StatRow } from "@/components/ui/panels";
 import { DateRangeInputs, defaultDateRange } from "@/components/statistics/DateRangeInputs";
 import { PortfolioSelect } from "@/components/statistics/PortfolioSelect";
@@ -106,18 +106,18 @@ function Results({
   const navOption = useMemo(() => {
     const total = data.nav_cash.find((s) => s.ticker === "TOTAL") ?? null;
     const stack = data.nav_cash.filter((s) => s.ticker !== "TOTAL");
-    return buildStackedAreaOption(stack, total, colors);
+    return buildHcStackedAreaOption(stack, total, colors);
   }, [data.nav_cash, colors]);
   const weightsOption = useMemo(
-    () => buildStackedPercentOption(data.weights_percent, colors),
+    () => buildHcStackedPercentOption(data.weights_percent, colors),
     [data.weights_percent, colors],
   );
   const performanceOption = useMemo(
-    () => buildMultiLineOption(data.asset_performance, colors),
+    () => buildHcMultiLineOption(data.asset_performance, colors),
     [data.asset_performance, colors],
   );
   const histogramOption = useMemo(
-    () => buildHistogramOption(data.histogram, colors),
+    () => buildHcHistogramOption(data.histogram, colors),
     [data.histogram, colors],
   );
 
@@ -183,16 +183,16 @@ function Results({
         {/* ── Charts ── */}
         <div className="flex min-w-0 flex-col gap-px">
           <Card title="Portfolio Performance" subtitle="value by holding, $">
-            <EChart option={navOption} className="h-[320px] w-full" />
+            <HighchartsChart options={navOption} className="h-[320px] w-full" />
           </Card>
           <Card title="Asset Weighting" subtitle="share of total value">
-            <EChart option={weightsOption} className="h-[280px] w-full" />
+            <HighchartsChart options={weightsOption} className="h-[280px] w-full" />
           </Card>
           <Card title="Asset Performance" subtitle="cumulative return, rebased">
-            <EChart option={performanceOption} className="h-[320px] w-full" />
+            <HighchartsChart options={performanceOption} className="h-[320px] w-full" />
           </Card>
           <Card title="Return Distribution" subtitle="daily returns">
-            <EChart option={histogramOption} className="h-[260px] w-full" />
+            <HighchartsChart options={histogramOption} className="h-[260px] w-full" />
           </Card>
         </div>
       </div>

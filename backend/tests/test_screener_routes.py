@@ -373,6 +373,100 @@ async def test_delete_filter_missing_row_404(monkeypatch: pytest.MonkeyPatch) ->
 
 
 # ---------------------------------------------------------------------------
+# PATCH filters/reorder
+# ---------------------------------------------------------------------------
+
+
+def _three_filter_screen() -> SimpleNamespace:
+    return _screen(
+        filters=[
+            _filter("pe_ratio", 10.0, 15.0, position=0),
+            _filter("market_cap", None, None, position=1),
+            _filter("roe", 0.1, None, position=2),
+        ]
+    )
+
+
+def _reorder(filters: list[SimpleNamespace], codes: list[str]) -> SimpleNamespace:
+    """Return a screen whose filters are *filters* rewritten into *codes* order."""
+    by_code = {f.metric_code: f for f in filters}
+    reordered = [
+        _filter(code, by_code[code].min_value, by_code[code].max_value, position=i)
+        for i, code in enumerate(codes)
+    ]
+    return _screen(filters=reordered)
+
+
+async def test_reorder_filters_rewrites_position_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # seeded screen has filters added in order: pe_ratio (0), market_cap (1), roe (2)
+    original = _three_filter_screen()
+    new_order = ["roe", "pe_ratio", "market_cap"]
+    captured: list[list[str]] = []
+
+    async def fake_reorder(session: Any, screen_id: int, codes: Any) -> None:
+        captured.append(list(codes))
+
+    # First get_screen → validation (original order); second → post-reorder response.
+    screens = iter([original, _reorder(original.filters, new_order)])
+
+    async def fake_get(session: Any, screen_id: int) -> SimpleNamespace:
+        return next(screens)
+
+    monkeypatch.setattr(screener_service, "reorder_filters", fake_reorder)
+    monkeypatch.setattr(screener_service, "get_screen", fake_get)
+
+    async with _client() as ac:
+        resp = await ac.patch(
+            "/screener/screens/1/filters/reorder",
+            json={"metric_codes": new_order},
+        )
+
+    assert resp.status_code == 200
+    assert captured == [new_order]
+    codes = [f["metric_code"] for f in resp.json()["filters"]]
+    assert codes == ["roe", "pe_ratio", "market_cap"]
+    positions = [f["position"] for f in resp.json()["filters"]]
+    assert positions == [0, 1, 2]
+
+
+async def test_reorder_filters_rejects_mismatched_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def explode(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("service must not be reached")
+
+    monkeypatch.setattr(screener_service, "reorder_filters", explode)
+    _stub_get_screen(monkeypatch, _three_filter_screen())
+
+    async with _client() as ac:
+        resp = await ac.patch(
+            "/screener/screens/1/filters/reorder",
+            json={"metric_codes": ["roe", "pe_ratio"]},  # missing market_cap
+        )
+
+    assert resp.status_code == 422
+
+
+async def test_reorder_filters_unknown_screen_404(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def explode(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("service must not be reached")
+
+    monkeypatch.setattr(screener_service, "reorder_filters", explode)
+    _stub_get_screen(monkeypatch, None)
+
+    async with _client() as ac:
+        resp = await ac.patch(
+            "/screener/screens/999999/filters/reorder", json={"metric_codes": []}
+        )
+
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # GET build/{metric_code}
 # ---------------------------------------------------------------------------
 
@@ -444,6 +538,49 @@ async def test_build_screen_404(monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_get_screen(monkeypatch, None)
     async with _client() as ac:
         response = await ac.get("/screener/screens/9/build/pe_ratio")
+
+    assert response.status_code == 404
+
+
+async def test_build_all_returns_every_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_get_screen(
+        monkeypatch,
+        _screen(filters=[_filter("pe_ratio", position=0), _filter("market_cap", position=1)]),
+    )
+    _stub_metric_values(monkeypatch, [float(v) for v in range(1, 30)])
+    _stub_count(monkeypatch, 7)
+    _stub_available_count(monkeypatch, 29)
+
+    async with _client() as ac:
+        response = await ac.get("/screener/screens/1/build")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["headline_count"] == 7
+    codes = [m["metric_code"] for m in body["metrics"]]
+    assert codes == ["pe_ratio", "market_cap"]  # position order
+    for metric in body["metrics"]:
+        assert metric["available_count"] == 29
+        assert metric["distribution"] is not None
+
+
+async def test_build_all_empty_screen_has_no_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_get_screen(monkeypatch, _screen(filters=[]))
+    _stub_count(monkeypatch, 0)
+
+    async with _client() as ac:
+        response = await ac.get("/screener/screens/1/build")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["headline_count"] == 0
+    assert body["metrics"] == []
+
+
+async def test_build_all_screen_404(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_get_screen(monkeypatch, None)
+    async with _client() as ac:
+        response = await ac.get("/screener/screens/9/build")
 
     assert response.status_code == 404
 

@@ -14,6 +14,7 @@ mother-DB value copied by the sync, served with the global staleness markers.
 """
 
 import datetime as dt
+import time
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field, fields
@@ -23,7 +24,7 @@ from sqlalchemy import ColumnElement, Select, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
-from app.models.fund import Fund, FundClass, FundHolding, FundRiskLatest
+from app.models.fund import Fund, FundClass, FundHolding, FundListRow, FundRiskLatest
 
 # Canonical strategy label for funds the mother-DB cascade could not classify.
 # (Was sourced from the now-retired app.sync.funds; this service is its sole
@@ -33,7 +34,9 @@ UNCLASSIFIED_LABEL = "Unclassified"
 # Hard cap on the CSV export — bounded output, no pagination (screener parity).
 CSV_HARD_CAP = 5000
 
-# NAV series window and decimation target for the profile chart.
+# NAV embedded in GET /funds/{id} is intentionally a bounded profile preview.
+# Chart-depth consumers must use /funds/{id}/timeseries?range=... instead
+# (P3), where MAX reads the full available NAV history through the CAGGs.
 NAV_WINDOW_DAYS = 365 * 2
 NAV_TARGET_POINTS = 260
 
@@ -72,6 +75,18 @@ SORT_WHITELIST: dict[str, InstrumentedAttribute[Any]] = {
     **{name: getattr(Fund, name) for name in _FUND_SORT_FIELDS},
     **{name: getattr(FundRiskLatest, name) for name in _RISK_SORT_FIELDS},
 }
+_LIST_SORT_WHITELIST: dict[str, InstrumentedAttribute[Any]] = {
+    **{name: getattr(FundListRow, name) for name in _FUND_SORT_FIELDS},
+    # The funds_list_mv materialized view does not (yet) carry the Tier-3 EVT /
+    # GARCH risk columns added to FundRiskLatest, so restrict the list sort to
+    # the risk fields the MV actually materializes. When the MV is extended to
+    # populate those columns, they become list-sortable automatically.
+    **{
+        name: getattr(FundListRow, name)
+        for name in _RISK_SORT_FIELDS
+        if hasattr(FundListRow, name)
+    },
+}
 
 DEFAULT_SORT = "aum_usd"
 DEFAULT_DIRECTION = "desc"
@@ -80,6 +95,16 @@ DEFAULT_DIRECTION = "desc"
 def sort_column(code: str) -> InstrumentedAttribute[Any]:
     """Resolve a sort code through the whitelist — THE injection gate."""
     column = SORT_WHITELIST.get(code)
+    if column is None:
+        raise UnknownSortColumnError(
+            f"Cannot sort by {code!r}: not a whitelisted funds column."
+        )
+    return column
+
+
+def _list_sort_column(code: str) -> InstrumentedAttribute[Any]:
+    """Resolve a list sort code against the materialized /funds projection."""
+    column = _LIST_SORT_WHITELIST.get(code)
     if column is None:
         raise UnknownSortColumnError(
             f"Cannot sort by {code!r}: not a whitelisted funds column."
@@ -165,34 +190,67 @@ def filter_conditions(filters: FundFilters) -> list[ColumnElement[bool]]:
     return conditions
 
 
+def _list_filter_conditions(filters: FundFilters) -> list[ColumnElement[bool]]:
+    """SQL predicates for GET /funds over the materialized list projection."""
+    conditions: list[ColumnElement[bool]] = [
+        FundListRow.strategy_label.is_distinct_from(UNCLASSIFIED_LABEL)
+    ]
+    if filters.search:
+        pattern = f"%{_escape_like(filters.search)}%"
+        conditions.append(
+            or_(
+                FundListRow.ticker.ilike(pattern, escape="\\"),
+                FundListRow.name.ilike(pattern, escape="\\"),
+            )
+        )
+    if filters.fund_type is not None:
+        conditions.append(FundListRow.fund_type == filters.fund_type)
+    if filters.strategy_label is not None:
+        strategy_pattern = f"%{_escape_like(filters.strategy_label)}%"
+        conditions.append(
+            FundListRow.strategy_label.ilike(strategy_pattern, escape="\\")
+        )
+    if filters.asset_class is not None:
+        conditions.append(FundListRow.asset_class == filters.asset_class)
+    if filters.expense_ratio_max is not None:
+        conditions.append(FundListRow.expense_ratio <= filters.expense_ratio_max)
+    if filters.aum_min is not None:
+        conditions.append(FundListRow.aum_usd >= filters.aum_min)
+    if filters.sharpe_1y_min is not None:
+        conditions.append(FundListRow.sharpe_1y >= filters.sharpe_1y_min)
+    if filters.volatility_1y_max is not None:
+        conditions.append(FundListRow.volatility_1y <= filters.volatility_1y_max)
+    if filters.return_1y_min is not None:
+        conditions.append(FundListRow.return_1y >= filters.return_1y_min)
+    if filters.max_drawdown_1y_min is not None:
+        conditions.append(FundListRow.max_drawdown_1y >= filters.max_drawdown_1y_min)
+    return conditions
+
+
 # Item columns served on every list row (funds identity + headline metrics).
 _ITEM_COLUMNS: tuple[tuple[str, InstrumentedAttribute[Any]], ...] = (
-    ("instrument_id", Fund.instrument_id),
-    ("series_id", Fund.series_id),
-    ("ticker", Fund.ticker),
-    ("name", Fund.name),
-    ("fund_type", Fund.fund_type),
-    ("strategy_label", Fund.strategy_label),
-    ("asset_class", Fund.asset_class),
-    ("is_index", Fund.is_index),
-    ("expense_ratio", Fund.expense_ratio),
-    ("aum_usd", Fund.aum_usd),
-    ("return_1y", FundRiskLatest.return_1y),
-    ("volatility_1y", FundRiskLatest.volatility_1y),
-    ("sharpe_1y", FundRiskLatest.sharpe_1y),
-    ("max_drawdown_1y", FundRiskLatest.max_drawdown_1y),
-    ("peer_sharpe_pctl", FundRiskLatest.peer_sharpe_pctl),
-    ("elite_flag", FundRiskLatest.elite_flag),
+    ("instrument_id", FundListRow.instrument_id),
+    ("series_id", FundListRow.series_id),
+    ("ticker", FundListRow.ticker),
+    ("name", FundListRow.name),
+    ("fund_type", FundListRow.fund_type),
+    ("strategy_label", FundListRow.strategy_label),
+    ("asset_class", FundListRow.asset_class),
+    ("is_index", FundListRow.is_index),
+    ("expense_ratio", FundListRow.expense_ratio),
+    ("aum_usd", FundListRow.aum_usd),
+    ("return_1y", FundListRow.return_1y),
+    ("volatility_1y", FundListRow.volatility_1y),
+    ("sharpe_1y", FundListRow.sharpe_1y),
+    ("max_drawdown_1y", FundListRow.max_drawdown_1y),
+    ("peer_sharpe_pctl", FundListRow.peer_sharpe_pctl),
+    ("elite_flag", FundListRow.elite_flag),
 )
 
 
 def _base_select(*columns: Any) -> Select[Any]:
-    """SELECT *columns* over funds_v LEFT JOIN fund_risk_latest_mv (via repointed models)."""
-    return (
-        select(*columns)
-        .select_from(Fund)
-        .outerjoin(FundRiskLatest, FundRiskLatest.instrument_id == Fund.instrument_id)
-    )
+    """SELECT *columns* over the materialized /funds list projection."""
+    return select(*columns).select_from(FundListRow)
 
 
 def build_funds_select(
@@ -203,13 +261,17 @@ def build_funds_select(
     limit: int,
     offset: int,
 ) -> Select[Any]:
-    """The dynamic-but-whitelisted funds list SELECT (pure — unit-tested)."""
-    column = sort_column(sort)
+    """The materialized, whitelisted funds list SELECT (pure — unit-tested)."""
+    column = _list_sort_column(sort)
     order = column.desc() if direction == "desc" else column.asc()
     return (
         _base_select(*(col for _name, col in _ITEM_COLUMNS))
-        .where(*filter_conditions(filters))
-        .order_by(order.nulls_last(), Fund.ticker.nulls_last(), Fund.instrument_id)
+        .where(*_list_filter_conditions(filters))
+        .order_by(
+            order.nulls_last(),
+            FundListRow.ticker.nulls_last(),
+            FundListRow.instrument_id,
+        )
         .limit(limit)
         .offset(offset)
     )
@@ -217,7 +279,7 @@ def build_funds_select(
 
 def build_count_select(filters: FundFilters) -> Select[Any]:
     """COUNT over the same filtered set as the list SELECT."""
-    return _base_select(func.count()).where(*filter_conditions(filters))
+    return _base_select(func.count()).where(*_list_filter_conditions(filters))
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +296,10 @@ class Staleness:
     source_nav_max_date: dt.date | None
 
 
+_STALENESS_CACHE_TTL_SECONDS = 300.0
+_staleness_cache: tuple[float, Staleness] | None = None
+
+
 async def fetch_funds(
     session: AsyncSession,
     filters: FundFilters,
@@ -247,41 +313,54 @@ async def fetch_funds(
     result = await session.execute(
         build_funds_select(
             filters, sort=sort, direction=direction, limit=limit, offset=offset
-        )
+        ).add_columns(func.count().over().label("_total"))
     )
     names = [name for name, _col in _ITEM_COLUMNS]
-    rows = [dict(zip(names, row, strict=True)) for row in result.all()]
-    total = int(await session.scalar(build_count_select(filters)) or 0)
+    records = result.all()
+    rows = [dict(zip(names, tuple(record)[:-1], strict=True)) for record in records]
+    total = (
+        int(tuple(records[0])[-1])
+        if records
+        else int(await session.scalar(build_count_select(filters)) or 0)
+    )
     return rows, total
 
 
 async def fetch_staleness(session: AsyncSession) -> Staleness:
     """Global data-freshness markers, derived from the dynamic sources.
 
-    The retired sync snapshot carried per-row synced_at/source_calc_date/
-    source_nav_max_date; the funds_v VIEW has none, so staleness is read live:
-    - source_calc_date  = MAX(fund_risk_latest_mv.calc_date)
-    - source_nav_max_date = MAX(nav_timeseries.nav_date)  (raw hypertable, 2.4)
-    - synced_at         = the view is "as fresh as the read" → query time, but
-      only when the universe is non-empty (None on an empty catalog, matching
-      the previous empty-table contract).
+    The /funds list path reads the materialized projection, which already
+    carries the global NAV max date. Cache this tiny aggregate briefly so each
+    page/filter miss does not re-read catalog metadata.
     """
-    source_calc_date = await session.scalar(select(func.max(FundRiskLatest.calc_date)))
-    source_nav_max_date = cast(
-        "dt.date | None",
-        await session.scalar(text("SELECT max(nav_date) FROM nav_timeseries")),
-    )
-    fund_count = int(
-        await session.scalar(select(func.count()).select_from(Fund)) or 0
-    )
+    global _staleness_cache
+
+    now = time.monotonic()
+    if _staleness_cache is not None:
+        expires_at, cached = _staleness_cache
+        if now < expires_at:
+            return cached
+
+    fund_count, source_calc_date, source_nav_max_date = (
+        await session.execute(
+            select(
+                func.count(),
+                func.max(FundListRow.calc_date),
+                func.max(FundListRow.source_nav_max_date),
+            ).select_from(FundListRow)
+        )
+    ).one()
+    fund_count = int(fund_count or 0)
     has_universe = fund_count > 0 and (
         source_calc_date is not None or source_nav_max_date is not None
     )
-    return Staleness(
+    staleness = Staleness(
         synced_at=dt.datetime.now(dt.UTC) if has_universe else None,
-        source_calc_date=source_calc_date,
-        source_nav_max_date=source_nav_max_date,
+        source_calc_date=cast("dt.date | None", source_calc_date),
+        source_nav_max_date=cast("dt.date | None", source_nav_max_date),
     )
+    _staleness_cache = (now + _STALENESS_CACHE_TTL_SECONDS, staleness)
+    return staleness
 
 
 # ---------------------------------------------------------------------------
@@ -399,8 +478,10 @@ class FundProfile:
 async def fetch_fund_profile(
     session: AsyncSession, instrument_id: uuid.UUID
 ) -> FundProfile | None:
-    """Fund + full risk snapshot + decimated 2y NAV + latest holdings.
+    """Fund + full risk snapshot + bounded preview NAV + latest holdings.
 
+    The NAV list is for lightweight profile context only. Long-history charts
+    use the range-aware timeseries route so profile payload size stays bounded.
     Returns None when the instrument is not in the local universe.
     """
     fund = await session.get(Fund, instrument_id)

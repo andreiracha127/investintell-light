@@ -38,7 +38,7 @@ import {
 } from "@/components/screener/shared";
 import { formatCompact, formatDate } from "@/lib/format";
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 30;
 type SortDir = "asc" | "desc";
 
 type FundType = NonNullable<FundsQuery["fund_type"]>;
@@ -169,7 +169,7 @@ export function FundsView() {
     : "—";
 
   return (
-    <div className="mx-auto max-w-[1400px] px-5 py-5">
+    <div className="mx-auto w-full max-w-[1800px] px-[clamp(16px,2vw,28px)] py-5">
       <PageTitle title="Funds" meta={meta} />
 
       {/* ── Filters ─────────────────────────────────────────────────────── */}
@@ -379,10 +379,10 @@ function FundsTable({
         </p>
       )}
 
-      <div className={`transition-opacity ${isFetching ? "opacity-60" : ""}`}>
+      <div className={`overflow-x-auto transition-opacity ${isFetching ? "opacity-60" : ""}`}>
         <DataGrid
           options={gridOptions}
-          className="h-[600px] w-full"
+          className="h-[600px] min-w-[1600px] w-full"
           onReady={onGridReady}
           emptyMessage="No funds match the current filters."
         />

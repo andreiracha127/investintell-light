@@ -12,23 +12,24 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ApiError,
   fetchStockAnalysis,
-  fetchStockHistory,
+  fetchStockTimeseries,
   isRangePreset,
+  stockTimeseriesToHistoryBars,
   type HistoryBar,
   type RangePreset,
   type StockAnalysis,
 } from "@/lib/api/client";
-import { buildCumulativeOption } from "@/lib/charts/cumulative";
-import { buildHistogramOption } from "@/lib/charts/histogram";
-import { buildRollingOption } from "@/lib/charts/rolling";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import { buildHcCumulativeOption } from "@/lib/charts/hc/cumulative";
+import { buildHcHistogramOption } from "@/lib/charts/hc/histogram";
+import { buildHcRollingOption } from "@/lib/charts/hc/rolling";
+import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import {
   formatCurrency,
   formatDate,
   formatNumber,
   formatPercent,
 } from "@/lib/format";
-import { EChart } from "@/components/charts/EChart";
+import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { InteractiveChart } from "@/components/charts/InteractiveChart";
 import { AddToPortfolio } from "@/components/stocks/AddToPortfolio";
 import { NewsPanel } from "@/components/stocks/NewsPanel";
@@ -66,9 +67,9 @@ export function StockAnalysisView({
       failureCount < 2,
   });
 
-  const history = useQuery({
-    queryKey: ["history", ticker],
-    queryFn: ({ signal }) => fetchStockHistory(ticker, 2520, signal),
+  const timeseries = useQuery({
+    queryKey: ["stock-timeseries", ticker, range],
+    queryFn: ({ signal }) => fetchStockTimeseries(ticker, range, signal),
     staleTime: 60 * 60 * 1000,
     retry: (failureCount, err) =>
       !(err instanceof ApiError && err.status >= 400 && err.status < 500) &&
@@ -118,7 +119,9 @@ export function StockAnalysisView({
       colors={colors}
       range={range}
       onRangeChange={selectRange}
-      historyBars={history.data?.bars ?? []}
+      historyBars={
+        timeseries.data ? stockTimeseriesToHistoryBars(timeseries.data) : []
+      }
     />
   );
 }
@@ -142,7 +145,7 @@ function AnalysisContent({
 
   const cumulativeOption = useMemo(
     () =>
-      buildCumulativeOption(
+      buildHcCumulativeOption(
         data.cumulative_returns,
         header.ticker,
         params.benchmark,
@@ -152,25 +155,25 @@ function AnalysisContent({
   );
   const volatilityOption = useMemo(
     () =>
-      buildRollingOption(data.rolling_volatility, "Volatility", colors, {
+      buildHcRollingOption(data.rolling_volatility, "Volatility", colors, {
         yPercent: true,
       }),
     [data.rolling_volatility, colors],
   );
   const betaOption = useMemo(
-    () => buildRollingOption(data.rolling_beta, "Beta", colors),
+    () => buildHcRollingOption(data.rolling_beta, "Beta", colors),
     [data.rolling_beta, colors],
   );
   const correlationOption = useMemo(
     () =>
-      buildRollingOption(data.rolling_correlation, "Correlation", colors, {
+      buildHcRollingOption(data.rolling_correlation, "Correlation", colors, {
         yMin: -1,
         yMax: 1,
       }),
     [data.rolling_correlation, colors],
   );
   const histogramOption = useMemo(
-    () => buildHistogramOption(data.histogram, colors),
+    () => buildHcHistogramOption(data.histogram, colors),
     [data.histogram, colors],
   );
 
@@ -223,7 +226,7 @@ function AnalysisContent({
         </div>
       </div>
 
-      {/* ── Interactive chart (IXChart + livefeed) ── */}
+      {/* ── Interactive chart (Highcharts Stock + livefeed) ── */}
       <div className="mb-px">
         <InteractiveChart
           symbol={header.ticker}
@@ -271,27 +274,27 @@ function AnalysisContent({
             </div>
           }
         >
-          <EChart option={cumulativeOption} className="h-[300px] w-full" />
+          <HighchartsChart options={cumulativeOption} className="h-[300px] w-full" />
         </Card>
       </div>
 
       {/* ── Rolling row ── */}
       <div className="mb-px grid grid-cols-1 gap-px bg-border lg:grid-cols-3">
         <Card title={`Rolling Volatility · ${params.window}d`}>
-          <EChart option={volatilityOption} className="h-[200px] w-full" />
+          <HighchartsChart options={volatilityOption} className="h-[200px] w-full" />
         </Card>
         <Card title={`Rolling Beta · ${params.window}d`}>
-          <EChart option={betaOption} className="h-[200px] w-full" />
+          <HighchartsChart options={betaOption} className="h-[200px] w-full" />
         </Card>
         <Card title={`Rolling Correlation · ${params.window}d`}>
-          <EChart option={correlationOption} className="h-[200px] w-full" />
+          <HighchartsChart options={correlationOption} className="h-[200px] w-full" />
         </Card>
       </div>
 
       {/* ── Distribution + statistics ── */}
       <div className="grid grid-cols-1 gap-px bg-border lg:grid-cols-2">
         <Card title="Daily Return Distribution">
-          <EChart option={histogramOption} className="h-[280px] w-full" />
+          <HighchartsChart options={histogramOption} className="h-[280px] w-full" />
         </Card>
 
         <Card title="Statistics">

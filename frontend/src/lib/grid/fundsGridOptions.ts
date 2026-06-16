@@ -104,22 +104,23 @@ interface FundColSpec {
   id: string;
   label: string;
   numeric: boolean;
+  width: number;
   formatter: CellFormatter;
 }
 
 const FUND_COLUMNS: FundColSpec[] = [
-  { id: "ticker", label: "Ticker", numeric: false, formatter: tickerFormatter },
-  { id: "name", label: "Name", numeric: false, formatter: nameFormatter },
-  { id: "fund_type", label: "Type", numeric: false, formatter: typeFormatter },
-  { id: "strategy_label", label: "Strategy", numeric: false, formatter: strategyFormatter },
-  { id: "asset_class", label: "Asset class", numeric: false, formatter: assetClassFormatter },
-  { id: "aum_usd", label: "AUM", numeric: true, formatter(this: GridCell) { return numOrDash(this.value, (n) => `$${formatCompact(n)}`); } },
-  { id: "expense_ratio", label: "Expense", numeric: true, formatter(this: GridCell) { return numOrDash(this.value, (n) => formatPercent(n)); } },
-  { id: "return_1y", label: "Return 1Y", numeric: true, formatter: returnFormatter },
-  { id: "volatility_1y", label: "Vol 1Y", numeric: true, formatter(this: GridCell) { return numOrDash(this.value, (n) => formatPercent(n)); } },
-  { id: "sharpe_1y", label: "Sharpe 1Y", numeric: true, formatter(this: GridCell) { return numOrDash(this.value, (n) => formatNumber(n)); } },
-  { id: "peer_sharpe_pctl", label: "Peer pctl", numeric: true, formatter(this: GridCell) { return numOrDash(this.value, (n) => formatNumber(n, 0)); } },
-  { id: "elite_flag", label: "Elite", numeric: true, formatter: eliteFormatter },
+  { id: "ticker", label: "Ticker", numeric: false, width: 100, formatter: tickerFormatter },
+  { id: "name", label: "Name", numeric: false, width: 340, formatter: nameFormatter },
+  { id: "fund_type", label: "Type", numeric: false, width: 90, formatter: typeFormatter },
+  { id: "strategy_label", label: "Strategy", numeric: false, width: 220, formatter: strategyFormatter },
+  { id: "asset_class", label: "Asset class", numeric: false, width: 130, formatter: assetClassFormatter },
+  { id: "aum_usd", label: "AUM", numeric: true, width: 120, formatter(this: GridCell) { return numOrDash(this.value, (n) => `$${formatCompact(n)}`); } },
+  { id: "expense_ratio", label: "Expense", numeric: true, width: 100, formatter(this: GridCell) { return numOrDash(this.value, (n) => formatPercent(n)); } },
+  { id: "return_1y", label: "Return 1Y", numeric: true, width: 110, formatter: returnFormatter },
+  { id: "volatility_1y", label: "Vol 1Y", numeric: true, width: 100, formatter(this: GridCell) { return numOrDash(this.value, (n) => formatPercent(n)); } },
+  { id: "sharpe_1y", label: "Sharpe 1Y", numeric: true, width: 100, formatter(this: GridCell) { return numOrDash(this.value, (n) => formatNumber(n)); } },
+  { id: "peer_sharpe_pctl", label: "Peer pctl", numeric: true, width: 100, formatter(this: GridCell) { return numOrDash(this.value, (n) => formatNumber(n, 0)); } },
+  { id: "elite_flag", label: "Elite", numeric: true, width: 80, formatter: eliteFormatter },
 ];
 
 export function fundsGridColumns(state: GridSortState): GridColumns {
@@ -127,6 +128,7 @@ export function fundsGridColumns(state: GridSortState): GridColumns {
     id: c.id,
     header: { format: c.label },
     className: c.numeric ? "ix-grid-cell-num" : "ix-grid-cell-text",
+    width: c.width,
     cells: { formatter: c.formatter },
     sorting: {
       orderSequence: c.numeric ? NUM_SEQ : TEXT_SEQ,

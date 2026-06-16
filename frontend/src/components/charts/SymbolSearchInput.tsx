@@ -19,13 +19,13 @@ const KIND_LABEL: Record<string, string> = {
 export function SymbolSearchInput({
   onSelect,
   onClear,
-  active,
-  placeholder = "Compare…",
+  active = null,
+  placeholder = "Compare...",
 }: {
   onSelect: (item: SymbolSearchResult) => void;
-  onClear: () => void;
+  onClear?: () => void;
   /** Símbolo ativo (mostra o ×). */
-  active: string | null;
+  active?: string | null;
   placeholder?: string;
 }) {
   const [text, setText] = useState("");
@@ -107,14 +107,14 @@ export function SymbolSearchInput({
         role="combobox"
         className="h-7 w-32 border border-border-strong bg-field px-2 text-[11px] text-text-primary placeholder:text-text-muted"
       />
-      {active && (
+      {active && onClear && (
         <button
           type="button"
           aria-label={`Remove comparison ${active}`}
           className="text-[11px] text-text-muted hover:text-text-primary"
           onClick={onClear}
         >
-          ×
+          x
         </button>
       )}
       {open && results.length > 0 && (

@@ -4,7 +4,7 @@
  * Thin Highcharts Grid Pro wrapper: create in a ref on mount, update on option
  * change, destroy on unmount. The grid lib is dynamically imported so it never
  * runs during SSR. All grid content comes from the pure adapter in
- * `src/lib/grid/gridOptions.ts`. Mirrors the EChart wrapper.
+ * `src/lib/grid/gridOptions.ts`. Mirrors the Highcharts wrapper pattern.
  */
 import { useEffect, useRef } from "react";
 import type { Grid, Options } from "@highcharts/grid-pro";

@@ -70,7 +70,9 @@ _EOD_PRICE_COLUMNS = (
 # safely under the ceiling with room for future column additions.
 _EOD_UPSERT_CHUNK = 2000
 
-TickerAction = Literal["fresh", "fetched_full", "fetched_incremental"]
+TickerAction = Literal[
+    "fresh", "fetched_full", "fetched_incremental", "stale_served"
+]
 
 
 class ColdTickerCapExceededError(Exception):
@@ -319,6 +321,7 @@ async def ensure_eod_data(
     *,
     staleness_hours: float | None = None,
     max_cold_tickers: int | None = None,
+    db_first: bool = False,
 ) -> EnsureReport:
     """Guarantee EOD data for *tickers* is present and fresh in the DB.
 
@@ -331,12 +334,20 @@ async def ensure_eod_data(
         end: Requested window end (informational — see fetch-window policy).
         staleness_hours: Override for tests; defaults to settings.
         max_cold_tickers: Override for tests; defaults to settings.
+        db_first: Strategy B. When True, *stale* tickers (instrument row exists
+            but the fetch is outside the freshness window) are served from the
+            DB as-is — **no synchronous Tiingo fetch on the request path**.
+            Keeping the universe fresh is delegated to the out-of-band warming
+            worker (``eod_prices_warmer``). Only *cold* tickers (no row at all)
+            still fetch synchronously, capped and deadline-bounded by the
+            caller. Defaults to False so non-request-path callers (and any
+            caller that genuinely needs the freshest data inline) are unchanged.
 
     Raises:
         ColdTickerCapExceededError: More than ``max_cold_tickers`` new tickers
             (no instrument row) in a single request.  Previously-ingested
             tickers that are merely stale always refresh incrementally without
-            cap.
+            cap (or are served as-is under ``db_first``).
         TiingoError subclasses: Propagated from the client (fail loud).
     """
     settings = get_settings()
@@ -361,19 +372,29 @@ async def ensure_eod_data(
             "request are allowed. Previously-ingested tickers refresh without cap."
         )
 
-    # Tickers that need a Tiingo fetch: cold (full history) + stale (incremental).
-    # Fresh tickers are skipped entirely.
-    needs_fetch: set[str] = set(cold) | set(_stale)
+    # Tickers that need a synchronous Tiingo fetch:
+    #   - default: cold (full history) + stale (incremental); fresh is skipped.
+    #   - db_first: cold ONLY — stale is served from the DB as-is (the warming
+    #     worker keeps it fresh out-of-band), keeping Tiingo I/O off the request
+    #     path. Fresh is still skipped.
+    stale_set = set(_stale)
+    needs_fetch: set[str] = set(cold) if db_first else set(cold) | stale_set
     today = dt.date.today()
     report = EnsureReport()
 
     for ticker in ordered:
-        if ticker not in needs_fetch:
+        if ticker in needs_fetch:
+            # ingest_one_ticker commits on success and rolls back + re-raises on
+            # failure — earlier tickers in this loop stay committed (fail loud).
+            report.outcomes.append(
+                await ingest_one_ticker(session, client, ticker, today)
+            )
+        elif db_first and ticker in stale_set:
+            # Served stale from the DB without a fetch (Strategy B).
+            report.outcomes.append(
+                TickerOutcome(ticker=ticker, action="stale_served")
+            )
+        else:
             report.outcomes.append(TickerOutcome(ticker=ticker, action="fresh"))
-            continue
-
-        # ingest_one_ticker commits on success and rolls back + re-raises on
-        # failure — earlier tickers in this loop stay committed (fail loud).
-        report.outcomes.append(await ingest_one_ticker(session, client, ticker, today))
 
     return report

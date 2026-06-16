@@ -12,9 +12,13 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@carbon/icons-react": "^11.82.0",
+    "@carbon/react": "^1.109.0",
+    "@carbon/styles": "^1.108.0",
     "@highcharts/grid-pro": "^3.0.0",
+    "@insforge/sdk": "^1.4.0",
     "@tanstack/react-query": "^5.101.0",
-    "echarts": "^6",
+    "highcharts": "^13.0.0",
     "next": "15.5.19",
     "react": "19.1.0",
     "react-dom": "19.1.0"
@@ -22,11 +26,16 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^4.7.0",
     "eslint": "^9",
     "eslint-config-next": "15.5.19",
+    "jsdom": "^25.0.1",
     "openapi-typescript": "^7",
     "tailwindcss": "^4",
     "typescript": "^5",

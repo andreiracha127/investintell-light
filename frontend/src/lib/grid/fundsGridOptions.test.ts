@@ -75,9 +75,13 @@ describe("fundsGridColumns", () => {
   it("aligns numeric vs text and sets per-type orderSequence", () => {
     const cols = fundsGridColumns({ dir: "desc" });
     const ticker = cols.find((c) => c.id === "ticker");
+    const name = cols.find((c) => c.id === "name");
     const aum = cols.find((c) => c.id === "aum_usd");
     expect(ticker?.className).toBe("ix-grid-cell-text");
     expect(aum?.className).toBe("ix-grid-cell-num");
+    expect(ticker?.width).toBe(100);
+    expect(name?.width).toBe(340);
+    expect(aum?.width).toBe(120);
     expect(ticker?.sorting?.orderSequence).toEqual(["asc", "desc", null]);
     expect(aum?.sorting?.orderSequence).toEqual(["desc", "asc", null]);
   });
@@ -93,6 +97,9 @@ describe("fundsGridColumns", () => {
     const fmt = cols.find((c) => c.id === "ticker")!.cells!.formatter;
     expect(fmtCall(fmt, "AAA", { instrument_id: "uuid-1" })).toBe(
       '<a class="ix-grid-link" href="/funds/uuid-1">AAA</a>',
+    );
+    expect(fmtCall(fmt, "AAA", { instrument_id: "fund/id" })).toBe(
+      '<a class="ix-grid-link" href="/funds/fund%2Fid">AAA</a>',
     );
     // no instrument_id -> plain label
     expect(fmtCall(fmt, "AAA", {})).toBe("AAA");

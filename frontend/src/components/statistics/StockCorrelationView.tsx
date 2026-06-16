@@ -13,10 +13,10 @@ import {
   type StockCorrelationRequest,
   type StockCorrelationResponse,
 } from "@/lib/api/client";
-import { buildHeatmapOption } from "@/lib/charts/heatmap";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import { buildHcHeatmapOption } from "@/lib/charts/hc/heatmap";
+import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { formatDate, formatNumber } from "@/lib/format";
-import { EChart } from "@/components/charts/EChart";
+import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { Card } from "@/components/ui/panels";
 import { PortfolioSelect } from "@/components/statistics/PortfolioSelect";
 import { StatisticsShell } from "@/components/statistics/StatisticsShell";
@@ -93,7 +93,7 @@ function Results({
   colors: ChartColors;
 }) {
   const heatmapOption = useMemo(
-    () => buildHeatmapOption(data, colors),
+    () => buildHcHeatmapOption(data, colors),
     [data, colors],
   );
 
@@ -103,7 +103,7 @@ function Results({
       subtitle={`as of ${formatDate(data.as_of)} · ${formatNumber(data.window, 0)}d window`}
       actions={<HeatmapLegend />}
     >
-      <EChart option={heatmapOption} className="h-[440px] w-full" />
+      <HighchartsChart options={heatmapOption} className="h-[440px] w-full" />
     </Card>
   );
 }

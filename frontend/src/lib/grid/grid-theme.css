@@ -58,11 +58,11 @@
   color: var(--color-accent);
 }
 .hcg-theme-graphite .ix-grid-link:hover { text-decoration: underline; }
-.hcg-theme-graphite .ix-grid-link-plain { color: var(--color-text-primary); text-decoration: none; }
+.hcg-theme-graphite .ix-grid-link-plain { display: block; color: var(--color-text-primary); text-decoration: none; }
 .hcg-theme-graphite .ix-grid-link-plain:hover { text-decoration: underline; }
 .hcg-theme-graphite .ix-grid-trunc {
-  display: inline-block;
-  max-width: 260px;
+  display: block;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -110,3 +110,15 @@
   from { background: var(--color-loss-muted); }
   to { background: transparent; }
 }
+
+/* Distribution sparkline (filters grid cell). */
+.hcg-theme-graphite .ix-spark { display: inline-block; vertical-align: middle; }
+.hcg-theme-graphite .ix-spark-bar { fill: var(--color-chart-bar-mute); }
+.hcg-theme-graphite .ix-spark-on { fill: var(--color-accent); }
+
+/* Filters grid: row reorder controls + clickable row name (Plano 6). */
+.hcg-theme-graphite .ix-grid-cell-mv { width: 26px; text-align: center; }
+.hcg-theme-graphite .ix-grid-mv { cursor: pointer; color: var(--color-text-muted); }
+.hcg-theme-graphite .ix-grid-mv:hover { color: var(--color-accent); }
+.hcg-theme-graphite .ix-grid-rowname { background: none; border: 0; padding: 0; color: var(--color-text-primary); font: inherit; cursor: pointer; }
+.hcg-theme-graphite .ix-grid-rowname:hover { color: var(--color-accent); }

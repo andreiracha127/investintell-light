@@ -32,9 +32,9 @@ import {
 } from "@/lib/api/client";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
 import { Card } from "@/components/ui/panels";
-import { EChart } from "@/components/charts/EChart";
-import { buildDriftBandsOption } from "@/lib/charts/rebalance";
-import { chartColors, type ChartColors } from "@/lib/charts/theme";
+import { HighchartsChart } from "@/components/charts/HighchartsChart";
+import { buildHcDriftBandsOption } from "@/lib/charts/hc/rebalance";
+import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { formatCurrency, formatDate, formatNumber, formatPercent } from "@/lib/format";
 
 // ── Optimizer label helpers ───────────────────────────────────────────────────
@@ -291,7 +291,7 @@ export function PortfolioRebalanceSection({
     if (!previewQuery.data || !colors) return null;
     const drifts: PositionDrift[] = previewQuery.data.drifts;
     const { band_abs, band_rel } = previewQuery.data.policy;
-    return buildDriftBandsOption(drifts, colors, band_abs, band_rel);
+    return buildHcDriftBandsOption(drifts, colors, band_abs, band_rel);
   }, [previewQuery.data, colors]);
 
   // ── All hooks above this line — early returns below ──────────────────────
@@ -384,13 +384,13 @@ export function PortfolioRebalanceSection({
               Position drift
             </p>
             {/* Height calculated from row count: 32px per bar row + 40px grid margins,
-                minimum 120px. EChart does not accept a style prop so we wrap. */}
+                minimum 120px. The chart wrapper receives its height from here. */}
             <div
               style={{
                 height: `${Math.max(120, preview.drifts.length * 32 + 40)}px`, // 32px per bar row + 40px grid margins
               }}
             >
-              <EChart option={driftOption} className="h-full w-full" />
+              <HighchartsChart options={driftOption} className="h-full w-full" />
             </div>
           </div>
         )}

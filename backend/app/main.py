@@ -23,6 +23,7 @@ from app.core.cache import CatalogCacheMiddleware
 from app.core.config import get_settings
 from app.core.db import engine
 from app.core.tiingo_provider import provider as tiingo_provider
+from app.core.timing import RequestTimingMiddleware
 
 
 @asynccontextmanager
@@ -52,6 +53,9 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
         allow_headers=["*"],
     )
+    # Camada mais externa (registrada por último): mede o tempo total de
+    # servidor por rota, inclusive cache hits e o custo do próprio CORS.
+    application.add_middleware(RequestTimingMiddleware)
     application.include_router(health_router.router)
     application.include_router(stocks_router.router)
     application.include_router(portfolio_router.router)

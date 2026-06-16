@@ -113,6 +113,17 @@ class FilterBody(BaseModel):
         return self
 
 
+class FilterReorder(BaseModel):
+    """Body for PATCH /screener/screens/{id}/filters/reorder.
+
+    Must list EXACTLY the screen's current filter codes, in the desired order.
+    """
+
+    metric_codes: list[str] = Field(
+        description="All of the screen's current filter metric codes, in the new order."
+    )
+
+
 class ScreenFilterOut(BaseModel):
     """One persisted filter row."""
 
@@ -177,6 +188,26 @@ class BuildResponse(BaseModel):
             "from 'no data yet' (available_count=0) without inspecting the 422."
         )
     )
+
+
+class MetricBuildOut(BaseModel):
+    """One filter's distribution + availability for the batch build payload."""
+
+    metric_code: str
+    distribution: DistributionOut | None
+    available_count: int
+
+
+class BuildAllResponse(BaseModel):
+    """GET /screener/screens/{id}/build — every filter's distribution in one round-trip.
+
+    headline_count honors ALL filters (the live match count); each metric's
+    distribution is the universe-wide histogram (null when the snapshot has no
+    data for it), feeding the per-row sparklines and the active-row panel.
+    """
+
+    headline_count: int
+    metrics: list[MetricBuildOut]
 
 
 class FilterUpdateResponse(BaseModel):

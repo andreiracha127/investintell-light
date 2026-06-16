@@ -23,7 +23,18 @@ from app.core.config import get_settings
 
 def _make_engine() -> "AsyncEngine":
     settings = get_settings()
-    return create_async_engine(settings.database_url, pool_pre_ping=True)
+    # No pool_pre_ping: it adds a round-trip per checkout (costly cross-region)
+    # and the latency tail it would mask is handled by pool_recycle + the
+    # DB-first request path. Explicit pool bounds keep a slow checkout from
+    # hanging or exhausting the shared TimescaleDB Cloud connection ceiling.
+    return create_async_engine(
+        settings.database_url,
+        pool_pre_ping=False,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+        pool_timeout=settings.db_pool_timeout_seconds,
+        pool_recycle=settings.db_pool_recycle_seconds,
+    )
 
 
 engine = _make_engine()

@@ -30,7 +30,17 @@ from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
 import numpy as np
-from sqlalchemy import ColumnElement, CursorResult, Row, Select, delete, func, or_, select
+from sqlalchemy import (
+    ColumnElement,
+    CursorResult,
+    Row,
+    Select,
+    delete,
+    func,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -211,6 +221,27 @@ async def delete_filter(session: AsyncSession, screen_id: int, metric_code: str)
     )
     await session.commit()
     return bool(result.rowcount)
+
+
+async def reorder_filters(
+    session: AsyncSession, screen_id: int, metric_codes: Sequence[str]
+) -> None:
+    """Rewrite filter positions to match metric_codes order (0-based).
+
+    The route has validated the screen exists and that metric_codes is exactly
+    the set of the screen's current filter codes (no missing/extra/duplicate).
+    position has no UNIQUE constraint, so a plain per-row UPDATE is safe.
+    """
+    for position, code in enumerate(metric_codes):
+        await session.execute(
+            update(ScreenFilter)
+            .where(
+                ScreenFilter.screen_id == screen_id,
+                ScreenFilter.metric_code == code,
+            )
+            .values(position=position)
+        )
+    await session.commit()
 
 
 # ---------------------------------------------------------------------------

@@ -6,6 +6,12 @@
  * `detail`, which the UI renders verbatim. No silent fallbacks.
  */
 import type { components, paths } from "@/lib/api/api";
+import { getAccessToken, refreshSession } from "@/lib/auth/token";
+import {
+  buildFundProxyPath,
+  buildFundsScatterProxyPath,
+  buildHoldingReverseLookupProxyPath,
+} from "@/lib/funds/dossierQueries";
 
 type AnalysisOperation = paths["/stocks/{ticker}/analysis"]["get"];
 type PricesOperation = paths["/stocks/{ticker}/prices"]["get"];
@@ -26,6 +32,8 @@ type ScreenPath = paths["/screener/screens/{screen_id}"];
 type ScreenFilterPath = paths["/screener/screens/{screen_id}/filters/{metric_code}"];
 type ScreenBuildOperation =
   paths["/screener/screens/{screen_id}/build/{metric_code}"]["get"];
+type ScreenBuildAllOperation = paths["/screener/screens/{screen_id}/build"]["get"];
+type ScreenReorderOperation = paths["/screener/screens/{screen_id}/filters/reorder"]["patch"];
 type ScreenResultsOperation = paths["/screener/screens/{screen_id}/results"]["get"];
 type ScreenResultsCsvOperation =
   paths["/screener/screens/{screen_id}/results.csv"]["get"];
@@ -34,6 +42,24 @@ type BuilderOptimizeOperation = paths["/builder/optimize"]["post"];
 type BuilderSaveOperation = paths["/builder/save"]["post"];
 type FundsCsvOperation = paths["/funds.csv"]["get"];
 type FundProfileOperation = paths["/funds/{instrument_id}"]["get"];
+type FundAnalysisOperation = paths["/funds/{instrument_id}/analysis"]["get"];
+type FundHoldingsTopOperation =
+  paths["/funds/{instrument_id}/holdings/top"]["get"];
+type FundPeersOperation = paths["/funds/{instrument_id}/peers"]["get"];
+type FundsScatterOperation = paths["/funds/scatter"]["get"];
+type FundFactorsOperation = paths["/funds/{instrument_id}/factors"]["get"];
+type FundStyleDriftOperation =
+  paths["/funds/{instrument_id}/style-drift"]["get"];
+type FundEntityAnalyticsOperation =
+  paths["/funds/{instrument_id}/entity-analytics"]["get"];
+type FundRiskTimeseriesOperation =
+  paths["/funds/{instrument_id}/risk-timeseries"]["get"];
+type FundActiveShareOperation =
+  paths["/funds/{instrument_id}/active-share"]["get"];
+type FundInstitutionalRevealOperation =
+  paths["/funds/{instrument_id}/institutional-reveal"]["get"];
+type HoldingReverseLookupOperation =
+  paths["/holdings/{cusip}/reverse-lookup"]["get"];
 type FundLookthroughOperation =
   paths["/funds/{instrument_id}/lookthrough"]["get"];
 type PortfolioLookthroughOperation =
@@ -56,9 +82,25 @@ export type StockHistory =
   StockHistoryOperation["responses"]["200"]["content"]["application/json"];
 export type HistoryBar = StockHistory["bars"][number];
 
+type StockTimeseriesOperation = paths["/stocks/{ticker}/timeseries"]["get"];
+export type StockTimeseries =
+  StockTimeseriesOperation["responses"]["200"]["content"]["application/json"];
+export type StockTimeseriesQuery = NonNullable<
+  StockTimeseriesOperation["parameters"]["query"]
+>;
+
 type FundHistoryOperation = paths["/funds/{instrument_id}/history"]["get"];
 export type FundHistory =
   FundHistoryOperation["responses"]["200"]["content"]["application/json"];
+
+type FundTimeseriesOperation =
+  paths["/funds/{instrument_id}/timeseries"]["get"];
+export type FundTimeseries =
+  FundTimeseriesOperation["responses"]["200"]["content"]["application/json"];
+export type FundTimeseriesQuery = NonNullable<
+  FundTimeseriesOperation["parameters"]["query"]
+>;
+export type TimeseriesInterval = StockTimeseries["interval"];
 
 type SymbolSearchOperation = paths["/search/symbols"]["get"];
 export type SymbolSearchResult =
@@ -142,6 +184,11 @@ export type FilterUpdateResponse =
 export type Distribution = NonNullable<FilterUpdateResponse["distribution"]>;
 export type BuildResponse =
   ScreenBuildOperation["responses"]["200"]["content"]["application/json"];
+export type BuildAll =
+  ScreenBuildAllOperation["responses"]["200"]["content"]["application/json"];
+export type MetricBuild = BuildAll["metrics"][number];
+export type FilterReorderBody =
+  ScreenReorderOperation["requestBody"]["content"]["application/json"];
 export type ScreenResults =
   ScreenResultsOperation["responses"]["200"]["content"]["application/json"];
 export type ResultsColumn = ScreenResults["columns"][number];
@@ -164,6 +211,50 @@ export type FundProfile =
 export type FundRisk = NonNullable<FundProfile["risk"]>;
 export type FundNavPoint = FundProfile["nav"][number];
 export type FundHolding = FundProfile["holdings"]["items"][number];
+export type FundAnalysis =
+  FundAnalysisOperation["responses"]["200"]["content"]["application/json"];
+export type FundAnalysisQuery = NonNullable<
+  FundAnalysisOperation["parameters"]["query"]
+>;
+export type FundHoldingsTop =
+  FundHoldingsTopOperation["responses"]["200"]["content"]["application/json"];
+export type FundHoldingsTopQuery = NonNullable<
+  FundHoldingsTopOperation["parameters"]["query"]
+>;
+export type FundPeers =
+  FundPeersOperation["responses"]["200"]["content"]["application/json"];
+export type FundPeersQuery = NonNullable<FundPeersOperation["parameters"]["query"]>;
+export type FundsScatter =
+  FundsScatterOperation["responses"]["200"]["content"]["application/json"];
+export type FundsScatterQuery = NonNullable<
+  FundsScatterOperation["parameters"]["query"]
+>;
+export type FundFactors =
+  FundFactorsOperation["responses"]["200"]["content"]["application/json"];
+export type FundStyleDrift =
+  FundStyleDriftOperation["responses"]["200"]["content"]["application/json"];
+export type FundStyleDriftQuery = NonNullable<
+  FundStyleDriftOperation["parameters"]["query"]
+>;
+export type FundEntityAnalytics =
+  FundEntityAnalyticsOperation["responses"]["200"]["content"]["application/json"];
+export type FundEntityAnalyticsQuery = NonNullable<
+  FundEntityAnalyticsOperation["parameters"]["query"]
+>;
+export type FundRiskTimeseries =
+  FundRiskTimeseriesOperation["responses"]["200"]["content"]["application/json"];
+export type FundRiskTimeseriesQuery = NonNullable<
+  FundRiskTimeseriesOperation["parameters"]["query"]
+>;
+export type FundActiveShare =
+  FundActiveShareOperation["responses"]["200"]["content"]["application/json"];
+export type FundActiveShareQuery = NonNullable<
+  FundActiveShareOperation["parameters"]["query"]
+>;
+export type FundInstitutionalReveal =
+  FundInstitutionalRevealOperation["responses"]["200"]["content"]["application/json"];
+export type HoldingReverseLookup =
+  HoldingReverseLookupOperation["responses"]["200"]["content"]["application/json"];
 
 export type FundLookthroughQuery = NonNullable<
   FundLookthroughOperation["parameters"]["query"]
@@ -223,6 +314,62 @@ export function isRangePreset(value: unknown): value is RangePreset {
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+type AuthFetchDeps = {
+  getToken: () => string | null;
+  refresh: () => Promise<boolean>;
+  onAuthFail: () => void;
+  fetchImpl: typeof fetch;
+};
+
+/** Wrap fetch: attach Bearer from the readable cookie; on 401/403 refresh once
+ *  and retry; on persistent auth failure call onAuthFail and return the response. */
+export function createFetchWithAuth(deps: AuthFetchDeps) {
+  const { getToken, refresh, onAuthFail, fetchImpl } = deps;
+  return async function fetchWithAuth(
+    input: RequestInfo | URL,
+    init: RequestInit = {},
+  ): Promise<Response> {
+    const withAuth = (token: string | null): RequestInit => {
+      const base: Record<string, string> =
+        init.headers instanceof Headers
+          ? Object.fromEntries(init.headers.entries())
+          : Array.isArray(init.headers)
+            ? Object.fromEntries(init.headers as [string, string][])
+            : { ...(init.headers as Record<string, string> | undefined) };
+      if (token) base["Authorization"] = `Bearer ${token}`;
+      // The FastAPI backend authenticates via the Bearer header, not cookies.
+      // Do NOT send credentials cross-origin: it would force a credentialed
+      // CORS response (Access-Control-Allow-Credentials) the API does not set,
+      // blocking every call. Same-origin /api/auth/* keep their own credentials.
+      return { ...init, headers: base };
+    };
+
+    let res = await fetchImpl(input, withAuth(getToken()));
+    if (res.status === 401 || res.status === 403) {
+      const refreshed = await refresh();
+      if (refreshed) {
+        res = await fetchImpl(input, withAuth(getToken()));
+      }
+      if (res.status === 401 || res.status === 403) {
+        onAuthFail();
+      }
+    }
+    return res;
+  };
+}
+
+const fetchWithAuth = createFetchWithAuth({
+  getToken: getAccessToken,
+  refresh: () => refreshSession(),
+  onAuthFail: () => {
+    if (typeof window !== "undefined") {
+      const next = encodeURIComponent(window.location.pathname + window.location.search);
+      window.location.assign(`/login?next=${next}`);
+    }
+  },
+  fetchImpl: (input, init) => fetch(input, init),
+});
+
 export class ApiError extends Error {
   readonly status: number;
 
@@ -275,15 +422,17 @@ async function request<T>(
   path: string,
   signal?: AbortSignal,
   init?: { method: "POST" | "PUT" | "PATCH" | "DELETE"; json?: unknown },
+  authMode: "auth" | "public" = "auth",
 ): Promise<T> {
   const timeoutSignal = AbortSignal.timeout(15_000);
   const combinedSignal = signal
     ? AbortSignal.any([signal, timeoutSignal])
     : timeoutSignal;
+  const fetcher = authMode === "public" ? fetch : fetchWithAuth;
 
   let res: Response;
   try {
-    res = await fetch(`${BASE_URL}${path}`, {
+    res = await fetcher(`${BASE_URL}${path}`, {
       signal: combinedSignal,
       ...(init && {
         method: init.method,
@@ -321,6 +470,52 @@ async function request<T>(
   return (await res.json()) as T;
 }
 
+function requestPublic<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return request<T>(path, signal, undefined, "public");
+}
+
+async function requestSameOrigin<T>(
+  path: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  const timeoutSignal = AbortSignal.timeout(15_000);
+  const combinedSignal = signal
+    ? AbortSignal.any([signal, timeoutSignal])
+    : timeoutSignal;
+
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      signal: combinedSignal,
+      headers: { Accept: "application/json" },
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      if (timeoutSignal.aborted) {
+        throw new Error("Request timed out — is the backend running?");
+      }
+      throw new Error("Request cancelled");
+    }
+    throw err;
+  }
+
+  if (!res.ok) {
+    const fallback = `HTTP ${res.status} ${res.statusText}`.trim();
+    let detail = fallback;
+    try {
+      detail = extractDetail(await res.json(), fallback);
+    } catch {
+      // Non-JSON error body — keep the HTTP status as the message.
+    }
+    throw new ApiError(res.status, detail);
+  }
+
+  if (res.status === 204) {
+    return undefined as T;
+  }
+  return (await res.json()) as T;
+}
+
 export function postPortfolioAnalysis(
   body: PortfolioAnalysisRequest,
   signal?: AbortSignal,
@@ -348,7 +543,7 @@ export function fetchStockAnalysis(
 }
 
 export function fetchMarketOverview(signal?: AbortSignal): Promise<MarketOverview> {
-  return request<MarketOverview>("/stocks/overview", signal);
+  return requestPublic<MarketOverview>("/stocks/overview", signal);
 }
 
 export function fetchStockHistory(
@@ -362,15 +557,79 @@ export function fetchStockHistory(
   );
 }
 
+export function fetchStockTimeseries(
+  ticker: string,
+  range: RangePreset,
+  signal?: AbortSignal,
+): Promise<StockTimeseries> {
+  return request<StockTimeseries>(
+    `/stocks/${encodeURIComponent(ticker)}/timeseries?range=${range}`,
+    signal,
+  );
+}
+
 export function fetchFundHistory(
   instrumentId: string,
   bars = 2520,
   signal?: AbortSignal,
 ): Promise<FundHistory> {
-  return request<FundHistory>(
-    `/funds/${encodeURIComponent(instrumentId)}/history?bars=${bars}`,
+  return requestSameOrigin<FundHistory>(
+    buildFundProxyPath("history", instrumentId, { bars }),
     signal,
   );
+}
+
+export function fetchFundTimeseries(
+  instrumentId: string,
+  range: RangePreset,
+  signal?: AbortSignal,
+): Promise<FundTimeseries> {
+  return requestSameOrigin<FundTimeseries>(
+    buildFundProxyPath("timeseries", instrumentId, { range }),
+    signal,
+  );
+}
+
+/** Convert stock OHLC/volume arrays into the chart bar contract. */
+export function stockTimeseriesToHistoryBars(
+  data: StockTimeseries,
+): HistoryBar[] {
+  const volumeByTime = new Map(data.volume.map((point) => [point[0], point[1]]));
+  return data.ohlc
+    .filter((point) => point.length >= 5)
+    .map((point) => ({
+      t: point[0],
+      o: point[1],
+      h: point[2],
+      l: point[3],
+      c: point[4],
+      v: volumeByTime.get(point[0]) ?? 0,
+    }));
+}
+
+/** Convert fund NAV line arrays into chart bars for the Stock chart. */
+export function fundTimeseriesToHistoryBars(data: FundTimeseries): HistoryBar[] {
+  return data.series
+    .filter((point) => point.length >= 2)
+    .map((point) => ({
+      t: point[0],
+      o: point[1],
+      h: point[1],
+      l: point[1],
+      c: point[1],
+      v: 0,
+    }));
+}
+
+export function fundTimeseriesToNavPoints(
+  data: FundTimeseries,
+): FundNavPoint[] {
+  return data.series
+    .filter((point) => point.length >= 2)
+    .map((point) => ({
+      date: new Date(point[0]).toISOString().slice(0, 10),
+      nav: point[1],
+    }));
 }
 
 export function fetchSymbolSearch(
@@ -610,6 +869,24 @@ export function fetchBuildMetric(
   );
 }
 
+export function fetchScreenBuildAll(
+  screenId: number,
+  signal?: AbortSignal,
+): Promise<BuildAll> {
+  return request<BuildAll>(`/screener/screens/${screenId}/build`, signal);
+}
+
+export function reorderScreenFilters(
+  screenId: number,
+  metricCodes: string[],
+): Promise<Screen> {
+  return request<Screen>(
+    `/screener/screens/${screenId}/filters/reorder`,
+    undefined,
+    { method: "PATCH", json: { metric_codes: metricCodes } satisfies FilterReorderBody },
+  );
+}
+
 function resultsParams(query: ResultsQuery | ResultsCsvQuery): string {
   const params = new URLSearchParams();
   if (query.sort !== undefined) params.set("sort", query.sort);
@@ -648,7 +925,7 @@ export async function fetchScreenResultsCsv(
   signal?: AbortSignal,
 ): Promise<Blob> {
   const qs = resultsParams(query);
-  const res = await fetch(
+  const res = await fetchWithAuth(
     `${BASE_URL}/screener/screens/${screenId}/results.csv${qs ? `?${qs}` : ""}`,
     { signal: signal ?? AbortSignal.timeout(30_000) },
   );
@@ -681,15 +958,132 @@ export function fetchFunds(
   signal?: AbortSignal,
 ): Promise<FundsList> {
   const qs = fundsParams(query);
-  return request<FundsList>(`/funds${qs ? `?${qs}` : ""}`, signal);
+  return requestPublic<FundsList>(`/funds${qs ? `?${qs}` : ""}`, signal);
 }
 
 export function fetchFundProfile(
   instrumentId: string,
   signal?: AbortSignal,
 ): Promise<FundProfile> {
-  return request<FundProfile>(
-    `/funds/${encodeURIComponent(instrumentId)}`,
+  return requestSameOrigin<FundProfile>(
+    buildFundProxyPath("profile", instrumentId),
+    signal,
+  );
+}
+
+export function fetchFundAnalysis(
+  instrumentId: string,
+  query: FundAnalysisQuery = {},
+  signal?: AbortSignal,
+): Promise<FundAnalysis> {
+  return requestSameOrigin<FundAnalysis>(
+    buildFundProxyPath("analysis", instrumentId, query),
+    signal,
+  );
+}
+
+export function fetchFundHoldingsTop(
+  instrumentId: string,
+  query: FundHoldingsTopQuery = {},
+  signal?: AbortSignal,
+): Promise<FundHoldingsTop> {
+  return requestSameOrigin<FundHoldingsTop>(
+    buildFundProxyPath("holdings-top", instrumentId, query),
+    signal,
+  );
+}
+
+export function fetchFundPeers(
+  instrumentId: string,
+  query: FundPeersQuery = {},
+  signal?: AbortSignal,
+): Promise<FundPeers> {
+  return requestSameOrigin<FundPeers>(
+    buildFundProxyPath("peers", instrumentId, query),
+    signal,
+  );
+}
+
+export function fetchFundsScatter(
+  query: FundsScatterQuery = {},
+  signal?: AbortSignal,
+): Promise<FundsScatter> {
+  return requestSameOrigin<FundsScatter>(
+    buildFundsScatterProxyPath(query),
+    signal,
+  );
+}
+
+export function fetchFundFactors(
+  instrumentId: string,
+  signal?: AbortSignal,
+): Promise<FundFactors> {
+  return requestSameOrigin<FundFactors>(
+    buildFundProxyPath("factors", instrumentId),
+    signal,
+  );
+}
+
+export function fetchFundStyleDrift(
+  instrumentId: string,
+  query: FundStyleDriftQuery = {},
+  signal?: AbortSignal,
+): Promise<FundStyleDrift> {
+  return requestSameOrigin<FundStyleDrift>(
+    buildFundProxyPath("style-drift", instrumentId, query),
+    signal,
+  );
+}
+
+export function fetchFundEntityAnalytics(
+  instrumentId: string,
+  query: FundEntityAnalyticsQuery = {},
+  signal?: AbortSignal,
+): Promise<FundEntityAnalytics> {
+  return requestSameOrigin<FundEntityAnalytics>(
+    buildFundProxyPath("entity-analytics", instrumentId, query),
+    signal,
+  );
+}
+
+export function fetchFundRiskTimeseries(
+  instrumentId: string,
+  query: FundRiskTimeseriesQuery = {},
+  signal?: AbortSignal,
+): Promise<FundRiskTimeseries> {
+  return requestSameOrigin<FundRiskTimeseries>(
+    buildFundProxyPath("risk-timeseries", instrumentId, query),
+    signal,
+  );
+}
+
+export function fetchFundActiveShare(
+  instrumentId: string,
+  query: FundActiveShareQuery = {},
+  signal?: AbortSignal,
+): Promise<FundActiveShare> {
+  return requestSameOrigin<FundActiveShare>(
+    buildFundProxyPath("active-share", instrumentId, query),
+    signal,
+  );
+}
+
+export function fetchFundInstitutionalReveal(
+  instrumentId: string,
+  signal?: AbortSignal,
+): Promise<FundInstitutionalReveal> {
+  return requestSameOrigin<FundInstitutionalReveal>(
+    buildFundProxyPath("institutional-reveal", instrumentId),
+    signal,
+  );
+}
+
+export function fetchHoldingReverseLookup(
+  cusip: string,
+  signal?: AbortSignal,
+): Promise<HoldingReverseLookup> {
+  return requestSameOrigin<HoldingReverseLookup>(
+    buildHoldingReverseLookupProxyPath(cusip),
     signal,
   );
 }
@@ -764,7 +1158,7 @@ export function fetchFundLookthrough(
   const params = new URLSearchParams();
   if (query.dimension != null) params.set("dimension", query.dimension); // schema allows explicit null — guard both
   const qs = params.toString();
-  return request<FundLookthrough>(
+  return requestPublic<FundLookthrough>(
     `/funds/${encodeURIComponent(instrumentId)}/lookthrough${qs ? `?${qs}` : ""}`,
     signal,
   );
@@ -783,7 +1177,7 @@ export function fetchPortfolioLookthrough(
 
 /** Fetch the current macro regime signals and recent regime flips. */
 export function fetchMacroRegime(signal?: AbortSignal): Promise<MacroRegime> {
-  return request<MacroRegime>("/macro/regime", signal);
+  return requestPublic<MacroRegime>("/macro/regime", signal);
 }
 
 /** Fetch the rebalance policy (bands and frequency) for a portfolio. */
