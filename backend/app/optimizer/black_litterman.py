@@ -210,6 +210,92 @@ def posterior(
     return mu_bl, (sigma_bl + sigma_bl.T) / 2.0
 
 
+# Per-entry Ω regularization floor (legacy REG_OMEGA_EPS_FACTOR,
+# black_litterman_service.py:56): a confidence=1 view drives Ω_ii -> 0; we floor
+# each diagonal entry relative to its own magnitude so a near-certain view stays
+# dominant without making Ω singular.
+_REG_OMEGA_EPS_FACTOR = 1e-8
+
+
+def posterior_woodbury(
+    sigma_ann: np.ndarray,
+    pi: np.ndarray,
+    p: np.ndarray,
+    q: np.ndarray,
+    omega: np.ndarray,
+    tau: float = DEFAULT_TAU,
+) -> np.ndarray:
+    """BL posterior mean via the Woodbury data-update form (full Ω supported).
+
+    Ported from quant_engine/black_litterman_service.py:239-253:
+
+        μ_BL = π + τΣ·Pᵀ · (P·τΣ·Pᵀ + Ω)⁻¹ · (Q − P·π)
+
+    Never inverts τΣ — only the strictly-PD K×K view-space matrix
+    (P·τΣ·Pᵀ + Ω_reg). A zero-variance asset transmits no information (its row
+    of τΣ·Pᵀ is zero) instead of producing a singular τΣ. Accepts a FULL
+    (non-diagonal) Ω; a per-entry diagonal floor keeps the solve stable even
+    for confidence≈1 views.
+
+    Returns the posterior MEAN only (the classic :func:`posterior` returns mean
+    and Σ_BL; callers needing Σ_BL keep using it). All inputs annualized.
+
+    Raises:
+        ValueError: shape mismatch, non-finite inputs, non-symmetric/non-PSD Ω,
+            tau ≤ 0, or a singular view-space matrix.
+    """
+    sigma_ann = _validate_sigma(sigma_ann, "posterior_woodbury")
+    pi = np.asarray(pi, dtype=float).ravel()
+    p = np.asarray(p, dtype=float)
+    q = np.asarray(q, dtype=float).ravel()
+    omega = np.asarray(omega, dtype=float)
+    n = sigma_ann.shape[0]
+    if pi.shape != (n,):
+        raise ValueError(f"pi has shape {pi.shape}, expected ({n},)")
+    if p.ndim != 2 or p.shape[1] != n:
+        raise ValueError(f"P shape {p.shape} inconsistent with n ({n})")
+    k = p.shape[0]
+    if q.shape != (k,):
+        raise ValueError(f"Q shape {q.shape} inconsistent with P rows ({k})")
+    if omega.shape != (k, k):
+        raise ValueError(f"Omega shape {omega.shape} inconsistent with P rows ({k})")
+    if tau <= 0:
+        raise ValueError(f"tau must be > 0, got {tau}")
+    if not (np.isfinite(pi).all() and np.isfinite(p).all()
+            and np.isfinite(q).all() and np.isfinite(omega).all()):
+        raise ValueError("posterior_woodbury: non-finite input")
+    if not np.allclose(omega, omega.T, atol=1e-12):
+        raise ValueError("Omega must be symmetric")
+    if float(np.linalg.eigvalsh(omega).min()) < -1e-10:
+        raise ValueError("Omega is not PSD (negative eigenvalue)")
+
+    # Per-entry diagonal regularization (legacy lines 218-237).
+    omega_diag = np.clip(np.diag(omega), 0.0, None)
+    positive = omega_diag[omega_diag > 0.0]
+    if positive.size == 0:
+        eps_vec = np.full(k, 1e-12)
+    else:
+        floor_for_zero = _REG_OMEGA_EPS_FACTOR * float(positive.min())
+        eps_vec = np.where(
+            omega_diag > 0.0, _REG_OMEGA_EPS_FACTOR * omega_diag, floor_for_zero
+        )
+    omega_reg = omega + np.diag(eps_vec)
+
+    tau_sigma = tau * sigma_ann                       # (N, N)
+    tau_sigma_pt = tau_sigma @ p.T                    # (N, K)
+    view_space = p @ tau_sigma_pt + omega_reg         # (K, K) strictly PD
+    innovation = q - p @ pi                           # (K,)
+    try:
+        mu_post = pi + tau_sigma_pt @ np.linalg.solve(view_space, innovation)
+    except np.linalg.LinAlgError as exc:
+        raise ValueError(
+            f"posterior_woodbury: singular view-space matrix (P·τΣ·Pᵀ + Ω): {exc}"
+        ) from exc
+    if not np.all(np.isfinite(mu_post)):
+        raise ValueError("posterior_woodbury produced non-finite output")
+    return np.asarray(mu_post, dtype=float)
+
+
 # He-Litterman (1999) consistency threshold: a view Q more than this many
 # predictive sigmas from its prior-implied value P*pi is "fighting the prior".
 _HE_LITTERMAN_SIGMA = 3.0
