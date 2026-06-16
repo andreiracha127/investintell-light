@@ -34,6 +34,9 @@ import {
 
 import { assetKey, assetName, assetTicker, type UniverseAsset } from "./assets";
 import { SelectionDiagnostics } from "./SelectionDiagnostics";
+import { DataGrid } from "@/components/ui/DataGrid";
+import { buildWeightsTree, type WeightInput } from "@/lib/builder/weightsTree";
+import { weightsTreeGridOptions } from "@/lib/grid/weightsTreeGridOptions";
 
 /** Current allocation of the base portfolio (when seeded from a saved one). */
 export interface BaseAllocation {
@@ -99,14 +102,30 @@ export function ResultsPanel({
   assetsByKey,
   base,
   colors,
+  grouped,
 }: {
   result: OptimizeResponse;
   objective: BuilderObjective;
   assetsByKey: Map<string, UniverseAsset>;
   base: BaseAllocation | null;
   colors: ChartColors | null;
+  grouped: boolean;
 }) {
   const { weights, expected, diagnostics } = result;
+
+  // Grouped (broad/fund-universe) view: a 3-level Asset Class → Strategy → Fund
+  // tree of non-zero weights with aggregated parent weights and dossier links.
+  const treeRows = buildWeightsTree(
+    weights.map<WeightInput>((w) => ({
+      kind: w.asset.kind,
+      instrumentId: w.asset.kind === "fund" ? w.asset.id : null,
+      ticker: w.ticker ?? null,
+      name: w.name ?? null,
+      weight: w.weight,
+      assetClass: w.asset_class ?? null,
+      strategyLabel: w.strategy_label ?? null,
+    })),
+  );
 
   /* ── Save as portfolio (with the optional execution step, F8.6b) ───── */
   const [saveOpen, setSaveOpen] = useState(false);
@@ -546,6 +565,13 @@ export function ResultsPanel({
             )}
           </div>
         )}
+        {grouped ? (
+          <DataGrid
+            options={weightsTreeGridOptions(treeRows)}
+            className="h-[420px] w-full"
+            emptyMessage="No positions with weight."
+          />
+        ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[560px] border-collapse ix-fs tabular-nums lining-nums">
             <thead>
@@ -603,6 +629,7 @@ export function ResultsPanel({
             </tbody>
           </table>
         </div>
+        )}
       </Card>
 
       {/* ── Donuts: Current vs Proposed ─────────────────────────────────── */}

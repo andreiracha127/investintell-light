@@ -409,6 +409,7 @@ export function BuilderView() {
             assetsByKey={assetsByKey}
             base={mode === "simulate" ? base : null}
             colors={colors}
+            grouped={mode === "universe"}
           />
         ) : (
           <p className="ix-pad ix-fs m-0 border border-border bg-surface-2 text-text-muted">
