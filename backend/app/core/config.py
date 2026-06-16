@@ -74,8 +74,25 @@ class Settings(BaseSettings):
     eod_staleness_hours: float = 24.0
     # Hard cap on cold/stale tickers ingested per request (fail loud — never a subset).
     max_cold_tickers_per_request: int = 5
+    # Deadline (seconds) for the synchronous cold-ticker Tiingo fetch that may
+    # still happen on the request path under Strategy B. Caps the latency tail:
+    # a slow/hung provider call is turned into a 503 instead of hanging the
+    # request. Only bites when a cold ticker (no DB rows) is fetched inline.
+    ensure_cold_fetch_deadline_seconds: float = 5.0
     # Hard cap on data points returned by the price-series endpoint.
     price_series_max_points: int = 7000
+
+    # --- DB connection pool (latency-tail hardening) ---
+    # Sized against the TimescaleDB Cloud ceiling (max_connections=200, shared
+    # with the datalake workers + exporters). pool_size+max_overflow per API
+    # process stays far under that even across replicas. pre_ping is disabled in
+    # db.py (it adds +1 RTT per checkout, painful cross-region); pool_recycle
+    # handles stale connections instead. pool_timeout fails a stuck checkout fast
+    # rather than hanging the request.
+    db_pool_size: int = 10
+    db_max_overflow: int = 10
+    db_pool_timeout_seconds: float = 10.0
+    db_pool_recycle_seconds: int = 1800
 
     # --- News ingestion settings (F2.4) ---
     # Per-ticker news is "fresh" when max(fetched_at) over the ticker's rows

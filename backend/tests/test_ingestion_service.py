@@ -441,6 +441,122 @@ async def test_failing_ticker_rolls_back_and_reraises() -> None:
 
 
 # ---------------------------------------------------------------------------
+# DB-first mode (Strategy B): stale served from DB, only cold fetches
+# ---------------------------------------------------------------------------
+
+
+async def test_db_first_stale_ticker_served_without_fetch() -> None:
+    """DB-first: a stale ticker is served from the DB with zero Tiingo calls.
+
+    This is the core of Strategy B — the warming worker keeps the universe
+    fresh, so the request path never pays a synchronous incremental fetch.
+    """
+    session = _FakeSession(
+        instruments=[_instrument("AAPL", _NOW - dt.timedelta(hours=48))],
+        max_date=dt.date(2026, 6, 1),
+    )
+    client = AsyncMock()
+
+    report = await ensure_eod_data(
+        session,  # type: ignore[arg-type]
+        client,
+        ["AAPL"],
+        dt.date(2026, 1, 1),
+        dt.date(2026, 6, 1),
+        db_first=True,
+    )
+
+    client.get_ticker_meta.assert_not_called()
+    client.get_eod_prices.assert_not_called()
+    assert session.commits == 0
+    assert [(o.ticker, o.action) for o in report.outcomes] == [("AAPL", "stale_served")]
+
+
+async def test_db_first_cold_ticker_still_fetches() -> None:
+    """DB-first: a truly cold ticker (no instrument row) still fetches synchronously."""
+    session = _FakeSession(instruments=[], max_date=None)
+    client = AsyncMock()
+    client.get_ticker_meta.return_value = _meta()
+    client.get_eod_prices.return_value = [_eod_row()]
+
+    report = await ensure_eod_data(
+        session,  # type: ignore[arg-type]
+        client,
+        ["AAPL"],
+        dt.date(2026, 1, 1),
+        dt.date(2026, 6, 1),
+        db_first=True,
+    )
+
+    client.get_eod_prices.assert_awaited_once()
+    assert report.outcomes[0].action == "fetched_full"
+    assert session.commits == 1
+
+
+async def test_db_first_fresh_ticker_unchanged() -> None:
+    """DB-first leaves the fresh path identical: no fetch, action 'fresh'."""
+    session = _FakeSession(instruments=[_instrument("AAPL", dt.datetime.now(dt.UTC))])
+    client = AsyncMock()
+
+    report = await ensure_eod_data(
+        session,  # type: ignore[arg-type]
+        client,
+        ["AAPL"],
+        dt.date(2026, 1, 1),
+        dt.date(2026, 6, 1),
+        db_first=True,
+    )
+
+    client.get_eod_prices.assert_not_called()
+    assert [(o.ticker, o.action) for o in report.outcomes] == [("AAPL", "fresh")]
+
+
+async def test_db_first_cold_cap_still_enforced() -> None:
+    """DB-first does NOT relax the cold cap — unbounded cold fetches stay blocked."""
+    session = _FakeSession(instruments=[])
+    client = AsyncMock()
+
+    with pytest.raises(ColdTickerCapExceededError):
+        await ensure_eod_data(
+            session,  # type: ignore[arg-type]
+            client,
+            ["A", "B", "C"],
+            dt.date(2026, 1, 1),
+            dt.date(2026, 6, 1),
+            max_cold_tickers=2,
+            db_first=True,
+        )
+
+    client.get_eod_prices.assert_not_called()
+    assert session.commits == 0
+
+
+async def test_db_first_mixed_only_cold_hits_tiingo() -> None:
+    """DB-first with 1 cold + 2 stale: only the cold ticker calls Tiingo."""
+    old_fetch = _NOW - dt.timedelta(hours=48)
+    session = _FakeSession(
+        instruments=[_instrument("S1", old_fetch), _instrument("S2", old_fetch)],
+        max_date={"S1": dt.date(2026, 6, 1), "S2": dt.date(2026, 6, 1)},
+    )
+    client = AsyncMock()
+    client.get_ticker_meta.return_value = _meta()
+    client.get_eod_prices.return_value = [_eod_row()]
+
+    report = await ensure_eod_data(
+        session,  # type: ignore[arg-type]
+        client,
+        ["C1", "S1", "S2"],
+        dt.date(2026, 1, 1),
+        dt.date(2026, 6, 1),
+        db_first=True,
+    )
+
+    actions = {o.ticker: o.action for o in report.outcomes}
+    assert actions == {"C1": "fetched_full", "S1": "stale_served", "S2": "stale_served"}
+    assert client.get_eod_prices.await_count == 1
+
+
+# ---------------------------------------------------------------------------
 # Chunked upsert — asyncpg 32 767-parameter ceiling
 # ---------------------------------------------------------------------------
 
