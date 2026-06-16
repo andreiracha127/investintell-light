@@ -137,6 +137,12 @@ export function universeDraftToSpec(
     rank_by: draft.rankBy,
     rank_dir: draft.rankDir,
     max_assets: draft.maxAssets,
+    // Broad-universe mode is opt-in elsewhere; ranked mode keeps these at their
+    // defaults (the backend ignores max_positions/min_pair_overlap unless
+    // broad_universe is true).
+    broad_universe: false,
+    max_positions: draft.maxAssets,
+    min_pair_overlap: 252,
     ...(includeIds && includeIds.length >= 2
       ? { include_instrument_ids: [...includeIds] }
       : {}),

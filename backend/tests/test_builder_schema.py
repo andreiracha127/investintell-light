@@ -126,3 +126,31 @@ def test_diagnostics_out_view_consistency_defaults_to_none() -> None:
 
     diag = DiagnosticsOut(n_obs=10, status="optimal")
     assert diag.view_consistency is None
+
+
+def test_broad_universe_incompatible_with_max_return_cvar() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from app.schemas.builder import OptimizeRequest
+
+    with pytest.raises(ValidationError, match="broad_universe"):
+        OptimizeRequest.model_validate(
+            {
+                "universe": {"broad_universe": True},
+                "objective": "max_return_cvar",
+                "cvar_limit": 0.02,
+            }
+        )
+
+
+def test_broad_universe_accepts_min_cvar_default() -> None:
+    from app.schemas.builder import OptimizeRequest
+
+    req = OptimizeRequest.model_validate(
+        {"universe": {"broad_universe": True, "max_positions": 25}}
+    )
+    assert req.universe is not None
+    assert req.universe.broad_universe is True
+    assert req.universe.max_positions == 25
+    assert req.objective == "min_cvar"

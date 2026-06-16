@@ -1917,6 +1917,7 @@ export interface components {
             /** Mu Posterior */
             mu_posterior?: number[] | null;
             view_consistency?: components["schemas"]["ViewConsistencyOut"] | null;
+            selection?: components["schemas"]["SelectionDiagnosticsOut"] | null;
         };
         /** DimensionOut */
         DimensionOut: {
@@ -1987,6 +1988,16 @@ export interface components {
             kind: "equity";
             /** Ticker */
             ticker: string;
+        };
+        /**
+         * ExcludedFundOut
+         * @description A fund dropped by Stage-1 with its reason (fail-loud transparency).
+         */
+        ExcludedFundOut: {
+            /** Fund */
+            fund: string;
+            /** Reason */
+            reason: string;
         };
         /** ExpectedOut */
         ExpectedOut: {
@@ -5125,6 +5136,22 @@ export interface components {
             n: number;
         };
         /**
+         * SelectionDiagnosticsOut
+         * @description Stage-1 selection summary (broad-universe mode only).
+         */
+        SelectionDiagnosticsOut: {
+            /** N Candidates */
+            n_candidates: number;
+            /** N Selected */
+            n_selected: number;
+            /** Excluded */
+            excluded: components["schemas"]["ExcludedFundOut"][];
+            /** Clusters */
+            clusters: {
+                [key: string]: number;
+            };
+        };
+        /**
          * StackedSeries
          * @description One series of a stacked chart: a position ticker, "CASH", or "TOTAL".
          */
@@ -5323,6 +5350,21 @@ export interface components {
             max_assets: number;
             /** Include Instrument Ids */
             include_instrument_ids?: string[] | null;
+            /**
+             * Broad Universe
+             * @default false
+             */
+            broad_universe: boolean;
+            /**
+             * Max Positions
+             * @default 30
+             */
+            max_positions: number;
+            /**
+             * Min Pair Overlap
+             * @default 252
+             */
+            min_pair_overlap: number;
         };
         /** ValidationError */
         ValidationError: {

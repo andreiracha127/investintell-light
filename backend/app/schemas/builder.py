@@ -160,6 +160,23 @@ class UniverseSpecIn(BaseModel):
     these (still subject to the same NAV/overlap guards). ``None`` = use the
     full top-``max_assets`` ranked set (default behaviour)."""
 
+    broad_universe: bool = False
+    """Broad-universe mode: drop the ranking LIMIT and run the two-stage
+    pipeline (Stage-1 risk-structure selection → Stage-2 convex allocation) over
+    the FULL filtered universe (Gates 1–3), up to ``MAX_UNIVERSE_CANDIDATES``.
+    When True, ``max_assets`` is ignored and ``max_positions`` sets the final
+    portfolio cardinality."""
+
+    max_positions: Annotated[int, Field(ge=2, le=MAX_UNIVERSE_ASSETS)] = (
+        DEFAULT_UNIVERSE_ASSETS
+    )
+    """Target cardinality K of the FINAL portfolio in broad-universe mode
+    (clusters ≈ positions). Ignored in the ranked (non-broad) mode."""
+
+    min_pair_overlap: Annotated[int, Field(ge=1)] = 252
+    """Minimum per-pair overlap (trading days) for the Stage-1 pairwise
+    covariance; funds below it are excluded with a structured reason."""
+
 
 class OptimizeRequest(BaseModel):
     """Optimize over either an explicit ``assets`` list OR a ``universe`` spec
@@ -214,6 +231,12 @@ class OptimizeRequest(BaseModel):
         if self.objective == "max_return_cvar":
             if self.cvar_limit is None:
                 raise ValueError("max_return_cvar requires a cvar_limit (tail-loss cap)")
+            if self.universe is not None and self.universe.broad_universe:
+                raise ValueError(
+                    "max_return_cvar cannot run in broad_universe mode — it needs "
+                    "expected returns (Black-Litterman views on an explicit 'assets' "
+                    "list); broad_universe is risk-structure-only (gate G5)"
+                )
             if self.universe is not None:
                 raise ValueError(
                     "max_return_cvar needs expected returns and so requires views on an "
@@ -258,6 +281,23 @@ class ViewConsistencyOut(BaseModel):
     threshold_sigma: float
 
 
+class ExcludedFundOut(BaseModel):
+    """A fund dropped by Stage-1 with its reason (fail-loud transparency)."""
+
+    fund: str
+    reason: str
+
+
+class SelectionDiagnosticsOut(BaseModel):
+    """Stage-1 selection summary (broad-universe mode only)."""
+
+    n_candidates: int
+    n_selected: int
+    excluded: list[ExcludedFundOut]
+    # selected fund label -> cluster id (which risk cluster it represents).
+    clusters: dict[str, int]
+
+
 class DiagnosticsOut(BaseModel):
     n_obs: int
     status: str
@@ -266,6 +306,8 @@ class DiagnosticsOut(BaseModel):
     mu_posterior: list[float] | None = None
     # He-Litterman view-vs-prior consistency — present only when views are given.
     view_consistency: ViewConsistencyOut | None = None
+    # Present only on the broad-universe path.
+    selection: SelectionDiagnosticsOut | None = None
 
 
 class OptimizeResponse(BaseModel):

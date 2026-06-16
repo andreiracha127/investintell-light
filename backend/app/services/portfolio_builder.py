@@ -39,6 +39,7 @@ from app.analytics import realized_cvar
 from app.optimizer import black_litterman as bl
 from app.optimizer import data as optimizer_data
 from app.optimizer import engine
+from app.optimizer import selection as optimizer_selection
 from app.optimizer.mandate import resolve_delta
 from app.schemas.builder import (
     AbsoluteViewIn,
@@ -46,10 +47,12 @@ from app.schemas.builder import (
     BlockBudgetIn,
     DiagnosticsOut,
     EquityRefIn,
+    ExcludedFundOut,
     ExpectedOut,
     FundRefIn,
     OptimizeRequest,
     OptimizeResponse,
+    SelectionDiagnosticsOut,
     UniverseSpecIn,
     ViewConsistencyOut,
     ViewIn,
@@ -297,12 +300,14 @@ async def _resolve_assets(
     assert payload.universe is not None  # the schema validator guarantees one
     spec = payload.universe
     needs_bl = bool(payload.views) or payload.objective in ("bl_utility", "max_return_cvar")
+    # Broad-universe mode removes the ranking LIMIT (Stage-1 selects later);
+    # the ranked mode keeps the user's top-``max_assets`` cap.
     candidates = await optimizer_data.select_universe_funds(
         session,
         _filters_from_spec(spec),
         rank_by=spec.rank_by,
         rank_dir=spec.rank_dir,
-        max_assets=spec.max_assets,
+        max_assets=None if spec.broad_universe else spec.max_assets,
         require_aum=needs_bl,
         include_ids=spec.include_instrument_ids,
         window_days=payload.window_days,
@@ -324,6 +329,60 @@ async def run_optimize(
     datalake: AsyncSession | None = None,
 ) -> OptimizeResponse:
     assets, label_map = await _resolve_assets(session, payload)
+
+    broad = payload.universe is not None and payload.universe.broad_universe
+    selection_diag: SelectionDiagnosticsOut | None = None
+    if broad:
+        assert payload.universe is not None
+        spec = payload.universe
+        all_refs = [_to_data_ref(ref) for ref in assets]
+        try:
+            wide = await optimizer_data.load_returns_matrix(
+                session, all_refs, window_days=payload.window_days
+            )
+        except ValueError as exc:
+            raise BuilderError(str(exc)) from exc
+        wide_labels = list(wide.columns)
+        try:
+            corr, kept, excluded = optimizer_selection.robust_selection_covariance(
+                wide.to_numpy(dtype=float), min_pair_overlap=spec.min_pair_overlap
+            )
+        except ValueError as exc:
+            raise BuilderError(str(exc)) from exc
+        kept_assets = [assets[i] for i in kept]
+        fund_ids = [ref.id for ref in kept_assets if isinstance(ref, FundRefIn)]
+        metrics_by_id = await optimizer_data.load_fund_quality_metrics(session, fund_ids)
+        neutral = {"sharpe_1y": None, "expense_ratio": None, "aum_usd": None}
+        metrics = [
+            metrics_by_id.get(ref.id, neutral) if isinstance(ref, FundRefIn) else neutral
+            for ref in kept_assets
+        ]
+        scores = optimizer_selection.quality_score(metrics)
+        result = optimizer_selection.select_diversified(corr, scores, k=spec.max_positions)
+        chosen_assets = [kept_assets[i] for i in result.selected]
+        if len(chosen_assets) < 2:
+            raise BuilderError(
+                "broad-universe selection produced fewer than 2 funds — relax the "
+                "filters or lower min_pair_overlap"
+            )
+        assets = chosen_assets
+        excluded_out = [
+            ExcludedFundOut(fund=wide_labels[orig], reason=reason)
+            for orig, reason in excluded.items()
+        ]
+        # ``result.cluster_of`` is keyed by the SELECTED index value (position in
+        # the kept/correlation set), which is exactly ``result.selected[pos]``.
+        clusters = {
+            _ref_key(chosen_assets[pos]): result.cluster_of[sel_idx]
+            for pos, sel_idx in enumerate(result.selected)
+        }
+        selection_diag = SelectionDiagnosticsOut(
+            n_candidates=len(wide_labels),
+            n_selected=len(chosen_assets),
+            excluded=excluded_out,
+            clusters=clusters,
+        )
+
     refs = [_to_data_ref(ref) for ref in assets]
     try:
         frame: pd.DataFrame = await optimizer_data.load_aligned_returns(
@@ -347,12 +406,32 @@ async def run_optimize(
                 "cover every asset in the request universe"
             ) from exc
     try:
-        sigma = engine.sigma_ledoit_wolf(scenarios)
+        sigma = (
+            engine.sigma_robust(scenarios) if broad else engine.sigma_ledoit_wolf(scenarios)
+        )
     except engine.OptimizerError as exc:
         raise BuilderError(str(exc)) from exc
 
     cap = payload.constraints.cap
     min_weight = payload.constraints.min_weight
+    # Broad-universe mode yields a LEAN portfolio (K ≈ max_positions): with few
+    # final assets a per-asset cap can be mathematically infeasible (cap·K < 1),
+    # since long-only weights must still sum to 1. We auto-relax this ONLY when
+    # the cap is the framework default (user did not set it) — silently raising
+    # a cap the user EXPLICITLY chose would violate least-surprise. An explicit
+    # infeasible cap fails loud; a feasible cap (cap·K ≥ 1) is always left as-is.
+    if broad and cap is not None and cap * len(assets) < 1.0:
+        n = len(assets)
+        min_feasible_cap = 1.0 / n
+        cap_was_explicit = "cap" in payload.constraints.model_fields_set
+        if cap_was_explicit:
+            raise BuilderError(
+                f"per-asset cap {cap:.2%} is infeasible for a {n}-position "
+                f"broad-universe portfolio (needs cap ≥ {min_feasible_cap:.2%}); "
+                "raise the cap or lower max_positions"
+            )
+        # Default (unset) cap: relax it to 1/K so K positions can sum to 1.
+        cap = min_feasible_cap
     has_views = bool(payload.views)
     needs_bl = has_views or payload.objective in ("bl_utility", "max_return_cvar")
     # Effective risk-aversion: explicit bl.delta override beats the mandate
@@ -514,5 +593,6 @@ async def run_optimize(
                 [float(x) for x in mu_posterior] if mu_posterior is not None else None
             ),
             view_consistency=view_consistency,
+            selection=selection_diag,
         ),
     )
