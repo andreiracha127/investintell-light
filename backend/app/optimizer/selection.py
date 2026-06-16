@@ -17,6 +17,7 @@ primitives (routes map → 422).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -191,6 +192,98 @@ def select_diversified(
     for cluster_id in np.unique(labels):
         members = np.where(labels == cluster_id)[0]
         # Highest quality within the cluster; ties broken by lowest index.
+        rep = int(members[np.argmax(sc[members])])
+        selected.append(rep)
+        cluster_of[rep] = int(cluster_id)
+        score_of[rep] = float(sc[rep])
+    selected.sort()
+    return SelectionResult(
+        selected=selected, cluster_of=cluster_of, score_of=score_of
+    )
+
+
+# ── Feature-based selection (pre-computed risk metrics, no raw NAV) ───────────
+
+
+def build_feature_matrix(
+    metrics: list[dict[str, float | None]], keys: Sequence[str]
+) -> NDArray[np.float64]:
+    """(N, F) matrix of raw feature values in ``keys`` order; missing → NaN."""
+    if not metrics:
+        raise ValueError("metrics must be non-empty")
+    rows = [
+        [np.nan if m.get(k) is None else float(m[k]) for k in keys] for m in metrics
+    ]
+    return np.asarray(rows, dtype=float)
+
+
+def _zscore_impute(matrix: NDArray[np.floating]) -> NDArray[np.float64]:
+    """Column-wise z-score; NaN entries and degenerate columns map to 0 (neutral).
+
+    A feature absent for a fund (NaN) or constant across the candidate set
+    contributes nothing to the Euclidean distance instead of dominating or
+    breaking it.
+    """
+    arr = np.asarray(matrix, dtype=float)
+    out = np.zeros_like(arr)
+    for j in range(arr.shape[1]):
+        col = arr[:, j]
+        present = np.isfinite(col)
+        if present.sum() < 2:
+            continue
+        mu = float(col[present].mean())
+        sd = float(col[present].std())
+        if sd < 1e-12:
+            continue
+        out[present, j] = (col[present] - mu) / sd
+    return out
+
+
+def select_diversified_features(
+    feature_matrix: NDArray[np.floating],
+    scores: NDArray[np.floating],
+    k: int,
+) -> SelectionResult:
+    """Pick ≤ K representatives by clustering in standardized risk-feature space.
+
+    The broad-universe Stage-1 alternative to the raw-NAV correlation path: each
+    fund's PRE-COMPUTED risk metrics (vol, drawdown, beta, equity correlation,
+    tail CVaR, capture …) form its feature vector, so no NAV history is loaded.
+    The matrix is z-scored per column (NaN/degenerate → neutral 0), clustered by
+    Ward linkage (Euclidean) into ``min(k, N)`` clusters, and the highest-``scores``
+    member of each cluster is its representative. NO expected-return input
+    (gate G5: ``scores`` is the Sharpe/expense/AUM quality score).
+    """
+    x = np.asarray(feature_matrix, dtype=float)
+    if x.ndim != 2:
+        raise ValueError(f"feature_matrix must be 2-D, got ndim={x.ndim}")
+    n = x.shape[0]
+    sc = np.asarray(scores, dtype=float).ravel()
+    if sc.shape != (n,):
+        raise ValueError(f"scores has shape {sc.shape}, expected ({n},)")
+    if k < 1:
+        raise ValueError(f"k must be >= 1, got {k}")
+    if n < 2:
+        raise ValueError("at least 2 funds are required to select")
+
+    k_eff = min(k, n)
+    if k_eff >= n:
+        selected = list(range(n))
+        return SelectionResult(
+            selected=selected,
+            cluster_of={i: i for i in selected},
+            score_of={i: float(sc[i]) for i in selected},
+        )
+
+    z = _zscore_impute(x)
+    link = linkage(z, method="ward")
+    labels = fcluster(link, t=k_eff, criterion="maxclust")
+
+    selected: list[int] = []
+    cluster_of: dict[int, int] = {}
+    score_of: dict[int, float] = {}
+    for cluster_id in np.unique(labels):
+        members = np.where(labels == cluster_id)[0]
         rep = int(members[np.argmax(sc[members])])
         selected.append(rep)
         cluster_of[rep] = int(cluster_id)

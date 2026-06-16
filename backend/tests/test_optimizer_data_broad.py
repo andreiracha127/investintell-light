@@ -173,6 +173,30 @@ async def test_load_fund_quality_metrics_fills_defaults_for_missing_fund() -> No
     assert result2[_FUND_C] is not result2[_FUND_X]
 
 
+async def test_load_fund_risk_features_returns_all_keys_and_fills_missing() -> None:
+    """Funds present in the MV get float features; an absent fund gets all-None;
+    a NULL column maps to None."""
+    keys = optimizer_data.RISK_FEATURE_KEYS
+    # Row shape: (instrument_id, *features) in RISK_FEATURE_KEYS order.
+    db_rows: list[tuple[Any, ...]] = [
+        (_FUND_A, *[decimal.Decimal("0.10")] * len(keys)),
+        (_FUND_B, *([decimal.Decimal("0.20")] * (len(keys) - 1) + [None])),
+    ]
+
+    class _S:
+        async def execute(self, stmt: Any) -> _FakeResult:
+            return _FakeResult(db_rows)
+
+    result = await optimizer_data.load_fund_risk_features(
+        _S(), [_FUND_A, _FUND_B, _FUND_C]  # type: ignore[arg-type]
+    )
+    assert set(result.keys()) == {_FUND_A, _FUND_B, _FUND_C}
+    assert set(result[_FUND_A].keys()) == set(keys)
+    assert isinstance(result[_FUND_A][keys[0]], float)
+    assert result[_FUND_B][keys[-1]] is None  # NULL column → None
+    assert all(v is None for v in result[_FUND_C].values())  # absent → all-None
+
+
 async def test_select_universe_funds_raises_when_exceeds_ceiling() -> None:
     """max_assets=None: raises ValueError (matching 'more than') when the DB
     returns more than MAX_UNIVERSE_CANDIDATES rows."""

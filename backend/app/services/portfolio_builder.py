@@ -341,53 +341,71 @@ async def run_optimize(
     if broad:
         assert payload.universe is not None
         spec = payload.universe
-        all_refs = [_to_data_ref(ref) for ref in assets]
-        try:
-            wide = await optimizer_data.load_returns_matrix(
-                session, all_refs, window_days=payload.window_days
+        # Stage-1 selects on PRE-COMPUTED per-fund risk features (no raw NAV): one
+        # query to the risk MV, cluster the candidates in standardized risk-factor
+        # space, and pick one representative per cluster by quality score. The raw
+        # NAV history is loaded only for the K chosen funds (Stage-2 below).
+        candidate_assets = assets
+        candidate_fund_ids = [
+            ref.id for ref in candidate_assets if isinstance(ref, FundRefIn)
+        ]
+        features_by_id = await optimizer_data.load_fund_risk_features(
+            session, candidate_fund_ids
+        )
+        # Keep funds with at least one usable risk metric; the rest can't be placed
+        # in the risk-structure space and are excluded (surfaced in diagnostics).
+        kept: list[int] = []
+        excluded: dict[int, str] = {}
+        for i, ref in enumerate(candidate_assets):
+            feats = features_by_id.get(ref.id) if isinstance(ref, FundRefIn) else None
+            if feats is not None and any(v is not None for v in feats.values()):
+                kept.append(i)
+            else:
+                excluded[i] = "no pre-computed risk metrics — excluded from selection"
+        if len(kept) < 2:
+            raise BuilderError(
+                "broad-universe selection found fewer than 2 funds with risk "
+                "metrics — relax the filters"
             )
-        except ValueError as exc:
-            raise BuilderError(str(exc)) from exc
-        wide_labels = list(wide.columns)
-        try:
-            corr, kept, excluded = optimizer_selection.robust_selection_covariance(
-                wide.to_numpy(dtype=float), min_pair_overlap=spec.min_pair_overlap
-            )
-        except ValueError as exc:
-            raise BuilderError(str(exc)) from exc
-        kept_assets = [assets[i] for i in kept]
+        kept_assets = [candidate_assets[i] for i in kept]
         fund_ids = [ref.id for ref in kept_assets if isinstance(ref, FundRefIn)]
-        metrics_by_id = await optimizer_data.load_fund_quality_metrics(session, fund_ids)
+        quality_by_id = await optimizer_data.load_fund_quality_metrics(session, fund_ids)
         neutral = {"sharpe_1y": None, "expense_ratio": None, "aum_usd": None}
-        metrics = [
-            metrics_by_id.get(ref.id, neutral) if isinstance(ref, FundRefIn) else neutral
+        quality = [
+            quality_by_id.get(ref.id, neutral) if isinstance(ref, FundRefIn) else neutral
             for ref in kept_assets
         ]
-        scores = optimizer_selection.quality_score(metrics)
-        result = optimizer_selection.select_diversified(corr, scores, k=spec.max_positions)
+        scores = optimizer_selection.quality_score(quality)
+        feature_rows = [features_by_id[ref.id] for ref in kept_assets]
+        feature_matrix = optimizer_selection.build_feature_matrix(
+            feature_rows, optimizer_data.RISK_FEATURE_KEYS
+        )
+        result = optimizer_selection.select_diversified_features(
+            feature_matrix, scores, k=spec.max_positions
+        )
         chosen_assets = [kept_assets[i] for i in result.selected]
         if len(chosen_assets) < 2:
             raise BuilderError(
-                "broad-universe selection produced fewer than 2 funds — relax the "
-                "filters or lower min_pair_overlap"
+                "broad-universe selection produced fewer than 2 funds — relax "
+                "the filters"
             )
-        assets = chosen_assets
         excluded_out = [
-            ExcludedFundOut(fund=wide_labels[orig], reason=reason)
+            ExcludedFundOut(fund=_ref_key(candidate_assets[orig]), reason=reason)
             for orig, reason in excluded.items()
         ]
         # ``result.cluster_of`` is keyed by the SELECTED index value (position in
-        # the kept/correlation set), which is exactly ``result.selected[pos]``.
+        # the kept set), which is exactly ``result.selected[pos]``.
         clusters = {
             _ref_key(chosen_assets[pos]): result.cluster_of[sel_idx]
             for pos, sel_idx in enumerate(result.selected)
         }
         selection_diag = SelectionDiagnosticsOut(
-            n_candidates=len(wide_labels),
+            n_candidates=len(candidate_assets),
             n_selected=len(chosen_assets),
             excluded=excluded_out,
             clusters=clusters,
         )
+        assets = chosen_assets
 
     refs = [_to_data_ref(ref) for ref in assets]
     try:

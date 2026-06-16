@@ -111,3 +111,61 @@ def test_select_diversified_rejects_shape_mismatch() -> None:
     corr = np.eye(4)
     with pytest.raises(ValueError, match="scores"):
         selection.select_diversified(corr, np.zeros(3), k=2)
+
+
+# ── feature-based selection (pre-computed risk metrics) ──────────────────────
+
+
+def test_build_feature_matrix_shapes_and_preserves_nan() -> None:
+    metrics = [{"a": 1.0, "b": 2.0}, {"a": None, "b": 3.0}]
+    m = selection.build_feature_matrix(metrics, ["a", "b"])
+    assert m.shape == (2, 2)
+    assert m[0, 0] == 1.0 and m[1, 1] == 3.0
+    assert np.isnan(m[1, 0])
+
+
+def _planted_feature_blocks(n_clusters: int, per: int, dim: int, seed: int) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    rows = []
+    for c in range(n_clusters):
+        center = np.full(dim, float(c) * 10.0)
+        for _ in range(per):
+            rows.append(center + rng.normal(0.0, 0.1, dim))
+    return np.vstack(rows)
+
+
+def test_select_diversified_features_picks_one_per_cluster() -> None:
+    fm = _planted_feature_blocks(n_clusters=3, per=4, dim=8, seed=0)
+    scores = np.linspace(0, 1, 12)
+    result = selection.select_diversified_features(fm, scores, k=3)
+    assert len(result.selected) == 3
+    assert {idx // 4 for idx in result.selected} == {0, 1, 2}
+    assert set(result.cluster_of) == set(result.selected)
+
+
+def test_select_diversified_features_best_quality_within_cluster() -> None:
+    fm = _planted_feature_blocks(n_clusters=2, per=4, dim=6, seed=1)
+    scores = np.zeros(8)
+    scores[2] = 1.0  # best in cluster 0 (indices 0-3)
+    scores[5] = 1.0  # best in cluster 1 (indices 4-7)
+    result = selection.select_diversified_features(fm, scores, k=2)
+    assert set(result.selected) == {2, 5}
+
+
+def test_select_diversified_features_tolerates_all_nan_column() -> None:
+    fm = _planted_feature_blocks(n_clusters=2, per=3, dim=3, seed=2)
+    fm[:, 1] = np.nan  # one all-NaN feature → z-score neutralizes it
+    scores = np.linspace(0, 1, 6)
+    result = selection.select_diversified_features(fm, scores, k=2)
+    assert len(result.selected) == 2
+
+
+def test_select_diversified_features_caps_k_at_available() -> None:
+    fm = np.random.default_rng(3).normal(0, 1, (4, 5))
+    result = selection.select_diversified_features(fm, np.linspace(0, 1, 4), k=99)
+    assert len(result.selected) == 4
+
+
+def test_select_diversified_features_rejects_shape_mismatch() -> None:
+    with pytest.raises(ValueError, match="scores"):
+        selection.select_diversified_features(np.zeros((4, 5)), np.zeros(3), k=2)

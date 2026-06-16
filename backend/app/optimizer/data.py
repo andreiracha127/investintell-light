@@ -327,6 +327,51 @@ async def load_fund_quality_metrics(
     return {fid: found.get(fid, dict(default)) for fid in fund_ids}
 
 
+# Pre-computed per-fund risk features for the broad-universe Stage-1 clustering.
+# All exist in fund_risk_latest_mv with ~98–100% coverage across asset classes;
+# they span equity exposure (beta, equity correlation), risk level (vol,
+# drawdown), tail (CVaR/EVT) and asymmetry (capture). G5-safe: NONE is an
+# expected-return forecast (raw returns are deliberately excluded).
+RISK_FEATURE_KEYS: tuple[str, ...] = (
+    "volatility_1y",
+    "max_drawdown_1y",
+    "beta_1y",
+    "equity_correlation_252d",
+    "cvar_95_12m",
+    "cvar_99_evt",
+    "downside_capture_1y",
+    "upside_capture_1y",
+)
+
+
+async def load_fund_risk_features(
+    session: AsyncSession, fund_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, dict[str, float | None]]:
+    """Pre-computed per-fund risk features for Stage-1 clustering (G5-safe).
+
+    Returns ``{instrument_id: {key: float|None}}`` over ``RISK_FEATURE_KEYS`` from
+    ``FundRiskLatest`` — the broad-universe selection clusters funds in this
+    standardized factor space WITHOUT loading any raw NAV history. Every requested
+    id is present (all-None default for a fund absent from the risk MV).
+    """
+    if not fund_ids:
+        return {}
+    cols = [getattr(FundRiskLatest, key) for key in RISK_FEATURE_KEYS]
+    result = await session.execute(
+        select(FundRiskLatest.instrument_id, *cols).where(
+            FundRiskLatest.instrument_id.in_(fund_ids)
+        )
+    )
+    found: dict[uuid.UUID, dict[str, float | None]] = {}
+    for row in result.all():
+        found[row[0]] = {
+            key: (float(val) if val is not None else None)
+            for key, val in zip(RISK_FEATURE_KEYS, row[1:], strict=True)
+        }
+    default = {key: None for key in RISK_FEATURE_KEYS}
+    return {fid: found.get(fid, dict(default)) for fid in fund_ids}
+
+
 @dataclass(frozen=True)
 class UniverseFund:
     """A fund selected by a universe spec — id plus display labels."""

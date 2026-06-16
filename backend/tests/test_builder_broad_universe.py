@@ -37,19 +37,18 @@ def _stub_broad(monkeypatch: pytest.MonkeyPatch, n_funds: int = 12) -> list[uuid
             for k, i in enumerate(ids)
         ]
 
-    async def fake_matrix(
-        session: Any, refs: list[Any], window_days: Any = None, today: Any = None
-    ) -> pd.DataFrame:
-        # 3 planted clusters of 4 funds, 600 obs, no NaN (all full history).
-        rng = np.random.default_rng(5)
-        cols = {}
-        for c in range(3):
-            common = rng.standard_normal((600, 1))
-            for j in range(4):
-                idio = rng.standard_normal((600, 1))
-                ref = refs[c * 4 + j]
-                cols[ref.label] = (0.85 * common + 0.15 * idio).ravel()
-        return pd.DataFrame(cols, index=pd.bdate_range("2023-01-02", periods=600))
+    async def fake_features(
+        session: Any, fund_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, dict[str, float | None]]:
+        # 3 planted clusters of 4 funds, well-separated in risk-feature space.
+        out: dict[uuid.UUID, dict[str, float | None]] = {}
+        for k, fid in enumerate(fund_ids):
+            base = float(k // 4) * 10.0  # cluster 0/1/2 centers at 0/10/20
+            out[fid] = {
+                key: base + 0.1 * (k % 4)
+                for key in optimizer_data.RISK_FEATURE_KEYS
+            }
+        return out
 
     async def fake_aligned(
         session: Any, refs: list[Any], window_days: Any = None, today: Any = None
@@ -79,7 +78,7 @@ def _stub_broad(monkeypatch: pytest.MonkeyPatch, n_funds: int = 12) -> list[uuid
         return {fid: "Large-Cap Growth" for fid in fund_ids}
 
     monkeypatch.setattr(optimizer_data, "select_universe_funds", fake_select)
-    monkeypatch.setattr(optimizer_data, "load_returns_matrix", fake_matrix)
+    monkeypatch.setattr(optimizer_data, "load_fund_risk_features", fake_features)
     monkeypatch.setattr(optimizer_data, "load_aligned_returns", fake_aligned)
     monkeypatch.setattr(optimizer_data, "load_fund_quality_metrics", fake_quality)
     monkeypatch.setattr(optimizer_data, "load_fund_asset_class", fake_asset_class)
