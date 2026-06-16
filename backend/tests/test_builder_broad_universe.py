@@ -166,3 +166,23 @@ async def test_broad_universe_explicit_feasible_cap_is_respected(
     assert response.status_code == 200, response.text
     body = response.json()
     assert all(w["weight"] <= 0.5 + 1e-6 for w in body["weights"])
+
+
+async def test_broad_universe_over_ceiling_is_422_not_500(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A universe exceeding MAX_UNIVERSE_CANDIDATES is a fail-loud 422, not a raw
+    500 (a 500 also strips the CORS headers, surfacing as a misleading CORS error
+    in the browser)."""
+
+    async def fake_select(session: Any, filters: Any, **kw: Any) -> list[Any]:
+        raise ValueError(
+            "universe matched more than 2000 funds — narrow the filters"
+        )
+
+    monkeypatch.setattr(optimizer_data, "select_universe_funds", fake_select)
+    payload = {"universe": {"broad_universe": True}, "objective": "min_cvar"}
+    async with _client() as client:
+        response = await client.post("/builder/optimize", json=payload)
+    assert response.status_code == 422, response.text
+    assert "more than 2000" in response.text

@@ -302,16 +302,22 @@ async def _resolve_assets(
     needs_bl = bool(payload.views) or payload.objective in ("bl_utility", "max_return_cvar")
     # Broad-universe mode removes the ranking LIMIT (Stage-1 selects later);
     # the ranked mode keeps the user's top-``max_assets`` cap.
-    candidates = await optimizer_data.select_universe_funds(
-        session,
-        _filters_from_spec(spec),
-        rank_by=spec.rank_by,
-        rank_dir=spec.rank_dir,
-        max_assets=None if spec.broad_universe else spec.max_assets,
-        require_aum=needs_bl,
-        include_ids=spec.include_instrument_ids,
-        window_days=payload.window_days,
-    )
+    try:
+        candidates = await optimizer_data.select_universe_funds(
+            session,
+            _filters_from_spec(spec),
+            rank_by=spec.rank_by,
+            rank_dir=spec.rank_dir,
+            max_assets=None if spec.broad_universe else spec.max_assets,
+            require_aum=needs_bl,
+            include_ids=spec.include_instrument_ids,
+            window_days=payload.window_days,
+        )
+    except ValueError as exc:
+        # Fail-loud data-layer guards (e.g. the broad-universe >2000 ceiling)
+        # must surface as 422, not a raw 500 — a 500 also drops the CORS headers
+        # and the browser then reports a misleading CORS error.
+        raise BuilderError(str(exc)) from exc
     if len(candidates) < 2:
         raise BuilderError(
             f"universe selection matched {len(candidates)} optimizable fund(s) — "
