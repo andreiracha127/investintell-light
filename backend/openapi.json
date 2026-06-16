@@ -2599,6 +2599,48 @@
         }
       }
     },
+    "/correlation-regime": {
+      "post": {
+        "tags": [
+          "correlation-regime"
+        ],
+        "summary": "Correlation Regime",
+        "description": "Correlation-regime + contagion analysis over an explicit asset list or a\nresolved fund universe. Decimal-fraction scale. Domain failures \u2192 422.",
+        "operationId": "correlation_regime_correlation_regime_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrelationRegimeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorrelationRegimeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/macro/fiscal": {
       "get": {
         "tags": [
@@ -3489,6 +3531,62 @@
         "title": "Candle",
         "description": "One OHLCV candle built from RAW (un-adjusted) prices.\n\nDaily for ranges up to 5Y; weekly (W-FRI buckets: open=first, high=max,\nlow=min, close=last, volume=sum) for range MAX."
       },
+      "ConcentrationOut": {
+        "properties": {
+          "eigenvalues": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Eigenvalues"
+          },
+          "first_eigenvalue_ratio": {
+            "type": "number",
+            "title": "First Eigenvalue Ratio"
+          },
+          "concentration_status": {
+            "type": "string",
+            "enum": [
+              "diversified",
+              "moderate_concentration",
+              "high_concentration"
+            ],
+            "title": "Concentration Status"
+          },
+          "absorption_ratio": {
+            "type": "number",
+            "title": "Absorption Ratio"
+          },
+          "absorption_status": {
+            "type": "string",
+            "enum": [
+              "normal",
+              "warning",
+              "critical"
+            ],
+            "title": "Absorption Status"
+          },
+          "mp_threshold": {
+            "type": "number",
+            "title": "Mp Threshold"
+          },
+          "n_signal_eigenvalues": {
+            "type": "integer",
+            "title": "N Signal Eigenvalues"
+          }
+        },
+        "type": "object",
+        "required": [
+          "eigenvalues",
+          "first_eigenvalue_ratio",
+          "concentration_status",
+          "absorption_ratio",
+          "absorption_status",
+          "mp_threshold",
+          "n_signal_eigenvalues"
+        ],
+        "title": "ConcentrationOut"
+      },
       "ConfidenceBar": {
         "properties": {
           "horizon": {
@@ -3627,6 +3725,145 @@
         ],
         "title": "CorrelationMatrixOut",
         "description": "Pairwise Pearson correlation of per-asset daily returns."
+      },
+      "CorrelationRegimeOut": {
+        "properties": {
+          "instrument_count": {
+            "type": "integer",
+            "title": "Instrument Count"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Labels"
+          },
+          "window_days": {
+            "type": "integer",
+            "title": "Window Days"
+          },
+          "correlation_matrix": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Correlation Matrix"
+          },
+          "pair_correlations": {
+            "items": {
+              "$ref": "#/components/schemas/PairCorrelationOut"
+            },
+            "type": "array",
+            "title": "Pair Correlations"
+          },
+          "concentration": {
+            "$ref": "#/components/schemas/ConcentrationOut"
+          },
+          "diversification_ratio": {
+            "type": "number",
+            "title": "Diversification Ratio"
+          },
+          "dr_alert": {
+            "type": "boolean",
+            "title": "Dr Alert"
+          },
+          "average_correlation": {
+            "type": "number",
+            "title": "Average Correlation"
+          },
+          "baseline_average_correlation": {
+            "type": "number",
+            "title": "Baseline Average Correlation"
+          },
+          "regime_shift_detected": {
+            "type": "boolean",
+            "title": "Regime Shift Detected"
+          },
+          "sufficient_data": {
+            "type": "boolean",
+            "title": "Sufficient Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "instrument_count",
+          "labels",
+          "window_days",
+          "correlation_matrix",
+          "pair_correlations",
+          "concentration",
+          "diversification_ratio",
+          "dr_alert",
+          "average_correlation",
+          "baseline_average_correlation",
+          "regime_shift_detected",
+          "sufficient_data"
+        ],
+        "title": "CorrelationRegimeOut"
+      },
+      "CorrelationRegimeRequest": {
+        "properties": {
+          "assets": {
+            "anyOf": [
+              {
+                "items": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/FundRefIn"
+                    },
+                    {
+                      "$ref": "#/components/schemas/EquityRefIn"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "kind",
+                    "mapping": {
+                      "equity": "#/components/schemas/EquityRefIn",
+                      "fund": "#/components/schemas/FundRefIn"
+                    }
+                  }
+                },
+                "type": "array",
+                "maxItems": 50,
+                "minItems": 2
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assets"
+          },
+          "universe": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UniverseSpecIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "window_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 3650.0,
+                "minimum": 30.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Days"
+          }
+        },
+        "type": "object",
+        "title": "CorrelationRegimeRequest",
+        "description": "Analyze either an explicit ``assets`` list OR a ``universe`` spec\n(exactly one), over the optimizer's aligned returns matrix."
       },
       "CorrelationRequest": {
         "properties": {
@@ -6953,6 +7190,44 @@
         ],
         "title": "OverviewAggregates",
         "description": "Portfolio-level aggregates rendered in the table column headers (D6)."
+      },
+      "PairCorrelationOut": {
+        "properties": {
+          "label_a": {
+            "type": "string",
+            "title": "Label A"
+          },
+          "label_b": {
+            "type": "string",
+            "title": "Label B"
+          },
+          "current_correlation": {
+            "type": "number",
+            "title": "Current Correlation"
+          },
+          "baseline_correlation": {
+            "type": "number",
+            "title": "Baseline Correlation"
+          },
+          "correlation_change": {
+            "type": "number",
+            "title": "Correlation Change"
+          },
+          "is_contagion": {
+            "type": "boolean",
+            "title": "Is Contagion"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label_a",
+          "label_b",
+          "current_correlation",
+          "baseline_correlation",
+          "correlation_change",
+          "is_contagion"
+        ],
+        "title": "PairCorrelationOut"
       },
       "PortfolioAnalysisRequest": {
         "properties": {

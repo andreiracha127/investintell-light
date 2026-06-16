@@ -890,6 +890,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/correlation-regime": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Correlation Regime
+         * @description Correlation-regime + contagion analysis over an explicit asset list or a
+         *     resolved fund universe. Decimal-fraction scale. Domain failures → 422.
+         */
+        post: operations["correlation_regime_correlation_regime_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/macro/fiscal": {
         parameters: {
             query?: never;
@@ -1342,6 +1363,29 @@ export interface components {
             /** Volume */
             volume: number;
         };
+        /** ConcentrationOut */
+        ConcentrationOut: {
+            /** Eigenvalues */
+            eigenvalues: number[];
+            /** First Eigenvalue Ratio */
+            first_eigenvalue_ratio: number;
+            /**
+             * Concentration Status
+             * @enum {string}
+             */
+            concentration_status: "diversified" | "moderate_concentration" | "high_concentration";
+            /** Absorption Ratio */
+            absorption_ratio: number;
+            /**
+             * Absorption Status
+             * @enum {string}
+             */
+            absorption_status: "normal" | "warning" | "critical";
+            /** Mp Threshold */
+            mp_threshold: number;
+            /** N Signal Eigenvalues */
+            n_signal_eigenvalues: number;
+        };
         /**
          * ConfidenceBar
          * @description One horizon's percentile fan of the projected statistic.
@@ -1411,6 +1455,44 @@ export interface components {
              * @description Row-major square matrix (-1..1); symmetric with unit diagonal.
              */
             matrix: number[][];
+        };
+        /** CorrelationRegimeOut */
+        CorrelationRegimeOut: {
+            /** Instrument Count */
+            instrument_count: number;
+            /** Labels */
+            labels: string[];
+            /** Window Days */
+            window_days: number;
+            /** Correlation Matrix */
+            correlation_matrix: number[][];
+            /** Pair Correlations */
+            pair_correlations: components["schemas"]["PairCorrelationOut"][];
+            concentration: components["schemas"]["ConcentrationOut"];
+            /** Diversification Ratio */
+            diversification_ratio: number;
+            /** Dr Alert */
+            dr_alert: boolean;
+            /** Average Correlation */
+            average_correlation: number;
+            /** Baseline Average Correlation */
+            baseline_average_correlation: number;
+            /** Regime Shift Detected */
+            regime_shift_detected: boolean;
+            /** Sufficient Data */
+            sufficient_data: boolean;
+        };
+        /**
+         * CorrelationRegimeRequest
+         * @description Analyze either an explicit ``assets`` list OR a ``universe`` spec
+         *     (exactly one), over the optimizer's aligned returns matrix.
+         */
+        CorrelationRegimeRequest: {
+            /** Assets */
+            assets?: (components["schemas"]["FundRefIn"] | components["schemas"]["EquityRefIn"])[] | null;
+            universe?: components["schemas"]["UniverseSpecIn"] | null;
+            /** Window Days */
+            window_days?: number | null;
         };
         /**
          * CorrelationRequest
@@ -2603,6 +2685,21 @@ export interface components {
              * @description Max as_of across positions; null for an empty portfolio.
              */
             as_of: string | null;
+        };
+        /** PairCorrelationOut */
+        PairCorrelationOut: {
+            /** Label A */
+            label_a: string;
+            /** Label B */
+            label_b: string;
+            /** Current Correlation */
+            current_correlation: number;
+            /** Baseline Correlation */
+            baseline_correlation: number;
+            /** Correlation Change */
+            correlation_change: number;
+            /** Is Contagion */
+            is_contagion: boolean;
         };
         /**
          * PortfolioAnalysisRequest
@@ -5548,6 +5645,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GlobalIndicatorsResponse"];
+                };
+            };
+        };
+    };
+    correlation_regime_correlation_regime_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CorrelationRegimeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CorrelationRegimeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
