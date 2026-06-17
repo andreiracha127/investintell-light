@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import func, select
+from sqlalchemy import bindparam, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.eod_price import EodPrice
@@ -328,9 +328,9 @@ async def load_fund_quality_metrics(
 
 
 # Pre-computed per-fund risk features for the broad-universe Stage-1 clustering.
-# All exist in fund_risk_latest_mv with ~98–100% coverage across asset classes;
-# they span equity exposure (beta, equity correlation), risk level (vol,
-# drawdown), tail (CVaR/EVT) and asymmetry (capture). G5-safe: NONE is an
+# They span equity exposure (beta, equity correlation), risk level (vol,
+# drawdown), tail (CVaR/EVT), asymmetry (capture) and fixed-income style
+# (empirical duration vs Δ rates, credit beta vs Δ spread). G5-safe: NONE is an
 # expected-return forecast (raw returns are deliberately excluded).
 RISK_FEATURE_KEYS: tuple[str, ...] = (
     "volatility_1y",
@@ -341,6 +341,8 @@ RISK_FEATURE_KEYS: tuple[str, ...] = (
     "cvar_99_evt",
     "downside_capture_1y",
     "upside_capture_1y",
+    "empirical_duration",
+    "credit_beta",
 )
 
 
@@ -349,19 +351,24 @@ async def load_fund_risk_features(
 ) -> dict[uuid.UUID, dict[str, float | None]]:
     """Pre-computed per-fund risk features for Stage-1 clustering (G5-safe).
 
-    Returns ``{instrument_id: {key: float|None}}`` over ``RISK_FEATURE_KEYS`` from
-    ``FundRiskLatest`` — the broad-universe selection clusters funds in this
-    standardized factor space WITHOUT loading any raw NAV history. Every requested
-    id is present (all-None default for a fund absent from the risk MV).
+    Returns ``{instrument_id: {key: float|None}}`` over ``RISK_FEATURE_KEYS`` — the
+    broad-universe selection clusters funds in this standardized factor space
+    WITHOUT loading any raw NAV history. Read from the LATEST ``fund_risk_metrics``
+    row per fund (the source of ``fund_risk_latest_mv``): the base table carries
+    the FI factors (``empirical_duration``/``credit_beta``) that the read-model MV
+    does not yet project. Every requested id is present (all-None default).
     """
     if not fund_ids:
         return {}
-    cols = [getattr(FundRiskLatest, key) for key in RISK_FEATURE_KEYS]
-    result = await session.execute(
-        select(FundRiskLatest.instrument_id, *cols).where(
-            FundRiskLatest.instrument_id.in_(fund_ids)
-        )
-    )
+    # RISK_FEATURE_KEYS are hardcoded column identifiers (never user input).
+    cols_sql = ", ".join(RISK_FEATURE_KEYS)
+    stmt = text(
+        f"SELECT DISTINCT ON (instrument_id) instrument_id, {cols_sql} "
+        "FROM fund_risk_metrics "
+        "WHERE organization_id IS NULL AND instrument_id IN :ids "
+        "ORDER BY instrument_id, calc_date DESC"
+    ).bindparams(bindparam("ids", expanding=True))
+    result = await session.execute(stmt, {"ids": list(fund_ids)})
     found: dict[uuid.UUID, dict[str, float | None]] = {}
     for row in result.all():
         found[row[0]] = {

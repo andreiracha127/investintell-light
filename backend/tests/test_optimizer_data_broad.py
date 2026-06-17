@@ -184,7 +184,7 @@ async def test_load_fund_risk_features_returns_all_keys_and_fills_missing() -> N
     ]
 
     class _S:
-        async def execute(self, stmt: Any) -> _FakeResult:
+        async def execute(self, stmt: Any, params: Any = None) -> _FakeResult:
             return _FakeResult(db_rows)
 
     result = await optimizer_data.load_fund_risk_features(
