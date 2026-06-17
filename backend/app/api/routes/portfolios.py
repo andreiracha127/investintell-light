@@ -286,9 +286,14 @@ async def get_portfolio_overview(
         closes.update(await portfolio_crud.select_last_two_navs(session, nav_tickers))
         fund_names = await portfolio_crud.select_fund_names(session, nav_tickers)
         names = {**fund_names, **names}
+    taxonomy = await portfolio_crud.resolve_position_taxonomy(session, tickers)
     try:
         rows, aggregates = portfolio_crud.build_overview(
-            portfolio.positions, closes, names, cash=portfolio.cash
+            portfolio.positions,
+            closes,
+            names,
+            cash=portfolio.cash,
+            taxonomy_by_ticker=taxonomy,
         )
     except portfolio_crud.MissingPriceDataError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

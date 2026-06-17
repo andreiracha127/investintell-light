@@ -104,6 +104,9 @@ def _install_stubs(
     async def fake_fund_names(session: Any, tickers: Any) -> dict[str, str | None]:
         return fund_names or {}
 
+    async def fake_taxonomy(session: Any, tickers: Any) -> dict[str, Any]:
+        return {t: portfolio_crud.PositionTaxonomy(None, None, None) for t in tickers}
+
     monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
     monkeypatch.setattr(portfolio_crud, "get_portfolio", fake_get)
     monkeypatch.setattr(portfolio_crud, "select_last_two_closes", fake_closes)
@@ -112,6 +115,7 @@ def _install_stubs(
     monkeypatch.setattr(portfolio_crud, "select_tickers_with_eod", fake_eod_known)
     monkeypatch.setattr(portfolio_crud, "select_last_two_navs", fake_navs)
     monkeypatch.setattr(portfolio_crud, "select_fund_names", fake_fund_names)
+    monkeypatch.setattr(portfolio_crud, "resolve_position_taxonomy", fake_taxonomy)
     return ensure_calls
 
 
@@ -438,3 +442,58 @@ def test_build_overview_taxonomy_defaults_none_when_map_omitted() -> None:
     )
     assert rows[0].asset_class is None
     assert rows[0].instrument_id is None
+
+
+async def test_resolve_position_taxonomy_funds_vs_equities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import uuid as _uuid
+
+    from app.optimizer import data as optimizer_data
+    from app.services import portfolio_crud
+
+    iid = _uuid.UUID(int=11)
+
+    async def fake_instr(session: Any, tickers: Any) -> dict[str, Any]:
+        return {"VTI": iid}  # AAPL absent -> direct equity
+
+    async def fake_class(session: Any, fund_ids: Any) -> dict[Any, str]:
+        return {iid: "equity"}
+
+    async def fake_strategy(session: Any, fund_ids: Any) -> dict[Any, str]:
+        return {iid: "Large-Cap Blend"}
+
+    monkeypatch.setattr(portfolio_crud, "_fund_instrument_by_ticker", fake_instr)
+    monkeypatch.setattr(optimizer_data, "load_fund_asset_class", fake_class)
+    monkeypatch.setattr(optimizer_data, "load_fund_strategy_label", fake_strategy)
+
+    out = await portfolio_crud.resolve_position_taxonomy(None, ["VTI", "AAPL"])  # type: ignore[arg-type]
+    assert out["VTI"] == portfolio_crud.PositionTaxonomy(
+        "equity", "Large-Cap Blend", iid
+    )
+    assert out["AAPL"] == portfolio_crud.PositionTaxonomy("equity", None, None)
+
+
+async def test_overview_response_includes_position_taxonomy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import uuid as _uuid
+
+    _install_stubs(
+        monkeypatch,
+        _portfolio([_position("VTI", 1.0, 10.0)], cash=0.0),
+        closes={"VTI": [(_LAST, 10.0)]},
+    )
+    iid = _uuid.UUID(int=11)
+
+    async def fake_taxonomy(session: Any, tickers: Any) -> dict[str, Any]:
+        return {"VTI": portfolio_crud.PositionTaxonomy("equity", "Large-Cap Blend", iid)}
+
+    monkeypatch.setattr(portfolio_crud, "resolve_position_taxonomy", fake_taxonomy)
+    async with _client() as ac:
+        resp = await ac.get("/portfolios/1/overview")
+    assert resp.status_code == 200, resp.text
+    pos = resp.json()["positions"][0]
+    assert pos["asset_class"] == "equity"
+    assert pos["strategy_label"] == "Large-Cap Blend"
+    assert pos["instrument_id"] == str(iid)
