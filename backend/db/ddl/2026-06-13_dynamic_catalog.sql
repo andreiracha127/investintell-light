@@ -115,9 +115,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS fund_risk_latest_mv_pk
 -- label — e.g. "Real Estate"/"Precious Metals"/"Emerging Markets Equity" funds
 -- carried asset_class='fixed_income', polluting the broad fixed_income universe
 -- by ~29%. strategy_label is the trustworthy field (sourced from SEC metadata +
--- strategy_reclassification_stage), so derive asset_class from it; genuinely
--- multi-asset / unknown labels (Balanced, Target Date, Multi-Asset, Index /
--- Passive, Unclassified) return NULL and fall back to the stored asset_class.
+-- strategy_reclassification_stage), so the data migration at the end of this
+-- file rewrites the STORED instruments_universe.asset_class from it via this
+-- map; genuinely multi-asset / unknown labels (Balanced, Target Date,
+-- Multi-Asset, Index / Passive, Unclassified) return NULL and keep the stored
+-- value. asset_class stays a stored column (NOT a view expression) so the
+-- optimizer's WHERE asset_class = :class predicate remains sargable.
 CREATE OR REPLACE FUNCTION public.asset_class_from_strategy(label text)
 RETURNS varchar
 LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $fn$
@@ -313,26 +316,15 @@ SELECT
         END,
         'Unclassified'
     ) AS strategy_label,
-    -- asset_class derived from the (reclassified) strategy_label via the
-    -- canonical map; multi-asset/unknown labels fall back to the stored
-    -- instruments_universe.asset_class. Mirrors the strategy_label COALESCE.
-    COALESCE(
-        public.asset_class_from_strategy(
-            COALESCE(
-                NULLIF(btrim(rf.strategy_label), ''),
-                NULLIF(btrim(etf.strategy_label), ''),
-                NULLIF(btrim(mmf.strategy_label), ''),
-                NULLIF(btrim(stage.label), ''),
-                CASE
-                    WHEN lower(btrim(peer.peer_strategy_label))
-                         IN ('mutual_fund', 'etf', 'mmf', 'ucits') THEN NULL
-                    ELSE NULLIF(btrim(peer.peer_strategy_label), '')
-                END,
-                'Unclassified'
-            )
-        ),
-        u.asset_class
-    )::varchar(50) AS asset_class,
+    -- Plain passthrough of the STORED instruments_universe.asset_class (kept
+    -- sargable: the broad/ranked optimizer filters WHERE asset_class = :class
+    -- with window_days=NULL, and a computed expression here makes the predicate
+    -- non-pushdownable — it forced a full materialization of this view + the
+    -- 27M-row NAV aggregation before filtering, turning a ~7s resolve into an
+    -- 18-minute hang. The correction lives in the column itself: the data
+    -- migration below rewrites instruments_universe.asset_class from the
+    -- reclassified strategy_label via asset_class_from_strategy().
+    u.asset_class,
     COALESCE(rf.is_index, etf.is_index) AS is_index,
     COALESCE(
         rf.net_operating_expenses, etf.net_operating_expenses,
@@ -370,6 +362,22 @@ LEFT JOIN nport_aum      ON nport_aum.series_id = e.sec_series_id
 LEFT JOIN etp            ON etp.ticker = upper(e.ticker)
 LEFT JOIN universe u     ON u.instrument_id = e.instrument_id
 LEFT JOIN nav_latest_aum ON nav_latest_aum.instrument_id = e.instrument_id;
+
+-- ---------------------------------------------------------------------------
+-- DATA MIGRATION (idempotent): correct instruments_universe.asset_class from
+-- the reclassified strategy_label. Run after funds_v + asset_class_from_strategy
+-- exist. Reads the resolved strategy_label via funds_v and rewrites the stored
+-- column for funds the canonical map places definitively; ambiguous labels
+-- (map -> NULL) keep their stored value. Re-running is a no-op (the DISTINCT
+-- guard skips already-correct rows). NOTE: if a future mother-DB resync rewrites
+-- instruments_universe.asset_class, re-run this block.
+-- ---------------------------------------------------------------------------
+UPDATE instruments_universe iu
+SET asset_class = public.asset_class_from_strategy(fv.strategy_label)
+FROM funds_v fv
+WHERE fv.instrument_id = iu.instrument_id
+  AND public.asset_class_from_strategy(fv.strategy_label) IS NOT NULL
+  AND iu.asset_class IS DISTINCT FROM public.asset_class_from_strategy(fv.strategy_label);
 
 -- ---------------------------------------------------------------------------
 -- fund_holdings_v / fund_classes_v — dynamic VIEWs replacing the sync_funds.py
