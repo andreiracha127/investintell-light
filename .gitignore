@@ -46,3 +46,6 @@ lean-research/
 
 # Superpowers brainstorm visual companion (local mockups)
 .superpowers/
+
+# Local git worktrees
+.worktrees/
