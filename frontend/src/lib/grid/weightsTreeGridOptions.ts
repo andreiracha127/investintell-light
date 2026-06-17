@@ -67,7 +67,10 @@ export function weightsTreeGridOptions(rows: WeightTreeRow[]): Options {
     idColumn: "id",
     columns: {
       id: rows.map((r) => r.id),
-      parentId: rows.map((r) => r.parentId ?? ""),
+      // Roots MUST be null (not ""): the parent-id tree adapter treats null as
+      // "root", but "" as a reference to a (non-existent) row with id "" →
+      // "Missing parent" → the tree build fails and the grid renders flat.
+      parentId: rows.map((r) => r.parentId ?? null),
       label: rows.map((r) => r.label),
       name: rows.map((r) => r.name ?? ""),
       weight: rows.map((r) => r.weight),

@@ -18,7 +18,10 @@ describe("weightsTreeGridOptions", () => {
       treeView?: { treeColumn?: string };
     };
     expect(data.columns.id).toHaveLength(3);
-    expect(data.columns.parentId).toEqual(["", "ac:equity", "st:equity/Growth"]);
+    // Root rows MUST carry parentId null (not ""): the parent-id tree adapter
+    // treats null as "root" but "" as a reference to a row with id "", which
+    // doesn't exist → "Missing parent" → the whole tree fails and renders flat.
+    expect(data.columns.parentId).toEqual([null, "ac:equity", "st:equity/Growth"]);
     // Tree input needs the row-id column declared, else the grid renders flat.
     expect(data.idColumn).toBe("id");
     expect(data.treeView?.treeColumn).toBe("label");
