@@ -223,20 +223,31 @@ export const OBJECTIVES: {
   },
 ];
 
-/** Objectives selectable in the current mode. Broad-universe mode is
- * risk-structure-only (gate G5), so the backend rejects mu-based objectives
- * (bl_utility / max_return_cvar) — hide bl_utility here (max_return_cvar is not
- * in OBJECTIVES; it is reached only via the views path). */
+/** Objectives the broad-universe path can actually serve: the COVARIANCE-based
+ * ones. Broad allocates on a pairwise covariance over the (diverse) universe, so
+ * scenario-based min_cvar — which needs a common joint-scenario window and 422s
+ * when the picks lack one — and the mu-based bl_utility (gate G5) are excluded. */
+const BROAD_OBJECTIVES: readonly BuilderObjective[] = [
+  "min_vol",
+  "erc",
+  "max_diversification",
+  "equal_weight",
+];
+
+/** Objectives selectable in the current mode. Broad-universe mode keeps only the
+ * covariance-based objectives (see BROAD_OBJECTIVES); ranked mode keeps all. */
 export function objectivesForBroad(broad: boolean): typeof OBJECTIVES {
-  return broad ? OBJECTIVES.filter((o) => o.value !== "bl_utility") : OBJECTIVES;
+  return broad
+    ? OBJECTIVES.filter((o) => BROAD_OBJECTIVES.includes(o.value))
+    : OBJECTIVES;
 }
 
-/** Fall a now-unavailable objective back to the mu-free default. In broad mode
- * bl_utility becomes min_cvar; everything else (and all of ranked mode) is
- * left untouched. */
+/** Steer a now-unavailable objective to the covariance default (min_vol). In
+ * broad mode any non-covariance objective (min_cvar / bl_utility) becomes
+ * min_vol; covariance objectives and all of ranked mode are left untouched. */
 export function resolveObjectiveForBroad(
   objective: BuilderObjective,
   broad: boolean,
 ): BuilderObjective {
-  return broad && objective === "bl_utility" ? "min_cvar" : objective;
+  return broad && !BROAD_OBJECTIVES.includes(objective) ? "min_vol" : objective;
 }

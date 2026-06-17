@@ -342,8 +342,10 @@ export function BuilderView() {
           )}
           {broadUniverse && (
             <p className="ix-fs mb-0 mt-2 text-text-muted">
-              Broad mode is risk-structure-only (gate G5) — return-based
-              objectives (BL max utility) are unavailable.
+              Broad mode allocates on a pairwise covariance, so only
+              covariance-based objectives are available — Min CVaR (needs a
+              common scenario window) and BL max utility (return-based, gate G5)
+              are not.
             </p>
           )}
         </Card>
