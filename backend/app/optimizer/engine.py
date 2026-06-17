@@ -22,7 +22,7 @@ from dataclasses import dataclass
 import cvxpy as cp
 import numpy as np
 
-from app.analytics import rmt
+from app.analytics import pairwise_cov, rmt
 
 TRADING_DAYS = 252
 
@@ -147,6 +147,40 @@ def sigma_robust(
         # Deterministic fallback: RMT denoise could not produce a usable matrix.
         return repair_psd(sigma_ledoit_wolf(arr))
     return repair_psd(cov_ann)
+
+
+def sigma_robust_pairwise(
+    returns: np.ndarray,
+    *,
+    min_pair_overlap: int = pairwise_cov.MIN_PAIR_OVERLAP,
+) -> tuple[np.ndarray, list[int], dict[int, str]]:
+    """Annualized (×252) covariance from a returns matrix WITH NaN.
+
+    The broad-universe Stage-2 estimator for covariance-based objectives
+    (min_vol / erc / max_diversification): unlike ``sigma_robust`` — which
+    refuses NaN and so forces a global ``dropna`` to the common-history window —
+    this builds each pair's covariance on THAT pair's overlapping observations
+    via ``pairwise_covariance``, so funds with disjoint inception dates no longer
+    collapse the panel to a tiny common window. Columns whose MEDIAN pairwise
+    overlap is below ``min_pair_overlap`` are excluded (returned in ``excluded``);
+    the covariance is rebuilt on the survivors, annualized, and PSD-repaired
+    (the raw pairwise matrix is not guaranteed PSD).
+
+    Returns ``(sigma, kept_indices, excluded)`` mirroring ``pairwise_covariance``.
+    Scenario-based objectives (min_cvar) still need joint scenarios and cannot
+    use this path. Raises ``OptimizerError`` when fewer than 2 funds survive.
+    """
+    arr = np.asarray(returns, dtype=float)
+    if arr.ndim != 2:
+        raise OptimizerError(f"returns must be a T×n matrix, got ndim={arr.ndim}")
+    try:
+        cov_daily, kept, excluded = pairwise_cov.pairwise_covariance(
+            arr, min_pair_overlap
+        )
+    except ValueError as exc:
+        raise OptimizerError(str(exc)) from exc
+    sigma = repair_psd(cov_daily * TRADING_DAYS)
+    return sigma, kept, excluded
 
 
 def _check_constraint_params(n: int, cap: float | None, min_weight: float | None) -> None:

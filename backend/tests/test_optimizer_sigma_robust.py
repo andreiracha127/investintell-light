@@ -57,3 +57,53 @@ def test_sigma_robust_rejects_nan() -> None:
     x[0, 0] = np.nan
     with pytest.raises(engine.OptimizerError, match="NaN"):
         engine.sigma_robust(x)
+
+
+# ── sigma_robust_pairwise (broad Stage-2 over partially-overlapping funds) ──────
+
+
+def test_sigma_robust_pairwise_matches_biased_cov_when_fully_observed() -> None:
+    """On a fully-observed panel the pairwise estimator equals the biased
+    sample covariance (1/n convention), annualized ×252 and PSD-repaired."""
+    x = _factor_returns(300, 4, seed=10)
+    sigma, kept, excluded = engine.sigma_robust_pairwise(x, min_pair_overlap=50)
+    assert kept == [0, 1, 2, 3]
+    assert excluded == {}
+    expected = engine.repair_psd(np.cov(x, rowvar=False, bias=True) * engine.TRADING_DAYS)
+    np.testing.assert_allclose(sigma, expected, atol=1e-9)
+
+
+def test_sigma_robust_pairwise_tolerates_nan_unlike_sigma_robust() -> None:
+    """The differentiator: a matrix with NaN (a young fund's pre-inception
+    gap) is accepted — each pair's covariance uses that pair's overlap — and
+    yields a symmetric PSD annualized sigma, where sigma_robust would refuse."""
+    x = _factor_returns(300, 3, seed=11)
+    x[:60, 2] = np.nan  # asset 2 born 60 rows in
+    with pytest.raises(engine.OptimizerError, match="NaN"):
+        engine.sigma_robust(x)  # baseline refuses NaN
+    sigma, kept, excluded = engine.sigma_robust_pairwise(x, min_pair_overlap=100)
+    assert kept == [0, 1, 2] and excluded == {}
+    assert sigma.shape == (3, 3)
+    np.testing.assert_allclose(sigma, sigma.T, atol=1e-12)
+    assert np.isfinite(sigma).all()
+    assert np.linalg.eigvalsh(sigma).min() > -1e-9  # PSD after repair
+
+
+def test_sigma_robust_pairwise_excludes_short_overlap_column() -> None:
+    """A fund whose median pairwise overlap is below the floor is dropped; the
+    covariance is rebuilt on the survivors (reported via kept/excluded)."""
+    x = _factor_returns(300, 4, seed=12)
+    x[:250, 3] = np.nan  # asset 3 overlaps each other column only 50 rows
+    sigma, kept, excluded = engine.sigma_robust_pairwise(x, min_pair_overlap=200)
+    assert kept == [0, 1, 2]
+    assert set(excluded) == {3}
+    assert sigma.shape == (3, 3)
+    assert np.linalg.eigvalsh(sigma).min() > -1e-9
+
+
+def test_sigma_robust_pairwise_raises_when_fewer_than_two_survive() -> None:
+    x = _factor_returns(300, 3, seed=13)
+    x[:280, 1] = np.nan
+    x[:280, 2] = np.nan  # only asset 0 has broad overlap
+    with pytest.raises(engine.OptimizerError):
+        engine.sigma_robust_pairwise(x, min_pair_overlap=200)

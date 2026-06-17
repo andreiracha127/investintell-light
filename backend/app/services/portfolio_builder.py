@@ -408,12 +408,68 @@ async def run_optimize(
         assets = chosen_assets
 
     refs = [_to_data_ref(ref) for ref in assets]
-    try:
-        frame: pd.DataFrame = await optimizer_data.load_aligned_returns(
-            session, refs, window_days=payload.window_days
-        )
-    except ValueError as exc:
-        raise BuilderError(str(exc)) from exc
+    frame: pd.DataFrame
+    # Broad mode + a covariance-based objective (min_vol / erc /
+    # max_diversification / equal_weight) tolerates funds with disjoint inception
+    # via a PAIRWISE covariance over the union-index (NaN-preserving) matrix — no
+    # global dropna to a common window, which on the diverse broad universe
+    # collapses to <400 shared days and fails loud. Scenario-based objectives
+    # (min_cvar / max_return_cvar) need joint scenario rows, so they keep the
+    # common-window loader.
+    pairwise_cov_path = broad and payload.objective not in (
+        "min_cvar",
+        "max_return_cvar",
+    )
+    if pairwise_cov_path:
+        assert payload.universe is not None
+        try:
+            union = await optimizer_data.load_returns_matrix(
+                session, refs, window_days=payload.window_days
+            )
+        except ValueError as exc:
+            raise BuilderError(str(exc)) from exc
+        try:
+            sigma, kept_idx, cov_excluded = engine.sigma_robust_pairwise(
+                union.to_numpy(dtype=float),
+                min_pair_overlap=payload.universe.min_pair_overlap,
+            )
+        except engine.OptimizerError as exc:
+            raise BuilderError(str(exc)) from exc
+        # Drop funds the pairwise estimator excluded (median overlap too low);
+        # surface them in the selection diagnostics alongside the Stage-1 cuts.
+        union_assets = list(assets)
+        kept_labels = [str(union.columns[i]) for i in kept_idx]
+        assets = [union_assets[i] for i in kept_idx]
+        refs = [refs[i] for i in kept_idx]
+        # In-sample CVaR is reported over the common-history rows of the
+        # SURVIVING funds; allocation itself used the pairwise sigma, not these.
+        frame = union[kept_labels].dropna()
+        if cov_excluded and selection_diag is not None:
+            extra_excluded = [
+                ExcludedFundOut(fund=_ref_key(union_assets[i]), reason=reason)
+                for i, reason in cov_excluded.items()
+            ]
+            selection_diag = selection_diag.model_copy(
+                update={
+                    "excluded": [*selection_diag.excluded, *extra_excluded],
+                    "n_selected": len(assets),
+                }
+            )
+    else:
+        try:
+            frame = await optimizer_data.load_aligned_returns(
+                session, refs, window_days=payload.window_days
+            )
+        except ValueError as exc:
+            raise BuilderError(str(exc)) from exc
+        try:
+            sigma = (
+                engine.sigma_robust(frame.to_numpy(dtype=float))
+                if broad
+                else engine.sigma_ledoit_wolf(frame.to_numpy(dtype=float))
+            )
+        except engine.OptimizerError as exc:
+            raise BuilderError(str(exc)) from exc
 
     labels = list(frame.columns)
     index_of = {label: i for i, label in enumerate(labels)}
@@ -429,12 +485,6 @@ async def run_optimize(
                 f"current_weights is missing an entry for asset {exc.args[0]} — it must "
                 "cover every asset in the request universe"
             ) from exc
-    try:
-        sigma = (
-            engine.sigma_robust(scenarios) if broad else engine.sigma_ledoit_wolf(scenarios)
-        )
-    except engine.OptimizerError as exc:
-        raise BuilderError(str(exc)) from exc
 
     cap = payload.constraints.cap
     min_weight = payload.constraints.min_weight
