@@ -101,7 +101,10 @@ export function HighchartsChart({
     const chart = chartRef.current;
     if (!chart) return;
     // redraw + oneToOne: replace series/axes rather than merge-append.
-    chart.update(coreOnlyOptions(options), true, true);
+    // animation=false: skip the 350ms theme animation on reactive updates
+    // (range switches redraw thousands of SVG paths → freeze/blank). The
+    // initial Highcharts.chart() above keeps its entry animation.
+    chart.update(coreOnlyOptions(options), true, true, false);
     onReadyRef.current?.(chart);
   }, [options]);
 

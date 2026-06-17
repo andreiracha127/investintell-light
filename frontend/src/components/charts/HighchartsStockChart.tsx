@@ -69,7 +69,10 @@ export function HighchartsStockChart({
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
-    chart.update(options, true, true);
+    // animation=false: skip the 350ms theme animation on reactive updates
+    // (range switches redraw thousands of SVG paths → freeze/blank). The
+    // initial Highcharts.stockChart() above keeps its entry animation.
+    chart.update(options, true, true, false);
     onReadyRef.current?.(chart);
   }, [options]);
 

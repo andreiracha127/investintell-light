@@ -661,17 +661,34 @@ function PerformanceTab({
   fundType: string;
   assetClass: string | null;
 }) {
+  const isRefreshing =
+    (timeseriesQuery.isFetching && !timeseriesQuery.isPending) ||
+    (analysisQuery.isFetching && !analysisQuery.isPending);
+
   return (
     <div className="grid gap-4 lg:[grid-template-columns:minmax(0,2fr)_minmax(280px,1fr)]">
       <div className="flex flex-col gap-4">
         {chartBars.length > 0 ? (
-          <InteractiveChart
-            symbol={fundLabel}
-            bars={chartBars}
-            mode="nav"
-            range={range}
-            onRangeChange={onRangeChange}
-          />
+          <div className="relative">
+            {isRefreshing ? (
+              <span className="absolute right-2 top-2 z-10 rounded bg-surface px-2 py-0.5 text-[11px] text-text-muted">
+                Atualizando…
+              </span>
+            ) : null}
+            <div
+              className={
+                isRefreshing ? "opacity-60 transition-opacity" : "transition-opacity"
+              }
+            >
+              <InteractiveChart
+                symbol={fundLabel}
+                bars={chartBars}
+                mode="nav"
+                range={range}
+                onRangeChange={onRangeChange}
+              />
+            </div>
+          </div>
         ) : (
           <Card title="NAV">
             <QueryMessage

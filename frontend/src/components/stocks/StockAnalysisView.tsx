@@ -7,7 +7,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   ApiError,
@@ -57,7 +57,8 @@ export function StockAnalysisView({
     setColors(chartColors());
   }, []);
 
-  const { data, error, isPending, refetch } = useQuery({
+  const { data, error, isPending, isFetching, isPlaceholderData, refetch } =
+    useQuery({
     queryKey: ["analysis", ticker, range, ROLLING_WINDOW],
     queryFn: ({ signal }) =>
       fetchStockAnalysis(ticker, { range, window: ROLLING_WINDOW }, signal),
@@ -65,7 +66,7 @@ export function StockAnalysisView({
     retry: (failureCount, err) =>
       !(err instanceof ApiError && err.status >= 400 && err.status < 500) &&
       failureCount < 2,
-  });
+    });
 
   const timeseries = useQuery({
     queryKey: ["stock-timeseries", ticker, range],
@@ -76,12 +77,15 @@ export function StockAnalysisView({
       failureCount < 2,
   });
 
-  const selectRange = (next: RangePreset) => {
-    setRange(next);
-    router.replace(`/stocks/${encodeURIComponent(ticker)}?range=${next}`, {
-      scroll: false,
-    });
-  };
+  const selectRange = useCallback(
+    (next: RangePreset) => {
+      setRange(next);
+      router.replace(`/stocks/${encodeURIComponent(ticker)}?range=${next}`, {
+        scroll: false,
+      });
+    },
+    [router, ticker],
+  );
 
   if (error) {
     if (error instanceof ApiError && error.status === 404) {
@@ -113,16 +117,28 @@ export function StockAnalysisView({
     return <LoadingSkeleton />;
   }
 
+  // Com keepPreviousData, ao trocar `range` o `data` persiste (isPending=false)
+  // mas `isFetching`/`isPlaceholderData` sinalizam a atualização em curso. Um
+  // leve fade no conteúdo torna isso visível sem desmontar nenhum chart.
+  const isRefreshing = (isFetching && !isPending) || isPlaceholderData;
+
   return (
-    <AnalysisContent
-      data={data}
-      colors={colors}
-      range={range}
-      onRangeChange={selectRange}
-      historyBars={
-        timeseries.data ? stockTimeseriesToHistoryBars(timeseries.data) : []
+    <div
+      className={
+        isRefreshing ? "opacity-60 transition-opacity" : "transition-opacity"
       }
-    />
+      aria-busy={isRefreshing || undefined}
+    >
+      <AnalysisContent
+        data={data}
+        colors={colors}
+        range={range}
+        onRangeChange={selectRange}
+        historyBars={
+          timeseries.data ? stockTimeseriesToHistoryBars(timeseries.data) : []
+        }
+      />
+    </div>
   );
 }
 

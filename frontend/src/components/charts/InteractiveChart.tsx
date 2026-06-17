@@ -68,6 +68,13 @@ export function InteractiveChart({
   const [live, setLive] = useState(true);
   const [feed, setFeed] = useState<FeedStatus>("off");
 
+  // Render params read inside the live-tick callback. Kept in a ref so changing
+  // type/period/volume does NOT re-run the subscribeTicks effect (which would
+  // tear down and re-open the WebSocket on every Candles/OHLC/Line, D/W/M, VOL
+  // click). The ref is updated synchronously on every render below.
+  const renderParamsRef = useRef({ type, period, volume: panes.volume });
+  renderParamsRef.current = { type, period, volume: panes.volume };
+
   useEffect(() => {
     setColors(chartColors());
   }, []);
@@ -168,18 +175,19 @@ export function InteractiveChart({
         });
         liveBarsRef.current = next;
         if (chartRef.current) {
+          const { type, period, volume } = renderParamsRef.current;
           applyBarsToLiveChart({
             chart: chartRef.current,
             bars: next,
             type,
             period,
-            showVolume: mode === "ohlcv" && panes.volume,
+            showVolume: mode === "ohlcv" && volume,
           });
         }
         return next;
       });
     });
-  }, [symbol, live, mode, type, period, panes.volume]);
+  }, [symbol, live, mode]);
 
   const typeOptions =
     mode === "nav" ? TYPES.filter((entry) => entry.id === "line" || entry.id === "area") : TYPES;
