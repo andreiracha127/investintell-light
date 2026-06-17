@@ -343,6 +343,7 @@ RISK_FEATURE_KEYS: tuple[str, ...] = (
     "upside_capture_1y",
     "empirical_duration",
     "credit_beta",
+    "inflation_beta",
     "crisis_alpha_score",
 )
 
