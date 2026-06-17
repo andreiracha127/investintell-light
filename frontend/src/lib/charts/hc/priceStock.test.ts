@@ -5,6 +5,7 @@ import {
   PRICE_SERIES_ID,
   VOLUME_SERIES_ID,
   addCompareSelection,
+  buildHcPriceCoreOption,
   buildHcPriceStockOption,
   compareSelectionKey,
   dataGroupingForPeriod,
@@ -180,6 +181,95 @@ describe("priceStock option builder", () => {
       forced: true,
       units: [["month", [1]]],
     });
+  });
+});
+
+describe("priceCore option builder", () => {
+  it("builds Core-safe line options without Stock-only controls or indicator series", () => {
+    const opt = buildHcPriceCoreOption({
+      symbol: "FUNDX",
+      bars: BARS,
+      mode: "nav",
+      type: "line",
+      period: "D",
+      range: "1Y",
+      overlays: { sma20: true, sma50: true },
+      panes: { volume: true, rsi: true },
+      scale: { log: false, pct: false },
+      compares: [],
+      compareData: {},
+      colors: TEST_COLORS,
+      onVisibleRangeChange: vi.fn(),
+    });
+    const stockOnly = opt as typeof opt & {
+      rangeSelector?: unknown;
+      navigator?: unknown;
+      scrollbar?: unknown;
+      stockTools?: unknown;
+    };
+    const series = opt.series as Array<{ id?: string; type?: string }>;
+    expect(stockOnly.rangeSelector).toBeUndefined();
+    expect(stockOnly.navigator).toBeUndefined();
+    expect(stockOnly.scrollbar).toBeUndefined();
+    expect(stockOnly.stockTools).toBeUndefined();
+    expect(series).toHaveLength(1);
+    expect(series[0]).toMatchObject({ id: PRICE_SERIES_ID, type: "line" });
+    expect(series.some((s) => s.type === "sma" || s.type === "rsi")).toBe(false);
+  });
+
+  it("normalizes compare series to percent in Core mode without Stock compare", () => {
+    const opt = buildHcPriceCoreOption({
+      symbol: "FUNDX",
+      bars: BARS,
+      mode: "nav",
+      type: "area",
+      period: "D",
+      range: "1Y",
+      overlays: { sma20: false, sma50: false },
+      panes: { volume: false, rsi: false },
+      scale: { log: false, pct: true },
+      compares: [COMPARE],
+      compareData: { [COMPARE.key]: BARS },
+      colors: TEST_COLORS,
+      onVisibleRangeChange: vi.fn(),
+    });
+    const plotOptions = opt.plotOptions as { series?: { compare?: string } };
+    const series = opt.series as Array<{ data?: Array<[number, number]>; type?: string }>;
+    expect(plotOptions.series?.compare).toBeUndefined();
+    expect(series[0]?.type).toBe("area");
+    expect(series[0]?.data?.map((point) => Number(point[1].toFixed(4)))).toEqual([
+      0,
+      -3.7037,
+      -0.9259,
+    ]);
+    expect(series[1]?.data?.[0]?.[1]).toBe(0);
+  });
+
+  it("groups Core mode data to the last close in each month", () => {
+    const opt = buildHcPriceCoreOption({
+      symbol: "FUNDX",
+      bars: [
+        { t: Date.UTC(2024, 0, 2), o: 1, h: 1, l: 1, c: 10, v: 0 },
+        { t: Date.UTC(2024, 0, 31), o: 1, h: 1, l: 1, c: 12, v: 0 },
+        { t: Date.UTC(2024, 1, 1), o: 1, h: 1, l: 1, c: 15, v: 0 },
+      ],
+      mode: "nav",
+      type: "line",
+      period: "M",
+      range: "1Y",
+      overlays: { sma20: false, sma50: false },
+      panes: { volume: false, rsi: false },
+      scale: { log: false, pct: false },
+      compares: [],
+      compareData: {},
+      colors: TEST_COLORS,
+      onVisibleRangeChange: vi.fn(),
+    });
+    const series = opt.series as Array<{ data?: Array<[number, number]> }>;
+    expect(series[0]?.data).toEqual([
+      [Date.UTC(2024, 0, 31), 12],
+      [Date.UTC(2024, 1, 1), 15],
+    ]);
   });
 });
 

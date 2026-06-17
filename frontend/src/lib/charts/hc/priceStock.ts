@@ -156,6 +156,124 @@ function emptyNavigatorData(bars: PriceBar[]): Array<[number, number]> {
   return bars.map((bar) => [bar.t, bar.c]);
 }
 
+function periodBucketStart(timeMs: number, period: PricePeriod): number {
+  if (period === "D") return timeMs;
+  const date = new Date(timeMs);
+  if (period === "M") {
+    return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
+  }
+  const day = date.getUTCDay() || 7;
+  return Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate() - day + 1,
+  );
+}
+
+function closeDataForCore(
+  bars: PriceBar[],
+  period: PricePeriod,
+  percent: boolean,
+): Array<[number, number]> {
+  const byBucket = new Map<number, PriceBar>();
+  for (const bar of bars) {
+    byBucket.set(periodBucketStart(bar.t, period), bar);
+  }
+  const grouped = [...byBucket.values()].sort((a, b) => a.t - b.t);
+  const base = grouped.find((bar) => bar.c > 0)?.c ?? null;
+  return grouped.map((bar) => [
+    bar.t,
+    percent && base !== null ? ((bar.c / base) - 1) * 100 : bar.c,
+  ]);
+}
+
+export function buildHcPriceCoreOption(input: PriceStockOptionsInput): Options {
+  const {
+    symbol,
+    bars,
+    type,
+    period,
+    scale,
+    compares,
+    compareData,
+    colors,
+    onVisibleRangeChange,
+  } = input;
+  const safeType: "line" | "area" = type === "area" ? "area" : "line";
+  const dataMin = bars[0]?.t ?? 0;
+  const dataMax = bars[bars.length - 1]?.t ?? 0;
+  const percent = scale.pct;
+
+  const series: SeriesOptionsType[] = [
+    {
+      id: PRICE_SERIES_ID,
+      type: safeType,
+      name: symbol,
+      data: closeDataForCore(bars, period, percent),
+      color: colors.accent,
+      lineWidth: 2,
+      marker: { enabled: false },
+      tooltip: { valueDecimals: percent ? 2 : 2 },
+    } as SeriesOptionsType,
+  ];
+
+  compares.forEach((compare, index) => {
+    series.push({
+      id: `compare-${compare.key}`,
+      type: "line",
+      name: compare.label,
+      data: closeDataForCore(compareData[compare.key] ?? [], period, percent),
+      color: colors.categories[(index + 4) % colors.categories.length],
+      lineWidth: 1.4,
+      marker: { enabled: false },
+      tooltip: { valueDecimals: percent ? 2 : 2 },
+    } as SeriesOptionsType);
+  });
+
+  return {
+    chart: {
+      type: safeType,
+      spacingTop: 8,
+      spacingRight: 8,
+      spacingBottom: 8,
+      spacingLeft: 8,
+    },
+    xAxis: {
+      type: "datetime",
+      events: {
+        afterSetExtremes(event) {
+          if (!onVisibleRangeChange) return;
+          const min = typeof event.min === "number" ? event.min : dataMin;
+          const max = typeof event.max === "number" ? event.max : dataMax;
+          onVisibleRangeChange(rangePresetFromExtremes(min, max, dataMin, dataMax));
+        },
+      },
+    },
+    yAxis: {
+      type: scale.log && !percent ? "logarithmic" : "linear",
+      title: { text: undefined },
+      labels: percent ? { format: "{value}%" } : undefined,
+    },
+    tooltip: {
+      shared: true,
+      valueSuffix: percent ? "%" : undefined,
+      valueDecimals: 2,
+    },
+    plotOptions: {
+      series: {
+        marker: { enabled: false },
+        turboThreshold: 0,
+      },
+      area: {
+        fillColor: `${colors.accent}24`,
+        threshold: null,
+      },
+    },
+    series,
+    credits: { enabled: false },
+  };
+}
+
 export function buildHcPriceStockOption(input: PriceStockOptionsInput): Options {
   const {
     symbol,

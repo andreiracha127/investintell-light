@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { Geist_Mono } from "next/font/google";
 import "./globals.css";
-import "highcharts/css/annotations/popup.css";
-import "highcharts/css/stocktools/gui.css";
 import { Providers } from "./providers";
 import { AppShell } from "@/components/shell/AppShell";
 import { CarbonThemeBridge } from "@/components/shell/CarbonThemeBridge";

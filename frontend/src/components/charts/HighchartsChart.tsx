@@ -13,6 +13,31 @@ import type { Chart, Options } from "highcharts";
 import { chartColors } from "@/lib/charts/chartColors";
 import { highchartsTheme } from "@/lib/charts/hc/theme";
 
+type StockUiOptions = Options & {
+  rangeSelector?: { enabled?: boolean };
+  navigator?: { enabled?: boolean };
+  scrollbar?: { enabled?: boolean };
+  stockTools?: { gui?: { enabled?: boolean } };
+  navigation?: { bindingsClassName?: string };
+};
+
+function coreOnlyOptions(options: Options): Options {
+  return {
+    ...(options as StockUiOptions),
+    rangeSelector: { ...(options as StockUiOptions).rangeSelector, enabled: false },
+    navigator: { ...(options as StockUiOptions).navigator, enabled: false },
+    scrollbar: { ...(options as StockUiOptions).scrollbar, enabled: false },
+    stockTools: {
+      ...(options as StockUiOptions).stockTools,
+      gui: {
+        ...(options as StockUiOptions).stockTools?.gui,
+        enabled: false,
+      },
+    },
+    navigation: { ...(options as StockUiOptions).navigation, bindingsClassName: undefined },
+  } as Options;
+}
+
 export function HighchartsChart({
   options,
   className,
@@ -53,7 +78,7 @@ export function HighchartsChart({
       const Highcharts = mod.default;
       // Apply the token-driven Graphite theme globally before creating.
       Highcharts.setOptions(highchartsTheme(chartColors()));
-      const chart = Highcharts.chart(containerRef.current, latestOptions.current);
+      const chart = Highcharts.chart(containerRef.current, coreOnlyOptions(latestOptions.current));
       if (disposed) {
         chart.destroy();
         return;
@@ -75,7 +100,7 @@ export function HighchartsChart({
     const chart = chartRef.current;
     if (!chart) return;
     // redraw + oneToOne: replace series/axes rather than merge-append.
-    chart.update(options, true, true);
+    chart.update(coreOnlyOptions(options), true, true);
     onReadyRef.current?.(chart);
   }, [options]);
 

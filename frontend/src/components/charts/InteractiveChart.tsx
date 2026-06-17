@@ -5,6 +5,7 @@ import { useQueries } from "@tanstack/react-query";
 import type { Chart } from "highcharts";
 
 import { SymbolSearchInput } from "@/components/charts/SymbolSearchInput";
+import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { HighchartsStockChart } from "@/components/charts/HighchartsStockChart";
 import {
   RANGE_PRESETS,
@@ -14,6 +15,7 @@ import {
 } from "@/lib/api/client";
 import {
   addCompareSelection,
+  buildHcPriceCoreOption,
   buildHcPriceStockOption,
   removeCompareSelection,
   type PriceBar,
@@ -116,9 +118,11 @@ export function InteractiveChart({
     return out;
   }, [compares, compareQueries]);
 
+  const usesStockChart = mode !== "nav";
   const options = useMemo(() => {
     if (!colors) return null;
-    return buildHcPriceStockOption({
+    const builder = usesStockChart ? buildHcPriceStockOption : buildHcPriceCoreOption;
+    return builder({
       symbol,
       bars: liveBars,
       mode,
@@ -149,6 +153,7 @@ export function InteractiveChart({
     compares,
     compareData,
     onRangeChange,
+    usesStockChart,
   ]);
 
   useEffect(() => {
@@ -228,24 +233,24 @@ export function InteractiveChart({
             </button>
           ))}
         </div>
-        <div role="group" aria-label="Indicators" className={group}>
-          <button
-            type="button"
-            aria-pressed={overlays.sma20}
-            className={btn(overlays.sma20)}
-            onClick={() => setOverlays((current) => ({ ...current, sma20: !current.sma20 }))}
-          >
-            SMA20
-          </button>
-          <button
-            type="button"
-            aria-pressed={overlays.sma50}
-            className={btn(overlays.sma50)}
-            onClick={() => setOverlays((current) => ({ ...current, sma50: !current.sma50 }))}
-          >
-            SMA50
-          </button>
-          {mode !== "nav" && (
+        {usesStockChart && (
+          <div role="group" aria-label="Indicators" className={group}>
+            <button
+              type="button"
+              aria-pressed={overlays.sma20}
+              className={btn(overlays.sma20)}
+              onClick={() => setOverlays((current) => ({ ...current, sma20: !current.sma20 }))}
+            >
+              SMA20
+            </button>
+            <button
+              type="button"
+              aria-pressed={overlays.sma50}
+              className={btn(overlays.sma50)}
+              onClick={() => setOverlays((current) => ({ ...current, sma50: !current.sma50 }))}
+            >
+              SMA50
+            </button>
             <button
               type="button"
               aria-pressed={panes.volume}
@@ -254,16 +259,16 @@ export function InteractiveChart({
             >
               VOL
             </button>
-          )}
-          <button
-            type="button"
-            aria-pressed={panes.rsi}
-            className={btn(panes.rsi)}
-            onClick={() => setPanes((current) => ({ ...current, rsi: !current.rsi }))}
-          >
-            RSI
-          </button>
-        </div>
+            <button
+              type="button"
+              aria-pressed={panes.rsi}
+              className={btn(panes.rsi)}
+              onClick={() => setPanes((current) => ({ ...current, rsi: !current.rsi }))}
+            >
+              RSI
+            </button>
+          </div>
+        )}
         <div role="group" aria-label="Scale" className={group}>
           <button
             type="button"
@@ -303,7 +308,7 @@ export function InteractiveChart({
           ))}
         </div>
         <div className="flex-1" />
-        {mode !== "nav" && (
+        {usesStockChart && (
           <button
             type="button"
             aria-pressed={live}
@@ -324,15 +329,27 @@ export function InteractiveChart({
 
       <div className="relative h-[58vh] min-h-[380px] border border-border bg-surface-1">
         {options ? (
-          <HighchartsStockChart
-            options={options}
-            className="h-full w-full"
-            isEmpty={liveBars.length === 0}
-            emptyMessage="No price or NAV history in the synced window."
-            onReady={(chart) => {
-              chartRef.current = chart;
-            }}
-          />
+          usesStockChart ? (
+            <HighchartsStockChart
+              options={options}
+              className="h-full w-full"
+              isEmpty={liveBars.length === 0}
+              emptyMessage="No price or NAV history in the synced window."
+              onReady={(chart) => {
+                chartRef.current = chart;
+              }}
+            />
+          ) : (
+            <HighchartsChart
+              options={options}
+              className="h-full w-full"
+              isEmpty={liveBars.length === 0}
+              emptyMessage="No price or NAV history in the synced window."
+              onReady={(chart) => {
+                chartRef.current = chart;
+              }}
+            />
+          )
         ) : (
           <div className="flex h-full items-center justify-center text-[13px] text-text-muted">
             Loading chart...
