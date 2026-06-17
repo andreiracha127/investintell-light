@@ -6,8 +6,18 @@ import { updateSession } from "@insforge/sdk/ssr";
 // runtime-compatible. Cast to the helper's own parameter types.
 type UpdateSessionArg = Parameters<typeof updateSession>[0];
 
+function isPublicPath(pathname: string): boolean {
+  return pathname === "/login" || pathname === "/funds" || pathname.startsWith("/funds/");
+}
+
+function isInternalPath(pathname: string): boolean {
+  return pathname.startsWith("/_next/") || pathname === "/favicon.ico";
+}
+
 export async function middleware(request: NextRequest) {
   const response = NextResponse.next({ request });
+  if (isInternalPath(request.nextUrl.pathname)) return response;
+  if (isPublicPath(request.nextUrl.pathname)) return response;
   await updateSession({
     requestCookies: request.cookies as unknown as UpdateSessionArg["requestCookies"],
     responseCookies: response.cookies as unknown as UpdateSessionArg["responseCookies"],
@@ -16,5 +26,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/auth).*)"],
+  matcher: ["/((?!_next/|favicon.ico|api/auth).*)"],
 };

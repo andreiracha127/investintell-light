@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { createServerClient, setAuthCookies } from "@insforge/sdk/ssr";
 
+function authErrorStatus(statusCode: unknown): number {
+  return typeof statusCode === "number" && statusCode >= 200 && statusCode <= 599
+    ? statusCode
+    : 401;
+}
+
 export async function POST(request: Request) {
   let body: { email: string; password: string };
   try {
@@ -14,7 +20,7 @@ export async function POST(request: Request) {
   if (error || !data?.accessToken) {
     return NextResponse.json(
       { error: error?.error ?? "AUTH_UNAUTHORIZED", message: error?.message ?? "Sign in failed" },
-      { status: error?.statusCode ?? 401 },
+      { status: authErrorStatus(error?.statusCode) },
     );
   }
 
