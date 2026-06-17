@@ -2568,6 +2568,8 @@ export interface components {
             max_drawdown_1y: number | null;
             /** Peer Sharpe Pctl */
             peer_sharpe_pctl: number | null;
+            /** Manager Score */
+            manager_score: number | null;
             /** Elite Flag */
             elite_flag: boolean | null;
         };

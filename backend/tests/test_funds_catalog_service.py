@@ -176,6 +176,7 @@ def test_csv_header_and_rows() -> None:
                 "sharpe_1y": 1.5,
                 "max_drawdown_1y": -0.1,
                 "peer_sharpe_pctl": 0.92,
+                "manager_score": 88.5,
                 "elite_flag": True,
             }
         ]
@@ -185,12 +186,12 @@ def test_csv_header_and_rows() -> None:
     assert lines[0] == (
         "ticker,name,fund_type,strategy_label,asset_class,aum_usd,"
         "expense_ratio,return_1y,volatility_1y,sharpe_1y,max_drawdown_1y,"
-        "peer_sharpe_pctl,elite_flag"
+        "peer_sharpe_pctl,manager_score,elite_flag"
     )
     # Stable numeric formatting: currency 2dp, percent 6dp, None -> empty.
     assert lines[1] == (
         "VTI,Vanguard Total Stock Market ETF,etf,Large Cap Blend,equity,"
-        "350000000000.00,0.000300,0.123400,,1.500000,-0.100000,0.920000,true"
+        "350000000000.00,0.000300,0.123400,,1.500000,-0.100000,0.920000,88.500000,true"
     )
 
 

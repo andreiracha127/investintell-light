@@ -36,7 +36,7 @@ const TEXT_SEQ: SortOrder[] = ["asc", "desc", null];
 const DATA_KEYS = [
   "ticker", "name", "fund_type", "strategy_label", "asset_class",
   "aum_usd", "expense_ratio", "return_1y", "volatility_1y", "sharpe_1y",
-  "peer_sharpe_pctl", "elite_flag", "instrument_id", "profile_href",
+  "peer_sharpe_pctl", "manager_score", "elite_flag", "instrument_id", "profile_href",
 ] as const;
 
 /** Escape text destined for a cell's HTML formatter output. */
@@ -49,8 +49,15 @@ export function escapeHtml(value: unknown): string {
 }
 
 function fundHref(row: GridCell["row"]): string | null {
-  const href = row.getCell("profile_href")?.value;
-  return href === null || href === undefined || href === "" ? null : String(href);
+  const rowData = (row as GridCell["row"] & { data?: Record<string, unknown> }).data;
+  const dataHref = rowData?.profile_href;
+  const href = dataHref ?? row.getCell("profile_href")?.value;
+  if (href !== null && href !== undefined && href !== "") {
+    return String(href);
+  }
+  const dataId = rowData?.instrument_id;
+  const id = dataId ?? row.getCell("instrument_id")?.value;
+  return id === null || id === undefined || id === "" ? null : `/funds/${encodeURIComponent(String(id))}`;
 }
 
 /** number|null -> "—" or fn(n). */
@@ -61,13 +68,13 @@ function numOrDash(value: unknown, fn: (n: number) => string): string {
 function tickerFormatter(this: GridCell): string {
   const label = escapeHtml(this.value ?? "—");
   const href = fundHref(this.row);
-  return href ? `<a class="ix-grid-link" href="${href}">${label}</a>` : label;
+  return href && this.value != null && this.value !== ""
+    ? `<a class="ix-grid-link" href="${escapeHtml(href)}">${label}</a>`
+    : label;
 }
 
 function nameFormatter(this: GridCell): string {
-  const inner = `<span class="ix-grid-trunc">${escapeHtml(this.value ?? "")}</span>`;
-  const href = fundHref(this.row);
-  return href ? `<a class="ix-grid-link-plain" href="${href}">${inner}</a>` : inner;
+  return `<span class="ix-grid-trunc">${escapeHtml(this.value ?? "")}</span>`;
 }
 
 function typeFormatter(this: GridCell): string {
@@ -120,6 +127,7 @@ const FUND_COLUMNS: FundColSpec[] = [
   { id: "volatility_1y", label: "Vol 1Y", numeric: true, width: 100, formatter(this: GridCell) { return numOrDash(this.value, (n) => formatPercent(n)); } },
   { id: "sharpe_1y", label: "Sharpe 1Y", numeric: true, width: 100, formatter(this: GridCell) { return numOrDash(this.value, (n) => formatNumber(n)); } },
   { id: "peer_sharpe_pctl", label: "Peer pctl", numeric: true, width: 100, formatter(this: GridCell) { return numOrDash(this.value, (n) => formatNumber(n, 0)); } },
+  { id: "manager_score", label: "Score", numeric: true, width: 90, formatter(this: GridCell) { return numOrDash(this.value, (n) => formatNumber(n)); } },
   { id: "elite_flag", label: "Elite", numeric: true, width: 80, formatter: eliteFormatter },
 ];
 

@@ -244,6 +244,7 @@ _ITEM_COLUMNS: tuple[tuple[str, InstrumentedAttribute[Any]], ...] = (
     ("sharpe_1y", FundListRow.sharpe_1y),
     ("max_drawdown_1y", FundListRow.max_drawdown_1y),
     ("peer_sharpe_pctl", FundListRow.peer_sharpe_pctl),
+    ("manager_score", FundListRow.manager_score),
     ("elite_flag", FundListRow.elite_flag),
 )
 
@@ -382,6 +383,7 @@ CSV_COLUMNS: tuple[tuple[str, str, str], ...] = (
     ("sharpe_1y", "Sharpe 1Y", "float"),
     ("max_drawdown_1y", "Max drawdown 1Y", "percent"),
     ("peer_sharpe_pctl", "Peer Sharpe pctl", "float"),
+    ("manager_score", "Score", "float"),
     ("elite_flag", "Elite", "string"),
 )
 

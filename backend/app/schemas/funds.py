@@ -49,6 +49,7 @@ class FundListItem(BaseModel):
     sharpe_1y: float | None
     max_drawdown_1y: float | None
     peer_sharpe_pctl: float | None
+    manager_score: float | None
     elite_flag: bool | None
 
 

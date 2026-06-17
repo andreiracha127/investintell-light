@@ -44,6 +44,7 @@ def _item_row(**overrides: Any) -> dict[str, Any]:
         "sharpe_1y": 1.1,
         "max_drawdown_1y": -0.08,
         "peer_sharpe_pctl": 0.93,
+        "manager_score": 88.5,
         "elite_flag": True,
     }
     row.update(overrides)
@@ -100,6 +101,7 @@ async def test_list_funds_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     item = body["items"][0]
     assert item["instrument_id"] == str(_FUND_ID)
     assert item["sharpe_1y"] == 1.1
+    assert item["manager_score"] == 88.5
     assert item["elite_flag"] is True
     # Defaults reach the service: aum_usd desc, page 1 -> offset 0.
     assert calls[0]["sort"] == "aum_usd"

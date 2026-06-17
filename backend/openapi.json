@@ -6590,6 +6590,17 @@
             ],
             "title": "Peer Sharpe Pctl"
           },
+          "manager_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manager Score"
+          },
           "elite_flag": {
             "anyOf": [
               {
@@ -6619,6 +6630,7 @@
           "sharpe_1y",
           "max_drawdown_1y",
           "peer_sharpe_pctl",
+          "manager_score",
           "elite_flag"
         ],
         "title": "FundListItem",

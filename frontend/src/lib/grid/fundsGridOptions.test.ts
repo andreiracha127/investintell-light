@@ -23,6 +23,7 @@ const ITEMS = [
     volatility_1y: 0.2,
     sharpe_1y: 1.1,
     peer_sharpe_pctl: 87,
+    manager_score: 88.5,
     elite_flag: true,
   },
   {
@@ -38,22 +39,33 @@ const ITEMS = [
     volatility_1y: null,
     sharpe_1y: null,
     peer_sharpe_pctl: null,
+    manager_score: null,
     elite_flag: false,
   },
 ] as unknown as FundsList["items"];
 
 const LIST = { items: ITEMS, total: 2 } as unknown as FundsList;
 
-// Mock Cell `this`: value + row.getCell(id).value
-type CellLike = { value: unknown; row: { getCell: (id: string) => { value: unknown } | undefined } };
+// Mock Cell `this`: value + rendered row cells + raw row data.
+type CellLike = {
+  value: unknown;
+  row: {
+    data?: Record<string, unknown>;
+    getCell: (id: string) => { value: unknown } | undefined;
+  };
+};
 const fmtCall = (
   fn: unknown,
   value: unknown,
   rowValues: Record<string, unknown> = {},
+  rowData: Record<string, unknown> = rowValues,
 ): string =>
   (fn as (this: CellLike) => string).call({
     value,
-    row: { getCell: (id: string) => (id in rowValues ? { value: rowValues[id] } : undefined) },
+    row: {
+      data: rowData,
+      getCell: (id: string) => (id in rowValues ? { value: rowValues[id] } : undefined),
+    },
   });
 
 describe("escapeHtml", () => {
@@ -63,9 +75,9 @@ describe("escapeHtml", () => {
 });
 
 describe("fundsGridColumns", () => {
-  it("returns the 12 display columns plus hidden internal link columns", () => {
+  it("returns the 13 display columns plus hidden internal link columns", () => {
     const cols = fundsGridColumns({ dir: "desc" });
-    expect(cols).toHaveLength(14);
+    expect(cols).toHaveLength(15);
     const ids = cols.map((c) => c.id);
     expect(ids).toContain("instrument_id");
     expect(ids).toContain("profile_href");
@@ -94,28 +106,35 @@ describe("fundsGridColumns", () => {
     expect(cols.find((c) => c.id === "ticker")?.sorting?.order).toBeUndefined();
   });
 
-  it("ticker formatter builds an escaped link to the fund profile using the row href", () => {
+  it("ticker formatter builds an escaped link to the fund profile using raw row data", () => {
     const cols = fundsGridColumns({ dir: "desc" });
     const fmt = cols.find((c) => c.id === "ticker")!.cells!.formatter;
-    expect(fmtCall(fmt, "AAA", { profile_href: "/funds/uuid-1" })).toBe(
+    expect(fmtCall(fmt, "AAA", {}, { profile_href: "/funds/uuid-1" })).toBe(
       '<a class="ix-grid-link" href="/funds/uuid-1">AAA</a>',
     );
-    expect(fmtCall(fmt, "AAA", { profile_href: "/funds/fund%2Fid" })).toBe(
+    expect(fmtCall(fmt, "AAA", {}, { profile_href: "/funds/fund%2Fid" })).toBe(
       '<a class="ix-grid-link" href="/funds/fund%2Fid">AAA</a>',
     );
+    expect(fmtCall(fmt, "AAA", {}, { instrument_id: "uuid-1" })).toBe(
+      '<a class="ix-grid-link" href="/funds/uuid-1">AAA</a>',
+    );
+    expect(fmtCall(fmt, "AAA", {}, { instrument_id: "fund/id" })).toBe(
+      '<a class="ix-grid-link" href="/funds/fund%2Fid">AAA</a>',
+    );
+    expect(fmtCall(fmt, null, {}, { profile_href: "/funds/uuid-2" })).toBe("—");
     // no href -> plain label
     expect(fmtCall(fmt, "AAA", {})).toBe("AAA");
   });
 
-  it("name formatter escapes HTML and wraps in a truncating link", () => {
+  it("name formatter escapes HTML without adding a profile link", () => {
     const cols = fundsGridColumns({ dir: "desc" });
     const fmt = cols.find((c) => c.id === "name")!.cells!.formatter;
     expect(fmtCall(fmt, "Alpha <Equity> Fund", { profile_href: "/funds/uuid-1" })).toBe(
-      '<a class="ix-grid-link-plain" href="/funds/uuid-1"><span class="ix-grid-trunc">Alpha &lt;Equity&gt; Fund</span></a>',
+      '<span class="ix-grid-trunc">Alpha &lt;Equity&gt; Fund</span>',
     );
   });
 
-  it("type/asset/aum/return/sharpe/peer/elite formatters render expected output", () => {
+  it("type/asset/aum/return/sharpe/peer/score/elite formatters render expected output", () => {
     const cols = fundsGridColumns({ dir: "desc" });
     const get = (id: string) => cols.find((c) => c.id === id)!.cells!.formatter;
     expect(fmtCall(get("fund_type"), "etf")).toBe('<span class="ix-grid-tag">ETF</span>');
@@ -127,6 +146,7 @@ describe("fundsGridColumns", () => {
     expect(fmtCall(get("return_1y"), -0.04)).toBe('<span class="text-loss">-4.00%</span>');
     expect(fmtCall(get("sharpe_1y"), 1.1)).toBe("1.10");
     expect(fmtCall(get("peer_sharpe_pctl"), 87)).toBe("87");
+    expect(fmtCall(get("manager_score"), 88.5)).toBe("88.50");
     expect(fmtCall(get("elite_flag"), true)).toBe('<span class="ix-grid-elite" aria-label="Elite fund">✓</span>');
     expect(fmtCall(get("elite_flag"), false)).toBe('<span class="text-text-muted">—</span>');
   });
@@ -139,6 +159,7 @@ describe("fundsGridData", () => {
     expect(data.columns!.ticker).toEqual(["AAA", null]);
     expect(data.columns!.instrument_id).toEqual(["uuid-1", "uuid-2"]);
     expect(data.columns!.profile_href).toEqual(["/funds/uuid-1", "/funds/uuid-2"]);
+    expect(data.columns!.manager_score).toEqual([88.5, null]);
     expect(data.columns!.elite_flag).toEqual([true, false]);
     expect(data.columns!.aum_usd).toEqual([1_000_000, null]);
   });
