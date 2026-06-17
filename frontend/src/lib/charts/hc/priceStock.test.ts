@@ -9,12 +9,16 @@ import {
   buildHcPriceStockOption,
   compareSelectionKey,
   dataGroupingForPeriod,
+  indicatorSeriesData,
   rangePresetFromExtremes,
   removeCompareSelection,
+  rsiValues,
+  smaValues,
   toMainSeriesData,
   toVolumeSeriesData,
   type PriceBar,
   type PriceCompareSelection,
+  type PriceStockOptionsInput,
 } from "@/lib/charts/hc/priceStock";
 import { TEST_COLORS } from "@/lib/charts/hc/__fixtures__/colors";
 
@@ -80,10 +84,12 @@ describe("priceStock option builder", () => {
       colors: TEST_COLORS,
       onVisibleRangeChange: vi.fn(),
     });
-    const series = opt.series as Array<{ id?: string; type?: string; linkedTo?: string }>;
+    const series = opt.series as Array<{ id?: string; type?: string; name?: string; yAxis?: string }>;
     expect(series[0]).toMatchObject({ id: PRICE_SERIES_ID, type: "candlestick" });
     expect(series.some((s) => s.id === VOLUME_SERIES_ID && s.type === "column")).toBe(true);
-    expect(series.some((s) => s.type === "sma" && s.linkedTo === PRICE_SERIES_ID)).toBe(true);
+    // Taylor-made SMA: a computed line series on the price axis (not the native
+    // Highstock `sma` indicator, which failed to register under ESM).
+    expect(series.some((s) => s.name === "SMA20" && s.type === "line" && s.yAxis === "price-axis")).toBe(true);
   });
 
   it("omits volume and OHLC-only series for NAV mode", () => {
@@ -123,10 +129,38 @@ describe("priceStock option builder", () => {
       colors: TEST_COLORS,
       onVisibleRangeChange: vi.fn(),
     });
-    const series = opt.series as Array<{ type?: string; yAxis?: string }>;
+    const series = opt.series as Array<{ type?: string; name?: string; yAxis?: string }>;
     const axes = opt.yAxis as Array<{ id?: string }>;
-    expect(series.some((s) => s.type === "rsi" && s.yAxis === "rsi-axis")).toBe(true);
+    // Taylor-made RSI: a computed line series bound to the dedicated RSI axis.
+    expect(series.some((s) => s.name === "RSI 14" && s.type === "line" && s.yAxis === "rsi-axis")).toBe(true);
     expect(axes.some((axis) => axis.id === "rsi-axis")).toBe(true);
+  });
+
+  describe("taylor-made studies", () => {
+    const close = (values: number[]): PriceBar[] =>
+      values.map((c, i) => ({ t: Date.UTC(2024, 0, i + 1), o: c, h: c, l: c, c, v: 0 }));
+
+    it("smaValues is null until the window fills, then the simple mean", () => {
+      // closes 1..5, period 3 → [null, null, 2, 3, 4]
+      expect(smaValues(close([1, 2, 3, 4, 5]), 3)).toEqual([null, null, 2, 3, 4]);
+    });
+
+    it("rsiValues is null for the first `period` bars then bounded 0..100", () => {
+      const rsi = rsiValues(close([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]), 14);
+      expect(rsi.slice(0, 14).every((v) => v === null)).toBe(true);
+      // strictly increasing closes → no losses → RSI pinned at 100
+      expect(rsi[14]).toBe(100);
+      expect(rsi[15]).toBe(100);
+    });
+
+    it("indicatorSeriesData aligns values to bar timestamps and keeps nulls", () => {
+      const bars = close([10, 11, 12]);
+      expect(indicatorSeriesData(bars, [null, 11, 11.5])).toEqual([
+        [bars[0].t, null],
+        [bars[1].t, 11],
+        [bars[2].t, 11.5],
+      ]);
+    });
   });
 
   it("uses logarithmic price axis only when log is active", () => {
@@ -270,6 +304,33 @@ describe("priceCore option builder", () => {
       [Date.UTC(2024, 0, 31), 12],
       [Date.UTC(2024, 1, 1), 15],
     ]);
+  });
+
+  it("never sets yAxis.labels to undefined (would crash Highcharts Axis.init on labels.rotation)", () => {
+    const base: Omit<PriceStockOptionsInput, "scale"> = {
+      symbol: "FUNDX",
+      bars: BARS,
+      mode: "nav",
+      type: "line",
+      period: "D",
+      range: "1Y",
+      overlays: { sma20: false, sma50: false },
+      panes: { volume: false, rsi: false },
+      compares: [],
+      compareData: {},
+      colors: TEST_COLORS,
+      onVisibleRangeChange: vi.fn(),
+    };
+
+    // Non-percent: the labels key must be OMITTED (not `labels: undefined`),
+    // otherwise Highcharts' merge overwrites the default labels object with
+    // undefined and Axis.init throws reading `labels.rotation`.
+    const linear = buildHcPriceCoreOption({ ...base, scale: { log: false, pct: false } });
+    expect("labels" in (linear.yAxis as Record<string, unknown>)).toBe(false);
+
+    // Percent: the labels object is still emitted for the % tick format.
+    const percent = buildHcPriceCoreOption({ ...base, scale: { log: false, pct: true } });
+    expect((percent.yAxis as { labels?: unknown }).labels).toEqual({ format: "{value}%" });
   });
 });
 

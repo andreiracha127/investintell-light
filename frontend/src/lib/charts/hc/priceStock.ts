@@ -65,6 +65,54 @@ export function toVolumeSeriesData(bars: PriceBar[]): Array<[number, number]> {
   return bars.map((bar) => [bar.t, bar.v]);
 }
 
+/**
+ * Estudos taylor-made — port das funções puras da engine ixchart (commit
+ * 709a6fb, `lib/ixchart/series.ts`). Substituem os indicadores nativos do
+ * Highstock (`type: "sma"`/`"rsi"`), que não registram de forma confiável sob
+ * o build ESM/Turbopack e deixavam os estudos sem renderizar.
+ */
+
+/** Média móvel simples sobre os closes (janela deslizante O(n)). */
+export function smaValues(bars: PriceBar[], period: number): (number | null)[] {
+  const out: (number | null)[] = new Array(bars.length).fill(null);
+  let acc = 0;
+  for (let i = 0; i < bars.length; i++) {
+    acc += bars[i].c;
+    if (i >= period) acc -= bars[i - period].c;
+    if (i >= period - 1) out[i] = acc / period;
+  }
+  return out;
+}
+
+/** RSI de Wilder (suavização exponencial dos ganhos/perdas médios). */
+export function rsiValues(bars: PriceBar[], period = 14): (number | null)[] {
+  const out: (number | null)[] = new Array(bars.length).fill(null);
+  let g = 0;
+  let l = 0;
+  for (let i = 1; i < bars.length; i++) {
+    const d = bars[i].c - bars[i - 1].c;
+    const up = Math.max(d, 0);
+    const dn = Math.max(-d, 0);
+    if (i <= period) {
+      g += up / period;
+      l += dn / period;
+    } else {
+      g = (g * (period - 1) + up) / period;
+      l = (l * (period - 1) + dn) / period;
+    }
+    if (i >= period) out[i] = l === 0 ? 100 : 100 - 100 / (1 + g / l);
+  }
+  return out;
+}
+
+/** Alinha valores de indicador aos bars como pontos [t, value] (mantém nulls). */
+export function indicatorSeriesData(
+  bars: PriceBar[],
+  values: (number | null)[],
+): Array<[number, number | null]> {
+  return bars.map((bar, index) => [bar.t, values[index]]);
+}
+
 export function dataGroupingForPeriod(period: PricePeriod): DataGroupingOptionsObject {
   if (period === "W") {
     return { enabled: true, forced: true, units: [["week", [1]]] };
@@ -252,7 +300,10 @@ export function buildHcPriceCoreOption(input: PriceStockOptionsInput): Options {
     yAxis: {
       type: scale.log && !percent ? "logarithmic" : "linear",
       title: { text: undefined },
-      labels: percent ? { format: "{value}%" } : undefined,
+      // Omit `labels` when not percent: `labels: undefined` makes Highcharts'
+      // merge overwrite the default labels object, and Axis.init then throws
+      // reading `labels.rotation`. The spread keeps the key absent in that case.
+      ...(percent ? { labels: { format: "{value}%" } } : {}),
     },
     tooltip: {
       shared: true,
@@ -302,7 +353,11 @@ export function buildHcPriceStockOption(input: PriceStockOptionsInput): Options 
       id: "price-axis",
       height: layout.priceHeight,
       type: scale.log ? "logarithmic" : "linear",
-      labels: { align: "right", x: -4 },
+      // Price axis on the right (trading convention). Labels align "left" so
+      // they sit OUTSIDE the plot, to the right of the axis line — `align:
+      // "right"` pushed them inside, overlapping the latest candles.
+      opposite: true,
+      labels: { align: "left", x: 4 },
       title: { text: undefined },
       resize: { enabled: true },
     },
@@ -314,7 +369,8 @@ export function buildHcPriceStockOption(input: PriceStockOptionsInput): Options 
       top: layout.volumeTop,
       height: panes.rsi ? "18%" : "24%",
       offset: 0,
-      labels: { align: "right", x: -4 },
+      opposite: true,
+      labels: { align: "left", x: 4 },
       title: { text: undefined },
     });
   }
@@ -327,7 +383,8 @@ export function buildHcPriceStockOption(input: PriceStockOptionsInput): Options 
       min: 0,
       max: 100,
       offset: 0,
-      labels: { align: "right", x: -4 },
+      opposite: true,
+      labels: { align: "left", x: 4 },
       title: { text: undefined },
       plotLines: [
         { value: 30, color: colors.grid, width: 1 },
@@ -367,37 +424,43 @@ export function buildHcPriceStockOption(input: PriceStockOptionsInput): Options 
 
   if (overlays.sma20) {
     series.push({
-      type: "sma",
+      type: "line",
       name: "SMA20",
-      linkedTo: PRICE_SERIES_ID,
-      params: { period: 20 },
+      data: indicatorSeriesData(bars, smaValues(bars, 20)),
+      yAxis: "price-axis",
       color: colors.categories[2],
       lineWidth: 1,
+      marker: { enabled: false },
       dataGrouping,
+      tooltip: { valueDecimals: 2 },
     } as SeriesOptionsType);
   }
 
   if (overlays.sma50) {
     series.push({
-      type: "sma",
+      type: "line",
       name: "SMA50",
-      linkedTo: PRICE_SERIES_ID,
-      params: { period: 50 },
+      data: indicatorSeriesData(bars, smaValues(bars, 50)),
+      yAxis: "price-axis",
       color: colors.categories[3],
       lineWidth: 1,
+      marker: { enabled: false },
       dataGrouping,
+      tooltip: { valueDecimals: 2 },
     } as SeriesOptionsType);
   }
 
   if (panes.rsi) {
     series.push({
-      type: "rsi",
+      type: "line",
       name: "RSI 14",
-      linkedTo: PRICE_SERIES_ID,
+      data: indicatorSeriesData(bars, rsiValues(bars, 14)),
       yAxis: "rsi-axis",
-      params: { period: 14 },
       color: colors.bar,
+      lineWidth: 1,
+      marker: { enabled: false },
       dataGrouping,
+      tooltip: { valueDecimals: 2 },
     } as SeriesOptionsType);
   }
 
@@ -419,24 +482,44 @@ export function buildHcPriceStockOption(input: PriceStockOptionsInput): Options 
 
   return {
     chart: { spacingTop: 8, spacingRight: 8, spacingBottom: 8, spacingLeft: 8 },
-    rangeSelector: {
-      selected: undefined,
-      inputEnabled: false,
-      buttons: [
-        { type: "month", count: 1, text: "1M" },
-        { type: "month", count: 6, text: "6M" },
-        { type: "year", count: 1, text: "1Y" },
-        { type: "year", count: 5, text: "5Y" },
-        { type: "all", text: "MAX" },
-      ],
-    },
+    // Range is driven by the custom toolbar buttons in InteractiveChart, which
+    // refetch at the correct per-range granularity. Disable Highstock's native
+    // rangeSelector so the two date selectors don't coexist and conflict.
+    rangeSelector: { enabled: false },
     navigator: {
       enabled: true,
       series: { data: emptyNavigatorData(bars), color: colors.barMute },
     },
     scrollbar: { enabled: true },
-    stockTools: { gui: { enabled: true } },
-    navigation: { bindingsClassName: "highcharts-bindings-container" },
+    // Barchart-style drawing/annotation toolbar. Drop the native `indicators`
+    // group (those SMA/RSI series fail to register under ESM — we draw studies
+    // as computed line series instead) and `typeChange` (the custom toolbar
+    // already owns series type), keeping only the drawing/annotation tools.
+    stockTools: {
+      gui: {
+        enabled: true,
+        buttons: [
+          "simpleShapes",
+          "lines",
+          "crookedLines",
+          "measure",
+          "advanced",
+          "toggleAnnotations",
+          "separator",
+          "verticalLabels",
+          "flags",
+          "separator",
+          "currentPriceIndicator",
+          "saveChart",
+        ],
+      },
+    },
+    // Self-hosted stock-tools icons (copied to public/), so the toolbar does
+    // not depend on the highcharts.com CDN (CSP / offline safe).
+    navigation: {
+      bindingsClassName: "highcharts-bindings-container",
+      iconsURL: "/highcharts/gfx/stock-icons/",
+    },
     xAxis: {
       ordinal: true,
       events: {

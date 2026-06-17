@@ -10,6 +10,12 @@
 import { useEffect, useRef } from "react";
 import type { Chart, Options } from "highcharts";
 
+// Native Highstock stock-tools GUI (Barchart-style drawing/annotation toolbar:
+// trendline, Fibonacci, horizontal/vertical lines, measure, rectangles). The
+// module is registered below; these stylesheets render its toolbar + popups.
+import "highcharts/css/stocktools/gui.css";
+import "highcharts/css/annotations/popup.css";
+
 import { chartColors } from "@/lib/charts/chartColors";
 import { highchartsTheme } from "@/lib/charts/hc/theme";
 
@@ -41,8 +47,8 @@ export function HighchartsStockChart({
       // Use the ESM build so Stock modules register on the same Highcharts
       // singleton. The UMD module paths do not self-register under Turbopack.
       const mod = await import("highcharts/esm/highstock.js");
-      await import("highcharts/esm/indicators/indicators.js");
-      await import("highcharts/esm/indicators/rsi.js");
+      // SMA/RSI studies are computed in the builder as plain line series
+      // (see priceStock.ts), so the native indicator modules are not loaded.
       await import("highcharts/esm/modules/annotations.js");
       await import("highcharts/esm/modules/stock-tools.js");
       if (disposed || !containerRef.current) return;
