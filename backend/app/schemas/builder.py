@@ -81,7 +81,9 @@ Mandate = Literal[
 # Candidate-universe selection vocabulary — mirrors the GET /funds filters and
 # sort whitelist so a universe optimization reuses the same catalog semantics.
 FundTypeFilter = Literal["etf", "mmf", "mutual_fund"]
-AssetClassFilter = Literal["equity", "fixed_income", "cash", "alternatives"]
+AssetClassFilter = Literal[
+    "equity", "fixed_income", "cash", "alternatives", "multi_asset"
+]
 UniverseRankBy = Literal[
     "aum_usd",
     "sharpe_1y",

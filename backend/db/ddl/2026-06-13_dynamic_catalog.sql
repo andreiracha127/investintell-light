@@ -117,10 +117,13 @@ CREATE UNIQUE INDEX IF NOT EXISTS fund_risk_latest_mv_pk
 -- by ~29%. strategy_label is the trustworthy field (sourced from SEC metadata +
 -- strategy_reclassification_stage), so the data migration at the end of this
 -- file rewrites the STORED instruments_universe.asset_class from it via this
--- map; genuinely multi-asset / unknown labels (Balanced, Target Date,
--- Multi-Asset, Index / Passive, Unclassified) return NULL and keep the stored
--- value. asset_class stays a stored column (NOT a view expression) so the
--- optimizer's WHERE asset_class = :class predicate remains sargable.
+-- map; multi-asset labels (Balanced, Target Date, Multi-Asset) map to the
+-- dedicated 'multi_asset' class, while genuinely unknown labels (Index /
+-- Passive, Unclassified) return NULL and keep the stored value (the column is
+-- NOT NULL, so they cannot be nulled — Unclassified is instead excluded from
+-- the optimizable universe in select_universe_funds). asset_class stays a
+-- stored column (NOT a view expression) so the optimizer's
+-- WHERE asset_class = :class predicate remains sargable.
 CREATE OR REPLACE FUNCTION public.asset_class_from_strategy(label text)
 RETURNS varchar
 LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $fn$
@@ -163,6 +166,9 @@ LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $fn$
     WHEN 'Real Estate' THEN 'alternatives'
     WHEN 'Cash Equivalent' THEN 'cash'
     WHEN 'Government Money Market' THEN 'cash'
+    WHEN 'Balanced' THEN 'multi_asset'
+    WHEN 'Target Date' THEN 'multi_asset'
+    WHEN 'Multi-Asset' THEN 'multi_asset'
     ELSE NULL
   END::varchar;
 $fn$;

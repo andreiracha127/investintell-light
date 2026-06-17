@@ -71,7 +71,7 @@ export type UniverseRankBy =
 /** UI draft for a universe spec — numeric fields are raw text/whole numbers. */
 export interface UniverseDraft {
   fundType: "" | "etf" | "mmf" | "mutual_fund";
-  assetClass: "" | "equity" | "fixed_income" | "cash" | "alternatives";
+  assetClass: "" | "equity" | "fixed_income" | "cash" | "alternatives" | "multi_asset";
   /** AUM floor in USD millions (raw text). */
   aumMinM: string;
   /** Expense-ratio ceiling in percent (raw text). */
@@ -121,7 +121,7 @@ function parsePositiveNum(text: string): number | undefined {
  * spec and the live match-count query. */
 function universeFilters(draft: UniverseDraft): {
   fund_type?: "etf" | "mmf" | "mutual_fund";
-  asset_class?: "equity" | "fixed_income" | "cash" | "alternatives";
+  asset_class?: "equity" | "fixed_income" | "cash" | "alternatives" | "multi_asset";
   aum_min?: number;
   expense_ratio_max?: number;
 } {

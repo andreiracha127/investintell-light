@@ -36,6 +36,7 @@ const ASSET_CLASS_LABEL: Record<string, string> = {
   fixed_income: "Fixed income",
   cash: "Cash",
   alternatives: "Alternatives",
+  multi_asset: "Multi-asset",
 };
 
 export function buildWeightsTree(weights: WeightInput[]): WeightTreeRow[] {

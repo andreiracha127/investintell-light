@@ -41,6 +41,7 @@ const ASSET_CLASSES: { value: UniverseDraft["assetClass"]; label: string }[] = [
   { value: "fixed_income", label: "Fixed income" },
   { value: "cash", label: "Cash" },
   { value: "alternatives", label: "Alternatives" },
+  { value: "multi_asset", label: "Multi-asset" },
 ];
 
 export function FundUniverseCard({

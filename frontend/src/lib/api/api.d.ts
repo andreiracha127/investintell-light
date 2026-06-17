@@ -1573,7 +1573,7 @@ export interface components {
              * Asset Class
              * @enum {string}
              */
-            asset_class: "equity" | "fixed_income" | "cash" | "alternatives";
+            asset_class: "equity" | "fixed_income" | "cash" | "alternatives" | "multi_asset";
             /**
              * Lo
              * @default 0
@@ -5347,7 +5347,7 @@ export interface components {
             /** Fund Type */
             fund_type?: ("etf" | "mmf" | "mutual_fund") | null;
             /** Asset Class */
-            asset_class?: ("equity" | "fixed_income" | "cash" | "alternatives") | null;
+            asset_class?: ("equity" | "fixed_income" | "cash" | "alternatives" | "multi_asset") | null;
             /** Strategy Label */
             strategy_label?: string | null;
             /** Expense Ratio Max */
@@ -6649,7 +6649,7 @@ export interface operations {
                 fund_type?: ("etf" | "mmf" | "mutual_fund") | null;
                 /** @description Strategy label substring match (free text). */
                 strategy_label?: string | null;
-                asset_class?: ("equity" | "fixed_income" | "cash" | "alternatives") | null;
+                asset_class?: ("equity" | "fixed_income" | "cash" | "alternatives" | "multi_asset") | null;
                 expense_ratio_max?: number | null;
                 aum_min?: number | null;
                 sharpe_1y_min?: number | null;
@@ -6696,7 +6696,7 @@ export interface operations {
                 fund_type?: ("etf" | "mmf" | "mutual_fund") | null;
                 /** @description Strategy label substring match (free text). */
                 strategy_label?: string | null;
-                asset_class?: ("equity" | "fixed_income" | "cash" | "alternatives") | null;
+                asset_class?: ("equity" | "fixed_income" | "cash" | "alternatives" | "multi_asset") | null;
                 expense_ratio_max?: number | null;
                 aum_min?: number | null;
                 sharpe_1y_min?: number | null;

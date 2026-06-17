@@ -103,7 +103,9 @@ DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
 
 FundTypeParam = Literal["etf", "mmf", "mutual_fund"]
-AssetClassParam = Literal["equity", "fixed_income", "cash", "alternatives"]
+AssetClassParam = Literal[
+    "equity", "fixed_income", "cash", "alternatives", "multi_asset"
+]
 
 
 def _filters(

@@ -458,6 +458,10 @@ async def select_universe_funds(
     # hard floor; a stricter user-supplied aum_min in `filters` narrows further.
     conditions.append(Fund.aum_usd.is_not(None))
     conditions.append(Fund.aum_usd >= MIN_UNIVERSE_AUM_USD)
+    # 'Unclassified' funds have no definite strategy/asset class — leave them out
+    # of the optimizable universe (too few to reclassify), mirroring the same
+    # exclusion baked into funds_list_mv.
+    conditions.append(Fund.strategy_label != "Unclassified")
     if require_aum:
         conditions.append(Fund.aum_usd > 0)
     if include_ids:

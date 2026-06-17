@@ -194,6 +194,14 @@ async def test_select_universe_funds_always_applies_quality_gates() -> None:
     assert "min(nav_timeseries.nav_date)" in session.sql
     cutoff = _TODAY - dt.timedelta(days=optimizer_data.MIN_UNIVERSE_HISTORY_DAYS)
     assert cutoff in session.bound_params.values()
+    # 'Unclassified' funds (unknown strategy → no definite asset class) are left
+    # out of the optimizable universe, mirroring funds_list_mv's exclusion.
+    assert "strategy_label !=" in session.sql
+    assert "Unclassified" in session.bound_params.values()
+    # 'Unclassified' funds (unknown strategy → no definite asset class) are
+    # excluded from the optimizable universe, mirroring funds_list_mv.
+    assert "strategy_label !=" in session.sql
+    assert "Unclassified" in session.bound_params.values()
 
 
 async def test_select_universe_funds_include_ids_restricts_candidates() -> None:

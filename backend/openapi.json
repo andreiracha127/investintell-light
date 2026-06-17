@@ -1847,7 +1847,8 @@
                     "equity",
                     "fixed_income",
                     "cash",
-                    "alternatives"
+                    "alternatives",
+                    "multi_asset"
                   ],
                   "type": "string"
                 },
@@ -2110,7 +2111,8 @@
                     "equity",
                     "fixed_income",
                     "cash",
-                    "alternatives"
+                    "alternatives",
+                    "multi_asset"
                   ],
                   "type": "string"
                 },
@@ -4193,7 +4195,8 @@
               "equity",
               "fixed_income",
               "cash",
-              "alternatives"
+              "alternatives",
+              "multi_asset"
             ],
             "title": "Asset Class"
           },
@@ -9683,6 +9686,13 @@
             },
             "type": "array",
             "title": "Recent Flips"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/RegimeHistoryOut"
+            },
+            "type": "array",
+            "title": "History"
           }
         },
         "type": "object",
@@ -9695,7 +9705,8 @@
           "days_in_state",
           "last_flip",
           "signal",
-          "recent_flips"
+          "recent_flips",
+          "history"
         ],
         "title": "MacroRegimeResponse",
         "description": "Estado do detector vote2of3 (worker regime_composite) + breakdown dos votos.\n\nrisk_off \u21d4 \u22652 votos entre credit/trend/nfci. Estados bin\u00e1rios \u2014 o composite\npor score ponderado (legado) foi refutado. O credit_regime segue materializado\n(\u00e9 1 dos votos); o composite \u00e9 o detector promovido (Sharpe 0,549 / DD 25,3%)."
@@ -11986,6 +11997,38 @@
         ],
         "title": "RegimeFlipOut"
       },
+      "RegimeHistoryOut": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "vote_count": {
+            "type": "integer",
+            "title": "Vote Count"
+          },
+          "votes": {
+            "$ref": "#/components/schemas/RegimeVotesOut"
+          },
+          "signal": {
+            "$ref": "#/components/schemas/RegimeSignalOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "state",
+          "vote_count",
+          "votes",
+          "signal"
+        ],
+        "title": "RegimeHistoryOut"
+      },
       "RegimeSignalOut": {
         "properties": {
           "ratio": {
@@ -13385,7 +13428,8 @@
                   "equity",
                   "fixed_income",
                   "cash",
-                  "alternatives"
+                  "alternatives",
+                  "multi_asset"
                 ]
               },
               {
