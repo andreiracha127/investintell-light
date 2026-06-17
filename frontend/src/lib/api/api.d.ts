@@ -4389,6 +4389,21 @@ export interface components {
              * @description Display name from the instruments cache.
              */
             name: string | null;
+            /**
+             * Asset Class
+             * @description Fund asset_class for the grouped allocation view; None for direct equities / non-fund tickers.
+             */
+            asset_class?: string | null;
+            /**
+             * Strategy Label
+             * @description Fund strategy_label for the grouped allocation view; None for direct equities.
+             */
+            strategy_label?: string | null;
+            /**
+             * Instrument Id
+             * @description Fund instrument_id (for the dossier link); None for non-fund holdings.
+             */
+            instrument_id?: string | null;
             /** Quantity */
             quantity: number;
             /**

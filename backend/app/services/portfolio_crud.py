@@ -9,9 +9,10 @@ Fail-loud contract:
 """
 
 import datetime as dt
-from collections.abc import Sequence
+import uuid
+from collections.abc import Mapping, Sequence
 from decimal import Decimal
-from typing import Any, Protocol, cast
+from typing import Any, NamedTuple, Protocol, cast
 
 from sqlalchemy import CursorResult, Row, delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -23,6 +24,7 @@ from app.models.eod_price import EodPrice
 from app.models.fund import Fund, FundClass, FundNav
 from app.models.instrument import Instrument
 from app.models.portfolio import Portfolio, Position
+from app.optimizer import data as optimizer_data
 from app.schemas.portfolios import (
     OverviewAggregates,
     PortfolioCreate,
@@ -334,6 +336,14 @@ async def select_fund_tickers(
     return {row[0] for row in result.all()}
 
 
+class PositionTaxonomy(NamedTuple):
+    """Per-position fund taxonomy for the grouped allocation view."""
+
+    asset_class: str | None
+    strategy_label: str | None
+    instrument_id: uuid.UUID | None
+
+
 async def _fund_instrument_by_ticker(
     session: AsyncSession, tickers: Sequence[str]
 ) -> dict[str, Any]:
@@ -368,6 +378,34 @@ async def _fund_instrument_by_ticker(
         for ticker, instrument_id in class_rows.all():
             instrument_by_ticker.setdefault(ticker, instrument_id)
     return instrument_by_ticker
+
+
+async def resolve_position_taxonomy(
+    session: AsyncSession, tickers: Sequence[str]
+) -> dict[str, PositionTaxonomy]:
+    """ticker -> PositionTaxonomy for the grouped allocation view.
+
+    Fund tickers resolve to their instrument_id (via _fund_instrument_by_ticker)
+    and carry the fund asset_class / strategy_label. Any ticker that does not
+    resolve to a fund instrument is treated as a directly-held equity:
+    ('equity', None, None).
+    """
+    if not tickers:
+        return {}
+    instrument_by_ticker = await _fund_instrument_by_ticker(session, tickers)
+    instrument_ids = list({iid for iid in instrument_by_ticker.values()})
+    asset_class_of = await optimizer_data.load_fund_asset_class(session, instrument_ids)
+    strategy_of = await optimizer_data.load_fund_strategy_label(session, instrument_ids)
+    out: dict[str, PositionTaxonomy] = {}
+    for ticker in tickers:
+        iid = instrument_by_ticker.get(ticker)
+        if iid is None:
+            out[ticker] = PositionTaxonomy("equity", None, None)
+        else:
+            out[ticker] = PositionTaxonomy(
+                asset_class_of.get(iid), strategy_of.get(iid), iid
+            )
+    return out
 
 
 async def select_tickers_with_eod(
@@ -512,6 +550,7 @@ def build_overview(
     closes_by_ticker: dict[str, list[tuple[dt.date, float]]],
     names_by_ticker: dict[str, str | None],
     cash: float,
+    taxonomy_by_ticker: Mapping[str, PositionTaxonomy] | None = None,
 ) -> tuple[list[PositionOverview], OverviewAggregates]:
     """Assemble the render-ready overview rows + aggregates (no I/O).
 
@@ -540,10 +579,16 @@ def build_overview(
         )
         pnl = market_value - cost_basis if cost_basis is not None else None
         pnl_pct = pnl / cost_basis if pnl is not None and cost_basis is not None else None
+        tax = (taxonomy_by_ticker or {}).get(
+            position.ticker, PositionTaxonomy(None, None, None)
+        )
         rows.append(
             PositionOverview(
                 ticker=position.ticker,
                 name=names_by_ticker.get(position.ticker),
+                asset_class=tax.asset_class,
+                strategy_label=tax.strategy_label,
+                instrument_id=tax.instrument_id,
                 quantity=position.quantity,
                 acq_price=position.acq_price,
                 basis=cast("PositionBasis", position.basis),

@@ -10,6 +10,7 @@ rejected with 422, never silently normalized away.
 """
 
 import datetime as dt
+import uuid
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -191,6 +192,21 @@ class PositionOverview(BaseModel):
 
     ticker: str
     name: str | None = Field(description="Display name from the instruments cache.")
+    asset_class: str | None = Field(
+        default=None,
+        description="Fund asset_class for the grouped allocation view; None for "
+        "direct equities / non-fund tickers.",
+    )
+    strategy_label: str | None = Field(
+        default=None,
+        description="Fund strategy_label for the grouped allocation view; None "
+        "for direct equities.",
+    )
+    instrument_id: uuid.UUID | None = Field(
+        default=None,
+        description="Fund instrument_id (for the dossier link); None for "
+        "non-fund holdings.",
+    )
     quantity: float
     acq_price: float | None = Field(
         description="Acquisition price per share/unit; null = unknown. With "

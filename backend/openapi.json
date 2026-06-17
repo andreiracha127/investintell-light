@@ -11449,6 +11449,43 @@
             "title": "Name",
             "description": "Display name from the instruments cache."
           },
+          "asset_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Class",
+            "description": "Fund asset_class for the grouped allocation view; None for direct equities / non-fund tickers."
+          },
+          "strategy_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Label",
+            "description": "Fund strategy_label for the grouped allocation view; None for direct equities."
+          },
+          "instrument_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Id",
+            "description": "Fund instrument_id (for the dossier link); None for non-fund holdings."
+          },
           "quantity": {
             "type": "number",
             "title": "Quantity"
