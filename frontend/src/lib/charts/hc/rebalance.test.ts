@@ -29,6 +29,7 @@ const DRIFTS: PositionDrift[] = [
     drift_abs: 0.07,
     drift_rel: 0.175,
     breach: true,
+    status: "urgent",
   },
   // target 35%, current 34% -> within band -> safe
   {
@@ -38,6 +39,7 @@ const DRIFTS: PositionDrift[] = [
     drift_abs: -0.01,
     drift_rel: -0.0286,
     breach: false,
+    status: "ok",
   },
   // target 25%, current 19% -> safe
   {
@@ -47,6 +49,7 @@ const DRIFTS: PositionDrift[] = [
     drift_abs: -0.06,
     drift_rel: -0.24,
     breach: false,
+    status: "ok",
   },
 ];
 
@@ -124,6 +127,7 @@ describe("buildHcDriftBandsOption", () => {
         drift_abs: 0,
         drift_rel: 0,
         breach: false,
+        status: "ok",
       },
     ];
     const opt = buildHcDriftBandsOption(tiny, TEST_COLORS, BAND_ABS, BAND_REL)!;
