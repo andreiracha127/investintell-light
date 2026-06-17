@@ -14,6 +14,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Grid } from "@highcharts/grid-pro";
 
@@ -62,7 +63,24 @@ const BUTTON_CLASS =
   "text-text-secondary hover:bg-layer-hover hover:text-text-primary " +
   "transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 
+const PORTFOLIO_SECTIONS = [
+  { id: "overview", label: "Overview" },
+  { id: "exposure", label: "Exposure" },
+  { id: "rebalance", label: "Rebalancing" },
+  { id: "news", label: "News" },
+] as const;
+
+type PortfolioSectionId = (typeof PORTFOLIO_SECTIONS)[number]["id"];
+
+function portfolioSectionFromParam(value: string | null): PortfolioSectionId {
+  return PORTFOLIO_SECTIONS.some((section) => section.id === value)
+    ? (value as PortfolioSectionId)
+    : "overview";
+}
+
 export function PortfolioOverviewView() {
+  const searchParams = useSearchParams();
+  const activeSection = portfolioSectionFromParam(searchParams.get("section"));
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const portfoliosQuery = useQuery({
@@ -123,15 +141,60 @@ export function PortfolioOverviewView() {
           {selected && (
             <>
               <PortfolioManageBar selected={selected} onSelect={setSelectedId} />
-              <OverviewSection key={selected.id} portfolioId={selected.id} />
-              <PortfolioLookthroughSection portfolioId={selected.id} />
-              <PortfolioRebalanceSection portfolioId={selected.id} />
-              <PortfolioNewsPanel portfolioId={selected.id} />
+              <PortfolioSectionTabs activeSection={activeSection} />
+              {activeSection === "overview" && (
+                <OverviewSection key={selected.id} portfolioId={selected.id} />
+              )}
+              {activeSection === "exposure" && (
+                <PortfolioLookthroughSection portfolioId={selected.id} />
+              )}
+              {activeSection === "rebalance" && (
+                <PortfolioRebalanceSection portfolioId={selected.id} />
+              )}
+              {activeSection === "news" && (
+                <PortfolioNewsPanel portfolioId={selected.id} />
+              )}
             </>
           )}
         </div>
       )}
     </div>
+  );
+}
+
+function PortfolioSectionTabs({
+  activeSection,
+}: {
+  activeSection: PortfolioSectionId;
+}) {
+  return (
+    <nav
+      aria-label="Portfolio sections"
+      className="border-x border-t border-border bg-field"
+    >
+      <div role="tablist" aria-label="Portfolio sections" className="flex overflow-x-auto">
+        {PORTFOLIO_SECTIONS.map((section) => {
+          const active = activeSection === section.id;
+          return (
+            <Link
+              key={section.id}
+              href={`/portfolio?section=${section.id}`}
+              scroll={false}
+              role="tab"
+              aria-selected={active}
+              aria-current={active ? "page" : undefined}
+              className={`flex h-[36px] items-center border-r border-border px-5 text-[12.5px] transition-colors ${
+                active
+                  ? "relative z-[1] border-b border-b-surface-2 bg-surface-2 font-bold text-accent"
+                  : "text-text-secondary hover:bg-layer-hover hover:text-text-primary"
+              }`}
+            >
+              {section.label}
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
   );
 }
 

@@ -32,11 +32,11 @@ const ASSET_CLASS_LABEL: Record<string, string> = {
 const NUM_SEQ: SortOrder[] = ["desc", "asc", null];
 const TEXT_SEQ: SortOrder[] = ["asc", "desc", null];
 
-/** All FundListItem keys we feed to the grid (display columns + hidden id). */
+/** All FundListItem keys we feed to the grid (display columns + link internals). */
 const DATA_KEYS = [
   "ticker", "name", "fund_type", "strategy_label", "asset_class",
   "aum_usd", "expense_ratio", "return_1y", "volatility_1y", "sharpe_1y",
-  "peer_sharpe_pctl", "elite_flag", "instrument_id",
+  "peer_sharpe_pctl", "elite_flag", "instrument_id", "profile_href",
 ] as const;
 
 /** Escape text destined for a cell's HTML formatter output. */
@@ -49,8 +49,8 @@ export function escapeHtml(value: unknown): string {
 }
 
 function fundHref(row: GridCell["row"]): string | null {
-  const id = row.getCell("instrument_id")?.value;
-  return id === null || id === undefined ? null : `/funds/${encodeURIComponent(String(id))}`;
+  const href = row.getCell("profile_href")?.value;
+  return href === null || href === undefined || href === "" ? null : String(href);
 }
 
 /** number|null -> "—" or fn(n). */
@@ -136,6 +136,7 @@ export function fundsGridColumns(state: GridSortState): GridColumns {
     },
   }));
   cols.push({ id: "instrument_id", enabled: false });
+  cols.push({ id: "profile_href", enabled: false });
   return cols;
 }
 
@@ -146,6 +147,12 @@ export function fundsGridData(items: FundsList["items"]): LocalGridData {
   const columns: Record<string, Array<string | number | boolean | null>> = {};
   for (const key of DATA_KEYS) {
     columns[key] = items.map((it) => {
+      if (key === "profile_href") {
+        const id = (it as Record<string, unknown>).instrument_id;
+        return typeof id === "string"
+          ? `/funds/${encodeURIComponent(id)}`
+          : null;
+      }
       const v = (it as Record<string, unknown>)[key];
       return typeof v === "number" || typeof v === "string" || typeof v === "boolean"
         ? v

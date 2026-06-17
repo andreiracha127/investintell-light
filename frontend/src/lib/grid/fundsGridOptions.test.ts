@@ -63,13 +63,15 @@ describe("escapeHtml", () => {
 });
 
 describe("fundsGridColumns", () => {
-  it("returns the 12 display columns plus a hidden instrument_id column", () => {
+  it("returns the 12 display columns plus hidden internal link columns", () => {
     const cols = fundsGridColumns({ dir: "desc" });
-    expect(cols).toHaveLength(13);
+    expect(cols).toHaveLength(14);
     const ids = cols.map((c) => c.id);
     expect(ids).toContain("instrument_id");
+    expect(ids).toContain("profile_href");
     const hidden = cols.find((c) => c.id === "instrument_id");
     expect(hidden?.enabled).toBe(false);
+    expect(cols.find((c) => c.id === "profile_href")?.enabled).toBe(false);
   });
 
   it("aligns numeric vs text and sets per-type orderSequence", () => {
@@ -92,23 +94,23 @@ describe("fundsGridColumns", () => {
     expect(cols.find((c) => c.id === "ticker")?.sorting?.order).toBeUndefined();
   });
 
-  it("ticker formatter builds an escaped link to the fund profile using instrument_id from the row", () => {
+  it("ticker formatter builds an escaped link to the fund profile using the row href", () => {
     const cols = fundsGridColumns({ dir: "desc" });
     const fmt = cols.find((c) => c.id === "ticker")!.cells!.formatter;
-    expect(fmtCall(fmt, "AAA", { instrument_id: "uuid-1" })).toBe(
+    expect(fmtCall(fmt, "AAA", { profile_href: "/funds/uuid-1" })).toBe(
       '<a class="ix-grid-link" href="/funds/uuid-1">AAA</a>',
     );
-    expect(fmtCall(fmt, "AAA", { instrument_id: "fund/id" })).toBe(
+    expect(fmtCall(fmt, "AAA", { profile_href: "/funds/fund%2Fid" })).toBe(
       '<a class="ix-grid-link" href="/funds/fund%2Fid">AAA</a>',
     );
-    // no instrument_id -> plain label
+    // no href -> plain label
     expect(fmtCall(fmt, "AAA", {})).toBe("AAA");
   });
 
   it("name formatter escapes HTML and wraps in a truncating link", () => {
     const cols = fundsGridColumns({ dir: "desc" });
     const fmt = cols.find((c) => c.id === "name")!.cells!.formatter;
-    expect(fmtCall(fmt, "Alpha <Equity> Fund", { instrument_id: "uuid-1" })).toBe(
+    expect(fmtCall(fmt, "Alpha <Equity> Fund", { profile_href: "/funds/uuid-1" })).toBe(
       '<a class="ix-grid-link-plain" href="/funds/uuid-1"><span class="ix-grid-trunc">Alpha &lt;Equity&gt; Fund</span></a>',
     );
   });
@@ -136,8 +138,16 @@ describe("fundsGridData", () => {
     expect(data.providerType).toBe("local");
     expect(data.columns!.ticker).toEqual(["AAA", null]);
     expect(data.columns!.instrument_id).toEqual(["uuid-1", "uuid-2"]);
+    expect(data.columns!.profile_href).toEqual(["/funds/uuid-1", "/funds/uuid-2"]);
     expect(data.columns!.elite_flag).toEqual([true, false]);
     expect(data.columns!.aum_usd).toEqual([1_000_000, null]);
+  });
+
+  it("pre-encodes profile hrefs so formatters do not depend on a hidden id cell", () => {
+    const data = fundsGridData([
+      { instrument_id: "fund/id", ticker: "AAA" },
+    ] as unknown as FundsList["items"]);
+    expect(data.columns!.profile_href).toEqual(["/funds/fund%2Fid"]);
   });
 });
 

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 
 import { PortfolioOverviewView } from "@/components/portfolio/PortfolioOverviewView";
 
@@ -7,5 +8,9 @@ export const metadata: Metadata = {
 };
 
 export default function PortfolioOverviewPage() {
-  return <PortfolioOverviewView />;
+  return (
+    <Suspense fallback={null}>
+      <PortfolioOverviewView />
+    </Suspense>
+  );
 }
