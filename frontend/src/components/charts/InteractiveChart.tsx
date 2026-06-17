@@ -148,9 +148,10 @@ export function InteractiveChart({
       compares,
       compareData,
       colors,
-      onVisibleRangeChange: (next) => {
-        if (next !== range) onRangeChange(next);
-      },
+      // No onVisibleRangeChange: the backend returns exactly the range window,
+      // so inferring the range from the visible extents always reads as "MAX"
+      // (whole dataset visible) and snaps the chart back to MAX on every range
+      // click. The toolbar range buttons are the sole source of truth.
     });
   }, [
     colors,
@@ -165,7 +166,6 @@ export function InteractiveChart({
     scale,
     compares,
     compareData,
-    onRangeChange,
     usesStockChart,
   ]);
 
