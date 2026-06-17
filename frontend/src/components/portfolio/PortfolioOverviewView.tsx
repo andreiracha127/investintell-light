@@ -46,6 +46,7 @@ import { flashClassForDir, FLASH_UP, FLASH_DOWN } from "@/lib/grid/liveFlash";
 import { useLiveTicks } from "@/lib/livefeed/useLiveTicks";
 import { Card, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
 import { retryPolicy } from "@/components/screener/shared";
+import { PortfolioAllocationSection } from "@/components/portfolio/PortfolioAllocationSection";
 import { PortfolioNewsPanel } from "@/components/portfolio/PortfolioNewsPanel";
 import { PortfolioLookthroughSection } from "@/components/portfolio/PortfolioLookthroughSection";
 import { PortfolioRebalanceSection } from "@/components/portfolio/PortfolioRebalanceSection";
@@ -570,6 +571,7 @@ function OverviewSection({ portfolioId }: { portfolioId: number }) {
         <AllocationPanel overview={overview} colors={colors} />
       )}
       <PositionsTable overview={overview} portfolioId={portfolioId} />
+      <PortfolioAllocationSection overview={overview} />
     </>
   );
 }
