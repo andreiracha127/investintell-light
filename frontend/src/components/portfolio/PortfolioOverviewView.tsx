@@ -15,7 +15,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Grid } from "@highcharts/grid-pro";
 
 import {
@@ -43,7 +43,7 @@ import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { DataGrid } from "@/components/ui/DataGrid";
 import { positionsToGridOptions, POSITION_COLS } from "@/lib/grid/positionsGridOptions";
-import { flashClassForDir, FLASH_UP, FLASH_DOWN } from "@/lib/grid/liveFlash";
+import type { TickDir } from "@/lib/grid/liveFlash";
 import { useLiveTicks } from "@/lib/livefeed/useLiveTicks";
 import { Card, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
 import { retryPolicy } from "@/components/screener/shared";
@@ -62,6 +62,18 @@ const BUTTON_CLASS =
   "h-[28px] px-3 bg-field border border-border-strong text-[12px] " +
   "text-text-secondary hover:bg-layer-hover hover:text-text-primary " +
   "transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+
+/**
+ * Muted gain/loss background that the live-tick flash fades from (to
+ * transparent) when re-triggered via the Web Animations API. Returns a `var()`
+ * reference (resolved against the animated element), mirroring grid-theme.css's
+ * `@keyframes ix-grid-flash-up/-down`. 0 (unchanged) → null (no flash).
+ */
+function flashTintForDir(dir: TickDir): string | null {
+  if (dir === 1) return "var(--color-gain-muted)";
+  if (dir === -1) return "var(--color-loss-muted)";
+  return null;
+}
 
 const PORTFOLIO_SECTIONS = [
   { id: "overview", label: "Overview" },
@@ -795,43 +807,61 @@ function PositionsTable({
 
   const rowError = editMutation.error ?? removeMutation.error;
 
+  // Stabilize the edit/remove handlers so the gridOptions memo below doesn't
+  // re-run on every render. React Query's `mutate` is referentially stable, so
+  // we depend on `editMutation.mutate` / `removeMutation.mutate` rather than the
+  // whole mutation objects (which are fresh each render). Deps are only the
+  // values these handlers actually read: positions (for the sibling field) and
+  // portfolioId/queryClient (for the revert invalidation).
+  const editMutate = editMutation.mutate;
+  const removeMutate = removeMutation.mutate;
+  const onEditShares = useCallback(
+    (ticker: string, value: number) => {
+      if (Number.isFinite(value) && value > 0) {
+        const pos = positions.find((p) => p.ticker === ticker);
+        editMutate({
+          ticker,
+          body: { quantity: value, acq_price: pos?.acq_price ?? null },
+        });
+      } else {
+        queryClient.invalidateQueries({ queryKey: ["overview", portfolioId] });
+      }
+    },
+    [positions, portfolioId, queryClient, editMutate],
+  );
+  const onEditCost = useCallback(
+    (ticker: string, value: number | null) => {
+      if (value === null || (Number.isFinite(value) && value > 0)) {
+        const pos = positions.find((p) => p.ticker === ticker);
+        if (pos) {
+          editMutate({
+            ticker,
+            body: { quantity: pos.quantity, acq_price: value },
+          });
+        }
+      } else {
+        queryClient.invalidateQueries({ queryKey: ["overview", portfolioId] });
+      }
+    },
+    [positions, portfolioId, queryClient, editMutate],
+  );
+  const onRemove = useCallback(
+    (ticker: string) => removeMutate(ticker),
+    [removeMutate],
+  );
+
   // Wire the grid's pure edit/remove callbacks to the mutations. Invalid edits
   // never persist; they re-fetch the overview so the grid reverts the cell to
-  // the server value.
+  // the server value. Only recomputes when the position DATA (overview) or a
+  // stabilized handler changes — never on an unrelated re-render.
   const gridOptions = useMemo(
     () =>
       positionsToGridOptions(overview, {
-        onEditShares: (ticker, value) => {
-          if (Number.isFinite(value) && value > 0) {
-            const pos = positions.find((p) => p.ticker === ticker);
-            editMutation.mutate({
-              ticker,
-              body: { quantity: value, acq_price: pos?.acq_price ?? null },
-            });
-          } else {
-            queryClient.invalidateQueries({
-              queryKey: ["overview", portfolioId],
-            });
-          }
-        },
-        onEditCost: (ticker, value) => {
-          if (value === null || (Number.isFinite(value) && value > 0)) {
-            const pos = positions.find((p) => p.ticker === ticker);
-            if (pos) {
-              editMutation.mutate({
-                ticker,
-                body: { quantity: pos.quantity, acq_price: value },
-              });
-            }
-          } else {
-            queryClient.invalidateQueries({
-              queryKey: ["overview", portfolioId],
-            });
-          }
-        },
-        onRemove: (ticker) => removeMutation.mutate(ticker),
+        onEditShares,
+        onEditCost,
+        onRemove,
       }),
-    [overview, positions, portfolioId, editMutation, removeMutation, queryClient],
+    [overview, onEditShares, onEditCost, onRemove],
   );
 
   // ── Live price ticks (path: targeted DOM flash) ──────────────────────────
@@ -865,13 +895,19 @@ function PositionsTable({
       const el = row.getCell(POSITION_COLS.last)?.htmlElement;
       if (!el) continue;
       el.textContent = formatCurrency(tick.price);
-      const cls = flashClassForDir(tick.dir);
-      if (!cls) continue;
-      // Re-trigger the CSS animation on rapid ticks: drop both flash classes,
-      // force a reflow, then add the current one.
-      el.classList.remove(FLASH_UP, FLASH_DOWN);
-      void el.offsetWidth; // reflow
-      el.classList.add(cls);
+      const tint = flashTintForDir(tick.dir);
+      if (!tint) continue;
+      // Re-trigger the gain/loss flash without touching layout. The old path
+      // removed/added a CSS class and read `el.offsetWidth` to force a reflow
+      // per row — N forced synchronous layouts per frame (layout thrashing).
+      // The Web Animations API restarts the animation outright (each call gets
+      // a fresh Animation), so no reflow read is needed. Keyframes mirror
+      // grid-theme.css's `ix-grid-flash-*`: muted gain/loss bg fading to
+      // transparent over 0.6s ease-out. `var()` resolves against `el`.
+      el.animate(
+        [{ background: tint }, { background: "transparent" }],
+        { duration: 600, easing: "ease-out" },
+      );
     }
   }, [ticks, gridEpoch]);
 

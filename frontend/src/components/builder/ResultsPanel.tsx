@@ -115,16 +115,26 @@ export function ResultsPanel({
 
   // Grouped (broad/fund-universe) view: a 3-level Asset Class → Strategy → Fund
   // tree of non-zero weights with aggregated parent weights and dossier links.
-  const treeRows = buildWeightsTree(
-    weights.map<WeightInput>((w) => ({
-      kind: w.asset.kind,
-      instrumentId: w.asset.kind === "fund" ? w.asset.id : null,
-      ticker: w.ticker ?? null,
-      name: w.name ?? null,
-      weight: w.weight,
-      assetClass: w.asset_class ?? null,
-      strategyLabel: w.strategy_label ?? null,
-    })),
+  // Memoized on `weights` (its only input) so the tree — and the grid options
+  // derived from it — aren't rebuilt on every unrelated re-render.
+  const treeRows = useMemo(
+    () =>
+      buildWeightsTree(
+        weights.map<WeightInput>((w) => ({
+          kind: w.asset.kind,
+          instrumentId: w.asset.kind === "fund" ? w.asset.id : null,
+          ticker: w.ticker ?? null,
+          name: w.name ?? null,
+          weight: w.weight,
+          assetClass: w.asset_class ?? null,
+          strategyLabel: w.strategy_label ?? null,
+        })),
+      ),
+    [weights],
+  );
+  const treeGridOptions = useMemo(
+    () => weightsTreeGridOptions(treeRows),
+    [treeRows],
   );
 
   /* ── Save as portfolio (with the optional execution step, F8.6b) ───── */
@@ -567,7 +577,7 @@ export function ResultsPanel({
         )}
         {grouped ? (
           <DataGrid
-            options={weightsTreeGridOptions(treeRows)}
+            options={treeGridOptions}
             className="h-[420px] w-full"
             emptyMessage="No positions with weight."
           />

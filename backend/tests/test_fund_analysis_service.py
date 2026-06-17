@@ -75,6 +75,53 @@ def test_max_range_lines_are_weekly_bounded_but_keep_first_growth_point() -> Non
     assert all(date.weekday() == 4 for date in dates)
 
 
+def test_5y_range_lines_are_weekly_bounded_but_keep_first_growth_point() -> None:
+    """5Y display series mirror the MAX weekly downsample (P2 item 7)."""
+    nav = _nav()
+    payload = _assemble(
+        nav,
+        range_key="5Y",
+        start=nav.index[0].date(),
+        end=nav.index[-1].date(),
+    )
+    # First growth point preserved (anchored at 100) even though weekly-bounded.
+    assert payload.growth_of_100[0][1] == pytest.approx(100.0)
+    # Far fewer points than the ~420 daily NAV rows.
+    assert len(payload.growth_of_100) <= 90
+    for series in (
+        payload.rolling_volatility,
+        payload.rolling_sharpe,
+        payload.drawdown[1:],  # first drawdown point is the preserved daily anchor
+    ):
+        dates = [date for date, _value in series]
+        assert dates
+        assert all(date.weekday() == 4 for date in dates)
+
+
+def test_5y_stats_identical_to_daily_base() -> None:
+    """Weekly display downsample must NOT change any scalar fund statistic."""
+    nav = _nav()
+    start = nav.index[0].date()
+    end = nav.index[-1].date()
+    p5 = _assemble(nav, range_key="5Y", start=start, end=end)
+    pd_ = _assemble(nav, range_key="1Y", start=start, end=end)
+
+    s5, sd = p5.stats, pd_.stats
+    assert s5.annualized_volatility == sd.annualized_volatility
+    assert s5.var_95 == sd.var_95
+    assert s5.cvar_95 == sd.cvar_95
+    assert s5.total_return == sd.total_return
+    assert s5.max_drawdown.depth == sd.max_drawdown.depth
+    assert s5.max_drawdown.peak_date == sd.max_drawdown.peak_date
+    assert s5.max_drawdown.trough_date == sd.max_drawdown.trough_date
+    assert s5.best_day.value == sd.best_day.value
+    assert s5.worst_day.value == sd.worst_day.value
+    assert p5.histogram.bin_edges == pd_.histogram.bin_edges
+    assert p5.histogram.counts == pd_.histogram.counts
+    # monthly_returns is range-independent (always month-end) — unchanged too.
+    assert p5.monthly_returns == pd_.monthly_returns
+
+
 def test_too_few_nav_rows_raises_insufficient_data() -> None:
     with pytest.raises(InsufficientFundDataError, match="NAV rows"):
         _assemble(_nav(1), start=dt.date(2024, 1, 1), end=dt.date(2024, 1, 1))

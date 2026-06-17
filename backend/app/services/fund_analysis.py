@@ -55,6 +55,11 @@ logger = logging.getLogger(__name__)
 
 _HISTOGRAM_BINS = 20
 
+# Display ranges whose growth/drawdown/rolling line series are weekly-downsampled
+# to bound the payload (mirrors timeseries._INTERVAL_BY_RANGE: 5Y and MAX →
+# weekly). Statistics are ALWAYS computed on the daily base and are unaffected.
+_WEEKLY_DISPLAY_RANGES = frozenset({"5Y", "MAX"})
+
 
 class FundAnalysisError(Exception):
     """Base for fund-analysis assembly failures mapped to HTTP 422."""
@@ -102,9 +107,9 @@ def _rolling_sharpe(returns: pd.Series, window: int) -> pd.Series:
 
 
 def _visible_line(series: pd.Series, range_key: RangeKey) -> list[tuple[dt.date, float]]:
-    """Emit a daily line, or a weekly-bounded MAX line preserving the first point."""
+    """Emit a daily line, or a weekly-bounded 5Y/MAX line preserving the first point."""
     clean = series.dropna()
-    if range_key != "MAX":
+    if range_key not in _WEEKLY_DISPLAY_RANGES:
         return series_points(clean)
     weekly = resample_weekly(clean)
     if len(clean) and (weekly.empty or weekly.index[0] != clean.index[0]):
@@ -117,7 +122,8 @@ def _sliced_rolling_line(
     series: pd.Series, *, start: dt.date, range_key: RangeKey
 ) -> list[tuple[dt.date, float]]:
     daily = series[series.index > pd.Timestamp(start)].dropna()
-    return series_points(resample_weekly(daily) if range_key == "MAX" else daily)
+    weekly_display = range_key in _WEEKLY_DISPLAY_RANGES
+    return series_points(resample_weekly(daily) if weekly_display else daily)
 
 
 def _monthly_return_points(nav: pd.Series) -> list[tuple[dt.date, float]]:

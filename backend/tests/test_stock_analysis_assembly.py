@@ -372,3 +372,86 @@ def test_non_max_rolling_series_remain_daily() -> None:
             assert all(g <= 4 for g in gaps), (
                 f"gap > 4 days in daily series: max gap = {max(gaps)}"
             )
+
+
+# ---------------------------------------------------------------------------
+# 5Y range — weekly display downsample, stats UNCHANGED (P2 item 7)
+# ---------------------------------------------------------------------------
+
+
+def test_5y_range_resamples_to_weekly_candles() -> None:
+    """5Y candles must be weekly (W-FRI), mirroring the MAX downsample.
+
+    The 5Y window (1826 calendar days) covers the whole 400-bday frame here, so
+    the candle count must collapse from ~400 daily rows to ~80 weekly rows.
+    """
+    asset, benchmark, _, end = _padded_inputs()
+    start = asset.index[0].date()  # 5Y covers full history for this frame
+    payload = _assemble(asset, benchmark, start, end, range_key="5Y")
+
+    # 400 business days ≈ 80 full weeks (far fewer than the ~400 daily candles).
+    assert 78 <= len(payload.candles) <= 82
+    week = payload.candles[1]  # a full Mon-Fri week
+    assert week.volume == 5_000  # summed daily volumes
+    assert week.date.weekday() == 4  # W-FRI label
+    assert week.low <= week.open <= week.high
+    assert week.low <= week.close <= week.high
+
+
+def test_5y_rolling_and_cumulative_series_are_weekly() -> None:
+    """5Y rolling + cumulative line series must be on a weekly (Friday) grid."""
+    asset, benchmark, _, end = _padded_inputs()
+    start = asset.index[0].date()
+    payload = _assemble(asset, benchmark, start, end, range_key="5Y")
+    for series in (
+        payload.rolling_volatility,
+        payload.rolling_beta,
+        payload.rolling_correlation,
+        payload.cumulative_returns.asset,
+        payload.cumulative_returns.benchmark,
+    ):
+        assert len(series) >= 2
+        dates = [d for d, _ in series]
+        assert all(d.weekday() == 4 for d in dates), (
+            f"non-Friday date found: {[d for d in dates if d.weekday() != 4][:3]}"
+        )
+
+
+def test_5y_stats_identical_to_daily_base() -> None:
+    """The weekly display downsample must NOT alter any scalar risk statistic.
+
+    Stats are computed on the daily in-range returns regardless of range_key.
+    We compare the assembled 5Y stats against (a) a manual daily computation
+    and (b) the stats from a daily (1Y-equivalent) assembly over the SAME
+    start/end — they must be bit-for-bit identical.
+    """
+    asset, benchmark, _, end = _padded_inputs()
+    start = asset.index[0].date()
+
+    payload_5y = _assemble(asset, benchmark, start, end, range_key="5Y")
+    # Same window, but ask for a daily range to get the un-downsampled baseline.
+    payload_daily = _assemble(asset, benchmark, start, end, range_key="1Y")
+
+    s5, sd = payload_5y.stats, payload_daily.stats
+    assert s5.annualized_volatility == sd.annualized_volatility
+    assert s5.var_95 == sd.var_95
+    assert s5.var_99 == sd.var_99
+    assert s5.cvar_95 == sd.cvar_95
+    assert s5.total_return == sd.total_return
+    assert s5.beta == sd.beta
+    assert s5.correlation == sd.correlation
+    assert s5.max_drawdown.depth == sd.max_drawdown.depth
+    assert s5.max_drawdown.peak_date == sd.max_drawdown.peak_date
+    assert s5.max_drawdown.trough_date == sd.max_drawdown.trough_date
+    assert s5.best_day.value == sd.best_day.value
+    assert s5.worst_day.value == sd.worst_day.value
+    assert payload_5y.histogram.bin_edges == payload_daily.histogram.bin_edges
+    assert payload_5y.histogram.counts == payload_daily.histogram.counts
+
+    # And independently confirm against a direct daily-base computation.
+    returns = asset["adj_close"].pct_change().dropna()
+    in_range = returns[returns.index > pd.Timestamp(start)]
+    assert s5.total_return == pytest.approx(float((1 + in_range).prod()) - 1.0)
+    assert s5.annualized_volatility == pytest.approx(
+        float(in_range.std(ddof=1)) * np.sqrt(252)
+    )

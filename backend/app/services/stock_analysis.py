@@ -70,6 +70,11 @@ from app.services._series import (
 
 _HISTOGRAM_BINS = 20
 
+# Display ranges whose candle/line series are weekly-downsampled to bound the
+# payload (mirrors timeseries._INTERVAL_BY_RANGE: 5Y and MAX → weekly grid).
+# Statistics are ALWAYS computed on the daily base and are unaffected.
+_WEEKLY_DISPLAY_RANGES = frozenset({"5Y", "MAX"})
+
 _PRICE_COLUMNS = ["open", "high", "low", "close", "volume", "adj_close"]
 
 # Aggregation rules for weekly (W-FRI) candle resampling on range MAX.
@@ -240,9 +245,10 @@ def assemble_analysis(
         as_of=_to_date(asset.index[-1]),
     )
 
-    # Candles: RAW in-range prices; weekly resample bounds the MAX payload.
+    # Candles: RAW in-range prices; weekly resample bounds the 5Y/MAX payload.
+    weekly_display = range_key in _WEEKLY_DISPLAY_RANGES
     visible = asset[asset.index >= start_ts]
-    candle_frame = _weekly_candles(visible) if range_key == "MAX" else visible
+    candle_frame = _weekly_candles(visible) if weekly_display else visible
     if len(candle_frame) > max_candles:
         raise PayloadTooLargeError(
             f"Range {range_key} for {ticker} would emit {len(candle_frame)} candles, "
@@ -251,8 +257,8 @@ def assemble_analysis(
 
     # Cumulative returns: aligned grid, sliced in-range, both rebased to 0
     # on the same first in-range date.
-    # For MAX, resample to W-FRI so the x-axis aligns with the weekly candles.
-    if range_key == "MAX":
+    # For 5Y/MAX, resample to W-FRI so the x-axis aligns with the weekly candles.
+    if weekly_display:
         cumulative = CumulativeReturns(
             asset=_rebased_cumulative_weekly(aligned_in_asset),
             benchmark=_rebased_cumulative_weekly(aligned_in_bench),
@@ -265,11 +271,11 @@ def assemble_analysis(
 
     # Rolling series: warm up on the padded returns, then slice to the
     # visible range and drop NaN rows (leading min_periods warm-up and any
-    # undefined windows). For MAX, resample to W-FRI to bound the payload and
-    # align the x-axis with the candle grid.
+    # undefined windows). For 5Y/MAX, resample to W-FRI to bound the payload
+    # and align the x-axis with the candle grid.
     def _sliced(series: pd.Series) -> list[tuple[dt.date, float]]:
         daily = series[series.index > start_ts].dropna()
-        return _series_points(_resample_weekly(daily) if range_key == "MAX" else daily)
+        return _series_points(_resample_weekly(daily) if weekly_display else daily)
 
     rolling_vol_points = _sliced(rolling_volatility(asset_returns, window))
     rolling_beta_points = _sliced(rolling_beta(asset_returns, bench_returns, window))

@@ -25,8 +25,8 @@ import {
   type PricePeriod,
 } from "@/lib/charts/hc/priceStock";
 import {
-  applyBarsToLiveChart,
-  mergeTickIntoBars,
+  applyTickToLiveChart,
+  mergeTickIntoBarsResult,
   parseTickTimeMs,
 } from "@/lib/charts/hc/priceStockLive";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
@@ -74,6 +74,12 @@ export function InteractiveChart({
   // click). The ref is updated synchronously on every render below.
   const renderParamsRef = useRef({ type, period, volume: panes.volume });
   renderParamsRef.current = { type, period, volume: panes.volume };
+
+  // Coalesce live-tick redraws: at most one incremental chart update per frame.
+  // pendingTickRef holds the latest bar + whether it was appended; rafRef holds
+  // the scheduled frame (null when nothing is queued).
+  const rafRef = useRef<number | null>(null);
+  const pendingTickRef = useRef<{ bar: PriceBar; appended: boolean } | null>(null);
 
   useEffect(() => {
     setColors(chartColors());
@@ -165,28 +171,56 @@ export function InteractiveChart({
 
   useEffect(() => {
     if (!live || mode === "nav" || !symbol) return;
-    return subscribeTicks(symbol, (tick) => {
-      const timeMs = parseTickTimeMs(tick.time);
-      setLiveBars((current) => {
-        const next = mergeTickIntoBars(current, {
-          price: tick.price,
-          size: tick.size,
-          timeMs,
-        });
-        liveBarsRef.current = next;
-        if (chartRef.current) {
-          const { type, period, volume } = renderParamsRef.current;
-          applyBarsToLiveChart({
-            chart: chartRef.current,
-            bars: next,
-            type,
-            period,
-            showVolume: mode === "ohlcv" && volume,
-          });
-        }
-        return next;
+
+    const flush = () => {
+      rafRef.current = null;
+      const pending = pendingTickRef.current;
+      pendingTickRef.current = null;
+      if (!pending || !chartRef.current) return;
+      const { type, volume } = renderParamsRef.current;
+      applyTickToLiveChart({
+        chart: chartRef.current,
+        bar: pending.bar,
+        appended: pending.appended,
+        type,
+        showVolume: mode === "ohlcv" && volume,
+        redraw: true,
       });
+    };
+
+    const unsubscribe = subscribeTicks(symbol, (tick) => {
+      const timeMs = parseTickTimeMs(tick.time);
+      // Pure state computation: derive the next bars from the current ref, then
+      // commit via ref + setState. No chart side-effects inside the updater.
+      const { bars: next, appended } = mergeTickIntoBarsResult(liveBarsRef.current, {
+        price: tick.price,
+        size: tick.size,
+        timeMs,
+      });
+      if (!next.length) return;
+      liveBarsRef.current = next;
+      setLiveBars(next);
+
+      // Queue an incremental redraw, coalesced to one per animation frame.
+      // Carry forward `appended` if any tick this frame started a new bar, so a
+      // day-boundary append is never dropped by a later same-day update.
+      pendingTickRef.current = {
+        bar: next[next.length - 1],
+        appended: appended || (pendingTickRef.current?.appended ?? false),
+      };
+      if (rafRef.current === null) {
+        rafRef.current = requestAnimationFrame(flush);
+      }
     });
+
+    return () => {
+      unsubscribe();
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      pendingTickRef.current = null;
+    };
   }, [symbol, live, mode]);
 
   const typeOptions =
