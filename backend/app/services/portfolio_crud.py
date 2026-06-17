@@ -9,9 +9,10 @@ Fail-loud contract:
 """
 
 import datetime as dt
-from collections.abc import Sequence
+import uuid
+from collections.abc import Mapping, Sequence
 from decimal import Decimal
-from typing import Any, Protocol, cast
+from typing import Any, NamedTuple, Protocol, cast
 
 from sqlalchemy import CursorResult, Row, delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -507,11 +508,20 @@ class PositionLike(Protocol):
     def trade_date(self) -> dt.date | None: ...
 
 
+class PositionTaxonomy(NamedTuple):
+    """Per-position fund taxonomy for the grouped allocation view."""
+
+    asset_class: str | None
+    strategy_label: str | None
+    instrument_id: uuid.UUID | None
+
+
 def build_overview(
     positions: Sequence[PositionLike],
     closes_by_ticker: dict[str, list[tuple[dt.date, float]]],
     names_by_ticker: dict[str, str | None],
     cash: float,
+    taxonomy_by_ticker: Mapping[str, PositionTaxonomy] | None = None,
 ) -> tuple[list[PositionOverview], OverviewAggregates]:
     """Assemble the render-ready overview rows + aggregates (no I/O).
 
@@ -540,10 +550,16 @@ def build_overview(
         )
         pnl = market_value - cost_basis if cost_basis is not None else None
         pnl_pct = pnl / cost_basis if pnl is not None and cost_basis is not None else None
+        tax = (taxonomy_by_ticker or {}).get(
+            position.ticker, PositionTaxonomy(None, None, None)
+        )
         rows.append(
             PositionOverview(
                 ticker=position.ticker,
                 name=names_by_ticker.get(position.ticker),
+                asset_class=tax.asset_class,
+                strategy_label=tax.strategy_label,
+                instrument_id=tax.instrument_id,
                 quantity=position.quantity,
                 acq_price=position.acq_price,
                 basis=cast("PositionBasis", position.basis),

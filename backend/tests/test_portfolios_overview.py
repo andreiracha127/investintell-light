@@ -402,3 +402,39 @@ def test_build_overview_as_of_is_max_across_positions() -> None:
     assert rows[0].as_of == older
     assert rows[1].as_of == _LAST
     assert aggregates.as_of == _LAST
+
+
+def test_build_overview_populates_taxonomy_from_map() -> None:
+    import uuid as _uuid
+
+    from app.services.portfolio_crud import PositionTaxonomy
+
+    iid = _uuid.UUID(int=7)
+    rows, _ = build_overview(
+        [_position("VTI", 1.0, 10.0), _position("AAPL", 1.0, 10.0)],
+        closes_by_ticker={"VTI": [(_LAST, 10.0)], "AAPL": [(_LAST, 10.0)]},
+        names_by_ticker={},
+        cash=0.0,
+        taxonomy_by_ticker={
+            "VTI": PositionTaxonomy("equity", "Large-Cap Blend", iid),
+        },
+    )
+    by_ticker = {r.ticker: r for r in rows}
+    assert by_ticker["VTI"].asset_class == "equity"
+    assert by_ticker["VTI"].strategy_label == "Large-Cap Blend"
+    assert by_ticker["VTI"].instrument_id == iid
+    # Ticker absent from the map -> all-None taxonomy (default).
+    assert by_ticker["AAPL"].asset_class is None
+    assert by_ticker["AAPL"].strategy_label is None
+    assert by_ticker["AAPL"].instrument_id is None
+
+
+def test_build_overview_taxonomy_defaults_none_when_map_omitted() -> None:
+    rows, _ = build_overview(
+        [_position("AAPL", 1.0, 10.0)],
+        closes_by_ticker={"AAPL": [(_LAST, 10.0)]},
+        names_by_ticker={},
+        cash=0.0,
+    )
+    assert rows[0].asset_class is None
+    assert rows[0].instrument_id is None
