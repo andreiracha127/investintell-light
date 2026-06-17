@@ -110,6 +110,60 @@ CREATE UNIQUE INDEX IF NOT EXISTS fund_risk_latest_mv_pk
 -- NOTE: synced_at / source_calc_date / source_nav_max_date are intentionally
 -- ABSENT — a dynamic view has no sync markers (Task 2.4 sources staleness from
 -- fund_risk_latest_mv.calc_date and nav_timeseries directly).
+-- Canonical strategy_label -> asset_class map. instruments_universe.asset_class
+-- is frozen at initial load and drifts hard from the (reclassified) strategy
+-- label — e.g. "Real Estate"/"Precious Metals"/"Emerging Markets Equity" funds
+-- carried asset_class='fixed_income', polluting the broad fixed_income universe
+-- by ~29%. strategy_label is the trustworthy field (sourced from SEC metadata +
+-- strategy_reclassification_stage), so derive asset_class from it; genuinely
+-- multi-asset / unknown labels (Balanced, Target Date, Multi-Asset, Index /
+-- Passive, Unclassified) return NULL and fall back to the stored asset_class.
+CREATE OR REPLACE FUNCTION public.asset_class_from_strategy(label text)
+RETURNS varchar
+LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $fn$
+  SELECT CASE label
+    WHEN 'Asset-Backed Securities' THEN 'fixed_income'
+    WHEN 'Convertible Securities' THEN 'fixed_income'
+    WHEN 'ESG/Sustainable Bond' THEN 'fixed_income'
+    WHEN 'Emerging Markets Debt' THEN 'fixed_income'
+    WHEN 'Government Bond' THEN 'fixed_income'
+    WHEN 'High Yield Bond' THEN 'fixed_income'
+    WHEN 'Inflation-Linked Bond' THEN 'fixed_income'
+    WHEN 'Intermediate-Term Bond' THEN 'fixed_income'
+    WHEN 'Investment Grade Bond' THEN 'fixed_income'
+    WHEN 'Mortgage-Backed Securities' THEN 'fixed_income'
+    WHEN 'Municipal Bond' THEN 'fixed_income'
+    WHEN 'Private Credit' THEN 'fixed_income'
+    WHEN 'Structured Credit' THEN 'fixed_income'
+    WHEN 'Asian Equity' THEN 'equity'
+    WHEN 'Emerging Markets Equity' THEN 'equity'
+    WHEN 'ESG/Sustainable Equity' THEN 'equity'
+    WHEN 'European Equity' THEN 'equity'
+    WHEN 'Global Equity' THEN 'equity'
+    WHEN 'International Equity' THEN 'equity'
+    WHEN 'Large Blend' THEN 'equity'
+    WHEN 'Large Growth' THEN 'equity'
+    WHEN 'Large Value' THEN 'equity'
+    WHEN 'Long/Short Equity' THEN 'equity'
+    WHEN 'Mid Blend' THEN 'equity'
+    WHEN 'Mid Growth' THEN 'equity'
+    WHEN 'Mid Value' THEN 'equity'
+    WHEN 'Sector Equity' THEN 'equity'
+    WHEN 'Size-Focused Equity' THEN 'equity'
+    WHEN 'Small Blend' THEN 'equity'
+    WHEN 'Small Growth' THEN 'equity'
+    WHEN 'Small Value' THEN 'equity'
+    WHEN 'Technology' THEN 'equity'
+    WHEN 'Alternative' THEN 'alternatives'
+    WHEN 'Commodities' THEN 'alternatives'
+    WHEN 'Precious Metals' THEN 'alternatives'
+    WHEN 'Real Estate' THEN 'alternatives'
+    WHEN 'Cash Equivalent' THEN 'cash'
+    WHEN 'Government Money Market' THEN 'cash'
+    ELSE NULL
+  END::varchar;
+$fn$;
+
 CREATE OR REPLACE VIEW funds_v AS
 WITH eligible AS (
     SELECT ii.instrument_id, ii.sec_series_id, ii.ticker, ii.isin,
@@ -259,7 +313,26 @@ SELECT
         END,
         'Unclassified'
     ) AS strategy_label,
-    u.asset_class,
+    -- asset_class derived from the (reclassified) strategy_label via the
+    -- canonical map; multi-asset/unknown labels fall back to the stored
+    -- instruments_universe.asset_class. Mirrors the strategy_label COALESCE.
+    COALESCE(
+        public.asset_class_from_strategy(
+            COALESCE(
+                NULLIF(btrim(rf.strategy_label), ''),
+                NULLIF(btrim(etf.strategy_label), ''),
+                NULLIF(btrim(mmf.strategy_label), ''),
+                NULLIF(btrim(stage.label), ''),
+                CASE
+                    WHEN lower(btrim(peer.peer_strategy_label))
+                         IN ('mutual_fund', 'etf', 'mmf', 'ucits') THEN NULL
+                    ELSE NULLIF(btrim(peer.peer_strategy_label), '')
+                END,
+                'Unclassified'
+            )
+        ),
+        u.asset_class
+    )::varchar(50) AS asset_class,
     COALESCE(rf.is_index, etf.is_index) AS is_index,
     COALESCE(
         rf.net_operating_expenses, etf.net_operating_expenses,
