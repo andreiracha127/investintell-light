@@ -72,6 +72,47 @@ export function toVolumeSeriesData(bars: PriceBar[]): Array<[number, number]> {
  * o build ESM/Turbopack e deixavam os estudos sem renderizar.
  */
 
+/**
+ * Resample diário → semanal/mensal (port de `resample` do ixchart). Agrega
+ * OHLCV por bucket (open do 1º, high/low extremos, close do último, volume
+ * somado) e mantém o timestamp do 1º bar do bucket. Os estudos são calculados
+ * sobre os bars resampleados, para que SMA20/RSI em W/M sejam de 20 semanas /
+ * meses (não de 20 dias agrupados).
+ */
+export function resampleBars(bars: PriceBar[], period: PricePeriod): PriceBar[] {
+  if (period === "D") return bars;
+  const keyOf = (t: number): number => {
+    const d = new Date(t);
+    const year = d.getUTCFullYear();
+    if (period === "M") return year * 100 + d.getUTCMonth();
+    // semana aproximada: ano*100 + nº da semana desde 1 de janeiro (UTC, para
+    // ser determinístico independente do fuso da máquina)
+    const onejan = Date.UTC(year, 0, 1);
+    return (
+      year * 100 +
+      Math.floor(((t - onejan) / 86_400_000 + new Date(onejan).getUTCDay()) / 7)
+    );
+  };
+  const out: PriceBar[] = [];
+  let cur: PriceBar | null = null;
+  let curKey: number | null = null;
+  for (const bar of bars) {
+    const key = keyOf(bar.t);
+    if (key !== curKey) {
+      if (cur) out.push(cur);
+      curKey = key;
+      cur = { ...bar };
+    } else if (cur) {
+      cur.h = Math.max(cur.h, bar.h);
+      cur.l = Math.min(cur.l, bar.l);
+      cur.c = bar.c;
+      cur.v += bar.v;
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
 /** Média móvel simples sobre os closes (janela deslizante O(n)). */
 export function smaValues(bars: PriceBar[], period: number): (number | null)[] {
   const out: (number | null)[] = new Array(bars.length).fill(null);
@@ -344,6 +385,9 @@ export function buildHcPriceStockOption(input: PriceStockOptionsInput): Options 
     mode === "nav" && (type === "candles" || type === "ohlc") ? "line" : type;
   const dataGrouping = dataGroupingForPeriod(period);
   const showVolume = mode === "ohlcv" && panes.volume;
+  // Studies (SMA/RSI) are computed on bars resampled to the selected period so
+  // W/M show 20-week / 20-month averages, not 20-day averages grouped visually.
+  const studyBars = resampleBars(bars, period);
   const layout = paneLayout({ volume: showVolume, rsi: panes.rsi });
   const dataMin = bars[0]?.t ?? 0;
   const dataMax = bars[bars.length - 1]?.t ?? 0;
@@ -426,7 +470,7 @@ export function buildHcPriceStockOption(input: PriceStockOptionsInput): Options 
     series.push({
       type: "line",
       name: "SMA20",
-      data: indicatorSeriesData(bars, smaValues(bars, 20)),
+      data: indicatorSeriesData(studyBars, smaValues(studyBars, 20)),
       yAxis: "price-axis",
       color: colors.categories[2],
       lineWidth: 1,
@@ -440,7 +484,7 @@ export function buildHcPriceStockOption(input: PriceStockOptionsInput): Options 
     series.push({
       type: "line",
       name: "SMA50",
-      data: indicatorSeriesData(bars, smaValues(bars, 50)),
+      data: indicatorSeriesData(studyBars, smaValues(studyBars, 50)),
       yAxis: "price-axis",
       color: colors.categories[3],
       lineWidth: 1,
@@ -454,7 +498,7 @@ export function buildHcPriceStockOption(input: PriceStockOptionsInput): Options 
     series.push({
       type: "line",
       name: "RSI 14",
-      data: indicatorSeriesData(bars, rsiValues(bars, 14)),
+      data: indicatorSeriesData(studyBars, rsiValues(studyBars, 14)),
       yAxis: "rsi-axis",
       color: colors.bar,
       lineWidth: 1,

@@ -12,6 +12,7 @@ import {
   indicatorSeriesData,
   rangePresetFromExtremes,
   removeCompareSelection,
+  resampleBars,
   rsiValues,
   smaValues,
   toMainSeriesData,
@@ -151,6 +152,32 @@ describe("priceStock option builder", () => {
       // strictly increasing closes → no losses → RSI pinned at 100
       expect(rsi[14]).toBe(100);
       expect(rsi[15]).toBe(100);
+    });
+
+    it("resampleBars is a no-op for D and aggregates OHLCV per month", () => {
+      const bars: PriceBar[] = [
+        { t: Date.UTC(2024, 0, 2), o: 10, h: 12, l: 9, c: 11, v: 100 },
+        { t: Date.UTC(2024, 0, 15), o: 11, h: 15, l: 8, c: 14, v: 200 },
+        { t: Date.UTC(2024, 1, 1), o: 14, h: 16, l: 13, c: 15, v: 50 },
+      ];
+      expect(resampleBars(bars, "D")).toBe(bars);
+      const monthly = resampleBars(bars, "M");
+      expect(monthly).toHaveLength(2);
+      // Jan bucket: open of first, high/low extremes, close of last, summed vol.
+      expect(monthly[0]).toMatchObject({ t: bars[0].t, o: 10, h: 15, l: 8, c: 14, v: 300 });
+      expect(monthly[1]).toMatchObject({ o: 14, c: 15, v: 50 });
+    });
+
+    it("studies computed on resampled bars yield period-scale averages", () => {
+      // 8 weekly closes; SMA over the monthly resample averages whole months.
+      const weekly: PriceBar[] = Array.from({ length: 8 }, (_, i) => {
+        const c = 10 + i;
+        return { t: Date.UTC(2024, Math.floor(i / 4), (i % 4) * 7 + 1), o: c, h: c, l: c, c, v: 0 };
+      });
+      const monthly = resampleBars(weekly, "M");
+      expect(monthly).toHaveLength(2); // 2 months
+      // Monthly closes are the last close of each month (13 and 17); SMA2 → null, 15.
+      expect(smaValues(monthly, 2)).toEqual([null, 15]);
     });
 
     it("indicatorSeriesData aligns values to bar timestamps and keeps nulls", () => {
