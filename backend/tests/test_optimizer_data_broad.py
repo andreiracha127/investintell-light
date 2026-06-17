@@ -100,8 +100,44 @@ async def test_load_returns_matrix_rejects_fewer_than_two() -> None:
         )
 
 
-def test_max_universe_candidates_default_is_2000() -> None:
-    assert optimizer_data.MAX_UNIVERSE_CANDIDATES == 2000
+def test_max_universe_candidates_default_is_5000() -> None:
+    assert optimizer_data.MAX_UNIVERSE_CANDIDATES == 5000
+
+
+def test_universe_quality_gate_constants() -> None:
+    assert optimizer_data.MIN_UNIVERSE_AUM_USD == 200_000_000
+    assert optimizer_data.MIN_UNIVERSE_HISTORY_DAYS == 3 * 365
+
+
+async def test_select_universe_funds_applies_aum_and_history_gates() -> None:
+    """The universe resolver gates on AUM >= $200M and >= 3y of NAV history
+    (track record). Verify both predicates are wired into the SQL."""
+    captured: dict[str, str] = {}
+
+    class _CaptureSession:
+        async def execute(self, stmt: Any) -> _FakeResult:
+            captured["sql"] = str(
+                stmt.compile(compile_kwargs={"literal_binds": True})
+            )
+            return _FakeResult([])
+
+    from app.services import funds_catalog
+
+    today = dt.date(2026, 6, 17)
+    await optimizer_data.select_universe_funds(
+        _CaptureSession(),  # type: ignore[arg-type]
+        funds_catalog.FundFilters(),
+        rank_by="aum_usd",
+        rank_dir="desc",
+        max_assets=None,
+        today=today,
+    )
+    sql = captured["sql"]
+    assert "200000000" in sql  # AUM >= $200M floor
+    cutoff = (
+        today - dt.timedelta(days=optimizer_data.MIN_UNIVERSE_HISTORY_DAYS)
+    ).isoformat()
+    assert cutoff in sql  # earliest NAV on/before the 3y cutoff
 
 
 _FUND_C = uuid.UUID("00000000-0000-0000-0000-00000000000c")

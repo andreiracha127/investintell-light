@@ -31,7 +31,11 @@ DEFAULT_WINDOW_DAYS: int | None = None
 MIN_COMMON_OBS = 400
 # Hard ceiling for the on-demand broad-universe path (design §8). Above this the
 # pipeline fails loud (a worker pre-compute path is phase 2, not built here).
-MAX_UNIVERSE_CANDIDATES = 2000
+MAX_UNIVERSE_CANDIDATES = 5000
+# Universe quality gates (applied in select_universe_funds): a fund must clear a
+# minimum AUM and carry a minimum NAV track record to enter the optimizable set.
+MIN_UNIVERSE_AUM_USD = 200_000_000
+MIN_UNIVERSE_HISTORY_DAYS = 3 * 365
 
 
 @dataclass(frozen=True)
@@ -408,9 +412,11 @@ async def select_universe_funds(
     ``ValueError`` (fail-loud — a pre-computed worker path is planned for
     larger universes).
 
-    Reuses the GET /funds filter predicates and sort whitelist, and only keeps
-    funds that EACH have at least ``min_obs`` non-null NAV observations in the
-    window — a per-fund coverage heuristic that screens out short-history funds.
+    Reuses the GET /funds filter predicates and sort whitelist. Quality gates
+    applied to EVERY candidate: AUM ≥ ``MIN_UNIVERSE_AUM_USD`` ($200M; NULL AUM
+    is excluded), a NAV track record ≥ ``MIN_UNIVERSE_HISTORY_DAYS`` (3y, over
+    full history), and at least ``min_obs`` non-null NAV observations in the
+    window — screening out small and short-history funds.
     It does NOT by itself guarantee the cross-fund date intersection clears
     ``MIN_COMMON_OBS``; ``load_aligned_returns`` still enforces that on the
     resolved set (a fail-loud 422 if the overlap falls short). ``require_aum``
@@ -429,13 +435,30 @@ async def select_universe_funds(
         .group_by(FundNav.instrument_id)
         .subquery()
     )
+    # Track-record gate: earliest NAV on/before the cutoff = the fund has carried
+    # at least MIN_UNIVERSE_HISTORY_DAYS of history. Computed over FULL history
+    # (independent of the analysis window) so a narrow window_days never spuriously
+    # disqualifies a long-lived fund.
+    history_cutoff = today - dt.timedelta(days=MIN_UNIVERSE_HISTORY_DAYS)
+    nav_span = (
+        select(
+            FundNav.instrument_id,
+            func.min(FundNav.nav_date).label("first_nav"),
+        )
+        .where(FundNav.nav.is_not(None))
+        .group_by(FundNav.instrument_id)
+        .subquery()
+    )
 
     order_col = funds_catalog.sort_column(rank_by)
     order = order_col.desc() if rank_dir == "desc" else order_col.asc()
 
     conditions = list(funds_catalog.filter_conditions(filters))
+    # Quality gate: a minimum AUM (NULL AUM = unconfirmed → excluded). This is a
+    # hard floor; a stricter user-supplied aum_min in `filters` narrows further.
+    conditions.append(Fund.aum_usd.is_not(None))
+    conditions.append(Fund.aum_usd >= MIN_UNIVERSE_AUM_USD)
     if require_aum:
-        conditions.append(Fund.aum_usd.is_not(None))
         conditions.append(Fund.aum_usd > 0)
     if include_ids:
         conditions.append(Fund.instrument_id.in_(list(include_ids)))
@@ -445,7 +468,12 @@ async def select_universe_funds(
         .select_from(Fund)
         .outerjoin(FundRiskLatest, FundRiskLatest.instrument_id == Fund.instrument_id)
         .join(nav_counts, nav_counts.c.instrument_id == Fund.instrument_id)
-        .where(*conditions, nav_counts.c.n >= min_obs)
+        .join(nav_span, nav_span.c.instrument_id == Fund.instrument_id)
+        .where(
+            *conditions,
+            nav_counts.c.n >= min_obs,
+            nav_span.c.first_nav <= history_cutoff,
+        )
         .order_by(order.nulls_last(), Fund.ticker.nulls_last(), Fund.instrument_id)
     )
     if max_assets is not None:

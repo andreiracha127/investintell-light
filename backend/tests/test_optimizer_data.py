@@ -173,7 +173,7 @@ async def test_select_universe_funds_maps_rows_and_joins_history() -> None:
     assert "aum_usd >" in session.sql
 
 
-async def test_select_universe_funds_without_require_aum_omits_aum_guard() -> None:
+async def test_select_universe_funds_always_applies_quality_gates() -> None:
     from app.services import funds_catalog
 
     session = _CaptureSession([(_FUND_A, "AAA", "Alpha Fund")])
@@ -186,9 +186,14 @@ async def test_select_universe_funds_without_require_aum_omits_aum_guard() -> No
         require_aum=False,
         today=_TODAY,
     )
-    # Negative pairing: the AUM guard must NOT be present when not required.
-    assert "aum_usd is not null" not in session.sql
-    assert "nav_timeseries" in session.sql
+    # The AUM floor and the 3y NAV track-record gate apply UNCONDITIONALLY
+    # (they are universe quality gates, not the BL-only require_aum guard).
+    assert "aum_usd is not null" in session.sql
+    assert "aum_usd >=" in session.sql
+    assert optimizer_data.MIN_UNIVERSE_AUM_USD in session.bound_params.values()
+    assert "min(nav_timeseries.nav_date)" in session.sql
+    cutoff = _TODAY - dt.timedelta(days=optimizer_data.MIN_UNIVERSE_HISTORY_DAYS)
+    assert cutoff in session.bound_params.values()
 
 
 async def test_select_universe_funds_include_ids_restricts_candidates() -> None:
