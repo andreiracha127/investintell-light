@@ -71,9 +71,10 @@ export function HighchartsChart({
       const mod = await import("highcharts/esm/highcharts.js");
       // Register Core modules consumed by hc/* builders before any chart is
       // created: heatmap (also provides colorAxis, used by correlation +
-      // monthly-returns) and xrange (regime strip).
+      // monthly-returns), xrange (regime strip), and annotations (macro RRG).
       await import("highcharts/esm/modules/heatmap.js");
       await import("highcharts/esm/modules/xrange.js");
+      await import("highcharts/esm/modules/annotations.js");
       if (disposed || !containerRef.current) return;
       const Highcharts = mod.default;
       // Apply the token-driven Graphite theme globally before creating.

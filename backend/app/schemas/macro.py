@@ -28,6 +28,14 @@ class RegimeFlipOut(BaseModel):
     state: str
 
 
+class RegimeHistoryOut(BaseModel):
+    date: dt.date
+    state: str
+    vote_count: int
+    votes: RegimeVotesOut
+    signal: RegimeSignalOut
+
+
 class MacroRegimeResponse(BaseModel):
     """Estado do detector vote2of3 (worker regime_composite) + breakdown dos votos.
 
@@ -45,3 +53,4 @@ class MacroRegimeResponse(BaseModel):
     last_flip: dt.date | None
     signal: RegimeSignalOut
     recent_flips: list[RegimeFlipOut]
+    history: list[RegimeHistoryOut]

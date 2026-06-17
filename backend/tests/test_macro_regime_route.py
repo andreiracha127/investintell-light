@@ -45,6 +45,30 @@ def _snapshot(
             mr.RegimeFlip(date=dt.date(2026, 5, 22), state="risk_off"),
             mr.RegimeFlip(date=dt.date(2020, 6, 1), state="risk_on"),
         ],
+        history=[
+            mr.CompositeRegimePoint(
+                date=dt.date(2026, 5, 21),
+                state="risk_on",
+                vote_count=1,
+                credit_vote=True,
+                trend_vote=False,
+                nfci_vote=False,
+                ratio=0.81,
+                p20_5y=0.79,
+                nfci=-0.2,
+            ),
+            mr.CompositeRegimePoint(
+                date=dt.date(2026, 5, 22),
+                state="risk_off",
+                vote_count=2,
+                credit_vote=True,
+                trend_vote=True,
+                nfci_vote=False,
+                ratio=0.76,
+                p20_5y=0.7901,
+                nfci=-0.12,
+            ),
+        ],
     )
 
 
@@ -75,6 +99,11 @@ async def test_macro_regime_returns_state_and_vote_breakdown(
     assert body["days_in_state"] == 21
     assert body["last_flip"] == "2026-05-22"
     assert [f["state"] for f in body["recent_flips"]] == ["risk_off", "risk_on"]
+    assert [p["state"] for p in body["history"]] == ["risk_on", "risk_off"]
+    assert body["history"][1]["votes"] == {"credit": True, "trend": True, "nfci": False}
+    assert body["history"][1]["signal"]["distance_pct"] == pytest.approx(
+        100.0 * (0.76 - 0.7901) / 0.7901, rel=1e-6
+    )
 
 
 @pytest.mark.anyio

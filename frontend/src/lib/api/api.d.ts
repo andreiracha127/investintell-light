@@ -3537,6 +3537,8 @@ export interface components {
             signal: components["schemas"]["RegimeSignalOut"];
             /** Recent Flips */
             recent_flips: components["schemas"]["RegimeFlipOut"][];
+            /** History */
+            history: components["schemas"]["RegimeHistoryOut"][];
         };
         /**
          * MacroRegionalResponse
@@ -4634,6 +4636,20 @@ export interface components {
             date: string;
             /** State */
             state: string;
+        };
+        /** RegimeHistoryOut */
+        RegimeHistoryOut: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** State */
+            state: string;
+            /** Vote Count */
+            vote_count: number;
+            votes: components["schemas"]["RegimeVotesOut"];
+            signal: components["schemas"]["RegimeSignalOut"];
         };
         /**
          * RegimeSignalOut

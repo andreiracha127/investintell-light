@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { buildHcRegimeStripOption } from "@/lib/charts/hc/regime";
+import {
+  buildHcMacroPerformanceOption,
+  buildHcMacroRotationOption,
+  buildHcRegimeStripOption,
+} from "@/lib/charts/hc/regime";
 import { TEST_COLORS } from "@/lib/charts/hc/__fixtures__/colors";
-import type { RegimeFlip } from "@/lib/api/client";
+import type { MacroRegime, RegimeFlip } from "@/lib/api/client";
 
 /** Epoch ms for a "YYYY-MM-DD" date, UTC-safe (mirrors the builder). */
 function ms(iso: string): number {
@@ -178,5 +182,112 @@ describe("buildHcRegimeStripOption", () => {
     expect(data[0].x).toBe(ms("2024-01-01"));
     // end is strictly after start (today >> 2024-01-01)
     expect(data[0].x2!).toBeGreaterThan(data[0].x!);
+  });
+});
+
+const HISTORY: MacroRegime["history"] = [
+  {
+    date: "2024-01-01",
+    state: "risk_on",
+    vote_count: 1,
+    votes: { credit: true, trend: false, nfci: false },
+    signal: { ratio: 0.82, p20_5y: 0.78, distance_pct: 5.1, nfci: -0.2 },
+  },
+  {
+    date: "2024-01-02",
+    state: "risk_off",
+    vote_count: 2,
+    votes: { credit: true, trend: true, nfci: false },
+    signal: { ratio: 0.76, p20_5y: 0.79, distance_pct: -3.8, nfci: -0.1 },
+  },
+  {
+    date: "2024-01-03",
+    state: "risk_on",
+    vote_count: 0,
+    votes: { credit: false, trend: false, nfci: false },
+    signal: { ratio: 0.84, p20_5y: 0.79, distance_pct: 6.3, nfci: -0.4 },
+  },
+];
+
+describe("buildHcMacroRotationOption", () => {
+  it("returns null for empty history", () => {
+    expect(buildHcMacroRotationOption([], TEST_COLORS)).toBeNull();
+  });
+
+  it("maps vote pressure into a 96-104 RRG-style quadrant path", () => {
+    const opt = buildHcMacroRotationOption(HISTORY, TEST_COLORS)!;
+    const path = opt.series?.[0] as {
+      type?: string;
+      data?: Array<{ x?: number; y?: number; custom?: { voteCount?: number } }>;
+    };
+    expect(path.type).toBe("line");
+    expect(path.data).toHaveLength(3);
+    expect(path.data?.[0].x).toBeCloseTo(96 + (2 / 3) * 8);
+    expect(path.data?.[1].x).toBeCloseTo(96 + (1 / 3) * 8);
+    expect(path.data?.[1].y).toBeCloseTo(97.6);
+    expect(path.data?.[2].x).toBe(104);
+    expect(path.data?.[2].y).toBe(104);
+    expect(path.data?.[1].custom?.voteCount).toBe(2);
+  });
+
+  it("draws quadrant reference axes at 100/100", () => {
+    const opt = buildHcMacroRotationOption(HISTORY, TEST_COLORS)!;
+    const xAxis = opt.xAxis as { plotLines?: Array<{ value?: number }> };
+    const yAxis = opt.yAxis as { plotLines?: Array<{ value?: number }> };
+    expect(xAxis.plotLines?.[0].value).toBe(100);
+    expect(yAxis.plotLines?.[0].value).toBe(100);
+  });
+});
+
+describe("buildHcMacroPerformanceOption", () => {
+  it("normalizes portfolio and asset series to 100", () => {
+    const opt = buildHcMacroPerformanceOption({
+      portfolio: [
+        ["2024-01-01", 1000],
+        ["2024-01-02", 900],
+      ],
+      asset: [
+        ["2024-01-01", 50],
+        ["2024-01-02", 55],
+      ],
+      regimes: HISTORY,
+      colors: TEST_COLORS,
+      portfolioLabel: "Portfolio",
+      assetLabel: "SPY",
+    })!;
+    const series = opt.series as Array<{ data?: Array<[number, number]>; name?: string }>;
+    expect(series[0].name).toBe("Portfolio");
+    expect(series[0].data).toEqual([
+      [ms("2024-01-01"), 100],
+      [ms("2024-01-02"), 90],
+    ]);
+    expect(series[1].data).toEqual([
+      [ms("2024-01-01"), 100],
+      [ms("2024-01-02"), 110.00000000000001],
+    ]);
+  });
+
+  it("adds regime plot bands over the datetime xAxis", () => {
+    const opt = buildHcMacroPerformanceOption({
+      portfolio: [
+        ["2024-01-01", 1000],
+        ["2024-01-03", 990],
+      ],
+      asset: [
+        ["2024-01-01", 50],
+        ["2024-01-03", 49],
+      ],
+      regimes: HISTORY,
+      colors: TEST_COLORS,
+      portfolioLabel: "Portfolio",
+      assetLabel: "SPY",
+    })!;
+    const xAxis = opt.xAxis as {
+      type?: string;
+      plotBands?: Array<{ color?: string; label?: { text?: string } }>;
+    };
+    expect(xAxis.type).toBe("datetime");
+    expect(xAxis.plotBands?.length).toBeGreaterThan(0);
+    expect(xAxis.plotBands?.some((band) => band.label?.text === "Risk-off")).toBe(true);
   });
 });

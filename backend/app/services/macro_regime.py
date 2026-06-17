@@ -128,6 +128,20 @@ class CompositeRegimeSnapshot:
     days_in_state: int
     last_flip: dt.date | None
     recent_flips: list[RegimeFlip]
+    history: list["CompositeRegimePoint"]
+
+
+@dataclass(frozen=True)
+class CompositeRegimePoint:
+    date: dt.date
+    state: str
+    vote_count: int
+    credit_vote: bool
+    trend_vote: bool
+    nfci_vote: bool
+    ratio: float | None
+    p20_5y: float | None
+    nfci: float | None
 
 
 _COMPOSITE_LATEST_SQL = text("""
@@ -156,6 +170,19 @@ _COMPOSITE_DAYS_IN_STATE_SQL = text("""
     ) AND regime_date <= :as_of
 """)
 
+_COMPOSITE_HISTORY_SQL = text("""
+    SELECT regime_date, state, vote_count, credit_vote, trend_vote, nfci_vote,
+           ratio, p20_5y, nfci
+    FROM (
+        SELECT regime_date, state, vote_count, credit_vote, trend_vote,
+               nfci_vote, ratio, p20_5y, nfci
+        FROM regime_composite_daily
+        ORDER BY regime_date DESC
+        LIMIT :limit
+    ) h
+    ORDER BY regime_date ASC
+""")
+
 
 async def fetch_composite_regime(
     datalake: AsyncSession,
@@ -166,6 +193,9 @@ async def fetch_composite_regime(
         return None
     flips = (
         await datalake.execute(_COMPOSITE_FLIPS_SQL, {"limit": RECENT_FLIPS})
+    ).all()
+    history_rows = (
+        await datalake.execute(_COMPOSITE_HISTORY_SQL, {"limit": 2520})
     ).all()
     days_in_state = (
         await datalake.execute(
@@ -190,5 +220,19 @@ async def fetch_composite_regime(
         last_flip=flips[0].regime_date if flips else None,
         recent_flips=[
             RegimeFlip(date=row.regime_date, state=row.state) for row in flips
+        ],
+        history=[
+            CompositeRegimePoint(
+                date=row.regime_date,
+                state=row.state,
+                vote_count=row.vote_count,
+                credit_vote=row.credit_vote,
+                trend_vote=row.trend_vote,
+                nfci_vote=row.nfci_vote,
+                ratio=f(row.ratio),
+                p20_5y=f(row.p20_5y),
+                nfci=f(row.nfci),
+            )
+            for row in history_rows
         ],
     )

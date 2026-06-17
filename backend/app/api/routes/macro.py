@@ -16,6 +16,7 @@ from app.core.datalake import get_datalake_session
 from app.schemas.macro import (
     MacroRegimeResponse,
     RegimeFlipOut,
+    RegimeHistoryOut,
     RegimeSignalOut,
     RegimeVotesOut,
 )
@@ -34,6 +35,10 @@ router = APIRouter(tags=["macro"])
 DETECTOR_NAME = "vote2of3"
 
 
+def _distance_pct(ratio: float | None, p20_5y: float | None) -> float | None:
+    return 100.0 * (ratio - p20_5y) / p20_5y if p20_5y and ratio is not None else None
+
+
 @router.get("/macro/regime", response_model=MacroRegimeResponse)
 async def get_macro_regime(
     datalake: Annotated[AsyncSession, Depends(get_datalake_session)],
@@ -48,11 +53,6 @@ async def get_macro_regime(
                 "populated regime_composite_daily yet."
             ),
         )
-    distance_pct = (
-        100.0 * (snapshot.ratio - snapshot.p20_5y) / snapshot.p20_5y
-        if snapshot.p20_5y and snapshot.ratio is not None
-        else None
-    )
     return MacroRegimeResponse(
         detector=DETECTOR_NAME,
         state=snapshot.state,
@@ -68,12 +68,31 @@ async def get_macro_regime(
         signal=RegimeSignalOut(
             ratio=snapshot.ratio,
             p20_5y=snapshot.p20_5y,
-            distance_pct=distance_pct,
+            distance_pct=_distance_pct(snapshot.ratio, snapshot.p20_5y),
             nfci=snapshot.nfci,
         ),
         recent_flips=[
             RegimeFlipOut(date=flip.date, state=flip.state)
             for flip in snapshot.recent_flips
+        ],
+        history=[
+            RegimeHistoryOut(
+                date=point.date,
+                state=point.state,
+                vote_count=point.vote_count,
+                votes=RegimeVotesOut(
+                    credit=point.credit_vote,
+                    trend=point.trend_vote,
+                    nfci=point.nfci_vote,
+                ),
+                signal=RegimeSignalOut(
+                    ratio=point.ratio,
+                    p20_5y=point.p20_5y,
+                    distance_pct=_distance_pct(point.ratio, point.p20_5y),
+                    nfci=point.nfci,
+                ),
+            )
+            for point in snapshot.history
         ],
     )
 
