@@ -218,11 +218,21 @@ def build_feature_matrix(
 
 
 def _zscore_impute(matrix: NDArray[np.floating]) -> NDArray[np.float64]:
-    """Column-wise z-score; NaN entries and degenerate columns map to 0 (neutral).
+    """Column-wise robust standardization; NaN/degenerate columns map to 0.
 
     A feature absent for a fund (NaN) or constant across the candidate set
     contributes nothing to the Euclidean distance instead of dominating or
     breaking it.
+
+    Standardization uses the median and MAD (median absolute deviation, scaled
+    by 1.4826 to match σ for a normal), not mean/std: the FI style betas are
+    heavy-tailed OLS fits that overfit on low-variance factors and reach the
+    numeric(10,6) floor (~-9999). A single such outlier would inflate a
+    mean/std scale and compress every other fund onto ~0, silently deadening
+    the whole feature. Median/MAD ignores the tail; the standardized values are
+    then clipped to ±4 so residual outliers cannot dominate the distance. When
+    the MAD is degenerate (≥50% identical values) we fall back to mean/std so
+    columns with spread but a tied median are not lost.
     """
     arr = np.asarray(matrix, dtype=float)
     out = np.zeros_like(arr)
@@ -231,11 +241,17 @@ def _zscore_impute(matrix: NDArray[np.floating]) -> NDArray[np.float64]:
         present = np.isfinite(col)
         if present.sum() < 2:
             continue
-        mu = float(col[present].mean())
-        sd = float(col[present].std())
+        vals = col[present]
+        med = float(np.median(vals))
+        mad = float(np.median(np.abs(vals - med)))
+        if mad >= 1e-12:
+            out[present, j] = np.clip((vals - med) / (mad * 1.4826), -4.0, 4.0)
+            continue
+        mu = float(vals.mean())
+        sd = float(vals.std())
         if sd < 1e-12:
             continue
-        out[present, j] = (col[present] - mu) / sd
+        out[present, j] = np.clip((vals - mu) / sd, -4.0, 4.0)
     return out
 
 

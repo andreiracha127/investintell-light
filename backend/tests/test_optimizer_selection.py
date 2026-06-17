@@ -124,6 +124,21 @@ def test_build_feature_matrix_shapes_and_preserves_nan() -> None:
     assert np.isnan(m[1, 0])
 
 
+def test_zscore_impute_outlier_does_not_deaden_column() -> None:
+    # A column carrying a clean two-group signal (-1 vs +1) plus a single
+    # extreme overfit outlier (the FI betas reach the numeric(10,6) floor of
+    # ~-9999). With mean/std standardization the outlier inflates the scale and
+    # compresses the two groups onto ~0, killing the feature's contribution to
+    # the Euclidean clustering distance. Robust (median/MAD) standardization
+    # must preserve the group separation.
+    col = np.array([-1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -9999.0]).reshape(-1, 1)
+    z = selection._zscore_impute(col)
+    bulk = z[:6, 0]  # the six signal rows, excluding the outlier
+    assert bulk.std() > 0.3  # group spread survives (mean/std → ~2e-4)
+    assert bulk[:3].mean() < bulk[3:].mean()  # groups stay on opposite sides
+    assert np.all(np.abs(z) <= 4.0 + 1e-9)  # residual outliers clipped
+
+
 def _planted_feature_blocks(n_clusters: int, per: int, dim: int, seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
     rows = []
