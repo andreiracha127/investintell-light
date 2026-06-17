@@ -8,6 +8,11 @@ import type { Options } from "highcharts";
 
 import type { CumulativeReturns } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
+import {
+  compactDatetimeXAxis,
+  formatTimestampDate,
+  toDatetimeData,
+} from "@/lib/charts/hc/dateAxis";
 import { formatPercent } from "@/lib/format";
 
 export function buildHcCumulativeOption(
@@ -18,12 +23,8 @@ export function buildHcCumulativeOption(
 ): Options {
   return {
     chart: { type: "line" },
-    legend: { enabled: false },
-    xAxis: {
-      categories: cumulative.asset.map((p) => p[0]),
-      crosshair: true,
-      tickWidth: 0,
-    },
+    legend: { enabled: true },
+    xAxis: compactDatetimeXAxis(),
     yAxis: {
       title: { text: undefined },
       labels: {
@@ -35,7 +36,7 @@ export function buildHcCumulativeOption(
     tooltip: {
       shared: true,
       formatter() {
-        const header = `${this.x}`;
+        const header = formatTimestampDate(this.x);
         const rows = (this.points ?? [])
           .map(
             (pt) =>
@@ -49,7 +50,7 @@ export function buildHcCumulativeOption(
       {
         type: "line",
         name: benchmarkLabel,
-        data: cumulative.benchmark.map((p) => p[1]),
+        data: toDatetimeData(cumulative.benchmark),
         color: colors.barMute,
         lineWidth: 2,
         marker: { enabled: false },
@@ -57,7 +58,7 @@ export function buildHcCumulativeOption(
       {
         type: "line",
         name: assetLabel,
-        data: cumulative.asset.map((p) => p[1]),
+        data: toDatetimeData(cumulative.asset),
         color: colors.accent,
         lineWidth: 2,
         marker: { enabled: false },

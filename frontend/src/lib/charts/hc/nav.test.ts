@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { buildHcNavOption } from "@/lib/charts/hc/nav";
 import { TEST_COLORS } from "@/lib/charts/hc/__fixtures__/colors";
+import { dateToUtcMs } from "@/lib/charts/hc/dateAxis";
 import type { SeriesPoint } from "@/lib/api/client";
-import { formatCurrency } from "@/lib/format";
+import { formatCurrency, formatDate } from "@/lib/format";
 
 const NAV: SeriesPoint[] = [
   ["2024-01-01", 100],
@@ -11,11 +12,14 @@ const NAV: SeriesPoint[] = [
 ];
 
 describe("buildHcNavOption", () => {
-  it("maps SeriesPoint dates to x categories and values to series data", () => {
+  it("maps SeriesPoint dates to datetime x values and y values", () => {
     const opt = buildHcNavOption(NAV, TEST_COLORS);
-    expect((opt.xAxis as { categories?: string[] }).categories).toEqual(["2024-01-01", "2024-01-02"]);
-    const series = opt.series?.[0] as { data?: number[] };
-    expect(series.data).toEqual([100, 101.5]);
+    expect((opt.xAxis as { type?: string }).type).toBe("datetime");
+    const series = opt.series?.[0] as { data?: Array<[number, number]> };
+    expect(series.data).toEqual([
+      [dateToUtcMs("2024-01-01"), 100],
+      [dateToUtcMs("2024-01-02"), 101.5],
+    ]);
   });
 
   it("colors the NAV line with the accent token", () => {
@@ -27,7 +31,7 @@ describe("buildHcNavOption", () => {
 
   it("renders an empty series for empty input", () => {
     const opt = buildHcNavOption([], TEST_COLORS);
-    const series = opt.series?.[0] as { data?: number[] };
+    const series = opt.series?.[0] as { data?: Array<[number, number]> };
     expect(series.data).toEqual([]);
   });
 
@@ -43,10 +47,10 @@ describe("buildHcNavOption", () => {
   it("formats the tooltip with the date and the currency value", () => {
     const opt = buildHcNavOption(NAV, TEST_COLORS);
     const tooltip = opt.tooltip as {
-      formatter?: (this: { x: string; y: number }) => string;
+      formatter?: (this: { x: number; y: number }) => string;
     };
-    const out = tooltip.formatter!.call({ x: "2024-01-02", y: 101.5 });
-    expect(out).toContain("2024-01-02");
+    const out = tooltip.formatter!.call({ x: dateToUtcMs("2024-01-02"), y: 101.5 });
+    expect(out).toContain(formatDate("2024-01-02"));
     expect(out).toContain(formatCurrency(101.5));
   });
 });

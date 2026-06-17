@@ -25,7 +25,8 @@ export function highchartsTheme(colors: ChartColors): Options {
     chart: {
       backgroundColor: "transparent",
       borderRadius: 0,
-      animation: false,
+      animation: { duration: 350 },
+      spacing: [8, 8, 8, 8],
       style: { fontFamily: SANS },
     },
     // text:undefined disables Highcharts' built-in default "Chart title".
@@ -34,6 +35,14 @@ export function highchartsTheme(colors: ChartColors): Options {
     xAxis: { ...axis },
     yAxis: { ...axis },
     legend: {
+      align: "center",
+      verticalAlign: "bottom",
+      layout: "horizontal",
+      itemDistance: 18,
+      padding: 8,
+      symbolHeight: 8,
+      symbolRadius: 0,
+      symbolWidth: 18,
       itemStyle: { color: colors.text },
       itemHoverStyle: { color: colors.accent },
       itemHiddenStyle: { color: colors.textMuted },
@@ -41,14 +50,20 @@ export function highchartsTheme(colors: ChartColors): Options {
     tooltip: {
       backgroundColor: colors.surface,
       borderColor: colors.grid,
-      borderRadius: 0,
+      borderRadius: 4,
+      padding: 10,
       shadow: false,
-      style: { color: colors.text },
+      style: { color: colors.text, fontSize: "12px" },
     },
     plotOptions: {
-      // `borderRadius` is column/bar-specific on the v13 PlotSeriesOptions type;
-      // keep the square-corner runtime value via a narrow cast.
-      series: { animation: false, borderRadius: 0 } as PlotSeriesOptions,
+      series: {
+        animation: { duration: 350 },
+        borderRadius: 2,
+        states: { hover: { lineWidthPlus: 1 } },
+        marker: { enabledThreshold: 3, radius: 2 },
+      } as PlotSeriesOptions,
+      column: { borderRadius: 2, groupPadding: 0.12, pointPadding: 0.04 },
+      bar: { borderRadius: 2, groupPadding: 0.12, pointPadding: 0.04 },
       candlestick: {
         color: colors.loss,
         upColor: colors.gain,

@@ -9,6 +9,7 @@ import type {
   FundsScatter,
 } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
+import { dateToUtcMs } from "@/lib/charts/hc/dateAxis";
 import {
   buildHcFactorSensitivityOption,
   buildHcFundsScatterOption,
@@ -221,8 +222,12 @@ describe("fund dossier Highcharts builders", () => {
     expect(option.series?.[0]).toMatchObject({
       type: "area",
       name: "Technology",
-      data: [0.4, 0.3],
+      data: [
+        [dateToUtcMs("2026-03-31"), 0.4],
+        [dateToUtcMs("2026-06-30"), 0.3],
+      ],
     });
+    expect((option.xAxis as { type?: string }).type).toBe("datetime");
   });
 
   it("builds factor sensitivity and style bias bars with signed colors", () => {
@@ -238,12 +243,19 @@ describe("fund dossier Highcharts builders", () => {
 
     expect(option.series?.[0]).toMatchObject({
       name: "Drawdown",
-      data: [0, -5],
+      data: [
+        [dateToUtcMs("2026-01-01"), 0],
+        [dateToUtcMs("2026-01-02"), -5],
+      ],
     });
     expect(option.series?.[1]).toMatchObject({
       name: "Conditional volatility",
-      data: [10, 12],
+      data: [
+        [dateToUtcMs("2026-01-01"), 10],
+        [dateToUtcMs("2026-01-02"), 12],
+      ],
     });
+    expect((option.xAxis as { type?: string }).type).toBe("datetime");
   });
 
   it("builds tail risk columns from decimal-fraction backend metrics", () => {

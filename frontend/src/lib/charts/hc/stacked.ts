@@ -14,6 +14,11 @@ import type { Options, Point } from "highcharts";
 
 import type { StackedSeries } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
+import {
+  compactDatetimeXAxis,
+  formatTimestampDate,
+  toDatetimeData,
+} from "@/lib/charts/hc/dateAxis";
 import { formatCompact, formatCurrency, formatNumber, formatPercent } from "@/lib/format";
 
 /**
@@ -35,14 +40,12 @@ export function buildHcStackedAreaOption(
   total: StackedSeries | null,
   colors: ChartColors,
 ): Options {
-  const dates = (stack[0] ?? total)?.points.map(([date]) => date) ?? [];
-
   const series: Options["series"] = stack.map((entry, index) => {
     const color = categoryColor(colors, index);
     return {
       type: "area",
       name: entry.ticker,
-      data: entry.points.map(([, value]) => value),
+      data: toDatetimeData(entry.points),
       stacking: "normal",
       color,
       lineWidth: 1,
@@ -58,7 +61,7 @@ export function buildHcStackedAreaOption(
     series.push({
       type: "line",
       name: total.ticker,
-      data: total.points.map(([, value]) => value),
+      data: toDatetimeData(total.points),
       color: colors.accent,
       lineWidth: 2,
       marker: { enabled: false },
@@ -68,11 +71,7 @@ export function buildHcStackedAreaOption(
 
   return {
     chart: { type: "area" },
-    xAxis: {
-      categories: dates,
-      crosshair: true,
-      tickWidth: 0,
-    },
+    xAxis: compactDatetimeXAxis(),
     yAxis: {
       title: { text: undefined },
       labels: {
@@ -84,8 +83,7 @@ export function buildHcStackedAreaOption(
     tooltip: {
       shared: true,
       formatter(this: Point) {
-        // Category x-axis: the ISO date label lives on `this.category`.
-        const header = `${String(this.category ?? "")}<br/>`;
+        const header = `${formatTimestampDate(this.x as number)}<br/>`;
         const points = (this as unknown as { points?: Point[] }).points ?? [];
         const rows = points
           .map(
@@ -108,15 +106,9 @@ export function buildHcStackedPercentOption(
   series: StackedSeries[],
   colors: ChartColors,
 ): Options {
-  const dates = series[0]?.points.map(([date]) => date) ?? [];
-
   return {
     chart: { type: "area" },
-    xAxis: {
-      categories: dates,
-      crosshair: true,
-      tickWidth: 0,
-    },
+    xAxis: compactDatetimeXAxis(),
     yAxis: {
       title: { text: undefined },
       min: 0,
@@ -132,8 +124,7 @@ export function buildHcStackedPercentOption(
     tooltip: {
       shared: true,
       formatter(this: Point) {
-        // Category x-axis: the date label lives on `this.category`.
-        const header = `${String(this.category ?? "")}<br/>`;
+        const header = `${formatTimestampDate(this.x as number)}<br/>`;
         const points = (this as unknown as { points?: Point[] }).points ?? [];
         const rows = points
           .map(
@@ -151,7 +142,7 @@ export function buildHcStackedPercentOption(
       return {
         type: "area" as const,
         name: entry.ticker,
-        data: entry.points.map(([, value]) => value),
+        data: toDatetimeData(entry.points),
         stacking: "percent",
         color,
         lineWidth: 1,
@@ -170,16 +161,11 @@ export function buildHcMultiLineOption(
   series: StackedSeries[],
   colors: ChartColors,
 ): Options {
-  const dates = series[0]?.points.map(([date]) => date) ?? [];
   let categoryIndex = 0;
 
   return {
     chart: { type: "line" },
-    xAxis: {
-      categories: dates,
-      crosshair: true,
-      tickWidth: 0,
-    },
+    xAxis: compactDatetimeXAxis(),
     yAxis: {
       title: { text: undefined },
       labels: {
@@ -191,8 +177,7 @@ export function buildHcMultiLineOption(
     tooltip: {
       shared: true,
       formatter(this: Point) {
-        // Category x-axis: the date label lives on `this.category`.
-        const header = `${String(this.category ?? "")}<br/>`;
+        const header = `${formatTimestampDate(this.x as number)}<br/>`;
         const points = (this as unknown as { points?: Point[] }).points ?? [];
         const rows = points
           .map(
@@ -209,7 +194,7 @@ export function buildHcMultiLineOption(
       return {
         type: "line" as const,
         name: entry.ticker,
-        data: entry.points.map(([, value]) => value),
+        data: toDatetimeData(entry.points),
         color,
         lineWidth: isTotal ? 2.5 : 1.5,
         marker: { enabled: false },

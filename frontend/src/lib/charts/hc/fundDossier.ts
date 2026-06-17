@@ -15,6 +15,13 @@ import type {
   FundsScatter,
 } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
+import {
+  DAY_MS,
+  compactDatetimeXAxis,
+  dateToUtcMs,
+  formatTimestampDate,
+  toDatetimeData,
+} from "@/lib/charts/hc/dateAxis";
 import { formatNumber, formatPercent } from "@/lib/format";
 
 function categoryColor(colors: ChartColors, index: number): string {
@@ -29,7 +36,6 @@ export function buildHcStyleDriftOption(
   drift: FundStyleDrift,
   colors: ChartColors,
 ): Options {
-  const dates = drift.periods.map((period) => period.report_date);
   const sectors = Array.from(
     new Set(
       drift.periods.flatMap((period) =>
@@ -40,7 +46,7 @@ export function buildHcStyleDriftOption(
 
   return {
     chart: { type: "area" },
-    xAxis: { categories: dates, crosshair: true, tickWidth: 0 },
+    xAxis: compactDatetimeXAxis(),
     yAxis: {
       title: { text: undefined },
       labels: {
@@ -54,7 +60,7 @@ export function buildHcStyleDriftOption(
       formatter(this: Point) {
         const points = (this as unknown as { points?: Point[] }).points ?? [];
         return (
-          `${String(this.category ?? "")}<br/>` +
+          `${formatTimestampDate(this.x as number)}<br/>` +
           points
             .map(
               (point) =>
@@ -78,7 +84,10 @@ export function buildHcStyleDriftOption(
       name: sector,
       data: drift.periods.map(
         (period) =>
-          period.sectors.find((item) => item.sector === sector)?.weight ?? 0,
+          [
+            dateToUtcMs(period.report_date),
+            period.sectors.find((item) => item.sector === sector)?.weight ?? 0,
+          ] as [number, number],
       ),
       color: categoryColor(colors, index),
       lineWidth: 1,
@@ -181,7 +190,7 @@ function regimeBands(
   );
   const dates = pointDates(risk.drawdown);
   const bands: XAxisPlotBandsOptions[] = [];
-  dates.forEach((date, index) => {
+  dates.forEach((date) => {
     const regime = byDate.get(date);
     if (!regime) return;
     const color =
@@ -191,9 +200,9 @@ function regimeBands(
           ? colors.accentMuted
           : colors.gain;
     bands.push({
-      from: index - 0.5,
-      to: index + 0.5,
-      color,
+      from: dateToUtcMs(date) - DAY_MS / 2,
+      to: dateToUtcMs(date) + DAY_MS / 2,
+      color: `${color}1f`,
     });
   });
   return bands;
@@ -203,16 +212,11 @@ export function buildHcRiskTimeseriesOption(
   risk: FundRiskTimeseries,
   colors: ChartColors,
 ): Options {
-  const dates = pointDates(risk.drawdown);
-
   return {
     chart: { type: "line" },
-    xAxis: {
-      categories: dates,
-      crosshair: true,
-      tickWidth: 0,
+    xAxis: compactDatetimeXAxis({
       plotBands: regimeBands(risk, colors),
-    },
+    }),
     yAxis: [
       {
         title: { text: undefined },
@@ -231,7 +235,7 @@ export function buildHcRiskTimeseriesOption(
       {
         type: "area",
         name: "Drawdown",
-        data: risk.drawdown.map(([, value]) => value),
+        data: toDatetimeData(risk.drawdown),
         color: colors.loss,
         fillOpacity: 0.18,
         marker: { enabled: false },
@@ -239,7 +243,7 @@ export function buildHcRiskTimeseriesOption(
       {
         type: "line",
         name: "Conditional volatility",
-        data: risk.conditional_volatility.map(([, value]) => value),
+        data: toDatetimeData(risk.conditional_volatility),
         color: colors.accent,
         marker: { enabled: false },
       },

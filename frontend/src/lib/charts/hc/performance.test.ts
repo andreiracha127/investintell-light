@@ -5,6 +5,7 @@ import {
   buildHcDrawdownOption,
 } from "@/lib/charts/hc/performance";
 import { TEST_COLORS } from "@/lib/charts/hc/__fixtures__/colors";
+import { dateToUtcMs } from "@/lib/charts/hc/dateAxis";
 import type { DrawdownResult, MonthlyReturn } from "@/lib/perf";
 import { formatDate, formatPercent } from "@/lib/format";
 
@@ -155,12 +156,17 @@ describe("buildHcDrawdownOption", () => {
     expect(series.color).toBe(TEST_COLORS.loss);
   });
 
-  it("maps dates to x categories and values to [date, value] data", () => {
+  it("maps dates to datetime x values and y values", () => {
     const opt = buildHcDrawdownOption(DD, TEST_COLORS)!;
-    const xAxis = opt.xAxis as { categories?: string[] };
-    expect(xAxis.categories).toEqual(["2024-01-01", "2024-01-02", "2024-01-03"]);
-    const data = (opt.series?.[0] as { data?: number[] }).data!;
-    expect(data).toEqual([0, -0.05, -0.1]);
+    const xAxis = opt.xAxis as { type?: string; labels?: { format?: string } };
+    expect(xAxis.type).toBe("datetime");
+    expect(xAxis.labels?.format).toBe("{value:%b '%y}");
+    const data = (opt.series?.[0] as { data?: Array<[number, number]> }).data!;
+    expect(data).toEqual([
+      [dateToUtcMs("2024-01-01"), 0],
+      [dateToUtcMs("2024-01-02"), -0.05],
+      [dateToUtcMs("2024-01-03"), -0.1],
+    ]);
   });
 
   it("caps the y-axis at 0 and labels in percent", () => {
@@ -179,9 +185,8 @@ describe("buildHcDrawdownOption", () => {
     const bands = (opt.xAxis as { plotBands?: Array<{ from?: number; to?: number }> })
       .plotBands!;
     expect(bands).toHaveLength(1);
-    // category indexes: from=0 (2024-01-01), to=2 (2024-01-03).
-    expect(bands[0].from).toBe(0);
-    expect(bands[0].to).toBe(2);
+    expect(bands[0].from).toBe(dateToUtcMs("2024-01-01"));
+    expect(bands[0].to).toBe(dateToUtcMs("2024-01-03"));
   });
 
   it("labels the plotBand with the worst depth", () => {
@@ -200,12 +205,10 @@ describe("buildHcDrawdownOption", () => {
 
   it("formats the tooltip with the date and the percent value", () => {
     const opt = buildHcDrawdownOption(DD, TEST_COLORS)!;
-    // The tooltip formatter `this` is the hovered Point. On a category x-axis
-    // the ISO date lives on `category` (NOT `x`, which is the numeric index).
     const tooltip = opt.tooltip as {
-      formatter?: (this: { category: string; y: number }) => string;
+      formatter?: (this: { x: number; y: number }) => string;
     };
-    const out = tooltip.formatter!.call({ category: "2024-01-03", y: -0.1 });
+    const out = tooltip.formatter!.call({ x: dateToUtcMs("2024-01-03"), y: -0.1 });
     expect(out).toContain(formatDate("2024-01-03"));
     expect(out).toContain(formatPercent(-0.1, 2));
   });

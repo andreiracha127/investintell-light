@@ -8,17 +8,18 @@ import type { Options } from "highcharts";
 
 import type { SeriesPoint } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
+import {
+  compactDatetimeXAxis,
+  formatTimestampDate,
+  toDatetimeData,
+} from "@/lib/charts/hc/dateAxis";
 import { formatCurrency } from "@/lib/format";
 
 export function buildHcNavOption(nav: SeriesPoint[], colors: ChartColors): Options {
   return {
     chart: { type: "line" },
     legend: { enabled: false },
-    xAxis: {
-      categories: nav.map((point) => point[0]),
-      crosshair: true,
-      tickWidth: 0,
-    },
+    xAxis: compactDatetimeXAxis(),
     yAxis: {
       title: { text: undefined },
       labels: {
@@ -30,14 +31,14 @@ export function buildHcNavOption(nav: SeriesPoint[], colors: ChartColors): Optio
     tooltip: {
       shared: true,
       formatter() {
-        return `${this.x}<br/><b>${formatCurrency(this.y as number)}</b>`;
+        return `${formatTimestampDate(this.x)}<br/><b>${formatCurrency(this.y as number)}</b>`;
       },
     },
     series: [
       {
         type: "line",
         name: "NAV",
-        data: nav.map((point) => point[1]),
+        data: toDatetimeData(nav),
         color: colors.accent,
         lineWidth: 2,
         marker: { enabled: false },

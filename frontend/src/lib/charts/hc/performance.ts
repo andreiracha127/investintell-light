@@ -17,7 +17,13 @@ import type { Options } from "highcharts";
 
 import type { DrawdownResult, MonthlyReturn } from "@/lib/perf";
 import type { ChartColors } from "@/lib/charts/chartColors";
-import { formatDate, formatPercent } from "@/lib/format";
+import {
+  compactDatetimeXAxis,
+  dateToUtcMs,
+  formatTimestampDate,
+  toDatetimeData,
+} from "@/lib/charts/hc/dateAxis";
+import { formatPercent } from "@/lib/format";
 
 // ── Month × year heatmap ─────────────────────────────────────────────────
 
@@ -155,22 +161,17 @@ export function buildHcDrawdownOption(
   if (!dd || dd.dates.length === 0) return null;
 
   // Worst-window plotBand: only when an actual drawdown exists (depth < 0).
-  // Category axis → plotBand bounds are the date indexes within dd.dates.
   const hasDrawdown = dd.worst.depth < 0;
-  const fromIdx = dd.dates.indexOf(dd.worst.from);
-  const toIdx = dd.dates.indexOf(dd.worst.to);
 
   return {
     chart: { type: "area" },
     legend: { enabled: false },
-    xAxis: {
-      categories: [...dd.dates],
-      tickWidth: 0,
+    xAxis: compactDatetimeXAxis({
       ...(hasDrawdown && {
         plotBands: [
           {
-            from: fromIdx,
-            to: toIdx,
+            from: dateToUtcMs(dd.worst.from),
+            to: dateToUtcMs(dd.worst.to),
             // Faint loss tint (≈0.1 opacity) — parity with the ECharts markArea fill.
             color: `${colors.loss}1a`,
             borderColor: colors.loss,
@@ -182,7 +183,7 @@ export function buildHcDrawdownOption(
           },
         ],
       }),
-    },
+    }),
     yAxis: {
       max: 0,
       title: { text: undefined },
@@ -193,19 +194,15 @@ export function buildHcDrawdownOption(
       },
     },
     tooltip: {
-      // The tooltip formatter `this` is the hovered Point. On a category x-axis
-      // `this.x` is the numeric index — NOT the date — so read the ISO date from
-      // the point's `category` (string|number on a category axis).
       formatter(this: Highcharts.Point) {
-        const date = String(this.category ?? "");
-        return `${formatDate(date)}<br/><b>${formatPercent(this.y as number, 2)}</b>`;
+        return `${formatTimestampDate(this.x as number)}<br/><b>${formatPercent(this.y as number, 2)}</b>`;
       },
     },
     series: [
       {
         type: "area",
         name: "Drawdown",
-        data: [...dd.values],
+        data: toDatetimeData(dd.dates.map((date, index) => [date, dd.values[index] ?? 0])),
         color: colors.loss,
         lineWidth: 1.5,
         fillOpacity: 0.2,

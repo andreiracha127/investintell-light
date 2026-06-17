@@ -10,6 +10,11 @@ import type { Options } from "highcharts";
 
 import type { SeriesPoint } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
+import {
+  compactDatetimeXAxis,
+  formatTimestampDate,
+  toDatetimeData,
+} from "@/lib/charts/hc/dateAxis";
 import { formatNumber, formatPercent } from "@/lib/format";
 
 export interface RollingAxisOptions {
@@ -32,11 +37,8 @@ export function buildHcRollingOption(
 
   return {
     chart: { type: "line" },
-    xAxis: {
-      categories: series.map((p) => p[0]),
-      crosshair: true,
-      tickWidth: 0,
-    },
+    legend: { enabled: false },
+    xAxis: compactDatetimeXAxis(),
     yAxis: {
       title: { text: undefined },
       ...(yMin !== undefined ? { min: yMin } : {}),
@@ -50,14 +52,14 @@ export function buildHcRollingOption(
     tooltip: {
       shared: true,
       formatter() {
-        return `${this.x}<br/><b>${formatValue(this.y as number)}</b>`;
+        return `${formatTimestampDate(this.x)}<br/><b>${formatValue(this.y as number)}</b>`;
       },
     },
     series: [
       {
         type: "line",
         name: label,
-        data: series.map((p) => p[1]),
+        data: toDatetimeData(series),
         color: colors.accent,
         lineWidth: 1.6,
         marker: { enabled: false },

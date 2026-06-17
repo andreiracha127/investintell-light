@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import { TEST_COLORS } from "@/lib/charts/hc/__fixtures__/colors";
+import { dateToUtcMs } from "@/lib/charts/hc/dateAxis";
 import {
   buildHcMultiLineOption,
   buildHcStackedAreaOption,
   buildHcStackedPercentOption,
 } from "@/lib/charts/hc/stacked";
 import type { StackedSeries } from "@/lib/api/client";
-import { formatCompact, formatCurrency, formatPercent } from "@/lib/format";
+import { formatCompact, formatCurrency, formatDate, formatPercent } from "@/lib/format";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -20,6 +21,7 @@ import { formatCompact, formatCurrency, formatPercent } from "@/lib/format";
  * name, raw y value, and (for stacked charts) the normalised `percentage`.
  */
 type TooltipCtx = {
+  x: number;
   category: string | number;
   index: number;
   points?: Array<{
@@ -95,22 +97,22 @@ const PERF_TOTAL: StackedSeries = {
 // ---------------------------------------------------------------------------
 
 describe("buildHcStackedAreaOption", () => {
-  it("returns xAxis categories from first stacked series dates", () => {
+  it("uses a compact datetime xAxis", () => {
     const opt = buildHcStackedAreaOption([SERIES_A, SERIES_B], TOTAL, TEST_COLORS);
-    const xAxis = opt.xAxis as { categories?: string[] };
-    expect(xAxis.categories).toEqual(["2024-01-01", "2024-01-02"]);
+    const xAxis = opt.xAxis as { type?: string; labels?: { format?: string } };
+    expect(xAxis.type).toBe("datetime");
+    expect(xAxis.labels?.format).toBe("{value:%b '%y}");
   });
 
-  it("falls back to total dates when stack is empty", () => {
+  it("keeps the datetime xAxis when stack is empty", () => {
     const opt = buildHcStackedAreaOption([], TOTAL, TEST_COLORS);
-    const xAxis = opt.xAxis as { categories?: string[] };
-    expect(xAxis.categories).toEqual(["2024-01-01", "2024-01-02"]);
+    expect((opt.xAxis as { type?: string }).type).toBe("datetime");
   });
 
-  it("returns empty categories when both stack and total are null/empty", () => {
+  it("does not create xAxis categories when both stack and total are null/empty", () => {
     const opt = buildHcStackedAreaOption([], null, TEST_COLORS);
     const xAxis = opt.xAxis as { categories?: string[] };
-    expect(xAxis.categories).toEqual([]);
+    expect(xAxis.categories).toBeUndefined();
   });
 
   it("creates an area series per stacked entry with stacking:normal", () => {
@@ -125,8 +127,11 @@ describe("buildHcStackedAreaOption", () => {
 
   it("maps series data values correctly", () => {
     const opt = buildHcStackedAreaOption([SERIES_A], null, TEST_COLORS);
-    const series = opt.series as Array<{ data?: number[] }>;
-    expect(series[0].data).toEqual([1000, 1100]);
+    const series = opt.series as Array<{ data?: Array<[number, number]> }>;
+    expect(series[0].data).toEqual([
+      [dateToUtcMs("2024-01-01"), 1000],
+      [dateToUtcMs("2024-01-02"), 1100],
+    ]);
   });
 
   it("uses categoryColor (skipping cat-1) for stacked series", () => {
@@ -149,9 +154,12 @@ describe("buildHcStackedAreaOption", () => {
 
   it("TOTAL line data maps correctly", () => {
     const opt = buildHcStackedAreaOption([], TOTAL, TEST_COLORS);
-    const series = opt.series as Array<{ name?: string; data?: number[] }>;
+    const series = opt.series as Array<{ name?: string; data?: Array<[number, number]> }>;
     const totalSeries = series.find((s) => s.name === "TOTAL");
-    expect(totalSeries!.data).toEqual([1200, 1300]);
+    expect(totalSeries!.data).toEqual([
+      [dateToUtcMs("2024-01-01"), 1200],
+      [dateToUtcMs("2024-01-02"), 1300],
+    ]);
   });
 
   it("omits TOTAL series when total is null", () => {
@@ -177,6 +185,7 @@ describe("buildHcStackedAreaOption", () => {
     // Real shared-tooltip context: the date label is on this.point.category
     // (NOT this.x, which is the numeric category index), rows on this.points.
     const out = tooltip.formatter!.call({
+      x: dateToUtcMs("2024-01-01"),
       category: "2024-01-01",
       index: 0,
       points: [
@@ -184,7 +193,7 @@ describe("buildHcStackedAreaOption", () => {
         { color: "#0f0", series: { name: "CASH" }, y: 200, percentage: 16.7 },
       ],
     });
-    expect(out).toContain("2024-01-01");
+    expect(out).toContain(formatDate("2024-01-01"));
     expect(out).toContain("AAPL");
     expect(out).toContain(formatCurrency(1000));
     expect(out).toContain("CASH");
@@ -208,16 +217,17 @@ describe("buildHcStackedAreaOption", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildHcStackedPercentOption", () => {
-  it("returns xAxis categories from first series dates", () => {
+  it("uses a compact datetime xAxis", () => {
     const opt = buildHcStackedPercentOption([WEIGHT_A, WEIGHT_B], TEST_COLORS);
-    const xAxis = opt.xAxis as { categories?: string[] };
-    expect(xAxis.categories).toEqual(["2024-01-01", "2024-01-02"]);
+    const xAxis = opt.xAxis as { type?: string; labels?: { format?: string } };
+    expect(xAxis.type).toBe("datetime");
+    expect(xAxis.labels?.format).toBe("{value:%b '%y}");
   });
 
-  it("returns empty categories for empty input", () => {
+  it("does not create xAxis categories for empty input", () => {
     const opt = buildHcStackedPercentOption([], TEST_COLORS);
     const xAxis = opt.xAxis as { categories?: string[] };
-    expect(xAxis.categories).toEqual([]);
+    expect(xAxis.categories).toBeUndefined();
   });
 
   it("creates area series with stacking:percent for each entry", () => {
@@ -231,8 +241,11 @@ describe("buildHcStackedPercentOption", () => {
 
   it("maps data values correctly", () => {
     const opt = buildHcStackedPercentOption([WEIGHT_A], TEST_COLORS);
-    const series = opt.series as Array<{ data?: number[] }>;
-    expect(series[0].data).toEqual([0.6, 0.65]);
+    const series = opt.series as Array<{ data?: Array<[number, number]> }>;
+    expect(series[0].data).toEqual([
+      [dateToUtcMs("2024-01-01"), 0.6],
+      [dateToUtcMs("2024-01-02"), 0.65],
+    ]);
   });
 
   it("uses categoryColor (skipping cat-1 anchor) for each series", () => {
@@ -268,6 +281,7 @@ describe("buildHcStackedPercentOption", () => {
     // Real shared-tooltip context: date on this.point.category, per-series rows
     // in this.points, and stacking:"percent" exposes the share as `percentage`.
     const out = tooltip.formatter!.call({
+      x: dateToUtcMs("2024-01-01"),
       category: "2024-01-01",
       index: 0,
       points: [
@@ -275,7 +289,7 @@ describe("buildHcStackedPercentOption", () => {
         { color: "#0f0", series: { name: "CASH" }, y: 0.4, percentage: 40 },
       ],
     });
-    expect(out).toContain("2024-01-01");
+    expect(out).toContain(formatDate("2024-01-01"));
     expect(out).toContain("AAPL");
     expect(out).toContain("60.0%");
     expect(out).toContain("CASH");
@@ -288,16 +302,17 @@ describe("buildHcStackedPercentOption", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildHcMultiLineOption", () => {
-  it("returns xAxis categories from first series dates", () => {
+  it("uses a compact datetime xAxis", () => {
     const opt = buildHcMultiLineOption([PERF_A, PERF_TOTAL], TEST_COLORS);
-    const xAxis = opt.xAxis as { categories?: string[] };
-    expect(xAxis.categories).toEqual(["2024-01-01", "2024-01-02"]);
+    const xAxis = opt.xAxis as { type?: string; labels?: { format?: string } };
+    expect(xAxis.type).toBe("datetime");
+    expect(xAxis.labels?.format).toBe("{value:%b '%y}");
   });
 
-  it("returns empty categories for empty input", () => {
+  it("does not create xAxis categories for empty input", () => {
     const opt = buildHcMultiLineOption([], TEST_COLORS);
     const xAxis = opt.xAxis as { categories?: string[] };
-    expect(xAxis.categories).toEqual([]);
+    expect(xAxis.categories).toBeUndefined();
   });
 
   it("creates a line series for each entry", () => {
@@ -309,8 +324,11 @@ describe("buildHcMultiLineOption", () => {
 
   it("maps data values correctly", () => {
     const opt = buildHcMultiLineOption([PERF_A], TEST_COLORS);
-    const series = opt.series as Array<{ data?: number[] }>;
-    expect(series[0].data).toEqual([0.0, 0.05]);
+    const series = opt.series as Array<{ data?: Array<[number, number]> }>;
+    expect(series[0].data).toEqual([
+      [dateToUtcMs("2024-01-01"), 0.0],
+      [dateToUtcMs("2024-01-02"), 0.05],
+    ]);
   });
 
   it("colors the TOTAL series with accent", () => {
@@ -366,6 +384,7 @@ describe("buildHcMultiLineOption", () => {
     // Real shared-tooltip context: date on this.point.category, per-series rows
     // in this.points; multi-line tooltips format the raw fraction (p.y) signed.
     const out = tooltip.formatter!.call({
+      x: dateToUtcMs("2024-01-02"),
       category: "2024-01-02",
       index: 1,
       points: [
@@ -373,7 +392,7 @@ describe("buildHcMultiLineOption", () => {
         { color: "#00f", series: { name: "TOTAL" }, y: 0.03, percentage: 37.5 },
       ],
     });
-    expect(out).toContain("2024-01-02");
+    expect(out).toContain(formatDate("2024-01-02"));
     expect(out).toContain("AAPL");
     expect(out).toContain(formatPercent(0.05, 2, { signed: true }));
     expect(out).toContain("TOTAL");

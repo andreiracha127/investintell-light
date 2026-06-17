@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { buildHcRollingOption } from "@/lib/charts/hc/rolling";
 import { TEST_COLORS } from "@/lib/charts/hc/__fixtures__/colors";
+import { dateToUtcMs } from "@/lib/charts/hc/dateAxis";
 import type { SeriesPoint } from "@/lib/api/client";
-import { formatNumber, formatPercent } from "@/lib/format";
+import { formatDate, formatNumber, formatPercent } from "@/lib/format";
 
 const SERIES: SeriesPoint[] = [
   ["2024-01-01", 0.12],
@@ -14,16 +15,21 @@ const SERIES: SeriesPoint[] = [
 describe("buildHcRollingOption", () => {
   // ── Data mapping ─────────────────────────────────────────────────────────
 
-  it("maps SeriesPoint dates to xAxis categories", () => {
+  it("uses a compact datetime xAxis", () => {
     const opt = buildHcRollingOption(SERIES, "Volatility", TEST_COLORS);
-    const xAxis = opt.xAxis as { categories?: string[] };
-    expect(xAxis.categories).toEqual(["2024-01-01", "2024-01-02", "2024-01-03"]);
+    const xAxis = opt.xAxis as { type?: string; labels?: { format?: string } };
+    expect(xAxis.type).toBe("datetime");
+    expect(xAxis.labels?.format).toBe("{value:%b '%y}");
   });
 
-  it("maps SeriesPoint values to series data", () => {
+  it("maps SeriesPoint dates and values to series data", () => {
     const opt = buildHcRollingOption(SERIES, "Volatility", TEST_COLORS);
-    const series = opt.series?.[0] as { data?: number[] };
-    expect(series.data).toEqual([0.12, 0.15, 0.11]);
+    const series = opt.series?.[0] as { data?: Array<[number, number]> };
+    expect(series.data).toEqual([
+      [dateToUtcMs("2024-01-01"), 0.12],
+      [dateToUtcMs("2024-01-02"), 0.15],
+      [dateToUtcMs("2024-01-03"), 0.11],
+    ]);
   });
 
   it("uses the provided label as the series name", () => {
@@ -66,10 +72,10 @@ describe("buildHcRollingOption", () => {
   it("formats tooltip values as plain numbers by default", () => {
     const opt = buildHcRollingOption(SERIES, "Beta", TEST_COLORS);
     const tooltip = opt.tooltip as {
-      formatter?: (this: { x: string; y: number }) => string;
+      formatter?: (this: { x: number; y: number }) => string;
     };
-    const out = tooltip.formatter!.call({ x: "2024-01-02", y: 0.15 });
-    expect(out).toContain("2024-01-02");
+    const out = tooltip.formatter!.call({ x: dateToUtcMs("2024-01-02"), y: 0.15 });
+    expect(out).toContain(formatDate("2024-01-02"));
     expect(out).toContain(formatNumber(0.15));
   });
 
@@ -91,10 +97,10 @@ describe("buildHcRollingOption", () => {
       yPercent: true,
     });
     const tooltip = opt.tooltip as {
-      formatter?: (this: { x: string; y: number }) => string;
+      formatter?: (this: { x: number; y: number }) => string;
     };
-    const out = tooltip.formatter!.call({ x: "2024-01-01", y: 0.12 });
-    expect(out).toContain("2024-01-01");
+    const out = tooltip.formatter!.call({ x: dateToUtcMs("2024-01-01"), y: 0.12 });
+    expect(out).toContain(formatDate("2024-01-01"));
     expect(out).toContain(formatPercent(0.12, 1));
   });
 
@@ -130,14 +136,15 @@ describe("buildHcRollingOption", () => {
 
   it("returns empty series data for empty input", () => {
     const opt = buildHcRollingOption([], "Volatility", TEST_COLORS);
-    const series = opt.series?.[0] as { data?: number[] };
+    const series = opt.series?.[0] as { data?: Array<[number, number]> };
     expect(series.data).toEqual([]);
   });
 
-  it("returns empty categories for empty input", () => {
+  it("keeps datetime xAxis for empty input", () => {
     const opt = buildHcRollingOption([], "Volatility", TEST_COLORS);
-    const xAxis = opt.xAxis as { categories?: string[] };
-    expect(xAxis.categories).toEqual([]);
+    const xAxis = opt.xAxis as { categories?: string[]; type?: string };
+    expect(xAxis.type).toBe("datetime");
+    expect(xAxis.categories).toBeUndefined();
   });
 
   // ── Chart-level structure ─────────────────────────────────────────────────
