@@ -1098,7 +1098,7 @@ Today `_solve_fn_for` rejects `max_return_cvar`. The per-fold solve closure rece
 
 ### Subtask 3a — schema: `cvar_limit` on the request
 
-- [ ] **Write failing test** — append to `backend/tests/test_backtest_schema.py`:
+- [x] **Write failing test** — append to `backend/tests/test_backtest_schema.py`:
 
 ```python
 def test_request_accepts_cvar_limit() -> None:
@@ -1130,11 +1130,11 @@ def test_request_cvar_limit_bounds() -> None:
         )
 ```
 
-- [ ] **Run the test (expect FAIL)**:
+- [x] **Run the test (expect FAIL)**:
   - Command: `cd backend && uv run pytest -q tests/test_backtest_schema.py -k cvar_limit`
   - Expected: `max_return_cvar` validates fine WITHOUT a cvar_limit (no constraint yet), so `test_request_max_return_cvar_requires_cvar_limit` fails (no ValidationError raised).
 
-- [ ] **Implement** — edit `backend/app/schemas/backtest.py`. Add `model_validator` to the pydantic import and add the field + validator to `WalkForwardRequest`.
+- [x] **Implement** — edit `backend/app/schemas/backtest.py`. Add `model_validator` to the pydantic import and add the field + validator to `WalkForwardRequest`.
 
   Current import line:
 ```python
@@ -1166,11 +1166,11 @@ from pydantic import BaseModel, Field, model_validator
         return self
 ```
 
-- [ ] **Run the test (expect PASS)**:
+- [x] **Run the test (expect PASS)**:
   - Command: `cd backend && uv run pytest -q tests/test_backtest_schema.py`
   - Expected: all pass (new cvar_limit tests plus the earlier oos_curve + defaults tests).
 
-- [ ] **Commit**:
+- [x] **Commit**:
   - `cd backend && git add app/schemas/backtest.py tests/test_backtest_schema.py && git commit -m "feat(backtest): WalkForwardRequest accepts cvar_limit (required for max_return_cvar)"`
 
 ### Subtask 3b — service: thread `w_mkt` into the per-fold closure

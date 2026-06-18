@@ -104,3 +104,41 @@ def test_response_carries_oos_curve_and_fold_boundaries() -> None:
     assert dumped["oos_curve"][0] == (dt.date(2020, 1, 2), 1.0)
     assert dumped["oos_curve"][1][1] == 1.01
     assert dumped["fold_boundaries"] == [dt.date(2020, 1, 2)]
+
+
+def test_request_accepts_cvar_limit() -> None:
+    req = WalkForwardRequest.model_validate(
+        {
+            "assets": [_fund(1), _fund(2)],
+            "objective": "max_return_cvar",
+            "cvar_limit": 0.02,
+        }
+    )
+    assert req.objective == "max_return_cvar"
+    assert req.cvar_limit == 0.02
+
+
+def test_request_max_return_cvar_requires_cvar_limit() -> None:
+    with pytest.raises(ValidationError, match="cvar_limit"):
+        WalkForwardRequest.model_validate(
+            {"assets": [_fund(1), _fund(2)], "objective": "max_return_cvar"}
+        )
+
+
+def test_request_cvar_limit_bounds() -> None:
+    with pytest.raises(ValidationError):
+        WalkForwardRequest.model_validate(
+            {
+                "assets": [_fund(1), _fund(2)],
+                "objective": "max_return_cvar",
+                "cvar_limit": 0.0,
+            }
+        )
+    with pytest.raises(ValidationError):
+        WalkForwardRequest.model_validate(
+            {
+                "assets": [_fund(1), _fund(2)],
+                "objective": "max_return_cvar",
+                "cvar_limit": 1.5,
+            }
+        )
