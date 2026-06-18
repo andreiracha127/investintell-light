@@ -2032,6 +2032,32 @@
         }
       }
     },
+    "/funds/strategies": {
+      "get": {
+        "tags": [
+          "funds"
+        ],
+        "summary": "List Fund Strategies",
+        "description": "Distinct strategy labels across the universe (Strategy filter dropdown).",
+        "operationId": "list_fund_strategies_funds_strategies_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "title": "Response List Fund Strategies Funds Strategies Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/funds.csv": {
       "get": {
         "tags": [
@@ -6675,6 +6701,17 @@
               }
             ],
             "title": "Elite Flag"
+          },
+          "manager_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manager Name"
           }
         },
         "type": "object",

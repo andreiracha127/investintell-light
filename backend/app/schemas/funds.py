@@ -51,6 +51,10 @@ class FundListItem(BaseModel):
     peer_sharpe_pctl: float | None
     manager_score: float | None
     elite_flag: bool | None
+    # Management company, resolved per page via the CIK identity crosswalk
+    # (instrument_identity.cik -> sec_managers.firm_name); not stored in the list
+    # MV. None when the fund's CIK maps to no SEC manager.
+    manager_name: str | None = None
 
 
 class FundsListResponse(BaseModel):

@@ -20,20 +20,20 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+
 import {
   fetchFunds,
+  fetchFundStrategies,
   fetchFundsCsv,
   type FundsList,
   type FundsQuery,
 } from "@/lib/api/client";
-import { DataGrid } from "@/components/ui/DataGrid";
+import { AddToPortfolio } from "@/components/stocks/AddToPortfolio";
 import { GridSkeleton } from "@/components/ui/GridSkeleton";
 import { LoadMoreFooter } from "@/components/ui/LoadMoreFooter";
-import { fundsListToGridOptions } from "@/lib/grid/fundsGridOptions";
-import {
-  useGridInfiniteScroll,
-  useInfiniteGrid,
-} from "@/lib/grid/useInfiniteGrid";
+import { useInfiniteGrid } from "@/lib/grid/useInfiniteGrid";
 import { InfoDot, PageTitle } from "@/components/ui/panels";
 import {
   BUTTON_CLASS,
@@ -41,7 +41,12 @@ import {
   FIELD_LABEL_CLASS,
   INPUT_CLASS,
 } from "@/components/screener/shared";
-import { formatCompact, formatDate } from "@/lib/format";
+import {
+  formatCompact,
+  formatDate,
+  formatNumber,
+  formatPercent,
+} from "@/lib/format";
 
 const PAGE_SIZE = 30;
 type SortDir = "asc" | "desc";
@@ -74,8 +79,14 @@ export function FundsView() {
   const [search, setSearch] = useState("");
   const [fundType, setFundType] = useState<FundType | "">("");
   const [assetClass, setAssetClass] = useState<AssetClass | "">("");
-  const [strategyText, setStrategyText] = useState("");
   const [strategy, setStrategy] = useState("");
+  // Strategy filter options: the full distinct label set from the DB
+  // (GET /funds/strategies), fetched once and cached for the dropdown.
+  const { data: strategyOptions = [] } = useQuery({
+    queryKey: ["fund-strategies"],
+    queryFn: ({ signal }) => fetchFundStrategies(signal),
+    staleTime: 60 * 60 * 1000,
+  });
   // Bound inputs in UI units: expense %, AUM $M, Sharpe raw, Vol %.
   const [expenseMaxPct, setExpenseMaxPct] = useState("");
   const [aumMinM, setAumMinM] = useState("");
@@ -84,15 +95,15 @@ export function FundsView() {
   const [sort, setSort] = useState("aum_usd");
   const [dir, setDir] = useState<SortDir>("desc");
 
-  // Debounce free-text filters; the debounced values feed the query key below,
-  // so any filter change restarts the infinite query at page 1.
+  // Debounce the free-text search; the debounced value feeds the query key
+  // below, so any change restarts the infinite query at page 1. Strategy is a
+  // select now, so it updates the query immediately on change.
   useEffect(() => {
     const timer = setTimeout(() => {
       setSearch(searchText.trim());
-      setStrategy(strategyText.trim());
     }, 300);
     return () => clearTimeout(timer);
-  }, [searchText, strategyText]);
+  }, [searchText]);
 
   const expenseMax = parseBound(expenseMaxPct);
   const aumMin = parseBound(aumMinM);
@@ -120,7 +131,7 @@ export function FundsView() {
     searchText.trim() !== "",
     fundType !== "",
     assetClass !== "",
-    strategyText.trim() !== "",
+    strategy !== "",
     expenseMaxPct.trim() !== "",
     aumMinM.trim() !== "",
     sharpeMin.trim() !== "",
@@ -131,7 +142,7 @@ export function FundsView() {
     setSearchText("");
     setFundType("");
     setAssetClass("");
-    setStrategyText("");
+    setStrategy("");
     setExpenseMaxPct("");
     setAumMinM("");
     setSharpeMin("");
@@ -184,6 +195,7 @@ export function FundsView() {
     () => fundsQuery.pages.flatMap((p) => p.items),
     [fundsQuery.pages],
   );
+
   const mergedData = useMemo<FundsList | undefined>(
     () => (lastPage ? { ...lastPage, items: mergedItems } : undefined),
     [lastPage, mergedItems],
@@ -296,13 +308,19 @@ export function FundsView() {
 
           <label className="flex min-w-0 flex-col gap-1.5">
             <span className={FIELD_LABEL_CLASS}>Strategy</span>
-            <input
-              value={strategyText}
-              onChange={(e) => setStrategyText(e.target.value)}
-              placeholder="e.g. Large Cap"
-              aria-label="Strategy label contains"
+            <select
+              value={strategy}
+              onChange={(e) => setStrategy(e.target.value)}
+              aria-label="Strategy"
               className={INPUT_CLASS}
-            />
+            >
+              <option value="">All strategies</option>
+              {strategyOptions.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
           </label>
 
           <BoundField
@@ -414,6 +432,47 @@ function BoundField({
   );
 }
 
+const TYPE_TAG: Record<string, string> = {
+  etf: "ETF",
+  mutual_fund: "Fund",
+  mmf: "MMF",
+};
+
+type FundColumn = {
+  key: string;
+  label: string;
+  align: "left" | "right";
+  tip?: string;
+  sortable: boolean;
+  /** Text columns sort ascending first; numeric columns sort descending first. */
+  text?: boolean;
+};
+
+/**
+ * Universe columns mirror the Funds.dc.html mockup. Every shown key is in the
+ * backend sort whitelist ("Fund" sorts by `name`); the trailing "+" column
+ * reuses the stocks `AddToPortfolio` control and is not sortable.
+ */
+const FUND_COLUMNS: FundColumn[] = [
+  { key: "name", label: "Fund", align: "left", tip: "Ticker and fund name", sortable: true, text: true },
+  { key: "manager_name", label: "Manager", align: "left", tip: "Management company (SEC adviser)", sortable: true, text: true },
+  { key: "fund_type", label: "Type", align: "left", tip: "ETF, mutual fund or money-market", sortable: true, text: true },
+  { key: "strategy_label", label: "Strategy", align: "left", tip: "Investment strategy / mandate", sortable: true, text: true },
+  { key: "aum_usd", label: "Assets", align: "right", tip: "Total net assets under management", sortable: true },
+  { key: "expense_ratio", label: "Expense", align: "right", tip: "Annual fee as a percent of assets", sortable: true },
+  { key: "return_1y", label: "Return 1Y", align: "right", tip: "Trailing one-year total return", sortable: true },
+  { key: "volatility_1y", label: "Vol 1Y", align: "right", tip: "Annualized volatility over the past year", sortable: true },
+  { key: "sharpe_1y", label: "Sharpe", align: "right", tip: "Return per unit of risk; higher is better", sortable: true },
+  { key: "manager_score", label: "Score", align: "right", tip: "Composite manager-quality score", sortable: true },
+  { key: "__add", label: "", align: "right", sortable: false },
+];
+
+/** Sign-tone class for a return cell (green gain / red loss / inherit). */
+function toneClass(n: number | null | undefined): string {
+  if (n == null) return "";
+  return n > 0 ? "text-gain" : n < 0 ? "text-loss" : "";
+}
+
 function FundsTable({
   data,
   loadedCount,
@@ -443,22 +502,32 @@ function FundsTable({
   onExport: () => void;
   onResetFilters: () => void;
 }) {
+  const router = useRouter();
   const { total } = data;
   const isEmpty = data.items.length === 0;
-  const gridOptions = useMemo(
-    () => fundsListToGridOptions(data, { sort, dir }, { onSortChange }),
-    [data, sort, dir, onSortChange],
+
+  const openFund = useCallback(
+    (id: string) => router.push(`/funds/${encodeURIComponent(id)}`),
+    [router],
   );
 
-  // Automatic near-bottom trigger; the "Load more" button is the fallback.
-  const onGridReady = useGridInfiniteScroll({
-    hasNextPage,
-    isFetchingNextPage,
-    fetchNextPage,
-  });
+  // Header-click sorting is server-side: report the next (code, dir) and the
+  // parent re-keys the infinite query (resetting to page 1). Toggle asc/desc on
+  // the active column; a fresh column starts descending (numeric) or ascending
+  // (text), matching the universe grid's prior behaviour.
+  const handleSort = useCallback(
+    (col: FundColumn) => {
+      if (!col.sortable) return;
+      const fresh: SortDir = col.text ? "asc" : "desc";
+      const nextDir: SortDir =
+        sort === col.key ? (dir === "desc" ? "asc" : "desc") : fresh;
+      onSortChange(col.key, nextDir);
+    },
+    [sort, dir, onSortChange],
+  );
 
   return (
-    <section className="bg-surface-2 border border-border">
+    <section className="border border-border bg-surface-2">
       <div className="flex flex-wrap items-center gap-2.5 border-b border-border px-[var(--ix-pad)] py-3">
         <h2 className="m-0 text-[13px] font-bold text-text-primary">
           Fund universe
@@ -509,12 +578,120 @@ function FundsTable({
         </div>
       ) : (
         <div className={`overflow-x-auto transition-opacity ${isFetching ? "opacity-60" : ""}`}>
-          <DataGrid
-            options={gridOptions}
-            className="h-[600px] min-w-[1600px] w-full"
-            onReady={onGridReady}
-            emptyMessage="No funds match the current filters."
-          />
+          <table className="ix-fs w-full min-w-[1180px] border-collapse tabular-nums">
+            <thead>
+              <tr>
+                {FUND_COLUMNS.map((col) => {
+                  const active = sort === col.key;
+                  const ariaSort = active
+                    ? dir === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : col.sortable
+                      ? "none"
+                      : undefined;
+                  return (
+                    <th
+                      key={col.key}
+                      scope="col"
+                      aria-sort={ariaSort}
+                      aria-label={col.key === "__add" ? "Add to portfolio" : undefined}
+                      title={col.tip}
+                      tabIndex={col.sortable ? 0 : undefined}
+                      onClick={col.sortable ? () => handleSort(col) : undefined}
+                      onKeyDown={
+                        col.sortable
+                          ? (e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                handleSort(col);
+                              }
+                            }
+                          : undefined
+                      }
+                      className={`border-b border-border-strong bg-field px-3 py-2.5 text-[10px] font-bold uppercase tracking-[0.05em] text-text-muted ${
+                        col.align === "right" ? "text-right" : "text-left"
+                      } ${col.sortable ? "cursor-pointer select-none hover:text-text-primary" : ""}`}
+                    >
+                      <span
+                        className={`inline-flex items-center gap-1 ${
+                          col.align === "right" ? "justify-end" : ""
+                        }`}
+                      >
+                        {col.label}
+                        {active && (
+                          <span className="text-[9px] text-accent">
+                            {dir === "asc" ? "▲" : "▼"}
+                          </span>
+                        )}
+                      </span>
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {data.items.map((row, i) => (
+                <tr
+                  key={row.instrument_id}
+                  tabIndex={0}
+                  onClick={() => openFund(row.instrument_id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") openFund(row.instrument_id);
+                  }}
+                  className={`cursor-pointer border-t border-border hover:bg-accent-wash focus-visible:[outline:2px_solid_var(--color-accent)] focus-visible:[outline-offset:-2px] ${
+                    i % 2 === 1 ? "bg-zebra" : ""
+                  }`}
+                >
+                  <td className="ix-cell px-3">
+                    <div className="font-bold text-accent">{row.ticker ?? "—"}</div>
+                    <div className="max-w-[280px] truncate text-[11px] text-text-secondary">
+                      {row.name}
+                    </div>
+                  </td>
+                  <td className="ix-cell max-w-[170px] truncate px-3 text-text-secondary">
+                    {row.manager_name ?? "—"}
+                  </td>
+                  <td className="ix-cell px-3">
+                    <span className="inline-flex h-[18px] items-center border border-border-strong bg-field px-1.5 text-[10px] font-bold uppercase tracking-[0.04em] text-text-secondary">
+                      {TYPE_TAG[row.fund_type] ?? row.fund_type}
+                    </span>
+                  </td>
+                  <td className="ix-cell max-w-[180px] truncate px-3 text-text-secondary">
+                    {row.strategy_label}
+                  </td>
+                  <td className="ix-cell px-3 text-right font-bold">
+                    {row.aum_usd != null ? `$${formatCompact(row.aum_usd)}` : "—"}
+                  </td>
+                  <td className="ix-cell px-3 text-right text-text-secondary">
+                    {row.expense_ratio != null ? formatPercent(row.expense_ratio) : "—"}
+                  </td>
+                  <td className={`ix-cell px-3 text-right font-bold ${toneClass(row.return_1y)}`}>
+                    {row.return_1y != null
+                      ? formatPercent(row.return_1y, 2, { signed: true })
+                      : "—"}
+                  </td>
+                  <td className="ix-cell px-3 text-right text-text-secondary">
+                    {row.volatility_1y != null ? formatPercent(row.volatility_1y) : "—"}
+                  </td>
+                  <td className="ix-cell px-3 text-right font-bold">
+                    {row.sharpe_1y != null ? formatNumber(row.sharpe_1y) : "—"}
+                  </td>
+                  <td className="ix-cell px-3 text-right text-text-secondary">
+                    {row.manager_score != null ? formatNumber(row.manager_score, 0) : "—"}
+                  </td>
+                  <td
+                    className="ix-cell px-2 text-right"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {row.ticker ? (
+                      <AddToPortfolio ticker={row.ticker} variant="icon" />
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 

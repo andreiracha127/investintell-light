@@ -20,7 +20,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, fields
 from typing import Any, cast
 
-from sqlalchemy import ColumnElement, Select, func, or_, select, text
+from sqlalchemy import ColumnElement, Select, column, func, or_, select, table, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
@@ -42,6 +42,54 @@ NAV_TARGET_POINTS = 260
 
 # Top-50 cap of the N-PORT source (defense in depth — the sync stores <= 50).
 HOLDINGS_CAP = 50
+
+
+# Mother-DB identity crosswalk (no ORM model in the Light; referenced ad-hoc for
+# the management-company enrichment, which the list MV does not carry). Lives in
+# the same database as funds_list_mv.
+_identity_tbl = table(
+    "instrument_identity",
+    column("instrument_id"),
+    column("cik_padded"),
+    column("cik_unpadded"),
+)
+_managers_tbl = table(
+    "sec_managers", column("cik"), column("firm_name"), column("aum_total")
+)
+
+
+def _build_manager_name_expr() -> ColumnElement[Any]:
+    """Correlated scalar subquery resolving a fund's management-company name.
+
+    Joins the fund's CIK (padded/unpadded, indexed) to ``sec_managers`` (indexed)
+    and keeps the largest-AUM filing — the operating adviser. Selectable for
+    display AND usable in ORDER BY, so the column sorts server-side like the
+    rest (~50ms even ordering the whole universe by it; both join keys indexed).
+    """
+    return (
+        select(_managers_tbl.c.firm_name)
+        .select_from(
+            _identity_tbl.join(
+                _managers_tbl,
+                or_(
+                    _managers_tbl.c.cik == _identity_tbl.c.cik_padded,
+                    _managers_tbl.c.cik == _identity_tbl.c.cik_unpadded,
+                ),
+            )
+        )
+        .where(
+            _identity_tbl.c.instrument_id == FundListRow.instrument_id,
+            _managers_tbl.c.firm_name.isnot(None),
+        )
+        .order_by(_managers_tbl.c.aum_total.desc().nulls_last())
+        .limit(1)
+        .correlate(FundListRow)
+        .scalar_subquery()
+        .label("manager_name")
+    )
+
+
+_MANAGER_NAME: ColumnElement[Any] = _build_manager_name_expr()
 
 
 class UnknownSortColumnError(Exception):
@@ -75,7 +123,7 @@ SORT_WHITELIST: dict[str, InstrumentedAttribute[Any]] = {
     **{name: getattr(Fund, name) for name in _FUND_SORT_FIELDS},
     **{name: getattr(FundRiskLatest, name) for name in _RISK_SORT_FIELDS},
 }
-_LIST_SORT_WHITELIST: dict[str, InstrumentedAttribute[Any]] = {
+_LIST_SORT_WHITELIST: dict[str, ColumnElement[Any]] = {
     **{name: getattr(FundListRow, name) for name in _FUND_SORT_FIELDS},
     # The funds_list_mv materialized view does not (yet) carry the Tier-3 EVT /
     # GARCH risk columns added to FundRiskLatest, so restrict the list sort to
@@ -86,6 +134,9 @@ _LIST_SORT_WHITELIST: dict[str, InstrumentedAttribute[Any]] = {
         for name in _RISK_SORT_FIELDS
         if hasattr(FundListRow, name)
     },
+    # Resolved per query (correlated subquery, not a stored column) — sortable
+    # all the same, so the Manager column behaves like the rest.
+    "manager_name": _MANAGER_NAME,
 }
 
 DEFAULT_SORT = "aum_usd"
@@ -102,7 +153,7 @@ def sort_column(code: str) -> InstrumentedAttribute[Any]:
     return column
 
 
-def _list_sort_column(code: str) -> InstrumentedAttribute[Any]:
+def _list_sort_column(code: str) -> ColumnElement[Any]:
     """Resolve a list sort code against the materialized /funds projection."""
     column = _LIST_SORT_WHITELIST.get(code)
     if column is None:
@@ -228,7 +279,9 @@ def _list_filter_conditions(filters: FundFilters) -> list[ColumnElement[bool]]:
 
 
 # Item columns served on every list row (funds identity + headline metrics).
-_ITEM_COLUMNS: tuple[tuple[str, InstrumentedAttribute[Any]], ...] = (
+# `manager_name` is a correlated subquery (not a stored MV column) — see
+# `_build_manager_name_expr` above.
+_ITEM_COLUMNS: tuple[tuple[str, ColumnElement[Any]], ...] = (
     ("instrument_id", FundListRow.instrument_id),
     ("series_id", FundListRow.series_id),
     ("ticker", FundListRow.ticker),
@@ -246,6 +299,7 @@ _ITEM_COLUMNS: tuple[tuple[str, InstrumentedAttribute[Any]], ...] = (
     ("peer_sharpe_pctl", FundListRow.peer_sharpe_pctl),
     ("manager_score", FundListRow.manager_score),
     ("elite_flag", FundListRow.elite_flag),
+    ("manager_name", _MANAGER_NAME),
 )
 
 
@@ -325,6 +379,18 @@ async def fetch_funds(
         else int(await session.scalar(build_count_select(filters)) or 0)
     )
     return rows, total
+
+
+async def fetch_strategies(session: AsyncSession) -> list[str]:
+    """Distinct, alphabetically sorted strategy labels across the universe.
+
+    Backs the Strategy filter dropdown — the whole closed set, not just the
+    labels on the loaded page.
+    """
+    result = await session.execute(
+        select(FundListRow.strategy_label).distinct().order_by(FundListRow.strategy_label)
+    )
+    return [row[0] for row in result.all() if row[0]]
 
 
 async def fetch_staleness(session: AsyncSession) -> Staleness:

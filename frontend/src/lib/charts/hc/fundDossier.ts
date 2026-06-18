@@ -46,9 +46,9 @@ export function buildHcStyleDriftOption(
 
   return {
     chart: { type: "area" },
-    xAxis: compactDatetimeXAxis(),
+    xAxis: { ...compactDatetimeXAxis(), crosshair: { width: 1, color: colors.grid } },
     yAxis: {
-      title: { text: undefined },
+      title: { text: "% of holdings" },
       labels: {
         formatter() {
           return formatPercent(this.value as number, 0);
@@ -106,7 +106,7 @@ export function buildHcFactorSensitivityOption(
       tickWidth: 0,
     },
     yAxis: {
-      title: { text: undefined },
+      title: { text: "Beta vs. factor" },
       labels: {
         formatter() {
           return formatNumber(this.value as number, 1);
@@ -147,7 +147,7 @@ export function buildHcStyleBiasOption(
       tickWidth: 0,
     },
     yAxis: {
-      title: { text: undefined },
+      title: { text: "Z-score (σ)" },
       plotLines: [{ value: 0, color: colors.grid, width: 1 }],
       labels: {
         formatter() {
@@ -214,12 +214,13 @@ export function buildHcRiskTimeseriesOption(
 ): Options {
   return {
     chart: { type: "line" },
-    xAxis: compactDatetimeXAxis({
-      plotBands: regimeBands(risk, colors),
-    }),
+    xAxis: {
+      ...compactDatetimeXAxis({ plotBands: regimeBands(risk, colors) }),
+      crosshair: { width: 1, color: colors.grid },
+    },
     yAxis: [
       {
-        title: { text: undefined },
+        title: { text: "Percent" },
         labels: {
           formatter() {
             return `${formatNumber(this.value as number, 0)}%`;
@@ -269,7 +270,7 @@ export function buildHcTailRiskOption(
     chart: { type: "column" },
     xAxis: { categories: rows.map(([label]) => label), tickWidth: 0 },
     yAxis: {
-      title: { text: undefined },
+      title: { text: "Daily loss" },
       labels: {
         formatter() {
           return formatPercent((this.value as number) / 100, 1);
@@ -310,7 +311,7 @@ export function buildHcInsiderSentimentOption(
       crosshair: true,
     },
     yAxis: {
-      title: { text: undefined },
+      title: { text: "Insider value ($)" },
       labels: {
         formatter() {
           return formatNumber(this.value as number, 0);
@@ -359,7 +360,7 @@ export function buildHcInstitutionalHolderOption(
       tickWidth: 0,
     },
     yAxis: {
-      title: { text: undefined },
+      title: { text: "Reported value" },
       labels: {
         formatter() {
           return `$${formatNumber(this.value as number, 0)}`;
@@ -404,7 +405,7 @@ export function buildHcInstitutionalOverlapOption(
     },
     yAxis: [
       {
-        title: { text: undefined },
+        title: { text: "Institutional value" },
         labels: {
           formatter() {
             return `$${formatNumber(this.value as number, 0)}`;

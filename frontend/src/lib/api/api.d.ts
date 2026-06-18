@@ -675,6 +675,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/funds/strategies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Fund Strategies
+         * @description Distinct strategy labels across the universe (Strategy filter dropdown).
+         */
+        get: operations["list_fund_strategies_funds_strategies_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/funds.csv": {
         parameters: {
             query?: never;
@@ -2607,6 +2627,8 @@ export interface components {
             manager_score: number | null;
             /** Elite Flag */
             elite_flag: boolean | null;
+            /** Manager Name */
+            manager_name?: string | null;
         };
         /** FundLookthroughResponse */
         FundLookthroughResponse: {
@@ -6897,6 +6919,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_fund_strategies_funds_strategies_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
                 };
             };
         };

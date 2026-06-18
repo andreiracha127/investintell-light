@@ -219,6 +219,12 @@ async def list_funds(
     )
 
 
+@router.get("/funds/strategies", response_model=list[str])
+async def list_fund_strategies(session: SessionDep) -> list[str]:
+    """Distinct strategy labels across the universe (Strategy filter dropdown)."""
+    return await catalog.fetch_strategies(session)
+
+
 @router.get(
     "/funds.csv",
     response_class=Response,

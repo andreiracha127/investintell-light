@@ -975,6 +975,11 @@ export function fetchFunds(
   return requestPublic<FundsList>(`/funds${qs ? `?${qs}` : ""}`, signal);
 }
 
+
+export function fetchFundStrategies(signal?: AbortSignal): Promise<string[]> {
+  return requestPublic<string[]>("/funds/strategies", signal);
+}
+
 export function fetchFundProfile(
   instrumentId: string,
   signal?: AbortSignal,

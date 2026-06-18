@@ -24,13 +24,15 @@ export interface RollingAxisOptions {
   yMin?: number;
   /** Fixed y-axis maximum (e.g. 1 for correlation). Omitted = auto-scale. */
   yMax?: number;
+  /** Optional y-axis title (e.g. "Volatility", "Growth of $100"). */
+  yTitle?: string;
 }
 
 export function buildHcRollingOption(
   series: SeriesPoint[],
   label: string,
   colors: ChartColors,
-  { yPercent = false, yMin, yMax }: RollingAxisOptions = {},
+  { yPercent = false, yMin, yMax, yTitle }: RollingAxisOptions = {},
 ): Options {
   const formatValue = (value: number): string =>
     yPercent ? formatPercent(value, 1) : formatNumber(value);
@@ -38,9 +40,11 @@ export function buildHcRollingOption(
   return {
     chart: { type: "line" },
     legend: { enabled: false },
-    xAxis: compactDatetimeXAxis(),
+    // Hovering anywhere drops a vertical guide to the date — the mockup's
+    // read-the-chart affordance. Colour only (grid chrome stays the theme's).
+    xAxis: { ...compactDatetimeXAxis(), crosshair: { width: 1, color: colors.grid } },
     yAxis: {
-      title: { text: undefined },
+      title: { text: yTitle },
       ...(yMin !== undefined ? { min: yMin } : {}),
       ...(yMax !== undefined ? { max: yMax } : {}),
       labels: {
