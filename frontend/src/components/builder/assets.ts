@@ -9,8 +9,24 @@ import type {
   BuilderObjective,
   BuilderUniverseSpec,
   FundsQuery,
+  OptimizeRequest,
   SymbolSearchResult,
 } from "@/lib/api/client";
+
+/** Risk mandate (apetite) -- the non-null arm of OptimizeRequest.mandate. */
+export type Mandate = NonNullable<OptimizeRequest["mandate"]>;
+
+/** Suggested daily CVaR-95 ceiling per mandate, in PERCENT (the UI input unit). */
+export const MANDATE_CVAR_PRESETS: Record<Mandate, number> = {
+  conservative: 1.0,
+  defensive: 1.0,
+  moderate_conservative: 1.5,
+  moderate: 2.0,
+  balanced: 2.0,
+  moderate_aggressive: 2.5,
+  aggressive: 3.0,
+  growth: 3.5,
+};
 
 export type UniverseAsset =
   | { kind: "fund"; id: string; ticker: string | null; name: string }
@@ -189,8 +205,14 @@ export const OBJECTIVES: {
   description: string;
 }[] = [
   {
+    value: "max_return_cvar",
+    label: "Max retorno sob CVaR (default)",
+    description:
+      "Maximizes expected return subject to a daily CVaR-95 ceiling. Uses the Black-Litterman equilibrium return when no views are given (the posterior when they are); the mandate pre-fills the ceiling.",
+  },
+  {
     value: "min_cvar",
-    label: "Min CVaR (default)",
+    label: "Min CVaR",
     description:
       "Minimizes expected loss in the worst 5% of historical scenarios (Rockafellar–Uryasev).",
   },
@@ -225,8 +247,9 @@ export const OBJECTIVES: {
 
 /** Objectives the broad-universe path can actually serve: the COVARIANCE-based
  * ones. Broad allocates on a pairwise covariance over the (diverse) universe, so
- * scenario-based min_cvar — which needs a common joint-scenario window and 422s
- * when the picks lack one — and the mu-based bl_utility (gate G5) are excluded. */
+ * scenario-based min_cvar/max_return_cvar — which need a common joint-scenario
+ * window and 422 when picks lack one — and mu-based bl_utility (gate G5) are
+ * excluded. */
 const BROAD_OBJECTIVES: readonly BuilderObjective[] = [
   "min_vol",
   "erc",
@@ -243,8 +266,9 @@ export function objectivesForBroad(broad: boolean): typeof OBJECTIVES {
 }
 
 /** Steer a now-unavailable objective to the covariance default (min_vol). In
- * broad mode any non-covariance objective (min_cvar / bl_utility) becomes
- * min_vol; covariance objectives and all of ranked mode are left untouched. */
+ * broad mode any non-covariance objective (min_cvar / max_return_cvar /
+ * bl_utility) becomes min_vol; covariance objectives and all of ranked mode are
+ * left untouched. */
 export function resolveObjectiveForBroad(
   objective: BuilderObjective,
   broad: boolean,
