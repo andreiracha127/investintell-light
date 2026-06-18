@@ -1185,6 +1185,7 @@ function PositionsTable({
       <AddPositionRowForm
         pending={addMutation.isPending}
         error={addMutation.error?.message ?? null}
+        spotFor={(t) => positions.find((p) => p.ticker === t)?.last_close ?? null}
         onAdd={async (ticker, body) => {
           try {
             await addMutation.mutateAsync({ ticker, body });
@@ -1404,118 +1405,233 @@ function PositionDetailPanel({
 }
 
 /**
- * Add-position form. The grid does not host a native editable "add" row, so
- * this lives as a contiguous field row above the grid (same panel, 1px rule),
- * preserving the original UX. Same validation/submit logic as before.
+ * Add-position form. The grid hosts no native editable "add" row, so this lives
+ * as a field row above the grid (same panel, 1px rule). Two entry modes:
+ *
+ *  - Shares: symbol + quantity (+ optional avg cost).
+ *  - Amount ($): symbol + dollar amount + price → quantity is computed as
+ *    amount / price. The price doubles as the acquisition price; for a ticker
+ *    already held, an empty price falls back to its latest close (the spot), so
+ *    the user just types how much they put in. No mental "amount ÷ price" math.
+ *
+ * Either way the form submits the same PositionBody { quantity, acq_price }.
  */
 function AddPositionRowForm({
   pending,
   error,
   onAdd,
   onDirty,
+  spotFor,
 }: {
   pending: boolean;
   error: string | null;
   /** Resolves true on success — only then are the inputs cleared. */
   onAdd: (ticker: string, body: PositionBody) => Promise<boolean>;
   onDirty: () => void;
+  /** Latest close for an already-held ticker; used as the spot in Amount mode. */
+  spotFor: (ticker: string) => number | null;
 }) {
+  const [mode, setMode] = useState<"shares" | "amount">("shares");
   const [ticker, setTicker] = useState("");
   const [shares, setShares] = useState("");
+  const [amount, setAmount] = useState("");
   const [cost, setCost] = useState("");
+  const [touched, setTouched] = useState(false);
+
+  const isAmount = mode === "amount";
+  const t = ticker.trim().toUpperCase();
 
   const parsedShares = parseShares(shares);
+  // null = empty (use spot), undefined = invalid, number = explicit price > 0.
   const parsedCost = parseCost(cost);
-  const canAdd =
-    ticker.trim().length > 0 &&
-    parsedShares !== undefined &&
-    parsedCost !== undefined &&
-    !pending;
+  const parsedAmount = parseShares(amount); // finite > 0, else undefined
+  const explicitPrice = typeof parsedCost === "number" ? parsedCost : null;
+  const existingSpot = t ? spotFor(t) : null;
+  const spot = explicitPrice ?? existingSpot;
+  const spotOk = spot != null && spot > 0;
+  const computedQty =
+    isAmount && parsedAmount !== undefined && spotOk ? parsedAmount / spot! : null;
+
+  const canAdd = isAmount
+    ? t.length > 0 &&
+      parsedAmount !== undefined &&
+      parsedCost !== undefined &&
+      spotOk &&
+      !pending
+    : t.length > 0 &&
+      parsedShares !== undefined &&
+      parsedCost !== undefined &&
+      !pending;
+
+  const reset = () => {
+    setTicker("");
+    setShares("");
+    setAmount("");
+    setCost("");
+    setTouched(false);
+  };
 
   const submit = () => {
-    if (!canAdd) return;
-    void onAdd(ticker.trim().toUpperCase(), {
-      quantity: parsedShares,
-      acq_price: parsedCost,
-    }).then((ok) => {
-      if (ok) {
-        setTicker("");
-        setShares("");
-        setCost("");
-      }
+    if (!canAdd) {
+      setTouched(true);
+      return;
+    }
+    const body: PositionBody = isAmount
+      ? { quantity: computedQty!, acq_price: spot! }
+      : { quantity: parsedShares!, acq_price: parsedCost! };
+    void onAdd(t, body).then((ok) => {
+      if (ok) reset();
     });
+  };
+
+  const dirty = () => {
+    setTouched(true);
+    onDirty();
+  };
+
+  const sharesInvalid =
+    !isAmount && touched && shares.trim() !== "" && parsedShares === undefined;
+  const amountInvalid =
+    isAmount && touched && amount.trim() !== "" && parsedAmount === undefined;
+  const costInvalid = touched && cost.trim() !== "" && parsedCost === undefined;
+
+  let computedStr = "";
+  if (isAmount) {
+    if (parsedAmount === undefined) computedStr = "Enter an amount in USD";
+    else if (!spotOk)
+      computedStr = "Enter a price — no spot is known for this symbol yet";
+    else
+      computedStr = `≈ ${formatNumber(computedQty!, 4)} shares at ${formatCurrency(spot!)}${
+        explicitPrice == null ? " (spot)" : ""
+      }`;
+  }
+
+  const modeBtn = (active: boolean) =>
+    `h-[30px] whitespace-nowrap border-r border-border-strong px-3 text-[11px] last:border-r-0 ${
+      active ? "bg-accent font-bold text-on-accent" : "text-text-secondary hover:bg-layer-hover"
+    }`;
+  const fieldClass = (invalid: boolean) =>
+    `w-[118px] text-right tabular-nums ${INPUT_CLASS} ${
+      invalid ? "border-b-2 border-loss focus:border-loss" : ""
+    }`;
+  const onFieldKey = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") submit();
   };
 
   return (
     <div className="border-b border-border bg-zebra px-[var(--ix-pad)] py-2.5">
       <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
+        <div
+          role="group"
+          aria-label="Add by"
+          className="flex h-[30px] self-end border border-border-strong"
+        >
+          <button
+            type="button"
+            aria-pressed={!isAmount}
+            onClick={() => {
+              setMode("shares");
+              setTouched(false);
+            }}
+            className={modeBtn(!isAmount)}
+          >
+            Shares
+          </button>
+          <button
+            type="button"
+            aria-pressed={isAmount}
+            onClick={() => {
+              setMode("amount");
+              setTouched(false);
+            }}
+            className={modeBtn(isAmount)}
+          >
+            Amount&nbsp;($)
+          </button>
+        </div>
+
         <label className="flex flex-col gap-1">
-          <span className="ix-fs text-text-muted">Ticker</span>
+          <span className="ix-fs text-text-muted">Symbol</span>
           <input
             value={ticker}
             onChange={(e) => {
               setTicker(e.target.value.toUpperCase());
-              onDirty();
+              dirty();
             }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submit();
-            }}
-            placeholder="TICKER"
-            aria-label="New position ticker"
-            className={`w-[110px] uppercase ${INPUT_CLASS}`}
+            onKeyDown={onFieldKey}
+            placeholder="E.G. AAPL"
+            aria-label="New position symbol"
+            className={`w-[108px] uppercase ${INPUT_CLASS}`}
           />
         </label>
+
+        {isAmount ? (
+          <label className="flex flex-col gap-1">
+            <span className="ix-fs text-text-muted">Amount ($)</span>
+            <input
+              value={amount}
+              onChange={(e) => {
+                setAmount(e.target.value);
+                dirty();
+              }}
+              onKeyDown={onFieldKey}
+              inputMode="decimal"
+              placeholder="0.00"
+              aria-label="New position amount in USD"
+              aria-invalid={amountInvalid}
+              className={fieldClass(amountInvalid)}
+            />
+          </label>
+        ) : (
+          <label className="flex flex-col gap-1">
+            <span className="ix-fs text-text-muted">Quantity</span>
+            <input
+              value={shares}
+              onChange={(e) => {
+                setShares(e.target.value);
+                dirty();
+              }}
+              onKeyDown={onFieldKey}
+              inputMode="decimal"
+              placeholder="0"
+              aria-label="New position quantity"
+              aria-invalid={sharesInvalid}
+              className={fieldClass(sharesInvalid)}
+            />
+          </label>
+        )}
+
         <label className="flex flex-col gap-1">
-          <span className="ix-fs text-text-muted">Cost</span>
+          <span className="ix-fs text-text-muted">{isAmount ? "Price" : "Avg cost"}</span>
           <input
             value={cost}
             onChange={(e) => {
               setCost(e.target.value);
-              onDirty();
+              dirty();
             }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submit();
-            }}
-            placeholder="Cost (opt.)"
-            aria-label="New position acquisition price (optional)"
-            aria-invalid={cost.trim() !== "" && parsedCost === undefined}
-            className={`w-[90px] text-right tabular-nums ${INPUT_CLASS} ${
-              cost.trim() !== "" && parsedCost === undefined
-                ? "border-b-2 border-loss focus:border-loss"
-                : ""
-            }`}
+            onKeyDown={onFieldKey}
+            inputMode="decimal"
+            placeholder={
+              isAmount
+                ? existingSpot != null
+                  ? `spot ${formatCurrency(existingSpot)}`
+                  : "price"
+                : "optional"
+            }
+            aria-label="New position price or average cost"
+            aria-invalid={costInvalid}
+            className={fieldClass(costInvalid)}
           />
         </label>
-        <label className="flex flex-col gap-1">
-          <span className="ix-fs text-text-muted">Shares</span>
-          <input
-            value={shares}
-            onChange={(e) => {
-              setShares(e.target.value);
-              onDirty();
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submit();
-            }}
-            placeholder="Shares"
-            aria-label="New position share count"
-            aria-invalid={shares.trim() !== "" && parsedShares === undefined}
-            className={`w-[90px] text-right tabular-nums ${INPUT_CLASS} ${
-              shares.trim() !== "" && parsedShares === undefined
-                ? "border-b-2 border-loss focus:border-loss"
-                : ""
-            }`}
-          />
-        </label>
-        <button
-          type="button"
-          onClick={submit}
-          disabled={!canAdd}
-          className={BUTTON_CLASS}
-        >
+
+        <button type="button" onClick={submit} disabled={!canAdd} className={BUTTON_CLASS}>
           {pending ? "Adding…" : "Add"}
         </button>
       </div>
+
+      {isAmount && computedStr && (
+        <div className="mt-1.5 text-[11px] tabular-nums text-text-muted">{computedStr}</div>
+      )}
       {error && (
         <p role="alert" className="mt-1.5 break-words text-[12px] text-loss">
           {error}
