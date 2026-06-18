@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.eod_price import EodPrice
 from app.models.universe import UniverseConstituent
-from app.schemas.market import IndexCard, LeaderRow, SectorPerf
+from app.schemas.market import IndexCard, LeaderRow, MarketBreadth, SectorPerf
 
 # Piso de liquidez das tabelas rankeadas: sem ele a lista de gainers é
 # dominada por micro caps abrindo com gap sem volume.
@@ -58,6 +58,44 @@ class RankedOverview(TypedDict):
     highs_52w: list[LeaderRow]
     lows_52w: list[LeaderRow]
     sectors: list[SectorPerf]
+    breadth: MarketBreadth | None
+
+
+def _breadth(liquid: list[OverviewRow]) -> MarketBreadth | None:
+    """Amplitude do dia sobre o mesmo universo líquido do ranking.
+
+    Avançam/recuam por variação do close; novas máximas/mínimas por toque no
+    extremo 52w; up-volume share = fração do volume total negociada em altas.
+    """
+    if not liquid:
+        return None
+    advancing = declining = unchanged = 0
+    new_highs = new_lows = 0
+    up_volume = 0.0
+    total_volume = 0.0
+    for r in liquid:
+        total_volume += r.volume
+        if r.last > r.prev:
+            advancing += 1
+            up_volume += r.volume
+        elif r.last < r.prev:
+            declining += 1
+        else:
+            unchanged += 1
+        if r.high_52w > 0 and r.last >= r.high_52w:
+            new_highs += 1
+        if r.low_52w > 0 and r.last <= r.low_52w:
+            new_lows += 1
+    return MarketBreadth(
+        tracked=len(liquid),
+        advancing=advancing,
+        declining=declining,
+        unchanged=unchanged,
+        advance_decline_ratio=(advancing / declining) if declining else float(advancing),
+        new_highs_52w=new_highs,
+        new_lows_52w=new_lows,
+        up_volume_share=(up_volume / total_volume) if total_volume > 0 else 0.0,
+    )
 
 
 async def fetch_overview_rows(session: AsyncSession) -> list[OverviewRow]:
@@ -179,4 +217,5 @@ def rank_overview(rows: list[OverviewRow]) -> RankedOverview:
         highs_52w=[_leader(r) for r in at_high[:TOP_N]],
         lows_52w=[_leader(r) for r in at_low[:TOP_N]],
         sectors=sectors,
+        breadth=_breadth(liquid),
     )

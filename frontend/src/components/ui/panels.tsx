@@ -5,6 +5,23 @@
  * Design source: /design/investintell-cockpit/InvestintellCockpit.dc.html
  */
 
+/**
+ * Inline "i" help dot with a native tooltip. Square-system circle, hairline
+ * border, muted glyph — hover/focus reveals `tip`. Accessible via title + label.
+ */
+export function InfoDot({ tip }: { tip: string }) {
+  return (
+    <span
+      title={tip}
+      aria-label={tip}
+      tabIndex={0}
+      className="inline-flex h-[13px] w-[13px] flex-none cursor-help items-center justify-center rounded-full border border-border-strong text-[8px] font-bold leading-none text-text-muted"
+    >
+      i
+    </span>
+  );
+}
+
 export function Card({
   title,
   subtitle,
@@ -39,15 +56,20 @@ export function StatRow({
   value,
   tone = "text-text-primary",
   detail,
+  tip,
 }: {
   label: string;
   value: string;
   tone?: string;
   detail?: string;
+  tip?: string;
 }) {
   return (
-    <div className="ix-cell flex items-baseline justify-between border-b border-border last:border-b-0">
-      <dt className="ix-fs text-text-secondary">{label}</dt>
+    <div className="ix-cell flex items-baseline justify-between gap-3 border-b border-border last:border-b-0">
+      <dt className="ix-fs flex items-center gap-1.5 text-text-secondary">
+        <span>{label}</span>
+        {tip && <InfoDot tip={tip} />}
+      </dt>
       <dd className="m-0 text-right">
         <span className={`ix-fs tabular-nums font-bold ${tone}`}>{value}</span>
         {detail && (
@@ -68,17 +90,20 @@ export function KpiTile({
   tone = "text-text-primary",
   detail,
   detailTone = "text-text-muted",
+  tip,
 }: {
   label: string;
   value: string;
   tone?: string;
   detail?: string;
   detailTone?: string;
+  tip?: string;
 }) {
   return (
     <div className="ix-pad bg-surface-2">
-      <div className="text-[10px] font-bold uppercase tracking-[0.08em] text-text-muted">
-        {label}
+      <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.08em] text-text-muted">
+        <span>{label}</span>
+        {tip && <InfoDot tip={tip} />}
       </div>
       <div className={`mt-1.5 text-[19px] font-bold tabular-nums ${tone}`}>{value}</div>
       {detail && <div className={`text-[11px] tabular-nums ${detailTone}`}>{detail}</div>}

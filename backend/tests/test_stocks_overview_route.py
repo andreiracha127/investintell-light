@@ -8,7 +8,7 @@ from httpx import ASGITransport, AsyncClient
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
 from app.main import create_app
-from app.schemas.market import IndexCard, LeaderRow, SectorPerf
+from app.schemas.market import IndexCard, LeaderRow, MarketBreadth, SectorPerf
 from app.services import market_overview as mo
 from app.tiingo.exceptions import TiingoError
 
@@ -40,6 +40,11 @@ def _patch_happy(monkeypatch: pytest.MonkeyPatch) -> None:
             as_of=dt.date(2026, 6, 11), most_active=[_leader()], gainers=[_leader()],
             losers=[], highs_52w=[], lows_52w=[],
             sectors=[SectorPerf(sector="Energy", change_pct_median=0.01, n=12)],
+            breadth=MarketBreadth(
+                tracked=1, advancing=1, declining=0, unchanged=0,
+                advance_decline_ratio=1.0, new_highs_52w=0, new_lows_52w=0,
+                up_volume_share=1.0,
+            ),
         )
 
     monkeypatch.setattr(mo, "fetch_overview_rows", fake_rows)
@@ -66,6 +71,7 @@ async def test_overview_assembles_payload(monkeypatch: pytest.MonkeyPatch) -> No
     assert body["indices"][0]["ticker"] == "SPY"
     assert body["sectors"][0]["sector"] == "Energy"
     assert body["universe_size"] == 1
+    assert body["breadth"]["advancing"] == 1 and body["breadth"]["tracked"] == 1
 
 
 @pytest.mark.anyio

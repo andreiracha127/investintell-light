@@ -9810,6 +9810,55 @@
         "title": "MacroRegionalResponse",
         "description": "Latest regional macro scorecards (worker macro_ingestion, DB-first)."
       },
+      "MarketBreadth": {
+        "properties": {
+          "tracked": {
+            "type": "integer",
+            "title": "Tracked"
+          },
+          "advancing": {
+            "type": "integer",
+            "title": "Advancing"
+          },
+          "declining": {
+            "type": "integer",
+            "title": "Declining"
+          },
+          "unchanged": {
+            "type": "integer",
+            "title": "Unchanged"
+          },
+          "advance_decline_ratio": {
+            "type": "number",
+            "title": "Advance Decline Ratio"
+          },
+          "new_highs_52w": {
+            "type": "integer",
+            "title": "New Highs 52W"
+          },
+          "new_lows_52w": {
+            "type": "integer",
+            "title": "New Lows 52W"
+          },
+          "up_volume_share": {
+            "type": "number",
+            "title": "Up Volume Share"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tracked",
+          "advancing",
+          "declining",
+          "unchanged",
+          "advance_decline_ratio",
+          "new_highs_52w",
+          "new_lows_52w",
+          "up_volume_share"
+        ],
+        "title": "MarketBreadth",
+        "description": "Participa\u00e7\u00e3o do universo l\u00edquido no movimento do dia (painel /stocks).\n\nDerivado das mesmas linhas usadas no ranking: amplitude confirma (ou n\u00e3o)\na dire\u00e7\u00e3o das tabelas de leaders."
+      },
       "MarketOverviewResponse": {
         "properties": {
           "as_of": {
@@ -9876,6 +9925,16 @@
             },
             "type": "array",
             "title": "Sectors"
+          },
+          "breadth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MarketBreadth"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -9888,7 +9947,8 @@
           "losers",
           "highs_52w",
           "lows_52w",
-          "sectors"
+          "sectors",
+          "breadth"
         ],
         "title": "MarketOverviewResponse"
       },

@@ -3592,6 +3592,31 @@ export interface components {
                 [key: string]: components["schemas"]["RegionScorecardOut"];
             };
         };
+        /**
+         * MarketBreadth
+         * @description Participação do universo líquido no movimento do dia (painel /stocks).
+         *
+         *     Derivado das mesmas linhas usadas no ranking: amplitude confirma (ou não)
+         *     a direção das tabelas de leaders.
+         */
+        MarketBreadth: {
+            /** Tracked */
+            tracked: number;
+            /** Advancing */
+            advancing: number;
+            /** Declining */
+            declining: number;
+            /** Unchanged */
+            unchanged: number;
+            /** Advance Decline Ratio */
+            advance_decline_ratio: number;
+            /** New Highs 52W */
+            new_highs_52w: number;
+            /** New Lows 52W */
+            new_lows_52w: number;
+            /** Up Volume Share */
+            up_volume_share: number;
+        };
         /** MarketOverviewResponse */
         MarketOverviewResponse: {
             /** As Of */
@@ -3612,6 +3637,7 @@ export interface components {
             lows_52w: components["schemas"]["LeaderRow"][];
             /** Sectors */
             sectors: components["schemas"]["SectorPerf"][];
+            breadth: components["schemas"]["MarketBreadth"] | null;
         };
         /**
          * MetricBuildOut

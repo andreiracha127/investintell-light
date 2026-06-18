@@ -201,7 +201,7 @@ function AnalysisContent({
   return (
     <div className="mx-auto flex max-w-[1360px] flex-col px-[clamp(14px,3vw,28px)] pb-10 pt-5">
       {/* ── Header row ── */}
-      <div className="mb-[18px] flex flex-wrap items-end justify-between gap-4">
+      <div className="mb-[18px] flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex flex-wrap items-baseline gap-2.5">
             <h1 className="m-0 font-serif text-[clamp(24px,4vw,30px)] font-bold tracking-[-0.01em] text-text-primary">
@@ -219,16 +219,19 @@ function AnalysisContent({
               {formatCurrency(shownChange, { signed: true })}{" "}
               ({formatPercent(shownChangePct, 2, { signed: true })})
             </span>
-            <span className="border border-border bg-field px-[7px] py-[2px] text-[10.5px] text-text-muted">
-              {feedStatus === "live" && live ? (
-                <span className="text-gain">● LIVE</span>
-              ) : (
-                <>EOD · {formatDate(header.as_of)}</>
-              )}
-            </span>
-            <AddToPortfolio ticker={header.ticker} />
+            {feedStatus === "live" && live ? (
+              <span className="inline-flex items-center gap-1.5 border border-border bg-field px-2 py-[3px] text-[11px] text-text-muted">
+                <span className="h-[7px] w-[7px] rounded-full bg-gain animate-pulse" />
+                <span className="font-bold text-gain">LIVE</span>
+              </span>
+            ) : (
+              <span className="border border-border bg-field px-[7px] py-[2px] text-[10.5px] text-text-muted">
+                EOD · {formatDate(header.as_of)}
+              </span>
+            )}
           </div>
         </div>
+        <AddToPortfolio ticker={header.ticker} variant="button" />
       </div>
 
       {/* ── Interactive chart (Highcharts Stock + livefeed) ── */}
@@ -247,26 +250,35 @@ function AnalysisContent({
         <KpiTile
           label="Ann. Volatility"
           value={formatPercent(stats.annualized_volatility)}
+          tip="Annualized standard deviation of daily returns — higher means larger price swings."
         />
         <KpiTile
           label={`Beta · ${params.benchmark}`}
           value={formatNumber(stats.beta)}
+          tip={`Sensitivity to ${params.benchmark}: 1.0 moves in line, >1 amplifies, <1 dampens.`}
         />
         <KpiTile
           label={`Corr · ${params.benchmark}`}
           value={formatNumber(stats.correlation)}
+          tip={`Correlation of daily returns with ${params.benchmark} (−1 to +1).`}
         />
         <KpiTile
           label={`Total Return · ${range}`}
           value={formatPercent(stats.total_return, 2, { signed: true })}
           tone={valueTone(stats.total_return)}
+          tip="Cumulative price return over the selected range."
         />
         <KpiTile
           label="Max Drawdown"
           value={formatPercent(stats.max_drawdown.depth)}
           tone="text-loss"
+          tip="Largest peak-to-trough decline over the range."
         />
-        <KpiTile label="VaR 95 (1d)" value={formatPercent(stats.var_95)} />
+        <KpiTile
+          label="VaR 95 (1d)"
+          value={formatPercent(stats.var_95)}
+          tip="Value at Risk: the daily loss not expected to be exceeded 95% of the time."
+        />
       </div>
 
       {/* ── Rolling row ── */}
@@ -293,10 +305,23 @@ function AnalysisContent({
             <StatRow
               label="Annualized Volatility"
               value={formatPercent(stats.annualized_volatility)}
+              tip="Annualized standard deviation of daily returns — higher means larger price swings."
             />
-            <StatRow label="VaR 95 (1d)" value={formatPercent(stats.var_95)} />
-            <StatRow label="VaR 99 (1d)" value={formatPercent(stats.var_99)} />
-            <StatRow label="CVaR 95 (1d)" value={formatPercent(stats.cvar_95)} />
+            <StatRow
+              label="VaR 95 (1d)"
+              value={formatPercent(stats.var_95)}
+              tip="The daily loss not expected to be exceeded 95% of the time."
+            />
+            <StatRow
+              label="VaR 99 (1d)"
+              value={formatPercent(stats.var_99)}
+              tip="The daily loss not expected to be exceeded 99% of the time."
+            />
+            <StatRow
+              label="CVaR 95 (1d)"
+              value={formatPercent(stats.cvar_95)}
+              tip="Expected loss on the worst 5% of days (the average tail beyond VaR 95)."
+            />
             <StatRow
               label="Total Return"
               value={formatPercent(stats.total_return, 2, { signed: true })}
@@ -305,16 +330,19 @@ function AnalysisContent({
             <StatRow
               label={`Beta vs ${params.benchmark}`}
               value={formatNumber(stats.beta)}
+              tip={`Sensitivity to ${params.benchmark}: 1.0 moves in line, >1 amplifies, <1 dampens.`}
             />
             <StatRow
               label={`Correlation vs ${params.benchmark}`}
               value={formatNumber(stats.correlation)}
+              tip={`Correlation of daily returns with ${params.benchmark} (−1 to +1).`}
             />
             <StatRow
               label="Max Drawdown"
               value={formatPercent(stats.max_drawdown.depth)}
               tone="text-loss"
               detail={`${formatDate(stats.max_drawdown.peak_date)} → ${formatDate(stats.max_drawdown.trough_date)}`}
+              tip="Largest peak-to-trough decline over the range."
             />
             <StatRow
               label="Best Day"

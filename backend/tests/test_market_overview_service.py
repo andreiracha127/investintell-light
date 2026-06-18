@@ -85,7 +85,32 @@ def test_sectors_median_and_null_sector_ignored() -> None:
     assert sec.change_pct_median == pytest.approx(0.04)
 
 
+def test_breadth_counts_ratio_highs_lows_and_up_volume() -> None:
+    rows = [
+        _row("UP1", 110.0, 100.0, volume=30_000_000, high=110.0, low=60.0),  # advancing + new high
+        _row("UP2", 105.0, 100.0, volume=10_000_000, high=130.0, low=60.0),  # advancing
+        _row("DN1", 80.0, 100.0, volume=20_000_000, high=130.0, low=80.0),   # declining + new low
+        _row("FLAT", 100.0, 100.0, volume=5_000_000, high=130.0, low=60.0),  # unchanged
+    ]
+    out = rank_overview(rows)
+    b = out["breadth"]
+    assert b is not None
+    assert (b.tracked, b.advancing, b.declining, b.unchanged) == (4, 2, 1, 1)
+    assert b.advance_decline_ratio == pytest.approx(2.0)
+    assert b.new_highs_52w == 1 and b.new_lows_52w == 1
+    # up-volume = (30M + 10M) advancing / 65M total
+    assert b.up_volume_share == pytest.approx(40_000_000 / 65_000_000)
+
+
+def test_breadth_ratio_with_zero_decliners_is_advancing_count() -> None:
+    out = rank_overview([_row("UP1", 110.0, 100.0), _row("UP2", 105.0, 100.0)])
+    b = out["breadth"]
+    assert b is not None and b.declining == 0
+    assert b.advance_decline_ratio == pytest.approx(2.0)
+
+
 def test_empty_rows_yield_empty_overview() -> None:
     out = rank_overview([])
     assert out["as_of"] is None
     assert out["gainers"] == [] and out["sectors"] == []
+    assert out["breadth"] is None

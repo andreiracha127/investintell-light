@@ -78,6 +78,7 @@ export type MarketOverview =
 export type LeaderRow = MarketOverview["gainers"][number];
 export type IndexCard = MarketOverview["indices"][number];
 export type SectorPerf = MarketOverview["sectors"][number];
+export type MarketBreadth = NonNullable<MarketOverview["breadth"]>;
 
 type StockHistoryOperation = paths["/stocks/{ticker}/history"]["get"];
 export type StockHistory =

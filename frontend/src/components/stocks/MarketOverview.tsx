@@ -8,6 +8,8 @@ import { formatDate } from "@/lib/format";
 import { IndexStrip } from "@/components/stocks/IndexStrip";
 import { LeadersTable } from "@/components/stocks/LeadersTable";
 import { SectorPanel } from "@/components/stocks/SectorPanel";
+import { MarketBreadthPanel } from "@/components/stocks/MarketBreadthPanel";
+import { PageTitle } from "@/components/ui/panels";
 
 export function MarketOverview() {
   const { data, error, isPending, refetch } = useQuery({
@@ -38,32 +40,42 @@ export function MarketOverview() {
   if (isPending || !data) {
     return (
       <div aria-busy="true" className="mx-auto flex max-w-[1360px] animate-pulse flex-col px-[clamp(14px,3vw,28px)] pb-10 pt-5">
-        <div className="mb-px grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
+        <div className="mb-3.5 grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
           {Array.from({ length: 4 }, (_, i) => (
-            <div key={i} className="h-[72px] bg-surface-2" />
+            <div key={i} className="h-20 bg-surface-2" />
           ))}
         </div>
-        <div className="mb-px h-[480px] border border-border bg-surface-2" />
-        <div className="h-[280px] border border-border bg-surface-2" />
+        <div className="mb-3.5 h-[480px] border border-border bg-surface-2" />
+        <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]">
+          <div className="h-[320px] bg-surface-2" />
+          <div className="h-[320px] bg-surface-2" />
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto flex max-w-[1360px] flex-col gap-px px-[clamp(14px,3vw,28px)] pb-10 pt-5">
-      <div className="mb-2 flex items-baseline justify-between">
-        <h1 className="m-0 font-serif text-[clamp(22px,3.5vw,28px)] font-bold tracking-[-0.01em] text-text-primary">
-          Stocks
-        </h1>
+    <div className="mx-auto flex max-w-[1360px] flex-col px-[clamp(14px,3vw,28px)] pb-10 pt-5">
+      <PageTitle title="Stocks">
         {data.as_of && (
-          <span className="border border-border bg-field px-[7px] py-[2px] text-[10.5px] text-text-muted">
-            EOD · {formatDate(data.as_of)} · {data.universe_size} symbols
+          <span className="inline-flex items-center gap-1.5 border border-border bg-field px-[9px] py-1 text-[11px] text-text-muted">
+            <span
+              title="End-of-day prices, updated after the market closes."
+              className="cursor-help border-b border-dotted border-current"
+            >
+              End of day
+            </span>
+            {" · "}
+            {formatDate(data.as_of)} · {data.universe_size} symbols
           </span>
         )}
-      </div>
+      </PageTitle>
       <IndexStrip indices={data.indices} />
       <LeadersTable overview={data} />
-      <SectorPanel sectors={data.sectors} />
+      <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]">
+        <SectorPanel sectors={data.sectors} />
+        <MarketBreadthPanel breadth={data.breadth} />
+      </div>
     </div>
   );
 }

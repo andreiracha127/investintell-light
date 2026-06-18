@@ -33,6 +33,23 @@ class SectorPerf(BaseModel):
     n: int  # constituintes líquidos com dado
 
 
+class MarketBreadth(BaseModel):
+    """Participação do universo líquido no movimento do dia (painel /stocks).
+
+    Derivado das mesmas linhas usadas no ranking: amplitude confirma (ou não)
+    a direção das tabelas de leaders.
+    """
+
+    tracked: int  # constituintes líquidos avaliados (advancing+declining+unchanged)
+    advancing: int
+    declining: int
+    unchanged: int
+    advance_decline_ratio: float  # advancing / declining (== advancing se declining=0)
+    new_highs_52w: int  # fechando na máxima de 52 semanas
+    new_lows_52w: int  # fechando na mínima de 52 semanas
+    up_volume_share: float  # fração 0..1 do volume negociado em altas
+
+
 class MarketOverviewResponse(BaseModel):
     as_of: dt.date | None  # None = universo sem preços (pré-backfill)
     universe_size: int
@@ -43,6 +60,7 @@ class MarketOverviewResponse(BaseModel):
     highs_52w: list[LeaderRow]
     lows_52w: list[LeaderRow]
     sectors: list[SectorPerf]
+    breadth: MarketBreadth | None  # None = sem constituintes líquidos (pré-backfill)
 
 
 class HistoryBar(BaseModel):

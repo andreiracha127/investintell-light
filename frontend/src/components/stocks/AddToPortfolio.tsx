@@ -9,7 +9,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { fetchPortfolios, putPosition } from "@/lib/api/client";
 
-export function AddToPortfolio({ ticker }: { ticker: string }) {
+export function AddToPortfolio({
+  ticker,
+  variant = "icon",
+}: {
+  ticker: string;
+  /** "icon" = "+" compacto (tabelas); "button" = botão accent rotulado (header). */
+  variant?: "icon" | "button";
+}) {
   const [open, setOpen] = useState(false);
   const [qty, setQty] = useState("1");
   const [done, setDone] = useState<string | null>(null);
@@ -53,9 +60,19 @@ export function AddToPortfolio({ ticker }: { ticker: string }) {
           setOpen((v) => !v);
           setDone(null);
         }}
-        className="flex h-6 items-center border border-border-strong px-1.5 text-[11px] font-bold text-text-secondary hover:bg-layer-hover hover:text-text-primary"
+        className={
+          variant === "button"
+            ? "inline-flex h-[34px] items-center gap-1.5 border border-accent bg-accent px-3.5 text-[12.5px] font-bold text-on-accent hover:bg-accent-muted hover:border-accent-muted"
+            : "flex h-6 items-center border border-border-strong px-1.5 text-[11px] font-bold text-text-secondary hover:bg-layer-hover hover:text-text-primary"
+        }
       >
-        +
+        {variant === "button" ? (
+          <>
+            <span className="text-[15px] leading-none">+</span> Add to portfolio
+          </>
+        ) : (
+          "+"
+        )}
       </button>
       {open && (
         <div
