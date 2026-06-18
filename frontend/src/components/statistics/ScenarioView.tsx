@@ -7,6 +7,12 @@
  * value series (TOTAL drawn as an accent line on top of the stack), 100%
  * weight evolution, normalized asset performance, return histogram and the
  * statistics rail. The frontend computes NO finance.
+ *
+ * Design source: Statistics.dc.html — the four chart views share one panel
+ * behind a tab strip (Performance / Weights / Asset return / Distribution),
+ * the Distribution tab drawing a fitted-normal bell curve of daily NAV
+ * returns. The statistics rail carries inline help dots and a Sharpe/Sortino
+ * row beneath the risk figures.
  */
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
@@ -21,9 +27,9 @@ import {
   buildHcStackedAreaOption,
   buildHcStackedPercentOption,
 } from "@/lib/charts/hc/stacked";
-import { buildHcHistogramOption } from "@/lib/charts/hc/histogram";
+import { buildHcBellCurveOption } from "@/lib/charts/hc/stats-bellcurve";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
-import { formatCurrency, formatDate, formatPercent } from "@/lib/format";
+import { formatCurrency, formatDate, formatNumber, formatPercent } from "@/lib/format";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { Card, StatRow } from "@/components/ui/panels";
 import { DateRangeInputs, defaultDateRange } from "@/components/statistics/DateRangeInputs";
@@ -94,6 +100,15 @@ export function ScenarioView() {
 
 /* ── Results ──────────────────────────────────────────────────────────────── */
 
+type ChartTab = "perf" | "weights" | "perf2" | "dist";
+
+const CHART_TABS: ReadonlyArray<{ key: ChartTab; label: string; hint: string }> = [
+  { key: "perf", label: "Performance", hint: "Stacked holding value, $ — Total drawn on top." },
+  { key: "weights", label: "Weights", hint: "Each holding's share of total value." },
+  { key: "perf2", label: "Asset return", hint: "Cumulative return, rebased." },
+  { key: "dist", label: "Distribution", hint: "Fitted normal of daily NAV returns." },
+];
+
 function Results({
   data,
   colors,
@@ -102,6 +117,7 @@ function Results({
   colors: ChartColors;
 }) {
   const { params, statistics: stats } = data;
+  const [tab, setTab] = useState<ChartTab>("perf");
 
   const navOption = useMemo(() => {
     const total = data.nav_cash.find((s) => s.ticker === "TOTAL") ?? null;
@@ -116,18 +132,36 @@ function Results({
     () => buildHcMultiLineOption(data.asset_performance, colors),
     [data.asset_performance, colors],
   );
-  const histogramOption = useMemo(
-    () => buildHcHistogramOption(data.histogram, colors),
-    [data.histogram, colors],
+  const distributionOption = useMemo(
+    () => buildHcBellCurveOption(data.histogram, stats.var_95, colors),
+    [data.histogram, stats.var_95, colors],
   );
+
+  // Holding count: nav_cash carries one series per position plus TOTAL/CASH.
+  const holdCount = data.nav_cash.filter(
+    (s) => s.ticker !== "TOTAL" && s.ticker !== "CASH",
+  ).length;
+
+  const option =
+    tab === "perf"
+      ? navOption
+      : tab === "weights"
+        ? weightsOption
+        : tab === "perf2"
+          ? performanceOption
+          : distributionOption;
+  const hint = CHART_TABS.find((t) => t.key === tab)!.hint;
 
   return (
     <div className="flex flex-col gap-px">
-      <div className="ix-pad flex flex-wrap items-center gap-x-4 gap-y-2 border border-border bg-surface-2 py-2">
-        <p className="m-0 tabular-nums text-[12px] text-text-muted">
+      <div className="ix-pad flex flex-wrap items-center gap-x-3 gap-y-2 border border-border bg-surface-2 py-2.5">
+        <p className="m-0 tabular-nums text-[12px] text-text-secondary">
           {params.name} · {formatDate(params.start_date)} →{" "}
-          {formatDate(params.end_date)} · Cash: {formatCurrency(params.cash)}
+          {formatDate(params.end_date)} · Cash invested: {formatCurrency(params.cash)}
         </p>
+        <span className="border border-border-strong bg-field px-1.5 py-px text-[10px] text-text-muted">
+          {holdCount} holdings
+        </span>
         {params.frequency === "weekly" && (
           <span
             title="The window is long, so line series are weekly (W-FRI); statistics stay daily."
@@ -174,27 +208,60 @@ function Results({
             <StatRow
               label="Annualized Volatility"
               value={formatPercent(stats.annualized_volatility)}
+              tip="Standard deviation of daily returns scaled to one year (× √252)."
             />
-            <StatRow label="VaR 95 (1d)" value={formatPercent(stats.var_95)} />
-            <StatRow label="VaR 99 (1d)" value={formatPercent(stats.var_99)} />
+            <StatRow
+              label="VaR 95 (1d)"
+              value={formatPercent(stats.var_95)}
+              tip="Value at Risk — the daily loss the portfolio exceeds only 5% of the time."
+            />
+            <StatRow
+              label="VaR 99 (1d)"
+              value={formatPercent(stats.var_99)}
+              tip="Value at Risk — the daily loss the portfolio exceeds only 1% of the time."
+            />
+            <StatRow
+              label="Sharpe Ratio"
+              value={formatNumber(stats.sharpe_ratio, 2)}
+              tip="Annualized excess return per unit of total volatility (4% risk-free)."
+            />
+            <StatRow
+              label="Sortino Ratio"
+              value={formatNumber(stats.sortino_ratio, 2)}
+              tip="Annualized excess return per unit of downside deviation (4% risk-free)."
+            />
           </dl>
         </Card>
 
-        {/* ── Charts ── */}
-        <div className="flex min-w-0 flex-col gap-px">
-          <Card title="Portfolio Performance" subtitle="value by holding, $">
-            <HighchartsChart options={navOption} className="h-[320px] w-full" />
-          </Card>
-          <Card title="Asset Weighting" subtitle="share of total value">
-            <HighchartsChart options={weightsOption} className="h-[280px] w-full" />
-          </Card>
-          <Card title="Asset Performance" subtitle="cumulative return, rebased">
-            <HighchartsChart options={performanceOption} className="h-[320px] w-full" />
-          </Card>
-          <Card title="Return Distribution" subtitle="daily returns">
-            <HighchartsChart options={histogramOption} className="h-[260px] w-full" />
-          </Card>
-        </div>
+        {/* ── Tabbed chart panel ── */}
+        <Card title="Charts" subtitle={hint}>
+          <div
+            role="tablist"
+            aria-label="Scenario charts"
+            className="mb-2.5 flex border-b border-border"
+          >
+            {CHART_TABS.map((t) => {
+              const active = t.key === tab;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setTab(t.key)}
+                  className={`-mb-px border-0 border-b-2 bg-transparent px-3.5 py-2 text-[12.5px] transition-colors ${
+                    active
+                      ? "border-accent font-bold text-accent"
+                      : "border-transparent text-text-muted hover:text-text-primary"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+          <HighchartsChart options={option} className="h-[380px] w-full" />
+        </Card>
       </div>
     </div>
   );
@@ -208,12 +275,7 @@ function ScenarioSkeleton() {
       className="grid animate-pulse grid-cols-1 gap-px xl:grid-cols-[minmax(320px,380px)_1fr]"
     >
       <div className="h-[520px] bg-surface-2" />
-      <div className="flex flex-col gap-px">
-        <div className="h-[380px] bg-surface-2" />
-        <div className="h-[340px] bg-surface-2" />
-        <div className="h-[380px] bg-surface-2" />
-        <div className="h-[320px] bg-surface-2" />
-      </div>
+      <div className="h-[520px] bg-surface-2" />
     </div>
   );
 }

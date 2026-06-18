@@ -14,7 +14,7 @@ import {
   type CorrelationRequest,
   type CorrelationResponse,
 } from "@/lib/api/client";
-import { buildHcRollingOption } from "@/lib/charts/hc/rolling";
+import { buildHcRollingCorrelationAreaOption } from "@/lib/charts/hc/stats-rolling-area";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { formatNumber } from "@/lib/format";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
@@ -121,11 +121,7 @@ function Results({
   const pairLabel = `${labels.x} × ${labels.y}`;
 
   const rollingOption = useMemo(
-    () =>
-      buildHcRollingOption(data.series, pairLabel, colors, {
-        yMin: -1,
-        yMax: 1,
-      }),
+    () => buildHcRollingCorrelationAreaOption(data.series, pairLabel, colors),
     [data.series, pairLabel, colors],
   );
 
@@ -137,15 +133,20 @@ function Results({
           value={formatNumber(data.current, 3)}
           tone="text-accent"
           detail={pairLabel}
+          tip="Correlation over the most recent window — closer to ±1 means tighter co-movement."
         />
         <KpiTile
           label="Rolling window"
           value={formatNumber(data.window, 0)}
           detail="trading days"
+          tip="Number of trailing trading days each correlation point is computed over."
         />
       </div>
 
-      <Card title="Rolling Correlation" subtitle={pairLabel}>
+      <Card
+        title="Rolling Correlation"
+        subtitle={`${pairLabel} · ${formatNumber(data.window, 0)}-day window`}
+      >
         <HighchartsChart options={rollingOption} className="h-[400px] w-full" />
       </Card>
     </div>

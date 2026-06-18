@@ -109,6 +109,12 @@ function Results({
     [data.scatter, data.regression_line, labels, colors],
   );
 
+  // Compact fitted-model line for the chart header: Y = β·X ± |α| · R².
+  const equation =
+    `Y = ${formatNumber(regression.beta, 2)}·X ` +
+    `${regression.alpha >= 0 ? "+" : "−"} ${formatPercent(Math.abs(regression.alpha), 3)}` +
+    `  ·  R² ${formatNumber(regression.r * regression.r, 2)}`;
+
   return (
     <div className="flex flex-col gap-px">
       <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
@@ -117,17 +123,35 @@ function Results({
           value={formatNumber(regression.beta, 3)}
           tone="text-accent"
           detail={`${labels.y} on ${labels.x}`}
+          tip="Sensitivity of Y to X. 1.0 moves one-for-one; above 1 amplifies, below 1 dampens."
         />
         <KpiTile
           label="Alpha (daily)"
           value={formatPercent(regression.alpha, 3, { signed: true })}
           tone={valueTone(regression.alpha)}
+          tip="Average daily return of Y not explained by its exposure to X (the intercept)."
         />
-        <KpiTile label="Correlation (r)" value={formatNumber(regression.r, 3)} />
-        <KpiTile label="Data points" value={formatNumber(regression.n_points, 0)} />
+        <KpiTile
+          label="Correlation (r)"
+          value={formatNumber(regression.r, 3)}
+          tip="Strength of the linear relationship between the two return series, from −1 to +1."
+        />
+        <KpiTile
+          label="Data points"
+          value={formatNumber(regression.n_points, 0)}
+          detail="trading days"
+        />
       </div>
 
-      <Card title="Daily Returns" subtitle={`${labels.y} vs ${labels.x}`}>
+      <Card
+        title="Daily Returns"
+        subtitle={`${labels.y} vs ${labels.x}`}
+        actions={
+          <span className="tabular-nums text-[11px] text-text-secondary">
+            {equation}
+          </span>
+        }
+      >
         <HighchartsChart options={scatterOption} className="h-[440px] w-full" />
       </Card>
     </div>
