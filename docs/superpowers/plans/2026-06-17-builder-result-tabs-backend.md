@@ -1444,7 +1444,7 @@ def test_solve_fn_max_return_cvar_is_rejected() -> None:
 
 ### Subtask 3c — route: equilibrium happy path + equities 422
 
-- [ ] **Write failing test** — append to `backend/tests/test_backtest_route.py`. First, note the existing `test_max_return_cvar_rejected_with_422` (lines 108-114) asserts the OLD rejection — REPLACE it with the equilibrium happy path. Delete that old test and add:
+- [x] **Write failing test** — append to `backend/tests/test_backtest_route.py`. First, note the existing `test_max_return_cvar_rejected_with_422` (lines 108-114) asserts the OLD rejection — REPLACE it with the equilibrium happy path. Delete that old test and add:
 
 ```python
 async def test_walk_forward_max_return_cvar_equilibrium_happy_path(
@@ -1493,7 +1493,7 @@ async def test_walk_forward_max_return_cvar_equities_422(
     assert "equities" in response.json()["detail"]
 ```
 
-- [ ] **Delete the obsolete route test** — remove this block from `backend/tests/test_backtest_route.py`:
+- [x] **Delete the obsolete route test** — remove this block from `backend/tests/test_backtest_route.py`:
 
 ```python
 async def test_max_return_cvar_rejected_with_422(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1505,15 +1505,15 @@ async def test_max_return_cvar_rejected_with_422(monkeypatch: pytest.MonkeyPatch
     assert "is not backtestable" in response.json()["detail"]
 ```
 
-- [ ] **Run the test (expect FAIL before implement, PASS after — implement is already done in 3b)**:
+- [x] **Run the test (expect FAIL before implement, PASS after — implement is already done in 3b)**:
   - Command: `cd backend && uv run pytest -q tests/test_backtest_route.py -k max_return_cvar`
   - Expected: with 3a + 3b merged, the equilibrium path works and the equities path 422s, so these PASS. (No production change in this subtask; it is the HTTP-level contract guard. The `test_bl_utility_rejected_with_422` test stays and still passes.)
 
-- [ ] **Run the full backtest + monte-carlo route suite (regression)**:
+- [x] **Run the full backtest + monte-carlo route suite (regression)**:
   - Command: `cd backend && uv run pytest -q tests/test_backtest_route.py tests/test_backtest_service.py`
   - Expected: all pass.
 
-- [ ] **Commit**:
+- [x] **Commit**:
   - `cd backend && git add tests/test_backtest_route.py && git commit -m "test(backtest): max_return_cvar equilibrium route happy path + equities/missing-limit 422"`
 
 ---
