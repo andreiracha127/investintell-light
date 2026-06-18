@@ -519,6 +519,8 @@ async def run_optimize(
     mu_equilibrium: np.ndarray | None = None
     mu_posterior: np.ndarray | None = None
     view_consistency: ViewConsistencyOut | None = None
+    cvar_limit_effective: float | None = None
+    regime_state: str | None = None
     w_mkt: np.ndarray | None = None
     if needs_bl:
         w_mkt = await _market_weights_for(session, assets, labels)
@@ -586,6 +588,8 @@ async def run_optimize(
             limit = apply_regime_cvar_limit(
                 payload.cvar_limit, state, risk_off_factor=DEFAULT_RISK_OFF_CVAR_FACTOR
             )
+            regime_state = state
+            cvar_limit_effective = limit
             # Reuse cvar_bounds (already built above with the same promotion
             # logic) — the max_return_cvar engine path is structurally identical
             # to min_cvar: BoundsBundle replaces the scalar (cap, min_weight)
@@ -681,5 +685,7 @@ async def run_optimize(
             ),
             view_consistency=view_consistency,
             selection=selection_diag,
+            cvar_limit_effective=cvar_limit_effective,
+            regime_state=regime_state,
         ),
     )

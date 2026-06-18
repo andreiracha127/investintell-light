@@ -342,7 +342,7 @@ The regime tightening (`× 0.5` on risk_off) is applied silently today. Expose t
 - Modify: `backend/app/services/portfolio_builder.py` (declare two vars; pass them into `DiagnosticsOut`)
 - Test: `backend/tests/test_builder_regime_cvar.py` (extend)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `backend/tests/test_builder_regime_cvar.py`:
 
@@ -401,12 +401,12 @@ async def test_run_optimize_exposes_effective_cvar_and_regime(
     monkeypatch.setattr(pb, "_OVERRIDE_REGIME_STATE", None, raising=False)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && uv run pytest -q tests/test_builder_regime_cvar.py::test_run_optimize_exposes_effective_cvar_and_regime`
 Expected: FAIL — `DiagnosticsOut` has no `cvar_limit_effective` / `regime_state` attributes (`AttributeError` or validation error).
 
-- [ ] **Step 3: Add the fields to `DiagnosticsOut`**
+- [x] **Step 3: Add the fields to `DiagnosticsOut`**
 
 In `backend/app/schemas/builder.py`, add to the `DiagnosticsOut` class (after the `selection` field):
 
@@ -417,7 +417,7 @@ In `backend/app/schemas/builder.py`, add to the `DiagnosticsOut` class (after th
     regime_state: str | None = None
 ```
 
-- [ ] **Step 4: Declare, capture, and wire the two vars in `run_optimize`**
+- [x] **Step 4: Declare, capture, and wire the two vars in `run_optimize`**
 
 In `backend/app/services/portfolio_builder.py`:
 
@@ -442,12 +442,12 @@ In `backend/app/services/portfolio_builder.py`:
             regime_state=regime_state,
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd backend && uv run pytest -q tests/test_builder_regime_cvar.py`
 Expected: PASS (all existing tests + the new one).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/app/schemas/builder.py backend/app/services/portfolio_builder.py backend/tests/test_builder_regime_cvar.py

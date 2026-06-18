@@ -4955,6 +4955,28 @@
                 "type": "null"
               }
             ]
+          },
+          "cvar_limit_effective": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cvar Limit Effective"
+          },
+          "regime_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regime State"
           }
         },
         "type": "object",
@@ -13585,7 +13607,7 @@
         },
         "type": "object",
         "title": "UniverseSpecIn",
-        "description": "Filter + rank a slice of the FUND universe instead of listing assets.\n\nThe optimizer then runs over the resolved candidates (funds only, v1 \u2014\nsame rule as views: equities have no AUM/market cap in the builder yet).\nCandidates are restricted to funds that EACH have enough NAV history; the\ncross-asset overlap requirement is still enforced on the resolved set. All\nfilter fields share the GET /funds vocabulary; ``rank_by``/``rank_dir``\npick the top ``max_assets`` of the matching set."
+        "description": "Filter + rank a slice of the FUND universe instead of listing assets.\n\nThe optimizer then runs over the resolved candidates (funds only, v1).\nCandidates are restricted to funds that EACH have enough NAV history; the\ncross-asset overlap requirement is still enforced on the resolved set. All\nfilter fields share the GET /funds vocabulary; ``rank_by``/``rank_dir``\npick the top ``max_assets`` of the matching set."
       },
       "ValidationError": {
         "properties": {

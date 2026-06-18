@@ -319,6 +319,9 @@ class DiagnosticsOut(BaseModel):
     view_consistency: ViewConsistencyOut | None = None
     # Present only on the broad-universe path.
     selection: SelectionDiagnosticsOut | None = None
+    # Present only on the max_return_cvar path.
+    cvar_limit_effective: float | None = None
+    regime_state: str | None = None
 
 
 class OptimizeResponse(BaseModel):
