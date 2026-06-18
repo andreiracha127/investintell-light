@@ -267,6 +267,35 @@ describe("buildHcMacroPerformanceOption", () => {
     ]);
   });
 
+  it("projects each series to running drawdown when view is 'drawdown'", () => {
+    const opt = buildHcMacroPerformanceOption({
+      portfolio: [
+        ["2024-01-01", 1000],
+        ["2024-01-02", 1100],
+        ["2024-01-03", 990],
+      ],
+      asset: [
+        ["2024-01-01", 50],
+        ["2024-01-02", 55],
+        ["2024-01-03", 55],
+      ],
+      regimes: HISTORY,
+      colors: TEST_COLORS,
+      portfolioLabel: "Portfolio",
+      assetLabel: "SPY",
+      view: "drawdown",
+    })!;
+    const series = opt.series as Array<{ type?: string; data?: Array<[number, number]> }>;
+    // Portfolio: new high at 1100, then -10% off that peak.
+    expect(series[0].type).toBe("area");
+    expect(series[0].data?.[0]).toEqual([ms("2024-01-01"), 0]);
+    expect(series[0].data?.[1]).toEqual([ms("2024-01-02"), 0]);
+    expect(series[0].data?.[2][1]).toBeCloseTo(-10);
+    // Drawdown reference plot line sits at 0, not 100.
+    const yAxis = opt.yAxis as { plotLines?: Array<{ value?: number }> };
+    expect(yAxis.plotLines?.[0].value).toBe(0);
+  });
+
   it("adds regime plot bands over the datetime xAxis", () => {
     const opt = buildHcMacroPerformanceOption({
       portfolio: [

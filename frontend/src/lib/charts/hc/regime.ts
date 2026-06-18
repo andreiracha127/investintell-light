@@ -228,6 +228,19 @@ function normalizeSeries(points: DatePoint[]): Array<[number, number]> {
     .map(([date, value]) => [dateToUtcMs(date), (value / base) * 100]);
 }
 
+/**
+ * Running drawdown from each prior peak, expressed as a non-positive percent
+ * (0% at every new high). Mirrors the prototype's `drawdown` helper.
+ */
+function drawdownSeries(points: DatePoint[]): Array<[number, number]> {
+  const clean = points.filter(([, value]) => Number.isFinite(value));
+  let peak = -Infinity;
+  return clean.map(([date, value]) => {
+    peak = Math.max(peak, value);
+    return [dateToUtcMs(date), peak > 0 ? (value / peak - 1) * 100 : 0];
+  });
+}
+
 function deriveRegimePlotBands(
   history: RegimeHistoryPoint[],
   minX: number,
@@ -376,6 +389,13 @@ export function buildHcMacroRotationOption(
   };
 }
 
+/** Encode a `#RRGGBB` token at the given alpha (reuses the local helper). */
+function tint(hex: string, a: number): string {
+  return withAlpha(hex, a);
+}
+
+export type MacroPerformanceView = "indexed" | "drawdown";
+
 export function buildHcMacroPerformanceOption({
   portfolio,
   asset,
@@ -383,6 +403,7 @@ export function buildHcMacroPerformanceOption({
   colors,
   portfolioLabel,
   assetLabel,
+  view = "indexed",
 }: {
   portfolio: DatePoint[];
   asset: DatePoint[];
@@ -390,13 +411,18 @@ export function buildHcMacroPerformanceOption({
   colors: ChartColors;
   portfolioLabel: string;
   assetLabel: string;
+  /** "indexed" rebases both series to 100; "drawdown" shows decline from peak. */
+  view?: MacroPerformanceView;
 }): Options | null {
-  const portfolioData = normalizeSeries(portfolio);
-  const assetData = normalizeSeries(asset);
+  const isDrawdown = view === "drawdown";
+  const project = isDrawdown ? drawdownSeries : normalizeSeries;
+  const portfolioData = project(portfolio);
+  const assetData = project(asset);
   const allTimes = [...portfolioData, ...assetData].map(([time]) => time);
   if (allTimes.length === 0) return null;
   const minX = Math.min(...allTimes);
   const maxX = Math.max(...allTimes);
+  const refLine = isDrawdown ? 0 : 100;
 
   return {
     chart: { type: "line", zooming: { type: "x" } },
@@ -407,34 +433,40 @@ export function buildHcMacroPerformanceOption({
       plotBands: deriveRegimePlotBands(regimes, minX, maxX, colors),
     }),
     yAxis: {
-      title: { text: "Indexed performance" },
+      title: { text: isDrawdown ? "Drawdown from peak" : "Indexed to 100" },
       labels: {
         formatter() {
-          return formatNumber(this.value as number, 0);
+          return isDrawdown
+            ? `${formatNumber(this.value as number, 0)}%`
+            : formatNumber(this.value as number, 0);
         },
       },
-      plotLines: [{ value: 100, width: 1, color: colors.grid }],
+      plotLines: [{ value: refLine, width: 1, color: colors.grid, dashStyle: "Dash", zIndex: 2 }],
     },
     tooltip: {
       shared: true,
       formatter() {
         const rows = (this.points ?? [])
-          .map(
-            (point) =>
-              `<span style="color:${point.series.color}">●</span> ${point.series.name}: <b>${formatNumber(point.y as number, 2)}</b>`,
-          )
+          .map((point) => {
+            const value = point.y as number;
+            const formatted = isDrawdown
+              ? `${formatNumber(value, 1)}%`
+              : formatNumber(value, 2);
+            return `<span style="color:${point.series.color}">●</span> ${point.series.name}: <b>${formatted}</b>`;
+          })
           .join("<br/>");
         return `${formatDate(new Date(this.x as number).toISOString().slice(0, 10))}<br/>${rows}`;
       },
     },
     series: [
       {
-        type: "line",
+        type: isDrawdown ? "area" : "line",
         name: portfolioLabel,
         data: portfolioData,
         color: colors.accent,
         lineWidth: 2.4,
         marker: { enabled: false },
+        fillColor: isDrawdown ? tint(colors.accent, 0.12) : undefined,
         zIndex: 3,
       },
       {
@@ -444,6 +476,7 @@ export function buildHcMacroPerformanceOption({
         color: colors.barMute,
         lineWidth: 1.8,
         marker: { enabled: false },
+        dashStyle: isDrawdown ? "ShortDash" : "Solid",
         zIndex: 2,
       },
     ],
