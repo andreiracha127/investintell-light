@@ -1175,7 +1175,7 @@ from pydantic import BaseModel, Field, model_validator
 
 ### Subtask 3b — service: thread `w_mkt` into the per-fold closure
 
-- [ ] **Write failing test** — append to `backend/tests/test_backtest_service.py`:
+- [x] **Write failing test** — append to `backend/tests/test_backtest_service.py`:
 
 ```python
 def test_solve_fn_max_return_cvar_with_w_mkt_solves() -> None:
@@ -1244,11 +1244,11 @@ async def test_run_max_return_cvar_equities_fail_loud(
 
 > The existing `test_solve_fn_max_return_cvar_is_rejected` test (lines 68-70) asserts the OLD behaviour ("max_return_cvar is not backtestable"). It is REPLACED by `test_solve_fn_max_return_cvar_without_w_mkt_is_rejected`. Delete the old test in the implement step below.
 
-- [ ] **Run the test (expect FAIL)**:
+- [x] **Run the test (expect FAIL)**:
   - Command: `cd backend && uv run pytest -q tests/test_backtest_service.py -k max_return_cvar`
   - Expected: `TypeError: _solve_fn_for() got an unexpected keyword argument 'w_mkt'` (and the old rejection test still asserts the not-backtestable message).
 
-- [ ] **Implement** — edit `backend/app/services/backtest.py`.
+- [x] **Implement** — edit `backend/app/services/backtest.py`.
 
   Extend imports (add BL + numpy types already present). Current:
 ```python
@@ -1427,7 +1427,7 @@ async def run_walk_forward_backtest(
   - `_market_weights_for` takes `list[AssetRefIn]` and `labels: list[str]`. `payload.assets` is already `list[AssetRefIn]`; `labels` MUST be the frame's column order (the function maps fund AUMs to labels positionally — see portfolio_builder.py:173). Build `labels` from `frame.columns`, not from `payload.assets`, so the alignment matches `bl.market_weights`'s `aums`/`labels` ordering. (For funds-only requests the order is identical, but reading from the frame is the safe contract.)
   - **Delete the now-obsolete test** `test_solve_fn_max_return_cvar_is_rejected` (lines 68-70 of `test_backtest_service.py`) — it asserted the removed rejection. The new `test_solve_fn_max_return_cvar_without_w_mkt_is_rejected` covers the no-w_mkt path.
 
-- [ ] **Delete the obsolete test** — remove this block from `backend/tests/test_backtest_service.py`:
+- [x] **Delete the obsolete test** — remove this block from `backend/tests/test_backtest_service.py`:
 
 ```python
 def test_solve_fn_max_return_cvar_is_rejected() -> None:
@@ -1435,11 +1435,11 @@ def test_solve_fn_max_return_cvar_is_rejected() -> None:
         _solve_fn_for("max_return_cvar", cap=0.25, min_weight=None)
 ```
 
-- [ ] **Run the test (expect PASS)**:
+- [x] **Run the test (expect PASS)**:
   - Command: `cd backend && uv run pytest -q tests/test_backtest_service.py`
   - Expected: all pass — the new equilibrium tests, `test_solve_fn_bl_utility_is_rejected` (unchanged), and the existing min_cvar/min_vol happy paths.
 
-- [ ] **Commit**:
+- [x] **Commit**:
   - `cd backend && git add app/services/backtest.py tests/test_backtest_service.py && git commit -m "feat(backtest): max_return_cvar walk-forward in equilibrium mode (w_mkt threaded per-fold)"`
 
 ### Subtask 3c — route: equilibrium happy path + equities 422

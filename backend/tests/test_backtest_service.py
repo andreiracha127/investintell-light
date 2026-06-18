@@ -65,8 +65,27 @@ def test_solve_fn_bl_utility_is_rejected() -> None:
         _solve_fn_for("bl_utility", cap=0.25, min_weight=None)
 
 
-def test_solve_fn_max_return_cvar_is_rejected() -> None:
-    with pytest.raises(BacktestError, match="max_return_cvar is not backtestable"):
+def test_solve_fn_max_return_cvar_with_w_mkt_solves() -> None:
+    # With a w_mkt the closure no longer rejects max_return_cvar: it builds
+    # pi = delta * Sigma_train * w_mkt per fold and solves the capped objective.
+    rng = np.random.default_rng(2)
+    train = rng.normal(0.0005, 0.01, (300, 3))
+    w_mkt = np.array([0.5, 0.3, 0.2])
+    fn = _solve_fn_for(
+        "max_return_cvar",
+        cap=0.6,
+        min_weight=None,
+        w_mkt=w_mkt,
+        cvar_limit=0.05,
+    )
+    w = fn(train)
+    assert abs(float(w.sum()) - 1.0) < 1e-6
+    assert (w >= -1e-9).all() and (w <= 0.6 + 1e-6).all()
+
+
+def test_solve_fn_max_return_cvar_without_w_mkt_is_rejected() -> None:
+    # No w_mkt (e.g. a non-equilibrium caller): the closure must fail loud.
+    with pytest.raises(BacktestError, match="max_return_cvar"):
         _solve_fn_for("max_return_cvar", cap=0.25, min_weight=None)
 
 
@@ -115,4 +134,62 @@ async def test_run_maps_short_window_to_backtest_error(
          "n_splits": 5, "test_size": 63, "min_train_size": 252}
     )
     with pytest.raises(BacktestError, match="insufficient history"):
+        await backtest_service.run_walk_forward_backtest(None, payload)
+
+
+async def test_run_max_return_cvar_equilibrium_happy_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+
+    async def fake_w_mkt(session: Any, assets: Any, labels: list[str]) -> np.ndarray:
+        # Equal market weights - the service only needs a valid w_mkt vector.
+        return np.full(len(labels), 1.0 / len(labels))
+
+    monkeypatch.setattr(backtest_service, "_market_weights_for", fake_w_mkt)
+    payload = WalkForwardRequest.model_validate(
+        {
+            "assets": [_fund(0), _fund(1), _fund(2)],
+            "objective": "max_return_cvar",
+            "cvar_limit": 0.05,
+            "constraints": {"cap": 0.6},
+        }
+    )
+    resp = await backtest_service.run_walk_forward_backtest(None, payload)
+    assert isinstance(resp, WalkForwardResponse)
+    assert resp.params.objective == "max_return_cvar"
+    assert resp.params.n_splits_computed == 5
+    assert len(resp.folds) == 5
+
+
+async def test_run_max_return_cvar_equities_fail_loud(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The real _market_weights_for rejects equities when no market cap is
+    # available; the service must surface that as a BacktestError.
+    async def fake_load(session: Any, assets: Any, **kwargs: Any) -> pd.DataFrame:
+        rng = np.random.default_rng(5)
+        index = pd.bdate_range("2018-01-02", periods=600)
+        return pd.DataFrame(
+            {ref.label: rng.normal(0.0004, 0.01, 600) for ref in assets},
+            index=index,
+        )
+
+    async def fake_mcap(session: Any, tickers: list[str]) -> dict[str, float | None]:
+        return {ticker: None for ticker in tickers}
+
+    monkeypatch.setattr(optimizer_data, "load_aligned_returns", fake_load)
+    monkeypatch.setattr(optimizer_data, "load_equity_market_cap", fake_mcap)
+    payload = WalkForwardRequest.model_validate(
+        {
+            "assets": [
+                {"kind": "equity", "ticker": "SPY"},
+                {"kind": "equity", "ticker": "AGG"},
+            ],
+            "objective": "max_return_cvar",
+            "cvar_limit": 0.05,
+            "constraints": {"cap": 0.6},
+        }
+    )
+    with pytest.raises(backtest_service.BacktestError, match="equities"):
         await backtest_service.run_walk_forward_backtest(None, payload)
