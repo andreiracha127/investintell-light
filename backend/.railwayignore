@@ -12,3 +12,7 @@ __pycache__/
 seeds/
 tests/
 alembic/
+
+# local analysis scratch (not part of the app)
+_navdata.*
+_gate_vs_full_backtest.py

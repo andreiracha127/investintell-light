@@ -12,3 +12,7 @@ seeds/
 .env
 *.log
 openapi.json
+
+# local analysis scratch (not part of the app)
+_navdata.*
+_gate_vs_full_backtest.py
