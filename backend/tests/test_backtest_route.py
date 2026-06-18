@@ -119,3 +119,29 @@ async def test_bad_n_splits_is_pydantic_422() -> None:
     async with _client() as client:
         response = await client.post("/backtest/walk-forward", json=payload)
     assert response.status_code == 422  # Field(ge=2)
+
+
+async def test_walk_forward_response_carries_oos_curve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+    payload = {
+        "assets": [_fund(0), _fund(1), _fund(2)],
+        "objective": "min_cvar",
+        "constraints": {"cap": 0.5},
+    }
+    async with _client() as client:
+        response = await client.post("/backtest/walk-forward", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    # One OOS point per observation across all folds (5 folds x 63 = 315).
+    total_obs = sum(f["n_obs"] for f in body["folds"])
+    assert len(body["oos_curve"]) == total_obs
+    # Each point is a [iso_date, nav] 2-element array; nav is finite & positive.
+    first = body["oos_curve"][0]
+    assert isinstance(first, list) and len(first) == 2
+    assert isinstance(first[0], str)  # ISO date
+    assert float(first[1]) > 0
+    # One boundary per fold; the first boundary == the first curve date.
+    assert len(body["fold_boundaries"]) == len(body["folds"])
+    assert body["fold_boundaries"][0] == first[0]

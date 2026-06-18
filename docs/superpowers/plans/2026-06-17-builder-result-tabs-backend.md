@@ -336,7 +336,7 @@ class WalkForwardResponse(BaseModel):
 
 ### Subtask 1c — route: end-to-end curve in the HTTP response
 
-- [ ] **Write failing test** — append to `backend/tests/test_backtest_route.py`:
+- [x] **Write failing test** — append to `backend/tests/test_backtest_route.py`:
 
 ```python
 async def test_walk_forward_response_carries_oos_curve(
@@ -362,17 +362,17 @@ async def test_walk_forward_response_carries_oos_curve(
     assert body["fold_boundaries"][0] == first[0]
 ```
 
-- [ ] **Run the test (expect FAIL or, if 1b is already merged, possibly PASS)**:
+- [x] **Run the test (expect FAIL or, if 1b is already merged, possibly PASS)**:
   - Command: `cd backend && uv run pytest -q tests/test_backtest_route.py -k oos_curve`
   - Expected: with 1b implemented, the route already serializes the fields, so this likely PASSES. If running this subtask before 1b's implementation, it fails with `KeyError: 'oos_curve'`. Either way the assertion set is the contract check; keep it.
 
-- [ ] **Implement** — no production change needed (the route returns the service's `WalkForwardResponse` unchanged). This subtask is a contract guard only.
+- [x] **Implement** — no production change needed (the route returns the service's `WalkForwardResponse` unchanged). This subtask is a contract guard only.
 
-- [ ] **Run the test (expect PASS)**:
+- [x] **Run the test (expect PASS)**:
   - Command: `cd backend && uv run pytest -q tests/test_backtest_route.py`
   - Expected: all route tests pass (the new one plus the pre-existing), e.g. `8 passed`.
 
-- [ ] **Commit**:
+- [x] **Commit**:
   - `cd backend && git add tests/test_backtest_route.py && git commit -m "test(backtest): assert OOS curve is present in the HTTP response"`
 
 ---
