@@ -47,6 +47,7 @@ export function InteractiveChart({
   onRangeChange,
   mode = "ohlcv",
   className,
+  chartAreaClassName = "h-[58vh] min-h-[380px]",
 }: {
   symbol: string;
   bars: PriceBar[];
@@ -54,6 +55,8 @@ export function InteractiveChart({
   onRangeChange: (next: RangePreset) => void;
   mode?: PriceMode;
   className?: string;
+  /** Sizing classes for the chart canvas area (height / aspect-ratio). */
+  chartAreaClassName?: string;
 }) {
   const chartRef = useRef<Chart | null>(null);
   const [colors, setColors] = useState<ChartColors | null>(null);
@@ -369,7 +372,7 @@ export function InteractiveChart({
         )}
       </div>
 
-      <div className="relative h-[58vh] min-h-[380px] border border-border bg-surface-1">
+      <div className={`relative border border-border bg-surface-1 ${chartAreaClassName}`}>
         {options ? (
           usesStockChart ? (
             <HighchartsStockChart

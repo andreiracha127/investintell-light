@@ -19,7 +19,6 @@ import {
   type RangePreset,
   type StockAnalysis,
 } from "@/lib/api/client";
-import { buildHcCumulativeOption } from "@/lib/charts/hc/cumulative";
 import { buildHcHistogramOption } from "@/lib/charts/hc/histogram";
 import { buildHcRollingOption } from "@/lib/charts/hc/rolling";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
@@ -159,16 +158,6 @@ function AnalysisContent({
 }) {
   const { header, params, stats } = data;
 
-  const cumulativeOption = useMemo(
-    () =>
-      buildHcCumulativeOption(
-        data.cumulative_returns,
-        header.ticker,
-        params.benchmark,
-        colors,
-      ),
-    [data.cumulative_returns, header.ticker, params.benchmark, colors],
-  );
   const volatilityOption = useMemo(
     () =>
       buildHcRollingOption(data.rolling_volatility, "Volatility", colors, {
@@ -249,6 +238,7 @@ function AnalysisContent({
           bars={historyBars}
           range={range}
           onRangeChange={onRangeChange}
+          chartAreaClassName="w-full aspect-[16/10] min-h-[380px] max-h-[70vh]"
         />
       </div>
 
@@ -277,21 +267,6 @@ function AnalysisContent({
           tone="text-loss"
         />
         <KpiTile label="VaR 95 (1d)" value={formatPercent(stats.var_95)} />
-      </div>
-
-      {/* ── Cumulative returns vs benchmark ── */}
-      <div className="mb-px">
-        <Card
-          title={`Cumulative Return vs ${params.benchmark}`}
-          actions={
-            <div className="flex gap-3.5 text-[10.5px] text-text-muted">
-              <ChartLegend swatch="line-accent" label={header.ticker} />
-              <ChartLegend swatch="line-grey" label={params.benchmark} />
-            </div>
-          }
-        >
-          <HighchartsChart options={cumulativeOption} className="h-[300px] w-full" />
-        </Card>
       </div>
 
       {/* ── Rolling row ── */}
@@ -366,25 +341,6 @@ function AnalysisContent({
 }
 
 /* ── Presentational helpers ───────────────────────────────────────────────── */
-
-/** Small legend entry: 10×2px accent/grey line. */
-function ChartLegend({
-  swatch,
-  label,
-}: {
-  swatch: "line-accent" | "line-grey";
-  label: string;
-}) {
-  return (
-    <span className="flex items-center gap-[5px]">
-      {swatch === "line-accent" && <span className="h-[2px] w-[10px] bg-accent" />}
-      {swatch === "line-grey" && (
-        <span className="h-[2px] w-[10px] bg-[var(--color-chart-bar-mute)]" />
-      )}
-      {label}
-    </span>
-  );
-}
 
 function StatePanel({
   title,
