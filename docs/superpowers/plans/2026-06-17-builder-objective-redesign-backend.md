@@ -188,7 +188,7 @@ git commit -m "feat(optimizer): w_mkt supports equities via market cap (shares �
 - Test: `backend/tests/test_builder_objective_equilibrium.py` (create)
 - Test: `backend/tests/test_optimizer_engine.py` (extend — scale-invariance characterization)
 
-- [ ] **Step 1: Write the failing behavior test**
+- [x] **Step 1: Write the failing behavior test**
 
 Create `backend/tests/test_builder_objective_equilibrium.py`:
 
@@ -255,12 +255,12 @@ async def test_max_return_cvar_without_views_uses_equilibrium(
     assert result.diagnostics.status == "optimal"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && uv run pytest -q tests/test_builder_objective_equilibrium.py`
 Expected: FAIL — `run_optimize` raises `BuilderError("max_return_cvar needs expected returns — provide views ...")` because `mu_posterior is None`.
 
-- [ ] **Step 3: Use the equilibrium fallback in the `max_return_cvar` branch**
+- [x] **Step 3: Use the equilibrium fallback in the `max_return_cvar` branch**
 
 In `backend/app/services/portfolio_builder.py`, replace the `max_return_cvar` branch (lines 572-597) with:
 
@@ -290,12 +290,12 @@ In `backend/app/services/portfolio_builder.py`, replace the `max_return_cvar` br
 
 (The regime-adjusted `limit` and `state` locals are reused by Task 3 to expose the effective ceiling — Task 3 adds the two lines that capture them.)
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd backend && uv run pytest -q tests/test_builder_objective_equilibrium.py`
 Expected: PASS.
 
-- [ ] **Step 5: Add the scale-invariance characterization test**
+- [x] **Step 5: Add the scale-invariance characterization test**
 
 This documents the methodological note that δ does not move the portfolio in `max_return_cvar` (a linear objective's argmax is invariant to positive scaling of μ). Append to `backend/tests/test_optimizer_engine.py`:
 
@@ -319,12 +319,12 @@ def test_max_return_cvar_argmax_invariant_to_mu_scale() -> None:
     assert np.allclose(w1, w2, atol=1e-4)
 ```
 
-- [ ] **Step 6: Run the characterization test**
+- [x] **Step 6: Run the characterization test**
 
 Run: `cd backend && uv run pytest -q tests/test_optimizer_engine.py::test_max_return_cvar_argmax_invariant_to_mu_scale`
 Expected: PASS immediately (this characterizes existing solver behavior; it is not red-green — it locks the property the design relies on).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/app/services/portfolio_builder.py backend/tests/test_builder_objective_equilibrium.py backend/tests/test_optimizer_engine.py

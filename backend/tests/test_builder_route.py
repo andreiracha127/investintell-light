@@ -681,10 +681,11 @@ async def test_optimize_max_return_cvar_with_views_happy_path(
     assert body["diagnostics"]["status"] == "optimal"
 
 
-async def test_optimize_max_return_cvar_without_bl_inputs_is_422(
+async def test_optimize_max_return_cvar_without_views_uses_equilibrium(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _stub_returns(monkeypatch)
+    _stub_aum(monkeypatch)
     payload = {
         "assets": [_fund_ref(i) for i in range(4)],
         "objective": "max_return_cvar",
@@ -692,8 +693,11 @@ async def test_optimize_max_return_cvar_without_bl_inputs_is_422(
     }
     async with _client() as client:
         response = await client.post("/builder/optimize", json=payload)
-    assert response.status_code == 422, response.text
-    assert "expected returns" in response.text.lower()
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["diagnostics"]["mu_equilibrium"] is not None
+    assert body["diagnostics"]["mu_posterior"] is None
+    assert body["diagnostics"]["status"] == "optimal"
 
 
 async def test_optimize_max_return_cvar_risk_off_smoke(

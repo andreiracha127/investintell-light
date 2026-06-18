@@ -575,11 +575,10 @@ async def run_optimize(
             )
         elif payload.objective == "max_return_cvar":
             assert payload.cvar_limit is not None  # schema validator guarantees it
-            if mu_posterior is None:
-                raise BuilderError(
-                    "max_return_cvar needs expected returns — provide views so the "
-                    "Black-Litterman posterior exists (gate G5)"
-                )
+            assert mu_equilibrium is not None  # needs_bl computes it for this objective
+            # Gate G5-safe mu: the BL posterior when views exist, otherwise the
+            # equilibrium return pi = delta*Sigma*w_mkt. Never the historical mean.
+            mu = mu_posterior if mu_posterior is not None else mu_equilibrium
             state = _OVERRIDE_REGIME_STATE
             if state is None and datalake is not None:
                 snap = await macro_regime.fetch_credit_regime(datalake)
@@ -593,7 +592,7 @@ async def run_optimize(
             # block, so no duplicate construction is needed.
             weights, status = engine.solve_max_return_cvar_capped(
                 scenarios,
-                mu=mu_posterior,
+                mu=mu,
                 cvar_limit=limit,
                 cap=cap,
                 min_weight=min_weight,
