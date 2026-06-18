@@ -67,7 +67,7 @@ export function ScreenerHeader({
 
   return (
     <header className="sticky top-0 z-10 bg-surface-1 border-b border-border">
-      <div className="mx-auto flex max-w-[1360px] flex-wrap items-center gap-2.5 px-[var(--ix-pad)] py-2.5">
+      <div className="mx-auto flex max-w-[1360px] flex-wrap items-center gap-2.5 px-[clamp(14px,3vw,28px)] py-3">
         {/* Screen switcher */}
         <div
           ref={menuRef}
@@ -83,19 +83,21 @@ export function ScreenerHeader({
                 else if (e.key === "Escape") setRenaming(false);
               }} onBlur={() => setRenaming(false)} aria-label="Rename screen" className={`w-[200px] ${INPUT_CLASS}`} />
           ) : (
-            <button type="button" onClick={() => setMenuOpen((v) => !v)} aria-expanded={menuOpen}
-              className="inline-flex items-center gap-1.5 text-[15px] font-bold text-text-primary hover:text-accent">
-              <span aria-hidden="true">⌂</span>{selected ? selected.name : "Untitled screen"}<span aria-hidden="true" className="text-text-muted">▾</span>
+            <button type="button" onClick={() => setMenuOpen((v) => !v)} aria-expanded={menuOpen} aria-haspopup="menu"
+              className="inline-flex h-[34px] items-center gap-2 border border-border-strong bg-field px-3 text-[13px] font-bold text-text-primary hover:bg-layer-hover">
+              <span aria-hidden="true" className="text-accent">▦</span>{selected ? selected.name : "Untitled screen"}<span aria-hidden="true" className="font-normal text-text-muted">▾</span>
             </button>
           )}
           {menuOpen && (
-            <div role="menu" className="absolute z-20 mt-1 w-[240px] bg-surface-2 border border-border-strong">
-              <ul className="max-h-[240px] overflow-auto py-1">
+            <div role="menu" className="absolute z-20 mt-1 w-[280px] bg-surface-2 border border-border-strong shadow-[0_6px_18px_rgba(0,0,0,0.14)]">
+              <div className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-[0.08em] text-text-muted">Saved screens</div>
+              <ul className="max-h-[240px] overflow-auto pb-1">
                 {screens.map((s) => (
                   <li key={s.id}>
                     <button type="button" role="menuitem" onClick={() => { onSelect(s.id); setMenuOpen(false); }}
                       className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-[12.5px] ${s.id === selected?.id ? "text-accent font-semibold" : "text-text-secondary hover:bg-layer-hover"}`}>
-                      {s.name}<span className="ml-auto tabular-nums text-[10px] text-text-muted">{s.filter_count}</span>
+                      <span className="truncate">{s.name}</span>
+                      <span className="ml-auto tabular-nums text-[10px] text-text-muted border border-border px-1.5 py-px">{s.filter_count}</span>
                     </button>
                   </li>
                 ))}
@@ -117,12 +119,16 @@ export function ScreenerHeader({
         </div>
 
         {/* Live match count */}
-        <span aria-live="polite" className="inline-flex h-[22px] items-center bg-accent-wash border border-accent px-2 tabular-nums text-[11px] font-bold text-accent">
+        <span aria-live="polite" className="inline-flex h-[24px] items-center bg-accent-wash border border-accent px-2.5 tabular-nums text-[11px] font-bold text-accent">
           {headline === null ? "— matches" : `${formatCompact(headline)} matches`}
         </span>
 
-        {/* Auto-save status (NOT a save button — persistence is live) */}
-        <span aria-live="polite" className="text-[11px] text-text-muted">
+        {/* Auto-save status (NOT a save button — persistence is live).
+            A status dot precedes the (test-asserted) status text. */}
+        <span aria-live="polite" className="inline-flex items-center gap-1.5 text-[11px] text-text-muted">
+          <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${
+            saveStatus === "saving" ? "bg-text-muted" : saveStatus === "error" ? "bg-loss" : "bg-gain"
+          }`} />
           {saveStatus === "saving" ? "Saving…" : saveStatus === "error" ? "Save failed — retry" : "Saved ✓"}
         </span>
 
@@ -130,7 +136,7 @@ export function ScreenerHeader({
         <div className="ml-auto flex items-center gap-2">
           <button type="button" onClick={onReset} disabled={!selected} className={BUTTON_CLASS}>Reset</button>
           <button type="button" onClick={onExport} disabled={!selected || exporting} className={`${BUTTON_PRIMARY_CLASS} inline-flex items-center gap-[7px]`}>
-            {exporting ? "Exporting…" : "⬇ Export CSV"}
+            {exporting ? "Exporting…" : (<><span aria-hidden="true">↓</span>Export CSV</>)}
           </button>
         </div>
       </div>

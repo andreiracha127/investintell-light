@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { MetricDef } from "@/lib/api/client";
-import { INPUT_CLASS, BUTTON_CLASS } from "@/components/screener/shared";
+import { BUTTON_CLASS } from "@/components/screener/shared";
 import { MetricBrowserPopover } from "@/components/screener/MetricBrowserPopover";
 
 export function AddMetricBar({
@@ -57,19 +57,26 @@ export function AddMetricBar({
           setQuery("");
         }
       }}
-      className="relative flex flex-wrap items-center gap-2 bg-surface-2 border-b border-border px-[var(--ix-pad)] py-2.5"
+      className="relative flex flex-wrap items-center gap-2.5 bg-surface-2 border-b border-border px-[var(--ix-pad)] py-3"
     >
       <span className="ix-label m-0">Add metric</span>
-      <div className="relative w-[280px]">
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a metric…  (P/E, ROE, Beta…)"
-          aria-label="Find a metric by name or code" className={`w-full ${INPUT_CLASS} text-[12px]`} />
+      <div className="relative w-[300px] max-w-full">
+        <div className="flex h-[34px] items-center gap-2 border border-border-strong bg-field px-2.5">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true" className="flex-none text-text-muted">
+            <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.4" />
+            <path d="M11 11l3 3" stroke="currentColor" strokeWidth="1.4" />
+          </svg>
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a metric…  (P/E, ROE, Beta…)"
+            aria-label="Find a metric by name or code"
+            className="min-w-0 flex-1 border-none bg-transparent text-[12.5px] text-text-primary placeholder:text-text-muted outline-none" />
+        </div>
         {suggestions.length > 0 && (
-          <ul className="absolute z-20 mt-px w-full max-h-[260px] overflow-auto bg-surface-2 border border-border-strong">
+          <ul className="absolute z-20 mt-px w-full max-h-[260px] overflow-auto bg-surface-2 border border-border-strong shadow-[0_6px_18px_rgba(0,0,0,0.12)]">
             {suggestions.map((m) => (
               <li key={m.code}>
                 <button type="button" onClick={() => add(m.code)}
                   className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-text-secondary hover:bg-layer-hover">
-                  <span>{m.name}</span>
+                  <span className="text-text-primary">{m.name}</span>
                   <span className="ml-auto text-[11px] text-text-muted">{m.abbreviation} · {m.category}</span>
                 </button>
               </li>

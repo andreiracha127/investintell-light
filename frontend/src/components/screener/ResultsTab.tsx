@@ -129,17 +129,20 @@ export function ResultsTab({
 
   return (
     <section className="bg-surface-2 border border-border">
-      <div className="flex flex-wrap items-center gap-2.5 px-[var(--ix-pad)] py-3">
-        <div className="relative w-[220px]">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-[var(--ix-pad)] py-3">
+        <div className="relative w-[240px] max-w-full">
           <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"
             className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted">
             <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.4" />
             <path d="M11 11l4 4" stroke="currentColor" strokeWidth="1.4" />
           </svg>
           <input value={searchText} onChange={(e) => setSearchText(e.target.value)}
-            placeholder="Search ticker / name…" aria-label="Search results by ticker or name"
+            placeholder="Search ticker or company…" aria-label="Search results by ticker or name"
             className={`w-full pl-[30px] ${INPUT_CLASS} text-[12px]`} />
         </div>
+        <span className="tabular-nums text-[11px] text-text-muted" aria-live="polite">
+          {search ? `${total} matching “${search}”` : `${total} ${total === 1 ? "match" : "matches"}`}
+        </span>
       </div>
 
       <div

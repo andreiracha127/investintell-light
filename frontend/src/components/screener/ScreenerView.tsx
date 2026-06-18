@@ -20,6 +20,7 @@ import { BuildPanel } from "@/components/screener/BuildPanel";
 import { ResultsTab } from "@/components/screener/ResultsTab";
 import { ScreenerHeader } from "@/components/screener/ScreenerHeader";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
+import { PageTitle } from "@/components/ui/panels";
 
 const TABS = [
   { id: "build", label: "Build" },
@@ -97,13 +98,24 @@ export function ScreenerView() {
       <ScreenerHeader screens={screens ?? []} selected={selected} onSelect={setSelectedId}
         headline={headline} saveStatus={saveStatus} onReset={onReset} onExport={onExport} exporting={exporting} />
       {exportError && (
-        <p role="alert" className="mx-auto w-full max-w-[1360px] px-[var(--ix-pad)] pt-2 text-[12px] text-loss break-words">
+        <p role="alert" className="mx-auto w-full max-w-[1360px] px-[clamp(14px,3vw,28px)] pt-2 text-[12px] text-loss break-words">
           Export failed: {exportError}
         </p>
       )}
 
-      <div className="mx-auto w-full max-w-[1360px] px-[var(--ix-pad)]">
-        <div role="tablist" aria-label="Screener views" className="mt-3 flex">
+      <div className="mx-auto w-full max-w-[1360px] px-[clamp(14px,3vw,28px)] pt-5">
+        <PageTitle title="Stock screener">
+          <span className="inline-flex items-center gap-1.5 border border-border bg-field px-[9px] py-1 text-[11px] text-text-muted">
+            <span
+              title="Screens run against the latest computed fundamentals snapshot, refreshed after each market close."
+              className="cursor-help border-b border-dotted border-current"
+            >
+              Fundamentals
+            </span>
+          </span>
+        </PageTitle>
+
+        <div role="tablist" aria-label="Screener views" className="flex">
           {TABS.map((t) => (
             <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}
               className={`h-[36px] px-5 text-[12.5px] border transition-colors ${

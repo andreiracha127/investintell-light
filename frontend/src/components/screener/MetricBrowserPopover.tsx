@@ -34,12 +34,12 @@ export function MetricBrowserPopover({
 
   return (
     <div role="dialog" aria-label="Browse metrics by category"
-      className="absolute z-20 mt-1 w-[360px] max-h-[420px] overflow-auto bg-surface-2 border border-border-strong shadow-[2px_2px_0_rgba(0,0,0,0.08)]">
-      <div className="sticky top-0 flex items-center gap-2 bg-surface-2 border-b border-border px-3 py-2">
+      className="absolute z-20 mt-1 w-[380px] max-w-[calc(100%-28px)] max-h-[440px] overflow-auto bg-surface-2 border border-border-strong shadow-[0_8px_24px_rgba(0,0,0,0.16)]">
+      <div className="sticky top-0 z-[1] flex items-center gap-2 bg-surface-2 border-b border-border px-3 py-2">
         <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Filter…"
           aria-label="Filter metrics" className={`flex-1 ${INPUT_CLASS} text-[12px]`} />
         <span className="tabular-nums text-[11px] text-text-muted">{catalog.length} metrics</span>
-        <button type="button" onClick={onClose} aria-label="Close" className="px-1.5 text-text-muted hover:text-text-primary">×</button>
+        <button type="button" onClick={onClose} aria-label="Close" className="px-1.5 text-[16px] leading-none text-text-muted hover:text-text-primary">×</button>
       </div>
       {groups.map(([category, metrics]) => {
         const selectedInGroup = metrics.filter((m) => selectedCodes.has(m.code)).length;
