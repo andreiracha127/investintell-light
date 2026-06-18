@@ -34,7 +34,12 @@ export function PortfolioNewsPanel({ portfolioId }: { portfolioId: number }) {
   return (
     <section className="ix-pad border border-border bg-surface-2">
       <div className="mb-2.5 flex items-center gap-2">
-        <h2 className="ix-label m-0">News</h2>
+        <h2 className="ix-label m-0">
+          News
+          <span className="ml-2 font-normal normal-case tracking-normal text-text-secondary">
+            · aggregated across portfolio holdings
+          </span>
+        </h2>
         {data.stale && (
           <span
             title="Live refresh failed — showing previously cached articles."

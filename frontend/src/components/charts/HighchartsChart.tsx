@@ -77,6 +77,9 @@ export function HighchartsChart({
       await import("highcharts/esm/modules/xrange.js");
       await import("highcharts/esm/highcharts-more.js");
       await import("highcharts/esm/modules/annotations.js");
+      // treemap: portfolio look-through exposure tiles. highcharts-more (above)
+      // provides the `packedbubble` series used by the Performance contributors.
+      await import("highcharts/esm/modules/treemap.js");
       if (disposed || !containerRef.current) return;
       const Highcharts = mod.default;
       // Apply the token-driven Graphite theme globally before creating.

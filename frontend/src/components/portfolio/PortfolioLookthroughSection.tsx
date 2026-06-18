@@ -1,33 +1,48 @@
 "use client";
 
 /**
- * Consolidated exposure section for the portfolio overview page.
+ * Consolidated exposure (look-through) for the portfolio page — Claude Design.
  *
- * Fetches portfolio look-through data and delegates rendering to the shared
- * `LookthroughPanel`. 404 → renders nothing. Any other error is surfaced
- * via the standard error panel pattern.
+ * Fetches portfolio look-through data and renders the design's exposure view:
+ * a KPI strip, a dimension tab bar (asset class / sector / currency / issuer —
+ * whatever the backend returns), and a look-through TREEMAP whose tile area is
+ * each bucket's portfolio weight, split into Direct / Via funds leaves.
  *
- * Shape note: PortfolioLookthroughResponse differs from FundLookthroughResponse:
- *   - No top-level `report_date` (uses `oldest_report_date` instead)
- *   - Has portfolio-level fields: total_value, cash_weight_pct, expanded_weight_pct,
- *     sum_pct_total, n_funds_expanded, unexpanded[]
- *   - summary is NOT a nested LookthroughSummaryOut — the portfolio response IS
- *     its own summary; we project it onto LookthroughSummaryOut-compatible props.
- *
- * LookthroughPanel accepts the shared `LookthroughSummary` shape. We project
- * the portfolio fields pragmatically: sum_pct_total → sum_pct_total, oldest_
- * report_date → oldest_report_date, coverage is not provided by the portfolio
- * endpoint (shows "—"). This is intentional — no leaky abstraction.
+ * The shared `LookthroughPanel` (bar variant) stays in use by the fund pages;
+ * this view is portfolio-specific so the funds UI is untouched. 404 → renders
+ * nothing; other errors use the standard error panel.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { ApiError, fetchPortfolioLookthrough } from "@/lib/api/client";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
-import { LookthroughPanel } from "@/components/lookthrough/LookthroughPanel";
+import { HighchartsChart } from "@/components/charts/HighchartsChart";
+import { buildHcExposureTreemapOption } from "@/lib/charts/hc/treemap";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
+import { InfoDot, KpiTile } from "@/components/ui/panels";
 import { formatDate, formatNumber } from "@/lib/format";
-import type { LookthroughSummary } from "@/lib/api/client";
+
+const LOOKTHROUGH_TIP =
+  "“Look-through”: sees through each fund/ETF in the portfolio down to its final underlying holdings, aggregating true exposure by asset class, sector, currency and issuer.";
+
+const DIM_LABELS: Record<string, string> = {
+  asset_class: "Asset class",
+  sector: "Sector",
+  currency: "Currency",
+  issuer: "Issuer",
+  country: "Country",
+  region: "Region",
+};
+
+function dimLabel(key: string): string {
+  return (
+    DIM_LABELS[key] ??
+    key
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+  );
+}
 
 export function PortfolioLookthroughSection({
   portfolioId,
@@ -40,6 +55,8 @@ export function PortfolioLookthroughSection({
     setColors(chartColors());
   }, []);
 
+  const [dim, setDim] = useState<string | null>(null);
+
   const query = useQuery({
     queryKey: ["portfolio-lookthrough", portfolioId],
     queryFn: ({ signal }) => fetchPortfolioLookthrough(portfolioId, signal),
@@ -50,7 +67,17 @@ export function PortfolioLookthroughSection({
     },
   });
 
-  // 404 or empty dimensions → render nothing silently.
+  const dims = useMemo(
+    () => (query.data ? Object.keys(query.data.dimensions) : []),
+    [query.data],
+  );
+  const activeDim = dim && dims.includes(dim) ? dim : (dims[0] ?? null);
+
+  const treemapOption = useMemo(() => {
+    if (!colors || !query.data || !activeDim) return null;
+    return buildHcExposureTreemapOption(query.data.dimensions[activeDim] ?? [], colors);
+  }, [colors, query.data, activeDim]);
+
   if (
     query.isError &&
     query.error instanceof ApiError &&
@@ -58,17 +85,15 @@ export function PortfolioLookthroughSection({
   ) {
     return null;
   }
-
   if (query.isPending) {
     return (
       <div
         aria-busy="true"
         aria-label="Loading consolidated exposure"
-        className="h-[120px] bg-surface-2 animate-pulse"
+        className="h-[480px] animate-pulse bg-surface-2"
       />
     );
   }
-
   if (query.isError) {
     return (
       <ErrorPanel
@@ -80,59 +105,99 @@ export function PortfolioLookthroughSection({
   }
 
   const data = query.data;
+  if (dims.length === 0) return null;
 
-  // No dimensions → nothing to show.
-  if (Object.keys(data.dimensions).length === 0) return null;
-
-  // Project portfolio response onto the shared LookthroughSummary shape.
-  // Fields not provided by the portfolio endpoint remain null.
-  const summary: LookthroughSummary = {
-    sum_pct_total: data.sum_pct_total,
-    direct_pct: null,
-    indirect_pct: null,
-    expanded_fund_pct: data.expanded_weight_pct,
-    nondecomposable_fund_pct: null,
-    derivatives_gross_pct: null,
-    derivatives_net_pct: null,
-    unidentified_pct: null,
-    // Coverage is not present in the portfolio response; callers see "—".
-    coverage_pct: null,
-    n_holdings: null,
-    n_children_expanded: data.n_funds_expanded,
-    oldest_report_date: data.oldest_report_date,
-  };
+  // ── KPIs (computed defensively from the dimensions that exist) ──────────
+  const currencyItems = data.dimensions.currency ?? [];
+  const nonUsd = currencyItems
+    .filter((i) => (i.label ?? i.key).toUpperCase() !== "USD")
+    .reduce((sum, i) => sum + i.total_pct, 0);
+  const assetItems = data.dimensions.asset_class ?? [];
+  const intl = assetItems
+    .filter((i) => /intl|international/i.test(i.label ?? i.key))
+    .reduce((sum, i) => sum + i.total_pct, 0);
 
   return (
-    <section>
-      {/* Section header */}
-      <div className="mb-3">
-        <h2 className="ix-label m-0">Consolidated exposure</h2>
-        <p className="text-[12px] text-text-secondary mt-0.5">
-          Across all portfolio funds
-          {data.oldest_report_date
-            ? ` · as of ${formatDate(data.oldest_report_date)}`
-            : ""}
-          {data.cash_weight_pct > 0 && (
-            <>
-              {" "}
-              <span className="text-text-muted">
-                · cash {formatNumber(data.cash_weight_pct, 1)}%
-              </span>
-            </>
-          )}
+    <div className="flex flex-col gap-px">
+      <div>
+        <h2 className="ix-label m-0 flex items-center gap-1.5">
+          Consolidated exposure
+          <InfoDot tip={LOOKTHROUGH_TIP} />
+        </h2>
+        <p className="mt-0.5 text-[12px] text-text-secondary">
+          Aggregating the final holdings of every fund in the portfolio
+          {data.oldest_report_date ? ` · as of ${formatDate(data.oldest_report_date)}` : ""}
         </p>
       </div>
 
-      {colors && (
-        <LookthroughPanel
-          dimensions={data.dimensions}
-          summary={summary}
-          reportDate={data.oldest_report_date}
-          colors={colors}
-          expandedLabel="Funds expanded"
-          expandedCount={data.n_funds_expanded}
+      <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(140px,1fr))]">
+        <KpiTile
+          label="Decomposed"
+          value={`${formatNumber(data.sum_pct_total, 1)}%`}
+          tip="Share of portfolio value mapped down to its final holdings."
         />
-      )}
-    </section>
+        <KpiTile
+          label="Funds expanded"
+          value={formatNumber(data.n_funds_expanded, 0)}
+          tip="Funds/ETFs whose final holdings were looked through."
+        />
+        <KpiTile label="Cash weight" value={`${formatNumber(data.cash_weight_pct, 1)}%`} />
+        {currencyItems.length > 0 && (
+          <KpiTile
+            label="Non-USD exposure"
+            value={`${formatNumber(nonUsd, 1)}%`}
+            tip="Sum of weights in currencies other than the US dollar."
+          />
+        )}
+        {intl > 0 && (
+          <KpiTile label="International equity" value={`${formatNumber(intl, 1)}%`} />
+        )}
+      </div>
+
+      <div
+        role="tablist"
+        aria-label="Exposure dimension"
+        className="flex flex-wrap gap-px border border-border bg-border"
+      >
+        {dims.map((key) => {
+          const active = key === activeDim;
+          return (
+            <button
+              key={key}
+              role="tab"
+              type="button"
+              aria-selected={active}
+              onClick={() => setDim(key)}
+              className={`h-[34px] min-w-[120px] flex-1 border-b-2 px-3.5 text-[11px] font-bold uppercase tracking-[0.06em] ${
+                active
+                  ? "border-accent bg-[var(--color-accent-wash)] text-accent"
+                  : "border-transparent bg-surface-2 text-text-secondary hover:bg-layer-hover"
+              }`}
+            >
+              {dimLabel(key)}
+            </button>
+          );
+        })}
+      </div>
+
+      <section className="ix-pad border border-t-0 border-border bg-surface-2">
+        <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
+          <h3 className="ix-label m-0">
+            Look-through map · {activeDim ? dimLabel(activeDim) : ""} → holdings
+          </h3>
+          <span className="text-[10.5px] text-text-muted">
+            Tile area = portfolio weight · Direct vs. Via funds
+          </span>
+        </div>
+        {treemapOption && (
+          <HighchartsChart
+            options={treemapOption}
+            className="h-[480px] w-full"
+            isEmpty={(data.dimensions[activeDim ?? ""] ?? []).length === 0}
+            emptyMessage="No exposure to map for this dimension."
+          />
+        )}
+      </section>
+    </div>
   );
 }

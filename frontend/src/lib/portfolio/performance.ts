@@ -1,0 +1,137 @@
+/**
+ * Synthetic portfolio NAV + per-holding contribution — reconstructed from the
+ * CURRENT holdings' real price histories.
+ *
+ * The backend exposes no portfolio-level NAV time series, so the Performance
+ * tab rebuilds one the way the design describes it: "reconstructed portfolio
+ * value over time from the current holdings — illustrative, not a booked track
+ * record". Each holding's quantity is held constant and multiplied by its
+ * historical close (funds: NAV/line series; stocks: OHLC close); summed across
+ * holdings plus cash gives NAV(t). Contribution over a selected range is each
+ * holding's quantity × (priceEnd − priceStart); cash cancels, so the holding
+ * contributions sum exactly to NAV(max) − NAV(min).
+ *
+ * Pure: no DOM, no network — safe to unit test in node. The component layer
+ * fetches the histories (useQueries) and feeds them in as HoldingSeries.
+ */
+
+export interface HoldingSeries {
+  ticker: string;
+  name: string;
+  /** Current quantity held (constant across the reconstructed path). */
+  quantity: number;
+  /** [tsMs, price] ascending by timestamp. */
+  points: Array<[number, number]>;
+}
+
+export interface NavReconstruction {
+  /** [tsMs, nav] ascending. Empty when no holding has usable history. */
+  nav: Array<[number, number]>;
+  /** First timestamp where every holding has at least one price (ms). */
+  startTs: number;
+  /** Last timestamp on the reconstructed path (ms). */
+  endTs: number;
+}
+
+export interface PeriodContribution {
+  ticker: string;
+  name: string;
+  /** Contribution to the period P&L in account currency (signed). */
+  value: number;
+  /** Holding price return over the period, decimal fraction. */
+  ret: number;
+}
+
+/** Normalize an epoch that may be seconds or milliseconds to milliseconds. */
+export function toMs(t: number): number {
+  // Anything below ~1e12 is seconds (year 2001 in ms ≈ 1e12; in s ≈ 1e9).
+  return t < 1e12 ? Math.round(t * 1000) : Math.round(t);
+}
+
+/** Extract [tsMs, close] points from an OHLC matrix ([t, o, h, l, c][]). */
+export function pricePointsFromOhlc(ohlc: number[][]): Array<[number, number]> {
+  return ohlc
+    .filter((row) => row.length >= 5 && Number.isFinite(row[4]))
+    .map((row) => [toMs(row[0]!), row[4]!] as [number, number]);
+}
+
+/** Extract [tsMs, value] points from a line matrix ([t, value][]). */
+export function pricePointsFromLine(series: number[][]): Array<[number, number]> {
+  return series
+    .filter((row) => row.length >= 2 && Number.isFinite(row[1]))
+    .map((row) => [toMs(row[0]!), row[1]!] as [number, number]);
+}
+
+/** Last price at-or-before `ts`; the first price when `ts` precedes the series. */
+function priceAt(points: Array<[number, number]>, ts: number): number {
+  let price = points[0]![1];
+  for (const [t, v] of points) {
+    if (t <= ts) price = v;
+    else break;
+  }
+  return price;
+}
+
+const usableHoldings = (holdings: HoldingSeries[]): HoldingSeries[] =>
+  holdings.filter((h) => h.quantity > 0 && h.points.length > 0);
+
+/**
+ * Reconstruct the synthetic NAV path: NAV(t) = Σ qtyᵢ·priceᵢ(t) + cash, where
+ * priceᵢ(t) is forward-filled (last close at-or-before t). The path starts at
+ * the latest of each holding's first timestamp so every holding is covered.
+ */
+export function reconstructNav(
+  holdings: HoldingSeries[],
+  cash: number,
+): NavReconstruction {
+  const usable = usableHoldings(holdings);
+  if (usable.length === 0) return { nav: [], startTs: 0, endTs: 0 };
+
+  const startTs = Math.max(...usable.map((h) => h.points[0]![0]));
+  const tsSet = new Set<number>([startTs]);
+  for (const h of usable) {
+    for (const [ts] of h.points) {
+      if (ts >= startTs) tsSet.add(ts);
+    }
+  }
+  const allTs = [...tsSet].sort((a, b) => a - b);
+
+  // One advancing pointer per holding (allTs is ascending), so each holding's
+  // forward-filled price is found in a single linear pass.
+  const cursor = usable.map(() => 0);
+  const nav: Array<[number, number]> = allTs.map((ts) => {
+    let sum = cash;
+    usable.forEach((h, hi) => {
+      let j = cursor[hi]!;
+      while (j + 1 < h.points.length && h.points[j + 1]![0] <= ts) j++;
+      cursor[hi] = j;
+      sum += h.quantity * h.points[j]![1];
+    });
+    return [ts, parseFloat(sum.toFixed(2))];
+  });
+
+  return { nav, startTs, endTs: allTs[allTs.length - 1]! };
+}
+
+/**
+ * Per-holding contribution to the period P&L over [minTs, maxTs]:
+ * valueᵢ = qtyᵢ·(priceᵢ(max) − priceᵢ(min)); retᵢ = priceᵢ(max)/priceᵢ(min) − 1.
+ */
+export function periodContributions(
+  holdings: HoldingSeries[],
+  minTs: number,
+  maxTs: number,
+): PeriodContribution[] {
+  return usableHoldings(holdings).map((h) => {
+    const start = priceAt(h.points, minTs);
+    const end = priceAt(h.points, maxTs);
+    const value = parseFloat((h.quantity * (end - start)).toFixed(2));
+    const ret = start > 0 ? end / start - 1 : 0;
+    return { ticker: h.ticker, name: h.name, value, ret };
+  });
+}
+
+/** Net period result = Σ contributions = NAV(max) − NAV(min). */
+export function periodTotal(contribs: PeriodContribution[]): number {
+  return parseFloat(contribs.reduce((sum, c) => sum + c.value, 0).toFixed(2));
+}

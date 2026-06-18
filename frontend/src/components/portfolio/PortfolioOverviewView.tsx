@@ -31,6 +31,7 @@ import {
   type PositionBody,
 } from "@/lib/api/client";
 import {
+  formatCompact,
   formatCurrency,
   formatDate,
   formatNumber,
@@ -45,12 +46,15 @@ import { DataGrid } from "@/components/ui/DataGrid";
 import { positionsToGridOptions, POSITION_COLS } from "@/lib/grid/positionsGridOptions";
 import type { TickDir } from "@/lib/grid/liveFlash";
 import { useLiveTicks } from "@/lib/livefeed/useLiveTicks";
-import { Card, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
+import { Card, InfoDot, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
 import { retryPolicy } from "@/components/screener/shared";
-import { PortfolioAllocationSection } from "@/components/portfolio/PortfolioAllocationSection";
 import { PortfolioNewsPanel } from "@/components/portfolio/PortfolioNewsPanel";
 import { PortfolioLookthroughSection } from "@/components/portfolio/PortfolioLookthroughSection";
 import { PortfolioRebalanceSection } from "@/components/portfolio/PortfolioRebalanceSection";
+import { PortfolioPerformanceView } from "@/components/portfolio/PortfolioPerformanceView";
+import { usePortfolioNav } from "@/components/portfolio/usePortfolioNav";
+import { formatTimestampDate } from "@/lib/charts/hc/dateAxis";
+import type { Options } from "highcharts";
 
 /** Carbon text field: flat, square, bottom rule only; accent rule on focus. */
 const INPUT_CLASS =
@@ -77,6 +81,7 @@ function flashTintForDir(dir: TickDir): string | null {
 
 const PORTFOLIO_SECTIONS = [
   { id: "overview", label: "Overview" },
+  { id: "performance", label: "Performance" },
   { id: "exposure", label: "Exposure" },
   { id: "rebalance", label: "Rebalancing" },
   { id: "news", label: "News" },
@@ -157,6 +162,9 @@ export function PortfolioOverviewView() {
               {activeSection === "overview" && (
                 <OverviewSection key={selected.id} portfolioId={selected.id} />
               )}
+              {activeSection === "performance" && (
+                <PerformanceSection key={selected.id} portfolioId={selected.id} />
+              )}
               {activeSection === "exposure" && (
                 <PortfolioLookthroughSection portfolioId={selected.id} />
               )}
@@ -180,10 +188,7 @@ function PortfolioSectionTabs({
   activeSection: PortfolioSectionId;
 }) {
   return (
-    <nav
-      aria-label="Portfolio sections"
-      className="border-x border-t border-border bg-field"
-    >
+    <nav aria-label="Portfolio sections" className="border border-border bg-field">
       <div role="tablist" aria-label="Portfolio sections" className="flex overflow-x-auto">
         {PORTFOLIO_SECTIONS.map((section) => {
           const active = activeSection === section.id;
@@ -195,10 +200,10 @@ function PortfolioSectionTabs({
               role="tab"
               aria-selected={active}
               aria-current={active ? "page" : undefined}
-              className={`flex h-[36px] items-center border-r border-border px-5 text-[12.5px] transition-colors ${
+              className={`flex h-[38px] flex-none items-center border-b-2 px-[18px] text-[12.5px] transition-colors ${
                 active
-                  ? "relative z-[1] border-b border-b-surface-2 bg-surface-2 font-bold text-accent"
-                  : "text-text-secondary hover:bg-layer-hover hover:text-text-primary"
+                  ? "border-accent bg-[var(--color-accent-wash)] font-bold text-accent"
+                  : "border-transparent text-text-secondary hover:bg-layer-hover hover:text-text-primary"
               }`}
             >
               {section.label}
@@ -417,48 +422,102 @@ function PortfolioSwitcher({
   selected: PortfolioListItem | null;
   onSelect: (id: number | null) => void;
 }) {
+  const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="flex h-[34px] items-stretch border border-border-strong text-[12px]">
-        {portfolios.map((portfolio, index) => {
-          const active = portfolio.id === selected?.id;
-          return (
-            <button
-              key={portfolio.id}
-              type="button"
-              onClick={() => onSelect(portfolio.id)}
-              aria-pressed={active}
-              className={`flex items-center gap-[7px] px-3.5 transition-colors ${
-                active
-                  ? "bg-accent font-bold text-on-accent"
-                  : `text-text-secondary hover:bg-layer-hover ${
-                      index > 0 ? "border-l border-border" : ""
-                    }`
-              }`}
-            >
-              {portfolio.name}
-              <span
-                className={`tabular-nums ${
-                  active ? "opacity-75" : "text-text-muted"
-                }`}
-              >
-                {portfolio.position_count}
-              </span>
-            </button>
-          );
-        })}
+      <div className="relative">
         <button
           type="button"
-          onClick={() => setCreating((open) => !open)}
-          aria-label="Create portfolio"
-          aria-expanded={creating}
-          title="Create portfolio"
-          className="flex items-center border-l border-border px-3 text-[16px] text-text-muted hover:bg-layer-hover hover:text-text-primary"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-label="Select portfolio"
+          onClick={() => setOpen((o) => !o)}
+          className="flex h-[34px] min-w-[210px] items-center gap-2.5 border border-border-strong bg-field px-3 text-left text-[12.5px] text-text-primary"
         >
-          +
+          <span className="flex min-w-0 flex-1 items-center gap-[7px]">
+            <span aria-hidden className="h-[9px] w-[9px] flex-none bg-accent" />
+            <span className="truncate font-bold">{selected?.name ?? "—"}</span>
+            <span className="flex-none tabular-nums text-text-muted">
+              {selected?.position_count ?? ""}
+            </span>
+          </span>
+          <span
+            aria-hidden
+            className={`flex-none text-[10px] text-text-muted transition-transform ${
+              open ? "rotate-180" : ""
+            }`}
+          >
+            ▾
+          </span>
         </button>
+        {open && (
+          <>
+            <div className="fixed inset-0 z-[55]" onClick={() => setOpen(false)} />
+            <ul
+              role="listbox"
+              aria-label="Portfolios"
+              className="absolute left-0 top-[38px] z-[56] max-h-[300px] min-w-[240px] max-w-[320px] overflow-y-auto border border-border-strong bg-surface-2 py-1 shadow-[0_6px_20px_rgba(0,0,0,0.16)]"
+            >
+              {portfolios.map((p) => {
+                const active = p.id === selected?.id;
+                return (
+                  <li key={p.id} role="option" aria-selected={active}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onSelect(p.id);
+                        setOpen(false);
+                      }}
+                      className={`flex w-full items-center gap-[9px] px-3 py-2 text-left text-[12.5px] ${
+                        active
+                          ? "bg-[var(--color-accent-wash)] font-bold text-accent"
+                          : "text-text-primary hover:bg-layer-hover"
+                      }`}
+                    >
+                      <span
+                        aria-hidden
+                        className="h-2 w-2 flex-none"
+                        style={{
+                          background: active
+                            ? "var(--color-accent)"
+                            : "var(--color-border-strong)",
+                        }}
+                      />
+                      <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                      <span className="flex-none tabular-nums text-text-muted">
+                        {p.position_count}
+                      </span>
+                      <span className="w-3 flex-none font-bold text-accent">
+                        {active ? "✓" : ""}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+              <li
+                role="option"
+                aria-selected={false}
+                className="mt-1 border-t border-border pt-0.5"
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    setCreating(true);
+                  }}
+                  className="flex w-full items-center gap-[9px] px-3 py-2 text-left text-[12.5px] text-text-secondary hover:bg-layer-hover"
+                >
+                  <span aria-hidden className="w-2 flex-none text-center text-text-muted">
+                    +
+                  </span>
+                  <span>New portfolio…</span>
+                </button>
+              </li>
+            </ul>
+          </>
+        )}
       </div>
       {creating && (
         <CreatePortfolioForm
@@ -485,6 +544,15 @@ function PortfolioManageBar({
   const queryClient = useQueryClient();
   const [renaming, setRenaming] = useState(false);
   const [renameText, setRenameText] = useState("");
+
+  // Shares the overview cache with the section views — only for the EOD as-of.
+  const overviewQuery = useQuery({
+    queryKey: ["overview", selected.id],
+    queryFn: ({ signal }) => fetchPortfolioOverview(selected.id, signal),
+    staleTime: 60_000,
+    retry: retryPolicy,
+  });
+  const asOf = overviewQuery.data?.aggregates.as_of ?? null;
 
   const invalidatePortfolio = (id: number) => {
     queryClient.invalidateQueries({ queryKey: ["portfolios"] });
@@ -572,6 +640,14 @@ function PortfolioManageBar({
           />
         </span>
 
+        {asOf && (
+          <span className="flex items-center gap-1.5 text-text-muted">
+            Last updated
+            <span className="tabular-nums text-text-secondary">{formatDate(asOf)}</span>
+            <InfoDot tip="End-of-day closing prices, updated after the market closes." />
+          </span>
+        )}
+
         <Link
           href={`/builder?portfolio=${selected.id}`}
           className={`${BUTTON_CLASS} ml-auto inline-flex items-center hover:border-accent hover:text-accent`}
@@ -640,14 +716,175 @@ function OverviewSection({ portfolioId }: { portfolioId: number }) {
 
   const overview = overviewQuery.data;
   return (
-    <>
+    <div className="flex flex-col gap-px">
       <KpiStrip overview={overview} />
       {colors && overview.positions.length > 0 && (
-        <AllocationPanel overview={overview} colors={colors} />
+        <div className="grid items-stretch gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]">
+          <AllocationPanel overview={overview} colors={colors} />
+          <NavPanel overview={overview} colors={colors} />
+        </div>
       )}
       <PositionsTable overview={overview} portfolioId={portfolioId} />
-      <PortfolioAllocationSection overview={overview} />
-    </>
+    </div>
+  );
+}
+
+/* ── Performance (synthetic NAV + contribution breakdown) ─────────────────── */
+
+function PerformanceSection({ portfolioId }: { portfolioId: number }) {
+  const overviewQuery = useQuery({
+    queryKey: ["overview", portfolioId],
+    queryFn: ({ signal }) => fetchPortfolioOverview(portfolioId, signal),
+    staleTime: 60_000,
+    retry: retryPolicy,
+  });
+
+  if (overviewQuery.isPending) {
+    return (
+      <div
+        aria-busy="true"
+        aria-label="Loading performance"
+        className="flex flex-col gap-px"
+      >
+        <div className="h-[400px] animate-pulse bg-surface-2" />
+        <div className="h-[340px] animate-pulse bg-surface-2" />
+      </div>
+    );
+  }
+  if (overviewQuery.isError) {
+    return (
+      <ErrorPanel
+        title="Failed to load portfolio"
+        message={overviewQuery.error.message}
+        onRetry={() => overviewQuery.refetch()}
+      />
+    );
+  }
+  return <PortfolioPerformanceView overview={overviewQuery.data} />;
+}
+
+/* ── Synthetic NAV mini-panel (Overview, beside the allocation donut) ─────── */
+
+const NAV_RANGES = [
+  { key: "1M", label: "1M", bars: 21 },
+  { key: "6M", label: "6M", bars: 126 },
+  { key: "1Y", label: "1Y", bars: 252 },
+  { key: "MAX", label: "Max", bars: Infinity },
+] as const;
+type NavRangeKey = (typeof NAV_RANGES)[number]["key"];
+
+const SYNTH_NAV_TIP =
+  "Reconstructed portfolio value over time from the current holdings — illustrative, not a booked track record.";
+
+function NavPanel({
+  overview,
+  colors,
+}: {
+  overview: PortfolioOverview;
+  colors: ChartColors;
+}) {
+  const { recon, isLoading, isError } = usePortfolioNav(overview);
+  const [range, setRange] = useState<NavRangeKey>("1Y");
+
+  const bars = NAV_RANGES.find((r) => r.key === range)!.bars;
+  const slice = useMemo(
+    () => (bars === Infinity ? recon.nav : recon.nav.slice(-bars)),
+    [recon.nav, bars],
+  );
+  const change =
+    slice.length > 1 ? slice[slice.length - 1]![1] / slice[0]![1] - 1 : 0;
+
+  const option = useMemo<Options | null>(() => {
+    if (slice.length === 0) return null;
+    const fill0 = `${colors.accent}30`;
+    const fill1 = `${colors.accent}00`;
+    return {
+      chart: { type: "areaspline", height: 200 },
+      legend: { enabled: false },
+      xAxis: { type: "datetime", crosshair: true, tickPixelInterval: 84 },
+      yAxis: {
+        title: { text: undefined },
+        labels: {
+          formatter() {
+            return `$${formatCompact(this.value as number)}`;
+          },
+        },
+      },
+      tooltip: {
+        formatter() {
+          const ctx = this as unknown as { x: number; y: number };
+          return `${formatTimestampDate(ctx.x)}<br/>NAV: <b>${formatCurrency(ctx.y)}</b>`;
+        },
+      },
+      series: [
+        {
+          type: "areaspline",
+          name: "NAV",
+          data: slice,
+          color: colors.accent,
+          lineWidth: 1.8,
+          marker: { enabled: false },
+          fillColor: {
+            linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
+            stops: [
+              [0, fill0],
+              [1, fill1],
+            ],
+          },
+        },
+      ],
+    };
+  }, [slice, colors]);
+
+  return (
+    <section className="ix-pad flex flex-col border border-border bg-surface-2">
+      <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="ix-label m-0 flex items-center gap-1.5">
+          Synthetic NAV
+          <InfoDot tip={SYNTH_NAV_TIP} />
+        </h2>
+        <div className="flex items-center gap-2.5">
+          <span className={`text-[12px] font-bold tabular-nums ${valueTone(change)}`}>
+            {formatPercent(change, 2, { signed: true })}
+          </span>
+          <div
+            role="group"
+            aria-label="NAV range"
+            className="flex border border-border-strong"
+          >
+            {NAV_RANGES.map((r) => {
+              const active = r.key === range;
+              return (
+                <button
+                  key={r.key}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setRange(r.key)}
+                  className={`h-[26px] border-r border-border-strong px-2.5 text-[11px] last:border-r-0 ${
+                    active
+                      ? "bg-accent font-bold text-on-accent"
+                      : "text-text-muted hover:bg-layer-hover"
+                  }`}
+                >
+                  {r.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+      {isLoading && slice.length === 0 ? (
+        <div className="h-[200px] flex-1 animate-pulse bg-layer-active" />
+      ) : option ? (
+        <HighchartsChart options={option} className="h-[200px] w-full flex-1" />
+      ) : (
+        <div className="flex h-[200px] flex-1 items-center justify-center px-4 text-center text-[12px] text-text-muted">
+          {isError
+            ? "Could not load price history."
+            : "Not enough price history to reconstruct a NAV."}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -742,24 +979,32 @@ function AllocationPanel({
   );
 
   return (
-    <Card title="Allocation">
-      <div className="flex flex-wrap items-center gap-[18px]">
-        <HighchartsChart options={options} className="h-[150px] w-[150px] shrink-0" />
-        <div className="flex min-w-[150px] max-w-[260px] flex-1 flex-col gap-1.5 tabular-nums">
+    <Card title="Allocation" subtitle="· share by market value">
+      <div className="flex flex-col gap-3">
+        <HighchartsChart options={options} className="h-[190px] w-full" />
+        <div className="ix-thin-scroll flex max-h-[128px] flex-col overflow-y-auto tabular-nums">
           {slices.map((slice, i) => (
             <div
               key={slice.name}
-              className="flex items-center gap-[9px] text-[12px]"
+              className="flex items-center gap-[9px] border-b border-border py-[3px] text-[12px] last:border-b-0"
             >
               <span
                 aria-hidden
                 className="h-2.5 w-2.5 shrink-0"
                 style={{
-                  background: colors.categories[i % colors.categories.length],
+                  background:
+                    slice.name === "Cash"
+                      ? colors.barMute
+                      : colors.categories[i % colors.categories.length],
                 }}
               />
-              <span className="flex-1 text-text-secondary">{slice.name}</span>
-              <span className="font-bold text-text-primary">
+              <span className="min-w-0 flex-1 truncate font-bold text-text-primary">
+                {slice.name}
+              </span>
+              <span className="shrink-0 text-text-muted">
+                ${formatCompact(slice.value)}
+              </span>
+              <span className="w-12 shrink-0 text-right font-bold text-text-primary">
                 {total > 0 ? formatPercent(slice.value / total, 1) : "—"}
               </span>
             </div>
