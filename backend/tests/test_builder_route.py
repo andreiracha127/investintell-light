@@ -4,8 +4,8 @@ The data-loading layer is stubbed at its canonical module
 (``app.optimizer.data``) — no live DB. The optimizer/BL math stays LIVE so
 the happy paths exercise the real pipeline end to end.
 
-422 contract covered: insufficient common history, unknown asset, views with
-equities / funds without AUM, rank-deficient P.
+422 contract covered: insufficient common history, unknown asset, missing
+market weights / funds without AUM, rank-deficient P.
 """
 
 import datetime as dt
@@ -194,10 +194,16 @@ async def test_unknown_asset_maps_to_422(monkeypatch: pytest.MonkeyPatch) -> Non
     assert "unknown asset" in response.json()["detail"]
 
 
-async def test_views_with_equity_universe_maps_to_422(
+async def test_views_with_equity_missing_market_cap_maps_to_422(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _stub_returns(monkeypatch)
+    _stub_aum(monkeypatch)
+
+    async def fake_mcap(session: Any, tickers: list[str]) -> dict[str, float | None]:
+        return {ticker: None for ticker in tickers}
+
+    monkeypatch.setattr(optimizer_data, "load_equity_market_cap", fake_mcap)
     payload = {
         "assets": [_fund_ref(0), _fund_ref(1), {"kind": "equity", "ticker": "AAPL"}],
         "constraints": {"cap": 0.5},
@@ -209,7 +215,7 @@ async def test_views_with_equity_universe_maps_to_422(
         response = await client.post("/builder/optimize", json=payload)
     assert response.status_code == 422
     detail = response.json()["detail"]
-    assert "equities" in detail and "equity:AAPL" in detail
+    assert "market weights require" in detail and "equity:AAPL" in detail
 
 
 async def test_views_with_missing_fund_aum_maps_to_422(

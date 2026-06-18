@@ -173,22 +173,26 @@ def _build_views(
 async def _market_weights_for(
     session: AsyncSession, assets: list[AssetRefIn], labels: list[str]
 ) -> np.ndarray:
-    """w_mkt from real AUM. Fail-loud on equities and on funds without AUM."""
-    equity_labels = [
-        _ref_key(ref) for ref in assets if isinstance(ref, EquityRefIn)
-    ]
-    if equity_labels:
-        raise BuilderError(
-            "views requerem AUM para todos os ativos; equities ainda sem market cap "
-            f"no builder: {', '.join(equity_labels)} — remova-as ou otimize sem views"
-        )
+    """w_mkt from real sizes: AUM for funds, market cap for equities.
+
+    Sizes are assembled in the same order as ``assets``/``labels`` so the
+    weight vector aligns with Sigma. Unknown or non-positive sizes fail loud via
+    ``bl.market_weights``.
+    """
     fund_ids: list[uuid.UUID] = [
         ref.id for ref in assets if isinstance(ref, FundRefIn)
     ]
+    tickers: list[str] = [ref.ticker for ref in assets if isinstance(ref, EquityRefIn)]
     aum_by_id = await optimizer_data.load_fund_aum(session, fund_ids)
-    aums: list[float | None] = [aum_by_id.get(fund_id) for fund_id in fund_ids]
+    mcap_by_ticker = await optimizer_data.load_equity_market_cap(session, tickers)
+    sizes: list[float | None] = []
+    for ref in assets:
+        if isinstance(ref, FundRefIn):
+            sizes.append(aum_by_id.get(ref.id))
+        else:
+            sizes.append(mcap_by_ticker.get(ref.ticker))
     try:
-        return bl.market_weights(aums, labels)
+        return bl.market_weights(sizes, labels)
     except ValueError as exc:
         raise BuilderError(str(exc)) from exc
 

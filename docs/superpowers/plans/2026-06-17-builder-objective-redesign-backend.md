@@ -25,7 +25,7 @@ Today `_market_weights_for` rejects equities, so the equilibrium path (and there
 - Modify: `backend/app/services/portfolio_builder.py:173-193` (`_market_weights_for`)
 - Test: `backend/tests/test_portfolio_builder_market_weights.py` (create)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `backend/tests/test_portfolio_builder_market_weights.py`:
 
@@ -79,12 +79,12 @@ async def test_equity_without_market_cap_fails_loud(monkeypatch: pytest.MonkeyPa
         await pb._market_weights_for(None, assets, labels)  # type: ignore[arg-type]
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && uv run pytest -q tests/test_portfolio_builder_market_weights.py`
 Expected: FAIL — `load_equity_market_cap` does not exist yet (`AttributeError`), and the current `_market_weights_for` raises `BuilderError` on the equity before reaching market_weights.
 
-- [ ] **Step 3: Add the `load_equity_market_cap` loader**
+- [x] **Step 3: Add the `load_equity_market_cap` loader**
 
 In `backend/app/optimizer/data.py`, add the import alongside the existing model imports (the block currently imports `from app.models.eod_price import EodPrice` and `from app.models.fund import ...`):
 
@@ -132,7 +132,7 @@ async def load_equity_market_cap(
 
 Note: `fundamentals_snapshot.ticker` is the PK (one row per ticker), so no "latest period_end" filter is needed. `eod_prices` uses `DISTINCT ON (ticker) ... ORDER BY ticker, date DESC` (Postgres/TimescaleDB) for the most recent price. The loader is thin I/O and is exercised through the mocked-loader test above (the project's optimizer tests deliberately avoid a live DB — see `conftest.py`).
 
-- [ ] **Step 4: Rewrite `_market_weights_for` to support equities**
+- [x] **Step 4: Rewrite `_market_weights_for` to support equities**
 
 Replace the body of `_market_weights_for` (`backend/app/services/portfolio_builder.py:173-193`) with:
 
@@ -165,12 +165,12 @@ async def _market_weights_for(
 
 `bl.market_weights` already fails loud listing every label with a missing/non-positive size, so the equity-without-market-cap case raises a `ValueError` → `BuilderError` with the offending labels.
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd backend && uv run pytest -q tests/test_portfolio_builder_market_weights.py`
 Expected: PASS (2 tests).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/app/optimizer/data.py backend/app/services/portfolio_builder.py backend/tests/test_portfolio_builder_market_weights.py
