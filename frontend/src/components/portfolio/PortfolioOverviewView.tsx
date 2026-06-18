@@ -43,7 +43,11 @@ import { buildHcAllocationOption } from "@/lib/charts/hc/allocation";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { DataGrid } from "@/components/ui/DataGrid";
-import { positionsToGridOptions, POSITION_COLS } from "@/lib/grid/positionsGridOptions";
+import {
+  formatShares,
+  positionsToGridOptions,
+  POSITION_COLS,
+} from "@/lib/grid/positionsGridOptions";
 import type { TickDir } from "@/lib/grid/liveFlash";
 import { useLiveTicks } from "@/lib/livefeed/useLiveTicks";
 import { Card, InfoDot, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
@@ -1095,6 +1099,14 @@ function PositionsTable({
     [removeMutate],
   );
 
+  // Position detail side panel (drawer): open on a row click (non-interactive
+  // cell). Closes itself when its position is removed (detailPos → null).
+  const [detailTicker, setDetailTicker] = useState<string | null>(null);
+  const onOpenDetail = useCallback((ticker: string) => setDetailTicker(ticker), []);
+  const detailPos = detailTicker
+    ? (positions.find((p) => p.ticker === detailTicker) ?? null)
+    : null;
+
   // Wire the grid's pure edit/remove callbacks to the mutations. Invalid edits
   // never persist; they re-fetch the overview so the grid reverts the cell to
   // the server value. Only recomputes when the position DATA (overview) or a
@@ -1105,8 +1117,9 @@ function PositionsTable({
         onEditShares,
         onEditCost,
         onRemove,
+        onOpenDetail,
       }),
-    [overview, onEditShares, onEditCost, onRemove],
+    [overview, onEditShares, onEditCost, onRemove, onOpenDetail],
   );
 
   // ── Live price ticks (path: targeted DOM flash) ──────────────────────────
@@ -1225,7 +1238,168 @@ function PositionsTable({
           Total value: {formatCurrency(aggregates.total_value)}
         </span>
       </div>
+
+      {detailPos && (
+        <PositionDetailPanel
+          position={detailPos}
+          aggregates={aggregates}
+          portfolioId={portfolioId}
+          onClose={() => setDetailTicker(null)}
+          onRemove={(ticker) => {
+            removeMutate(ticker);
+            setDetailTicker(null);
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+/* ── Position detail side panel (drawer) ──────────────────────────────────── */
+
+function PositionDetailPanel({
+  position,
+  aggregates,
+  portfolioId,
+  onClose,
+  onRemove,
+}: {
+  position: PortfolioOverview["positions"][number];
+  aggregates: PortfolioOverview["aggregates"];
+  portfolioId: number;
+  onClose: () => void;
+  onRemove: (ticker: string) => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const weight =
+    aggregates.total_value > 0 ? position.market_value / aggregates.total_value : 0;
+
+  const rows: Array<{ label: string; value: string; tone?: string }> = [
+    { label: "Quantity", value: formatShares(position.quantity) },
+    {
+      label: "Avg cost",
+      value: position.acq_price != null ? formatCurrency(position.acq_price) : "—",
+    },
+    { label: "Price", value: formatCurrency(position.last_close) },
+    { label: "Market value", value: formatCurrency(position.market_value) },
+    {
+      label: "Total cost",
+      value: position.cost_basis != null ? formatCurrency(position.cost_basis) : "—",
+      tone: "text-text-secondary",
+    },
+    {
+      label: "P&L",
+      value: position.pnl != null ? formatCurrency(position.pnl, { signed: true }) : "—",
+      tone: position.pnl != null ? valueTone(position.pnl) : "text-text-muted",
+    },
+    {
+      label: "P&L %",
+      value:
+        position.pnl_pct != null
+          ? formatPercent(position.pnl_pct, 2, { signed: true })
+          : "—",
+      tone: position.pnl_pct != null ? valueTone(position.pnl_pct) : "text-text-muted",
+    },
+  ];
+
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-[80] flex justify-end bg-[rgba(0,0,0,0.28)]"
+    >
+      <aside
+        role="dialog"
+        aria-label={`Position detail ${position.ticker}`}
+        onClick={(e) => e.stopPropagation()}
+        className="flex h-full w-[340px] max-w-[90vw] flex-col overflow-auto border-l border-border-strong bg-surface-2 shadow-[-8px_0_30px_rgba(0,0,0,0.18)]"
+      >
+        <div className="flex items-start justify-between gap-2 border-b border-border px-[var(--ix-pad)] py-4">
+          <div>
+            <div className="ix-title text-[18px] text-accent">{position.ticker}</div>
+            {position.name && (
+              <div className="mt-0.5 text-[12px] text-text-secondary">{position.name}</div>
+            )}
+          </div>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            className="text-[18px] leading-none text-text-muted hover:text-text-primary"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="flex flex-col px-[var(--ix-pad)] py-3.5">
+          {(position.asset_class || position.strategy_label) && (
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              {position.asset_class && (
+                <span className="border border-border bg-field px-[7px] py-0.5 text-[10px] text-text-secondary">
+                  {position.asset_class}
+                </span>
+              )}
+              {position.strategy_label && (
+                <span className="border border-border bg-field px-[7px] py-0.5 text-[10px] text-text-secondary">
+                  {position.strategy_label}
+                </span>
+              )}
+            </div>
+          )}
+
+          <dl className="m-0 flex flex-col">
+            {rows.map((r) => (
+              <div
+                key={r.label}
+                className="flex items-baseline justify-between gap-3 border-b border-border py-[7px] text-[12.5px] last:border-b-0"
+              >
+                <dt className="text-text-secondary">{r.label}</dt>
+                <dd className={`m-0 font-bold tabular-nums ${r.tone ?? "text-text-primary"}`}>
+                  {r.value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+
+          <div className="mt-3.5">
+            <div className="mb-1.5 flex items-center justify-between text-[11px] text-text-muted">
+              <span>Portfolio weight</span>
+              <span className="font-bold tabular-nums text-text-primary">
+                {formatPercent(weight, 1)}
+              </span>
+            </div>
+            <div className="h-2 overflow-hidden bg-layer-active">
+              <div
+                className="h-full bg-accent"
+                style={{ width: `${(weight * 100).toFixed(1)}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-auto flex gap-2 border-t border-border px-[var(--ix-pad)] py-3.5">
+          <Link
+            href={`/builder?portfolio=${portfolioId}`}
+            className="h-[34px] flex-1 border border-accent bg-accent text-center text-[12.5px] font-bold leading-[34px] text-on-accent"
+          >
+            Optimize in Builder →
+          </Link>
+          <button
+            type="button"
+            onClick={() => onRemove(position.ticker)}
+            className="h-[34px] border border-border-strong bg-field px-3.5 text-[12.5px] text-text-secondary hover:border-loss hover:text-loss"
+          >
+            Remove
+          </button>
+        </div>
+      </aside>
+    </div>
   );
 }
 

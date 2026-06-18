@@ -22,7 +22,13 @@ export interface PositionsCallbacks {
   onEditShares: (ticker: string, value: number) => void;
   onEditCost: (ticker: string, value: number | null) => void;
   onRemove: (ticker: string) => void;
+  /** Open the position detail side panel (click on a non-interactive cell). */
+  onOpenDetail?: (ticker: string) => void;
 }
+
+/** Columns whose click has its own behavior (edit / link / remove) — never
+ *  triggers the detail panel. */
+const NON_DETAIL_COLS = new Set(["cost", "shares", "ticker", "__remove"]);
 
 /**
  * Column ids referenced cross-file by the live-tick effect (which reads the
@@ -171,6 +177,15 @@ export function positionsToGridOptions(
             } else if (colId === "cost") {
               callbacks.onEditCost(String(ticker), value);
             }
+          },
+          click(this: TableCell) {
+            // Row → detail panel, except on cells with their own click
+            // (editable cost/shares, the ticker link, the × remove button).
+            if (!callbacks.onOpenDetail) return;
+            const colId = this.column?.id;
+            if (colId && NON_DETAIL_COLS.has(colId)) return;
+            const ticker = this.row.getCell("ticker")?.value;
+            if (ticker != null) callbacks.onOpenDetail(String(ticker));
           },
         },
       },
