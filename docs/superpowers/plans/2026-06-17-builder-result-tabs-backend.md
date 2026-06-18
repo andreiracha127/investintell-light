@@ -904,7 +904,7 @@ async def run_portfolio_monte_carlo(
 
 ### Subtask 2c — route: `POST /monte-carlo/portfolio`
 
-- [ ] **Write failing test** — create `backend/tests/test_monte_carlo_portfolio_route.py`:
+- [x] **Write failing test** — create `backend/tests/test_monte_carlo_portfolio_route.py`:
 
 ```python
 """Tests for POST /monte-carlo/portfolio.
@@ -1017,11 +1017,11 @@ async def test_portfolio_requires_two_positions_422() -> None:
     assert response.status_code == 422  # min_length=2
 ```
 
-- [ ] **Run the test (expect FAIL)**:
+- [x] **Run the test (expect FAIL)**:
   - Command: `cd backend && uv run pytest -q tests/test_monte_carlo_portfolio_route.py`
   - Expected: `404` on the happy path (route not registered yet) → assertion failure.
 
-- [ ] **Implement** — edit `backend/app/api/routes/monte_carlo.py`. Extend imports and add the route.
+- [x] **Implement** — edit `backend/app/api/routes/monte_carlo.py`. Extend imports and add the route.
 
   Current imports:
 ```python
@@ -1071,15 +1071,15 @@ async def project_portfolio_monte_carlo(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 ```
 
-- [ ] **Run the test (expect PASS)**:
+- [x] **Run the test (expect PASS)**:
   - Command: `cd backend && uv run pytest -q tests/test_monte_carlo_portfolio_route.py`
   - Expected: all 5 tests pass.
 
-- [ ] **Run the single-instrument route tests (regression)**:
+- [x] **Run the single-instrument route tests (regression)**:
   - Command: `cd backend && uv run pytest -q tests/test_monte_carlo_route.py`
   - Expected: unchanged, all pass (the `/projection` route is untouched).
 
-- [ ] **Commit**:
+- [x] **Commit**:
   - `cd backend && git add app/api/routes/monte_carlo.py tests/test_monte_carlo_portfolio_route.py && git commit -m "feat(monte-carlo): add POST /monte-carlo/portfolio (thin route, ValueError→422)"`
 
 ---
