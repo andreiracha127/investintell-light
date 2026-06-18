@@ -3358,7 +3358,7 @@ export interface components {
             sentiment_score?: number | null;
             /**
              * Source
-             * @default sec_insider_sentiment
+             * @default sec_insider_transactions
              */
             source: string;
             /** As Of */

@@ -8,6 +8,9 @@ import pytest
 
 from app.models.fund import Fund
 from app.services.fund_dossier_tier_b import (
+    _INSIDER_SENTIMENT_SQL,
+    _INSTITUTIONAL_REVEAL_SQL,
+    _REVERSE_LOOKUP_SQL,
     _max_drawdown_series,
     _ols_market_sensitivities,
     _regime_label,
@@ -94,3 +97,29 @@ def test_ols_market_sensitivities_include_t_stats() -> None:
     assert [item.factor for item in payload] == ["Factor 1", "Factor 2"]
     assert payload[0].beta == pytest.approx(1.5)
     assert payload[0].t_stat is not None
+
+
+def test_tier_c_13f_sql_targets_deployed_schema() -> None:
+    """The 13F reveal/reverse-lookup queries must read the columns that actually
+    exist in the deployed ``sec_13f_holdings`` (report_date / issuer_name /
+    market_value) and resolve the manager name via ``sec_managers.firm_name``.
+    The original manager_name/period/name/value_usd columns never existed in
+    production, which silently broke the Relationships panel."""
+    for sql in (_INSTITUTIONAL_REVEAL_SQL, _REVERSE_LOOKUP_SQL):
+        assert "issuer_name" in sql, "must select the real issuer_name column"
+        assert "market_value" in sql, "must select the real market_value column"
+        assert "report_date" in sql, "must filter/period on the real report_date"
+        assert "sec_managers" in sql, "manager name must be joined from sec_managers"
+        assert "firm_name" in sql, "manager name comes from sec_managers.firm_name"
+
+
+def test_insider_sentiment_sql_aggregates_from_raw_transactions() -> None:
+    """``sec_insider_sentiment`` was never deployed; the insider panel must
+    aggregate buy/sell sentiment on the fly from the raw
+    ``sec_insider_transactions`` feed, bucketing the open-market Form 4 codes
+    (P = purchase, S = sale) by calendar quarter."""
+    sql = _INSIDER_SENTIMENT_SQL
+    assert "sec_insider_transactions" in sql, "must read the raw transactions feed"
+    assert "sec_insider_sentiment" not in sql, "the aggregate table never existed"
+    assert "trans_code" in sql, "buy/sell classification comes from trans_code (P/S)"
+    assert "date_trunc" in sql, "transactions must be bucketed into quarters"

@@ -388,7 +388,7 @@ class InsiderData(BaseModel):
         default=None,
         description="Net/(buy+sell), bounded to [-1, 1] when volume exists.",
     )
-    source: str = "sec_insider_sentiment"
+    source: str = "sec_insider_transactions"
     as_of: dt.date | None = None
     empty_state: EmptyState | None = None
 

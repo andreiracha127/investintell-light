@@ -808,8 +808,65 @@ def _tail_risk(returns: pd.Series) -> FundTailRiskMetrics:
     )
 
 
-def _insider_empty(reason: str, source: str | None = "sec_insider_sentiment") -> InsiderData:
+def _insider_empty(reason: str, source: str | None = "sec_insider_transactions") -> InsiderData:
     return InsiderData(empty_state=_empty(reason, source))
+
+
+# The deployed insider data is the raw Form 345 feed `sec_insider_transactions`
+# (issuer_cik / trans_date / trans_code / trans_value); there is NO pre-aggregated
+# `sec_insider_sentiment` table. Aggregate buy/sell sentiment on the fly from the
+# open-market transaction codes (P = purchase, S = sale) per calendar quarter.
+_INSIDER_SENTIMENT_SQL = """
+                    WITH issuer_map AS (
+                        SELECT DISTINCT
+                            upper(m.cusip) AS cusip,
+                            m.issuer_cik::text AS cik
+                        FROM sec_cusip_ticker_map m
+                        WHERE upper(m.cusip) = ANY(:cusips)
+                          AND m.issuer_cik IS NOT NULL
+                    ),
+                    matched_ciks AS (
+                        SELECT DISTINCT cik FROM issuer_map
+                    ),
+                    tx AS (
+                        SELECT
+                            date_trunc('quarter', t.trans_date)::date AS quarter,
+                            t.issuer_cik::text AS cik,
+                            t.trans_code,
+                            t.trans_value
+                        FROM sec_insider_transactions t
+                        WHERE t.issuer_cik::text IN (SELECT cik FROM matched_ciks)
+                          AND t.trans_code IN ('P', 'S')
+                          AND t.trans_value IS NOT NULL
+                    ),
+                    quarterly AS (
+                        SELECT
+                            quarter,
+                            SUM(CASE WHEN trans_code = 'P' THEN trans_value ELSE 0 END) AS buy_value,
+                            SUM(CASE WHEN trans_code = 'S' THEN trans_value ELSE 0 END) AS sell_value,
+                            COUNT(*) FILTER (WHERE trans_code = 'P') AS buy_count,
+                            COUNT(*) FILTER (WHERE trans_code = 'S') AS sell_count,
+                            array_agg(DISTINCT cik) AS issuer_ciks
+                        FROM tx
+                        GROUP BY quarter
+                    )
+                    SELECT
+                        q.quarter,
+                        q.buy_value,
+                        q.sell_value,
+                        q.buy_value - q.sell_value AS net_value,
+                        q.buy_count,
+                        q.sell_count,
+                        q.issuer_ciks,
+                        (
+                            SELECT array_agg(DISTINCT im.cusip)
+                            FROM issuer_map im
+                            WHERE im.cik = ANY(q.issuer_ciks)
+                        ) AS matched_cusips
+                    FROM quarterly q
+                    ORDER BY q.quarter DESC
+                    LIMIT 8
+                    """
 
 
 async def fetch_fund_insider_data(
@@ -828,54 +885,14 @@ async def fetch_fund_insider_data(
     try:
         rows = (
             await datalake.execute(
-                text(
-                    """
-                    WITH issuer_map AS (
-                        SELECT DISTINCT
-                            upper(m.cusip) AS cusip,
-                            m.issuer_cik::text AS cik
-                        FROM sec_cusip_ticker_map m
-                        WHERE upper(m.cusip) = ANY(:cusips)
-                          AND m.issuer_cik IS NOT NULL
-                    ),
-                    quarterly AS (
-                        SELECT
-                            s.quarter,
-                            SUM(s.buy_value) AS buy_value,
-                            SUM(s.sell_value) AS sell_value,
-                            SUM(s.net_value) AS net_value,
-                            SUM(s.buy_count) AS buy_count,
-                            SUM(s.sell_count) AS sell_count
-                        FROM sec_insider_sentiment s
-                        JOIN issuer_map im ON im.cik = s.cik
-                        GROUP BY s.quarter
-                    )
-                    SELECT
-                        q.quarter,
-                        q.buy_value,
-                        q.sell_value,
-                        q.net_value,
-                        q.buy_count,
-                        q.sell_count,
-                        array_agg(DISTINCT im.cik) AS issuer_ciks,
-                        array_agg(DISTINCT im.cusip) AS matched_cusips
-                    FROM quarterly q
-                    JOIN sec_insider_sentiment s ON s.quarter = q.quarter
-                    JOIN issuer_map im ON im.cik = s.cik
-                    GROUP BY
-                        q.quarter, q.buy_value, q.sell_value, q.net_value,
-                        q.buy_count, q.sell_count
-                    ORDER BY q.quarter DESC
-                    LIMIT 8
-                    """
-                ),
+                text(_INSIDER_SENTIMENT_SQL),
                 {"cusips": cusips},
             )
         ).mappings().all()
     except SQLAlchemyError as exc:
         if _is_missing_relation(exc):
-            return _insider_empty("SEC insider sentiment tables are not deployed yet.")
-        raise _source_error("sec_insider_sentiment", exc) from exc
+            return _insider_empty("SEC insider transactions table is not deployed yet.")
+        raise _source_error("sec_insider_transactions", exc) from exc
 
     if not rows:
         return _insider_empty("No Form 4 insider sentiment matched this fund's holdings.")
@@ -1156,6 +1173,73 @@ def _institutional_payload(
     )
 
 
+# --- SEC 13F Tier C queries -------------------------------------------------
+# The deployed `sec_13f_holdings` (replicated from the monolith) stores
+# cik / report_date / cusip / issuer_name / market_value / shares — it has NO
+# manager_name / period / name / value_usd columns. Manager identity comes from
+# `sec_managers.firm_name` (cik is not unique there, so pick the highest-AUM row
+# via LATERAL). Output aliases keep the payload-builder row keys stable.
+_INSTITUTIONAL_REVEAL_SQL = """
+                    WITH matched AS (
+                        SELECT
+                            h.cik,
+                            COALESCE(mgr.firm_name, 'CIK ' || h.cik) AS manager_name,
+                            h.report_date AS period,
+                            h.report_date,
+                            upper(h.cusip) AS cusip,
+                            h.issuer_name AS name,
+                            h.market_value AS value_usd,
+                            h.shares
+                        FROM sec_13f_holdings h
+                        LEFT JOIN LATERAL (
+                            SELECT m.firm_name
+                            FROM sec_managers m
+                            WHERE m.cik = h.cik AND m.firm_name IS NOT NULL
+                            ORDER BY m.aum_total DESC NULLS LAST
+                            LIMIT 1
+                        ) mgr ON true
+                        WHERE upper(h.cusip) = ANY(:cusips)
+                    ),
+                    latest AS (
+                        SELECT max(period) AS period FROM matched
+                    )
+                    SELECT matched.*
+                    FROM matched
+                    JOIN latest ON latest.period = matched.period
+                    ORDER BY value_usd DESC NULLS LAST
+                    LIMIT :limit
+                    """
+
+_REVERSE_LOOKUP_SQL = """
+                    WITH latest AS (
+                        SELECT max(report_date) AS period
+                        FROM sec_13f_holdings
+                        WHERE upper(cusip) = :cusip
+                    )
+                    SELECT
+                        h.cik,
+                        COALESCE(mgr.firm_name, 'CIK ' || h.cik) AS manager_name,
+                        h.report_date AS period,
+                        h.report_date,
+                        upper(h.cusip) AS cusip,
+                        h.issuer_name AS name,
+                        h.market_value AS value_usd,
+                        h.shares
+                    FROM sec_13f_holdings h
+                    LEFT JOIN LATERAL (
+                        SELECT m.firm_name
+                        FROM sec_managers m
+                        WHERE m.cik = h.cik AND m.firm_name IS NOT NULL
+                        ORDER BY m.aum_total DESC NULLS LAST
+                        LIMIT 1
+                    ) mgr ON true
+                    WHERE upper(h.cusip) = :cusip
+                      AND h.report_date = (SELECT period FROM latest)
+                    ORDER BY value_usd DESC NULLS LAST
+                    LIMIT 100
+                    """
+
+
 async def fetch_fund_institutional_reveal(
     session: AsyncSession,
     datalake: AsyncSession,
@@ -1177,25 +1261,7 @@ async def fetch_fund_institutional_reveal(
     try:
         rows = (
             await datalake.execute(
-                text(
-                    """
-                    WITH matched AS (
-                        SELECT
-                            cik, manager_name, period, report_date, upper(cusip) AS cusip,
-                            name, value_usd, shares
-                        FROM sec_13f_holdings
-                        WHERE upper(cusip) = ANY(:cusips)
-                    ),
-                    latest AS (
-                        SELECT max(period) AS period FROM matched
-                    )
-                    SELECT matched.*
-                    FROM matched
-                    JOIN latest ON latest.period = matched.period
-                    ORDER BY value_usd DESC NULLS LAST
-                    LIMIT :limit
-                    """
-                ),
+                text(_INSTITUTIONAL_REVEAL_SQL),
                 {"cusips": cusips, "limit": _TIER_C_13F_ROW_LIMIT},
             )
         ).mappings().all()
@@ -1278,23 +1344,7 @@ async def fetch_holding_reverse_lookup(
     try:
         rows = (
             await datalake.execute(
-                text(
-                    """
-                    WITH latest AS (
-                        SELECT max(period) AS period
-                        FROM sec_13f_holdings
-                        WHERE upper(cusip) = :cusip
-                    )
-                    SELECT
-                        cik, manager_name, period, report_date, upper(cusip) AS cusip,
-                        name, value_usd, shares
-                    FROM sec_13f_holdings
-                    WHERE upper(cusip) = :cusip
-                      AND period = (SELECT period FROM latest)
-                    ORDER BY value_usd DESC NULLS LAST
-                    LIMIT 100
-                    """
-                ),
+                text(_REVERSE_LOOKUP_SQL),
                 {"cusip": normalized},
             )
         ).mappings().all()

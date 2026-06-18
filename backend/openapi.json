@@ -9193,7 +9193,7 @@
           "source": {
             "type": "string",
             "title": "Source",
-            "default": "sec_insider_sentiment"
+            "default": "sec_insider_transactions"
           },
           "as_of": {
             "anyOf": [
