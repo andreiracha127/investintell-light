@@ -395,7 +395,7 @@ Build a synthetic portfolio return series from the optimized weights (`portfolio
 
 ### Subtask 2a — schemas
 
-- [ ] **Write failing test** — create `backend/tests/test_monte_carlo_portfolio_schema.py`:
+- [x] **Write failing test** — create `backend/tests/test_monte_carlo_portfolio_schema.py`:
 
 ```python
 """Schema contract for POST /monte-carlo/portfolio."""
@@ -488,11 +488,11 @@ def test_response_round_trips_confidence_bars() -> None:
     assert dumped["params"]["n_assets"] == 2
 ```
 
-- [ ] **Run the test (expect FAIL)**:
+- [x] **Run the test (expect FAIL)**:
   - Command: `cd backend && uv run pytest -q tests/test_monte_carlo_portfolio_schema.py`
   - Expected: `ImportError: cannot import name 'PortfolioMonteCarloRequest' from 'app.schemas.monte_carlo'`.
 
-- [ ] **Implement** — edit `backend/app/schemas/monte_carlo.py`. Add the builder asset ref import to the top import block:
+- [x] **Implement** — edit `backend/app/schemas/monte_carlo.py`. Add the builder asset ref import to the top import block:
 
   Current:
 ```python
@@ -629,11 +629,11 @@ class PortfolioMonteCarloResponse(BaseModel):
     )
 ```
 
-- [ ] **Run the test (expect PASS)**:
+- [x] **Run the test (expect PASS)**:
   - Command: `cd backend && uv run pytest -q tests/test_monte_carlo_portfolio_schema.py`
   - Expected: all 6 tests pass.
 
-- [ ] **Commit**:
+- [x] **Commit**:
   - `cd backend && git add app/schemas/monte_carlo.py tests/test_monte_carlo_portfolio_schema.py && git commit -m "feat(monte-carlo): portfolio MC request/response schemas (n_assets, reuse ConfidenceBar)"`
 
 ### Subtask 2b — service: `assemble_portfolio_monte_carlo` + `run_portfolio_monte_carlo`
