@@ -638,7 +638,7 @@ class PortfolioMonteCarloResponse(BaseModel):
 
 ### Subtask 2b — service: `assemble_portfolio_monte_carlo` + `run_portfolio_monte_carlo`
 
-- [ ] **Write failing test** — append to `backend/tests/test_monte_carlo_service.py`:
+- [x] **Write failing test** — append to `backend/tests/test_monte_carlo_service.py`:
 
 ```python
 import datetime as dt
@@ -744,11 +744,11 @@ async def test_run_insufficient_common_history_maps_to_422(
         await run_portfolio_monte_carlo(None, payload)
 ```
 
-- [ ] **Run the test (expect FAIL)**:
+- [x] **Run the test (expect FAIL)**:
   - Command: `cd backend && uv run pytest -q tests/test_monte_carlo_service.py -k portfolio`
   - Expected: `ImportError: cannot import name 'assemble_portfolio_monte_carlo' from 'app.services.monte_carlo'`.
 
-- [ ] **Implement** — edit `backend/app/services/monte_carlo.py`.
+- [x] **Implement** — edit `backend/app/services/monte_carlo.py`.
 
   Extend the imports. Current top block includes:
 ```python
@@ -895,11 +895,11 @@ async def run_portfolio_monte_carlo(
 
 > Weights are NOT renormalized: the optimizer's weights already sum to 1 (long-only sum-1 contract). Holding them constant over the horizon is the documented rebalancing assumption. If a caller sends weights that do not sum to 1, the synthetic series simply reflects the under/over-investment they sent — fail-loud is reserved for missing data, not for the user's chosen weights.
 
-- [ ] **Run the test (expect PASS)**:
+- [x] **Run the test (expect PASS)**:
   - Command: `cd backend && uv run pytest -q tests/test_monte_carlo_service.py`
   - Expected: all tests pass (the new portfolio tests plus the pre-existing single-instrument ones).
 
-- [ ] **Commit**:
+- [x] **Commit**:
   - `cd backend && git add app/services/monte_carlo.py tests/test_monte_carlo_service.py && git commit -m "feat(monte-carlo): run_portfolio_monte_carlo builds frame@w and reuses the pure core"`
 
 ### Subtask 2c — route: `POST /monte-carlo/portfolio`
