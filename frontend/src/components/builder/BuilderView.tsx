@@ -478,6 +478,7 @@ export function BuilderView() {
             base={mode === "simulate" ? base : null}
             colors={colors}
             grouped={mode === "universe"}
+            cvarLimitPct={objective === "max_return_cvar" ? cvarLimitPct : null}
           />
         ) : (
           <p className="ix-pad ix-fs m-0 border border-border bg-surface-2 text-text-muted">

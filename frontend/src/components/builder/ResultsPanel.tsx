@@ -103,6 +103,7 @@ export function ResultsPanel({
   base,
   colors,
   grouped,
+  cvarLimitPct,
 }: {
   result: OptimizeResponse;
   objective: BuilderObjective;
@@ -110,8 +111,19 @@ export function ResultsPanel({
   base: BaseAllocation | null;
   colors: ChartColors | null;
   grouped: boolean;
+  cvarLimitPct: string | null;
 }) {
   const { weights, expected, diagnostics } = result;
+  const requestedCvar =
+    cvarLimitPct !== null && cvarLimitPct.trim() !== ""
+      ? Number(cvarLimitPct)
+      : null;
+  const effectiveCvar = diagnostics.cvar_limit_effective;
+  const showCvarTile =
+    objective === "max_return_cvar" &&
+    effectiveCvar != null &&
+    requestedCvar !== null &&
+    Number.isFinite(requestedCvar);
 
   // Grouped (broad/fund-universe) view: a 3-level Asset Class → Strategy → Fund
   // tree of non-zero weights with aggregated parent weights and dossier links.
@@ -320,6 +332,17 @@ export function ResultsPanel({
           value={formatPercent(expected.cvar_95_in_sample)}
           detail="worst 5% of daily scenarios"
         />
+        {showCvarTile && (
+          <KpiTile
+            label="CVaR ceiling"
+            value={`${formatPercent(requestedCvar / 100)} → ${formatPercent(effectiveCvar)}`}
+            detail={
+              diagnostics.regime_state
+                ? `regime ${diagnostics.regime_state.replace(/_/g, "-")}`
+                : "effective ceiling applied"
+            }
+          />
+        )}
         {expected.return_ann_bl !== null && (
           <KpiTile
             label="Return ann. (BL)"
