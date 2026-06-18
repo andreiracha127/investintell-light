@@ -199,7 +199,7 @@ class WalkForwardResult:
 
 ### Subtask 1b — schema + service: expose `oos_curve` / `fold_boundaries`
 
-- [ ] **Write failing test** — append to `backend/tests/test_backtest_schema.py`:
+- [x] **Write failing test** — append to `backend/tests/test_backtest_schema.py`:
 
 ```python
 import datetime as dt
@@ -229,11 +229,11 @@ def test_response_carries_oos_curve_and_fold_boundaries() -> None:
     assert dumped["fold_boundaries"] == [dt.date(2020, 1, 2)]
 ```
 
-- [ ] **Run the test (expect FAIL)**:
+- [x] **Run the test (expect FAIL)**:
   - Command: `cd backend && uv run pytest -q tests/test_backtest_schema.py -k oos_curve`
   - Expected: `ImportError: cannot import name 'SeriesPoint' from 'app.schemas.backtest'` (and the constructor would reject unknown kwargs).
 
-- [ ] **Implement** — edit `backend/app/schemas/backtest.py`.
+- [x] **Implement** — edit `backend/app/schemas/backtest.py`.
 
   Add the `SeriesPoint` import (re-exported so tests and the service can import it from here). The current import block is:
 
@@ -327,11 +327,11 @@ class WalkForwardResponse(BaseModel):
     )
 ```
 
-- [ ] **Run the test (expect PASS)**:
+- [x] **Run the test (expect PASS)**:
   - Command: `cd backend && uv run pytest -q tests/test_backtest_schema.py`
   - Expected: all schema tests pass (the new test plus the 4 pre-existing), e.g. `5 passed`.
 
-- [ ] **Commit**:
+- [x] **Commit**:
   - `cd backend && git add app/schemas/backtest.py app/services/backtest.py tests/test_backtest_schema.py && git commit -m "feat(backtest): expose oos_curve + fold_boundaries on WalkForwardResponse"`
 
 ### Subtask 1c — route: end-to-end curve in the HTTP response

@@ -144,4 +144,6 @@ async def run_walk_forward_backtest(
         std_sharpe=result.std_sharpe,
         positive_folds=result.positive_folds,
         mean_turnover=result.mean_turnover,
+        oos_curve=list(result.oos_curve),
+        fold_boundaries=list(result.fold_boundaries),
     )

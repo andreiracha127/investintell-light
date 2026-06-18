@@ -7,11 +7,21 @@ constraints reuse the builder vocabulary so a backtest takes the exact request
 a user already built in POST /builder/optimize.
 """
 
+import datetime as dt
 from typing import Annotated
 
 from pydantic import BaseModel, Field
 
+from app.schemas.analysis import SeriesPoint
 from app.schemas.builder import AssetRefIn, ConstraintsIn, Objective
+
+__all__ = [
+    "SeriesPoint",
+    "WalkForwardRequest",
+    "FoldMetricsOut",
+    "WalkForwardParams",
+    "WalkForwardResponse",
+]
 
 # -- Request -------------------------------------------------------------------
 
@@ -76,3 +86,14 @@ class WalkForwardResponse(BaseModel):
     # Consistency, not significance: how many of n folds had a positive Sharpe.
     positive_folds: int
     mean_turnover: float
+    # Realized out-of-sample equity curve: [date, nav] points compounded across
+    # folds in time order (nav fraction, starts near 1.0). The fold boundaries
+    # are the per-fold first OOS dates (re-optimization / rebalancing points).
+    oos_curve: list[SeriesPoint] = Field(
+        default_factory=list,
+        description="Chained OOS NAV as [date, nav] points (decimal fraction NAV).",
+    )
+    fold_boundaries: list[dt.date] = Field(
+        default_factory=list,
+        description="First OOS date of each fold (plotLine markers).",
+    )
