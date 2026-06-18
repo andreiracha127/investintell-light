@@ -58,6 +58,11 @@ import { PortfolioRebalanceSection } from "@/components/portfolio/PortfolioRebal
 import { PortfolioPerformanceView } from "@/components/portfolio/PortfolioPerformanceView";
 import { usePortfolioNav } from "@/components/portfolio/usePortfolioNav";
 import { formatTimestampDate } from "@/lib/charts/hc/dateAxis";
+import {
+  buildAmountAdd,
+  resolveSpot,
+  type ExistingHolding,
+} from "@/lib/portfolio/addPosition";
 import type { Options } from "highcharts";
 
 /** Carbon text field: flat, square, bottom rule only; accent rule on focus. */
@@ -1185,7 +1190,12 @@ function PositionsTable({
       <AddPositionRowForm
         pending={addMutation.isPending}
         error={addMutation.error?.message ?? null}
-        spotFor={(t) => positions.find((p) => p.ticker === t)?.last_close ?? null}
+        existingFor={(t) => {
+          const p = positions.find((pos) => pos.ticker === t);
+          return p
+            ? { quantity: p.quantity, acqPrice: p.acq_price, lastClose: p.last_close }
+            : null;
+        }}
         onAdd={async (ticker, body) => {
           try {
             await addMutation.mutateAsync({ ticker, body });
@@ -1421,15 +1431,15 @@ function AddPositionRowForm({
   error,
   onAdd,
   onDirty,
-  spotFor,
+  existingFor,
 }: {
   pending: boolean;
   error: string | null;
   /** Resolves true on success — only then are the inputs cleared. */
   onAdd: (ticker: string, body: PositionBody) => Promise<boolean>;
   onDirty: () => void;
-  /** Latest close for an already-held ticker; used as the spot in Amount mode. */
-  spotFor: (ticker: string) => number | null;
+  /** Existing holding for a ticker (qty/cost/last close); spot + accumulation. */
+  existingFor: (ticker: string) => ExistingHolding | null;
 }) {
   const [mode, setMode] = useState<"shares" | "amount">("shares");
   const [ticker, setTicker] = useState("");
@@ -1446,11 +1456,15 @@ function AddPositionRowForm({
   const parsedCost = parseCost(cost);
   const parsedAmount = parseShares(amount); // finite > 0, else undefined
   const explicitPrice = typeof parsedCost === "number" ? parsedCost : null;
-  const existingSpot = t ? spotFor(t) : null;
-  const spot = explicitPrice ?? existingSpot;
+  const existing = t ? existingFor(t) : null;
+  const existingSpot = existing?.lastClose ?? null;
+  const spot = resolveSpot(explicitPrice, existing);
   const spotOk = spot != null && spot > 0;
-  const computedQty =
-    isAmount && parsedAmount !== undefined && spotOk ? parsedAmount / spot! : null;
+  // Amount mode accumulates onto an existing holding (qty summed, cost blended).
+  const amountAdd =
+    isAmount && parsedAmount !== undefined && spotOk
+      ? buildAmountAdd(parsedAmount, spot, existing)
+      : null;
 
   const canAdd = isAmount
     ? t.length > 0 &&
@@ -1476,9 +1490,10 @@ function AddPositionRowForm({
       setTouched(true);
       return;
     }
-    const body: PositionBody = isAmount
-      ? { quantity: computedQty!, acq_price: spot! }
-      : { quantity: parsedShares!, acq_price: parsedCost! };
+    const body: PositionBody =
+      isAmount && amountAdd
+        ? { quantity: amountAdd.quantity, acq_price: amountAdd.acqPrice }
+        : { quantity: parsedShares!, acq_price: parsedCost! };
     void onAdd(t, body).then((ok) => {
       if (ok) reset();
     });
@@ -1500,10 +1515,12 @@ function AddPositionRowForm({
     if (parsedAmount === undefined) computedStr = "Enter an amount in USD";
     else if (!spotOk)
       computedStr = "Enter a price — no spot is known for this symbol yet";
-    else
-      computedStr = `≈ ${formatNumber(computedQty!, 4)} shares at ${formatCurrency(spot!)}${
-        explicitPrice == null ? " (spot)" : ""
-      }`;
+    else if (amountAdd) {
+      const at = `${formatCurrency(spot!)}${explicitPrice == null ? " (spot)" : ""}`;
+      computedStr = existing
+        ? `+${formatNumber(amountAdd.addedQuantity, 4)} shares at ${at} · new total ${formatNumber(amountAdd.quantity, 4)}`
+        : `≈ ${formatNumber(amountAdd.addedQuantity, 4)} shares at ${at}`;
+    }
   }
 
   const modeBtn = (active: boolean) =>

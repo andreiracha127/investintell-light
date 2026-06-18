@@ -231,7 +231,7 @@ function AnalysisContent({
             )}
           </div>
         </div>
-        <AddToPortfolio ticker={header.ticker} variant="button" />
+        <AddToPortfolio ticker={header.ticker} price={shownLast} variant="button" />
       </div>
 
       {/* ── Interactive chart (Highcharts Stock + livefeed) ── */}

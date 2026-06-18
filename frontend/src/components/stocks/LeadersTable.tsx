@@ -242,7 +242,7 @@ export function LeadersTable({ overview }: { overview: MarketOverview }) {
                         {formatCurrency(r.low_52w)} – {formatCurrency(r.high_52w)}
                       </td>
                       <td className="px-2 py-1.5 text-right" onClick={(e) => e.stopPropagation()}>
-                        <AddToPortfolio ticker={r.ticker} />
+                        <AddToPortfolio ticker={r.ticker} price={last} />
                       </td>
                     </tr>
                   );
