@@ -132,7 +132,7 @@ export function FundUniverseCard({
   const keptCount = previewFunds.length === 0 ? 0 : selected.size;
 
   return (
-    <Card title="Fund universe" subtitle="filter &amp; rank — no manual tickers">
+    <Card title="Your universe" subtitle="filter & rank the funds — no manual tickers">
       <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
         <Select
           label="Fund type"

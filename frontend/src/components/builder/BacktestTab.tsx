@@ -6,7 +6,7 @@ import type { XAxisOptions } from "highcharts";
 
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { ErrorPanel } from "@/components/screener/shared";
-import { Card, KpiTile } from "@/components/ui/panels";
+import { KpiTile } from "@/components/ui/panels";
 import {
   postBacktestWalkForward,
   type BuilderObjective,
@@ -23,7 +23,7 @@ import {
 import { buildHcNavOption } from "@/lib/charts/hc/nav";
 import { formatNumber, formatPercent } from "@/lib/format";
 
-import { TabSkeleton, type UsedConstraints } from "./tabShared";
+import { ChartCard, TabSkeleton, type UsedConstraints } from "./tabShared";
 
 const BACKTESTABLE: ReadonlySet<BuilderObjective> = new Set<BuilderObjective>([
   "min_cvar",
@@ -91,9 +91,10 @@ export function BacktestTab({
 
   return (
     <div className="flex flex-col gap-px">
-      <p className="ix-fs m-0 border-l-[3px] border-border-strong bg-surface-2 px-2.5 py-1.5 text-text-secondary">
-        Validates the optimization process out-of-sample by re-optimizing each
-        fold; it is not a replay of these exact weights.
+      <p className="ix-fs m-0 border-l-[3px] border-border-strong bg-surface-2 px-3 py-2 leading-relaxed text-text-secondary">
+        This re-runs the same strategy on rolling slices of history it had not
+        seen yet (walk-forward) — a check that the approach holds up
+        out-of-sample, not a replay of these exact weights.
         {downgraded && (
           <>
             {" "}
@@ -161,20 +162,30 @@ function BacktestBody({
     <div className="flex flex-col gap-px">
       <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
         <KpiTile
-          label="Mean Sharpe"
+          label="Average Sharpe"
           value={formatNumber(data.mean_sharpe)}
+          tip="Mean risk-adjusted return across all test periods."
           tone="text-accent"
         />
-        <KpiTile label="Sharpe std" value={formatNumber(data.std_sharpe)} />
         <KpiTile
-          label="Positive folds"
+          label="Consistency"
+          value={`±${formatNumber(data.std_sharpe)}`}
+          tip="Standard deviation of Sharpe across periods — lower means steadier."
+        />
+        <KpiTile
+          label="Profitable periods"
           value={`${data.positive_folds} / ${data.params.n_splits_computed}`}
         />
-        <KpiTile label="Mean turnover" value={formatPercent(data.mean_turnover)} />
+        <KpiTile
+          label="Average turnover"
+          value={formatPercent(data.mean_turnover)}
+          tip="Share of the portfolio traded each re-optimization — a proxy for trading cost."
+        />
       </div>
 
-      <Card
-        title="Per-fold metrics"
+      <ChartCard
+        title="Return path by test period"
+        subtitle="one line per period"
         actions={
           <div className="flex items-stretch border border-border-strong">
             {(
@@ -217,12 +228,12 @@ function BacktestBody({
           <table className="w-full min-w-[640px] border-collapse ix-fs tabular-nums lining-nums">
             <thead>
               <tr className="bg-field">
-                <Th align="left">Fold</Th>
+                <Th align="left">Period</Th>
                 <Th align="right">Train</Th>
                 <Th align="right">Obs</Th>
                 <Th align="right">Sharpe</Th>
-                <Th align="right">CVaR 95</Th>
-                <Th align="right">Max DD</Th>
+                <Th align="right">Worst-case loss</Th>
+                <Th align="right">Max drawdown</Th>
                 <Th align="right">Turnover</Th>
                 <Th align="right">Net return</Th>
               </tr>
@@ -264,11 +275,11 @@ function BacktestBody({
             </tbody>
           </table>
         </div>
-      </Card>
+      </ChartCard>
 
-      <Card
-        title="Out-of-sample equity curve"
-        subtitle="chained net of costs; dashes mark re-optimization"
+      <ChartCard
+        title="Out-of-sample growth"
+        subtitle="net of costs; dashes mark each re-optimization"
       >
         {oosOption ? (
           <HighchartsChart
@@ -282,7 +293,7 @@ function BacktestBody({
             Preparing chart
           </p>
         )}
-      </Card>
+      </ChartCard>
     </div>
   );
 }

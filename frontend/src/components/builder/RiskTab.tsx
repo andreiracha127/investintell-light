@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef } from "react";
 
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { ErrorPanel } from "@/components/screener/shared";
-import { Card, KpiTile, valueTone } from "@/components/ui/panels";
+import { KpiTile, valueTone } from "@/components/ui/panels";
 import {
   postPortfolioAnalysis,
   type OptimizeResponse,
@@ -19,9 +19,10 @@ import { buildHcCumulativeOption } from "@/lib/charts/hc/cumulative";
 import { buildHcHeatmapOption } from "@/lib/charts/hc/heatmap";
 import { formatNumber, formatPercent } from "@/lib/format";
 
+import { METRIC_COPY } from "./BuilderCopy";
 import { buildActiveWeights } from "./activeWeights";
 import { assetKey, type UniverseAsset } from "./assets";
-import { TabSkeleton } from "./tabShared";
+import { ChartCard, TabSkeleton } from "./tabShared";
 
 function weightTicker(
   weight: WeightOut,
@@ -156,35 +157,56 @@ function RiskBody({
     <div className="flex flex-col gap-px">
       <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
         <KpiTile
-          label="Vol (ann.)"
+          label={METRIC_COPY.vol_ann.label}
           value={formatPercent(stats.annualized_volatility)}
+          tip={METRIC_COPY.vol_ann.tip}
           tone="text-accent"
         />
-        <KpiTile label="Sharpe" value={formatNumber(stats.sharpe_ratio)} />
-        <KpiTile label="Sortino" value={formatNumber(stats.sortino_ratio)} />
         <KpiTile
-          label="CVaR 95"
-          value={formatPercent(stats.cvar_95)}
-          detail="1-day, worst 5%"
+          label={METRIC_COPY.sharpe_ratio.label}
+          value={formatNumber(stats.sharpe_ratio)}
+          tip={METRIC_COPY.sharpe_ratio.tip}
         />
         <KpiTile
-          label="Max drawdown"
+          label={METRIC_COPY.sortino_ratio.label}
+          value={formatNumber(stats.sortino_ratio)}
+          tip={METRIC_COPY.sortino_ratio.tip}
+        />
+        <KpiTile
+          label={METRIC_COPY.cvar_95.label}
+          value={formatPercent(stats.cvar_95)}
+          detail="1-day, worst 5%"
+          tip={METRIC_COPY.cvar_95.tip}
+        />
+        <KpiTile
+          label={METRIC_COPY.max_drawdown.label}
           value={formatPercent(stats.max_drawdown.depth)}
+          tip={METRIC_COPY.max_drawdown.tip}
           tone="text-loss"
         />
         <KpiTile
-          label="Diversification"
+          label={METRIC_COPY.diversification_ratio.label}
           value={formatNumber(stats.diversification_ratio)}
+          tip={METRIC_COPY.diversification_ratio.tip}
         />
         <KpiTile
-          label="Information ratio"
+          label={METRIC_COPY.information_ratio.label}
           value={formatNumber(stats.information_ratio)}
+          tip={METRIC_COPY.information_ratio.tip}
           tone={valueTone(stats.information_ratio)}
         />
-        <KpiTile label="Beta (SPY)" value={formatNumber(stats.beta)} />
+        <KpiTile
+          label={METRIC_COPY.beta.label}
+          value={formatNumber(stats.beta)}
+          tip={METRIC_COPY.beta.tip}
+        />
       </div>
 
-      <Card title="Risk contribution by asset">
+      <ChartCard
+        title="Where the risk comes from"
+        subtitle="each holding's share of total portfolio risk"
+        tip="Each holding's share of total portfolio risk — not the same as its weight. A small, volatile holding can carry outsized risk."
+      >
         {contributionsOption ? (
           <HighchartsChart
             options={contributionsOption}
@@ -197,9 +219,12 @@ function RiskBody({
             Preparing chart
           </p>
         )}
-      </Card>
+      </ChartCard>
 
-      <Card title="Correlation matrix">
+      <ChartCard
+        title="How holdings move together"
+        tip="Correlation from −1 (move opposite) to +1 (move together). Lower correlations mean more diversification."
+      >
         {heatmapOption ? (
           <HighchartsChart
             options={heatmapOption}
@@ -212,9 +237,9 @@ function RiskBody({
             Preparing chart
           </p>
         )}
-      </Card>
+      </ChartCard>
 
-      <Card title="Cumulative return - portfolio vs SPY">
+      <ChartCard title="Growth of $100 — portfolio vs. S&P 500">
         {cumulativeOption ? (
           <HighchartsChart
             options={cumulativeOption}
@@ -227,7 +252,7 @@ function RiskBody({
             Preparing chart
           </p>
         )}
-      </Card>
+      </ChartCard>
     </div>
   );
 }

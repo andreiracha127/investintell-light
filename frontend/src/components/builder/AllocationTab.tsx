@@ -32,6 +32,7 @@ import {
   INPUT_CLASS,
 } from "@/components/screener/shared";
 
+import { METRIC_COPY } from "./BuilderCopy";
 import { assetKey, assetName, assetTicker, type UniverseAsset } from "./assets";
 import { SelectionDiagnostics } from "./SelectionDiagnostics";
 import { DataGrid } from "@/components/ui/DataGrid";
@@ -46,6 +47,8 @@ interface WeightRow {
   weight: number;
   kind: "fund" | "equity";
 }
+
+type WeightSortKey = "ticker" | "weight" | "current" | "delta";
 
 /** Weights below this are numeric solver noise — a quantity would round to 0. */
 const SAVE_WEIGHT_FLOOR = 1e-6;
@@ -277,6 +280,52 @@ export function AllocationTab({
   );
   const maxWeight = Math.max(...rows.map((r) => r.weight), 1e-9);
 
+  // Sortable proposed-weights table (Holding / Weight / Current / Change).
+  const [sortKey, setSortKey] = useState<WeightSortKey>("weight");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const onSort = (key: WeightSortKey) => {
+    if (key === sortKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir(key === "ticker" ? "asc" : "desc");
+    }
+  };
+  const sortedRows = useMemo(() => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    const decorated = rows.map((r) => {
+      const current = base?.weights.get(r.key) ?? 0;
+      return { row: r, current, delta: r.weight - current };
+    });
+    decorated.sort((a, b) => {
+      if (sortKey === "ticker") {
+        return a.row.ticker < b.row.ticker
+          ? -1 * dir
+          : a.row.ticker > b.row.ticker
+            ? 1 * dir
+            : 0;
+      }
+      const av =
+        sortKey === "current"
+          ? a.current
+          : sortKey === "delta"
+            ? a.delta
+            : a.row.weight;
+      const bv =
+        sortKey === "current"
+          ? b.current
+          : sortKey === "delta"
+            ? b.delta
+            : b.row.weight;
+      return (av - bv) * dir;
+    });
+    return decorated;
+  }, [rows, base, sortKey, sortDir]);
+  const totalWeight = rows.reduce((sum, r) => sum + r.weight, 0);
+  const totalCurrent = base
+    ? [...base.weights.values()].reduce((sum, w) => sum + w, 0)
+    : 0;
+
   const proposedDonut = useMemo(
     () =>
       colors
@@ -323,43 +372,58 @@ export function AllocationTab({
   return (
     <div className="flex flex-col gap-px">
       {/* ── KPI tiles ───────────────────────────────────────────────────── */}
-      <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
+      <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(155px,1fr))]">
+        {expected.return_ann_bl !== null && (
+          <KpiTile
+            label={METRIC_COPY.return_ann_bl.label}
+            value={formatPercent(expected.return_ann_bl, 2, { signed: true })}
+            detail={METRIC_COPY.return_ann_bl.detail}
+            tip={METRIC_COPY.return_ann_bl.tip}
+            tone={valueTone(expected.return_ann_bl)}
+          />
+        )}
         <KpiTile
-          label="Vol (ann.)"
+          label={METRIC_COPY.vol_ann.label}
           value={formatPercent(expected.vol_ann)}
+          detail={METRIC_COPY.vol_ann.detail}
+          tip={METRIC_COPY.vol_ann.tip}
           tone="text-accent"
         />
         <KpiTile
-          label="CVaR 95 in-sample"
+          label={METRIC_COPY.cvar_95.label}
           value={formatPercent(expected.cvar_95_in_sample)}
-          detail="worst 5% of daily scenarios"
+          detail={METRIC_COPY.cvar_95.detail}
+          tip={METRIC_COPY.cvar_95.tip}
         />
         {showCvarTile && (
           <KpiTile
-            label="CVaR ceiling"
+            label={METRIC_COPY.cvar_limit.label}
             value={`${formatPercent(requestedCvar / 100)} → ${formatPercent(effectiveCvar)}`}
             detail={
               diagnostics.regime_state
                 ? `regime ${diagnostics.regime_state.replace(/_/g, "-")}`
-                : "effective ceiling applied"
+                : METRIC_COPY.cvar_limit.detail
             }
+            tip={METRIC_COPY.cvar_limit.tip}
           />
         )}
-        {expected.return_ann_bl !== null && (
-          <KpiTile
-            label="Return ann. (BL)"
-            value={formatPercent(expected.return_ann_bl, 2, { signed: true })}
-            tone={valueTone(expected.return_ann_bl)}
-          />
-        )}
-        <KpiTile label="N obs" value={formatNumber(diagnostics.n_obs, 0)} />
-        <KpiTile label="Status" value={diagnostics.status} />
+        <KpiTile
+          label={METRIC_COPY.n_obs.label}
+          value={formatNumber(diagnostics.n_obs, 0)}
+          detail={METRIC_COPY.n_obs.detail}
+        />
+        <KpiTile
+          label={METRIC_COPY.status.label}
+          value={diagnostics.status}
+          detail={METRIC_COPY.status.detail}
+          tone={diagnostics.status === "optimal" ? "text-gain" : "text-text-primary"}
+        />
       </div>
 
       {/* ── Weights table ───────────────────────────────────────────────── */}
       <Card
         title="Proposed weights"
-        subtitle={base ? `vs ${base.name}` : undefined}
+        subtitle={base ? `vs. ${base.name}` : undefined}
         actions={
           <span className="flex items-center gap-2">
             <button
@@ -597,71 +661,119 @@ export function AllocationTab({
         <div className="overflow-x-auto">
           <table className="w-full min-w-[560px] border-collapse ix-fs tabular-nums lining-nums">
             <thead>
-              <tr className="bg-field">
-                <Th align="left">Asset</Th>
-                <Th align="right">Weight</Th>
+              <tr className="bg-zebra">
+                <SortableTh
+                  label="Holding"
+                  align="left"
+                  sortKey="ticker"
+                  active={sortKey}
+                  dir={sortDir}
+                  onSort={onSort}
+                />
+                <SortableTh
+                  label="Weight"
+                  align="right"
+                  sortKey="weight"
+                  active={sortKey}
+                  dir={sortDir}
+                  onSort={onSort}
+                />
                 <Th align="left">{/* bar */}</Th>
-                {base && <Th align="right">Current</Th>}
-                {base && <Th align="right">Δ</Th>}
+                {base && (
+                  <SortableTh
+                    label="Current"
+                    align="right"
+                    sortKey="current"
+                    active={sortKey}
+                    dir={sortDir}
+                    onSort={onSort}
+                  />
+                )}
+                {base && (
+                  <SortableTh
+                    label="Change"
+                    align="right"
+                    sortKey="delta"
+                    active={sortKey}
+                    dir={sortDir}
+                    onSort={onSort}
+                  />
+                )}
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, i) => {
-                const current = base?.weights.get(row.key) ?? 0;
-                const delta = row.weight - current;
-                return (
-                  <tr
-                    key={row.key}
-                    className={`border-b border-border ${i % 2 === 1 ? "bg-zebra" : ""}`}
-                  >
-                    <td className="ix-cell px-2.5 first:pl-[var(--ix-pad)]">
-                      <span className="font-bold text-accent">{row.ticker}</span>
-                      {row.name && (
-                        <span className="ml-2 inline-block max-w-[260px] truncate align-bottom text-text-secondary">
-                          {row.name}
-                        </span>
-                      )}
-                    </td>
-                    <td className="ix-cell px-2.5 text-right font-bold">
-                      {formatPercent(row.weight)}
-                    </td>
-                    <td className="ix-cell w-[180px] px-2.5">
-                      <span className="relative block h-[6px] w-full border border-border bg-field">
-                        <span
-                          className="absolute inset-y-0 left-0 bg-accent"
-                          style={{ width: `${(row.weight / maxWeight) * 100}%` }}
-                        />
+              {sortedRows.map(({ row, current, delta }, i) => (
+                <tr
+                  key={row.key}
+                  className={`border-b border-border ${i % 2 === 1 ? "bg-zebra" : ""}`}
+                >
+                  <td className="ix-cell px-2.5 first:pl-[var(--ix-pad)]">
+                    <span className="font-bold text-accent">{row.ticker}</span>
+                    {row.name && (
+                      <span className="ml-2 inline-block max-w-[260px] truncate align-bottom text-text-secondary">
+                        {row.name}
                       </span>
+                    )}
+                  </td>
+                  <td className="ix-cell px-2.5 text-right font-bold">
+                    {formatPercent(row.weight)}
+                  </td>
+                  <td className="ix-cell w-[180px] px-2.5">
+                    <span className="relative block h-[7px] w-full bg-layer-active">
+                      <span
+                        className="absolute inset-y-0 left-0 bg-accent"
+                        style={{ width: `${(row.weight / maxWeight) * 100}%` }}
+                      />
+                    </span>
+                  </td>
+                  {base && (
+                    <td className="ix-cell px-2.5 text-right text-text-secondary">
+                      {formatPercent(current)}
                     </td>
-                    {base && (
-                      <td className="ix-cell px-2.5 text-right text-text-secondary">
-                        {formatPercent(current)}
-                      </td>
-                    )}
-                    {base && (
-                      <td
-                        className={`ix-cell px-2.5 pr-[var(--ix-pad)] text-right font-bold ${valueTone(delta)}`}
-                      >
-                        {formatPercent(delta, 2, { signed: true })}
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
+                  )}
+                  {base && (
+                    <td
+                      className={`ix-cell px-2.5 pr-[var(--ix-pad)] text-right font-bold ${valueTone(delta)}`}
+                    >
+                      {formatPercent(delta, 2, { signed: true })}
+                    </td>
+                  )}
+                </tr>
+              ))}
             </tbody>
+            <tfoot>
+              <tr className="border-t border-border-strong bg-zebra">
+                <td className="px-2.5 py-2 font-bold text-text-secondary first:pl-[var(--ix-pad)]">
+                  Total
+                </td>
+                <td className="px-2.5 py-2 text-right font-bold">
+                  {formatPercent(totalWeight)}
+                </td>
+                <td />
+                {base && (
+                  <td className="px-2.5 py-2 text-right text-text-muted">
+                    {formatPercent(totalCurrent)}
+                  </td>
+                )}
+                {base && <td />}
+              </tr>
+            </tfoot>
           </table>
         </div>
         )}
       </Card>
 
-      {/* ── Donuts: Current vs Proposed ─────────────────────────────────── */}
+      {/* ── Donuts: before vs. after ────────────────────────────────────── */}
       {proposedDonut && (
-        <Card title={currentDonut ? "Allocation — current vs proposed" : "Allocation — proposed"}>
+        <Card title="Allocation — before vs. after">
           <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]">
             {currentDonut && (
-              <Donut title={`Current — ${base?.name ?? ""}`} options={currentDonut} />
+              <Donut
+                title={`Current — ${base?.name ?? ""}`}
+                options={currentDonut}
+              />
             )}
-            <Donut title="Proposed" options={proposedDonut} />
+            <Donut title="Proposed" options={proposedDonut} accent />
           </div>
         </Card>
       )}
@@ -699,19 +811,66 @@ function Th({ align, children }: { align: "left" | "right"; children?: React.Rea
   );
 }
 
+/** Header-click sortable column with aria-sort + arrow indicator. */
+function SortableTh({
+  label,
+  align,
+  sortKey,
+  active,
+  dir,
+  onSort,
+}: {
+  label: string;
+  align: "left" | "right";
+  sortKey: WeightSortKey;
+  active: WeightSortKey;
+  dir: "asc" | "desc";
+  onSort: (key: WeightSortKey) => void;
+}) {
+  const on = active === sortKey;
+  return (
+    <th
+      role="columnheader"
+      aria-sort={on ? (dir === "asc" ? "ascending" : "descending") : "none"}
+      className={`whitespace-nowrap border-b border-b-border-strong px-2.5 py-[9px] ${
+        align === "right" ? "text-right" : "text-left"
+      } text-[10px] font-bold uppercase tracking-[0.06em] text-text-muted first:pl-[var(--ix-pad)] last:pr-[var(--ix-pad)]`}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center gap-1 uppercase tracking-[0.06em] transition-colors hover:text-text-primary ${
+          align === "right" ? "flex-row-reverse" : ""
+        }`}
+      >
+        {label}
+        <span className="text-[9px] text-accent">
+          {on ? (dir === "asc" ? "▲" : "▼") : ""}
+        </span>
+      </button>
+    </th>
+  );
+}
+
 function Donut({
   title,
   options,
+  accent,
 }: {
   title: string;
   options: NonNullable<ReturnType<typeof buildHcAllocationOption>>;
+  accent?: boolean;
 }) {
   return (
-    <div className="bg-surface-2 px-2 py-2">
-      <div className="mb-1 text-center text-[10px] font-bold uppercase tracking-[0.08em] text-text-muted">
+    <div className="bg-surface-2 px-2.5 py-2.5">
+      <div
+        className={`mb-1 text-center text-[10px] font-bold uppercase tracking-[0.08em] ${
+          accent ? "text-accent" : "text-text-muted"
+        }`}
+      >
         {title}
       </div>
-      <HighchartsChart options={options} className="h-[240px] w-full" />
+      <HighchartsChart options={options} className="h-[250px] w-full" />
     </div>
   );
 }

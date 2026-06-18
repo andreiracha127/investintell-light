@@ -1,12 +1,17 @@
 "use client";
 
 /**
- * Portfolio Builder (F8.5) — optimize weights either over a hand-picked basket
- * ("Simulate": unified stock/fund search + saved-portfolio import) or over the
- * filtered+ranked fund universe ("Fund universe": no manual tickers). Set
- * constraints + objective, optionally express advanced views, and POST
- * /builder/optimize. The backend computes ALL finance; this view only collects
- * inputs and renders the response. 422s surface verbatim.
+ * Portfolio Builder (Claude Design) — optimize weights either over a
+ * hand-picked basket ("Test a basket": unified stock/fund search + saved-
+ * portfolio import) or over the filtered+ranked fund universe ("Search the
+ * fund universe": no manual tickers). Set the goal + guardrails, optionally
+ * express advanced views, and POST /builder/optimize. The backend computes ALL
+ * finance; this view only collects inputs and renders the response. 422s
+ * surface verbatim.
+ *
+ * Presentation upgrade only — same mutations, same /lib/api/client contracts,
+ * same assetKey / universeDraftToSpec / toApiView logic. Plain-language copy
+ * lives in BuilderCopy.tsx so the API enums stay code-keyed.
  */
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
@@ -21,12 +26,8 @@ import {
   type PortfolioOverview,
 } from "@/lib/api/client";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
-import { Card, PageTitle } from "@/components/ui/panels";
-import {
-  ErrorPanel,
-  FIELD_LABEL_CLASS,
-  INPUT_CLASS,
-} from "@/components/screener/shared";
+import { InfoDot } from "@/components/ui/panels";
+import { ErrorPanel } from "@/components/screener/shared";
 
 import {
   assetKey,
@@ -36,11 +37,11 @@ import {
   type UniverseAsset,
   type UniverseDraft,
   type Mandate,
-  OBJECTIVES,
   MANDATE_CVAR_PRESETS,
   objectivesForBroad,
   resolveObjectiveForBroad,
 } from "./assets";
+import { OBJECTIVE_COPY, FIELD_COPY, METHOD_ITEMS, METHOD_FOOTNOTE } from "./BuilderCopy";
 import { UniverseCard } from "./UniverseCard";
 import { FundUniverseCard } from "./FundUniverseCard";
 import { ViewsCard, toApiView, type ViewDraft } from "./ViewsCard";
@@ -48,23 +49,37 @@ import { ResultsPanel, type BaseAllocation } from "./ResultsPanel";
 
 type BuilderMode = "simulate" | "universe";
 
-const MODES: { value: BuilderMode; label: string; hint: string }[] = [
-  { value: "simulate", label: "Simulate", hint: "Pick stocks & funds to test" },
-  { value: "universe", label: "Fund universe", hint: "Optimize a filtered set" },
+const MODES: {
+  value: BuilderMode;
+  label: string;
+  hint: string;
+}[] = [
+  {
+    value: "simulate",
+    label: "Test a basket",
+    hint: "Pick stocks & funds",
+  },
+  {
+    value: "universe",
+    label: "Search the fund universe",
+    hint: "Optimize a filtered set",
+  },
 ];
 
 const MANDATES: { value: Mandate; label: string }[] = [
   { value: "conservative", label: "Conservative" },
   { value: "defensive", label: "Defensive" },
-  { value: "moderate_conservative", label: "Moderate conservative" },
+  { value: "moderate_conservative", label: "Moderately conservative" },
   { value: "moderate", label: "Moderate" },
   { value: "balanced", label: "Balanced" },
-  { value: "moderate_aggressive", label: "Moderate aggressive" },
+  { value: "moderate_aggressive", label: "Moderately aggressive" },
   { value: "aggressive", label: "Aggressive" },
   { value: "growth", label: "Growth" },
 ];
 
 const DEFAULT_MANDATE: Mandate = "moderate";
+
+const AS_OF = "Jun 18, 2026";
 
 /** Parse a non-empty numeric input; invalid/blank -> null. */
 function parseNum(text: string): number | null {
@@ -82,6 +97,17 @@ export function BuilderView() {
 
   /* ── Mode ──────────────────────────────────────────────────────────── */
   const [mode, setMode] = useState<BuilderMode>("simulate");
+
+  /* ── How it works panel ────────────────────────────────────────────── */
+  const [methodOpen, setMethodOpen] = useState(false);
+  useEffect(() => {
+    if (!methodOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMethodOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [methodOpen]);
 
   /* ── Simulate universe ─────────────────────────────────────────────── */
   const [assets, setAssets] = useState<UniverseAsset[]>([]);
@@ -264,7 +290,7 @@ export function BuilderView() {
     });
   };
 
-  const objectiveDef = OBJECTIVES.find((o) => o.value === objective);
+  const objectiveCopy = OBJECTIVE_COPY[objective];
   const broadUniverse = mode === "universe" && universeDraft.broadUniverse;
   const visibleObjectives = objectivesForBroad(broadUniverse);
   // Entering broad mode while a mu-based objective is selected silently resets
@@ -308,34 +334,73 @@ export function BuilderView() {
         : cvarLimitPct
       : null;
 
+  const runHint = !canRun
+    ? mode === "simulate" && assets.length < 2
+      ? "Add at least two holdings to optimize."
+      : "Resolve the highlighted inputs to optimize."
+    : objective === "bl_utility" && views.length === 0
+      ? "Tip: add a view in Advanced to tilt away from market weights."
+      : "Re-optimizes with your current goal and guardrails.";
+
   return (
     <div className="mx-auto max-w-[1400px] px-5 py-5">
-      <PageTitle
-        title="Portfolio Builder"
-        meta="CVXPY engine · Ledoit-Wolf Σ · Black-Litterman views"
-      />
+      {/* ── Workspace header ──────────────────────────────────────────── */}
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3.5">
+        <div>
+          <h1 className="ix-title m-0 text-[clamp(22px,3.5vw,28px)]">
+            Portfolio builder
+          </h1>
+          <div className="mb-1.5 mt-2 h-[3px] w-[34px] bg-accent" />
+          <div className="max-w-[560px] text-[12px] text-text-secondary">
+            Pick holdings, set your risk, and get suggested weights.
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setMethodOpen(true)}
+          className="inline-flex h-[32px] items-center gap-[7px] border border-border-strong bg-field px-3 text-[12px] text-text-secondary transition-colors hover:bg-layer-hover"
+        >
+          <InfoDot tip="How the optimizer works" />
+          How it works
+        </button>
+      </div>
 
-      <div className="flex flex-col gap-3">
-        {/* ── Mode toggle ─────────────────────────────────────────────── */}
-        <div className="flex items-stretch border border-border-strong w-fit">
+      {/* ── Mode toggle + estimation chip ─────────────────────────────── */}
+      <div className="mb-3.5 flex flex-wrap items-center gap-3.5">
+        <div
+          role="tablist"
+          aria-label="Builder mode"
+          className="flex border border-border-strong"
+        >
           {MODES.map((m) => (
             <button
               key={m.value}
               type="button"
+              role="tab"
+              aria-selected={mode === m.value}
               onClick={() => switchMode(m.value)}
-              aria-pressed={mode === m.value}
-              title={m.hint}
-              className={`flex h-[34px] flex-col justify-center px-4 text-[12.5px] transition-colors ${
+              className={`px-4 py-2 text-left leading-tight transition-colors ${
                 mode === m.value
-                  ? "bg-accent font-bold text-on-accent"
-                  : "bg-field font-medium text-text-secondary hover:bg-layer-hover"
+                  ? "bg-accent text-on-accent"
+                  : "bg-field text-text-secondary hover:bg-layer-hover"
               }`}
             >
-              {m.label}
+              <span className="block text-[12.5px] font-bold">{m.label}</span>
+              <span className="block text-[10.5px] font-normal opacity-85">
+                {m.hint}
+              </span>
             </button>
           ))}
         </div>
+        <span className="inline-flex items-center gap-1.5 border border-border bg-field px-2.5 py-1 text-[11px] text-text-muted">
+          <span title="Estimates use daily prices and fund NAV history through the date shown.">
+            Estimation data
+          </span>{" "}
+          · {AS_OF}
+        </span>
+      </div>
 
+      <div className="flex flex-col gap-3.5">
         {deepLinkQuery.isError && (
           <p
             role="alert"
@@ -346,6 +411,7 @@ export function BuilderView() {
           </p>
         )}
 
+        {/* ── ① Your basket / universe ──────────────────────────────── */}
         {mode === "simulate" ? (
           <UniverseCard
             assets={assets}
@@ -362,30 +428,37 @@ export function BuilderView() {
           />
         )}
 
-        <Card title="Constraints & objective">
-          <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
-            <label className="flex min-w-[210px] flex-col gap-1">
-              <span className={FIELD_LABEL_CLASS}>Objective</span>
+        {/* ── ② Goal & guardrails ───────────────────────────────────── */}
+        <NumberedSection step={2} title="Goal & guardrails">
+          <div className="flex flex-wrap items-start gap-x-[18px] gap-y-4">
+            <label className="flex w-[300px] max-w-full flex-col gap-1.5">
+              <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.07em] text-text-muted">
+                {FIELD_COPY.objective.label}
+                <InfoDot tip={objectiveCopy.tip} />
+              </span>
               <select
                 value={objective}
                 onChange={(e) => setObjective(e.target.value as BuilderObjective)}
                 aria-label="Optimization objective"
-                className={INPUT_CLASS}
+                className={SELECT_CLASS}
               >
                 {visibleObjectives.map((o) => (
                   <option key={o.value} value={o.value}>
-                    {o.label}
+                    {OBJECTIVE_COPY[o.value].label}
                   </option>
                 ))}
               </select>
             </label>
-            <label className="flex min-w-[180px] flex-col gap-1">
-              <span className={FIELD_LABEL_CLASS}>Risk mandate</span>
+            <label className="flex min-w-[200px] flex-col gap-1.5">
+              <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.07em] text-text-muted">
+                {FIELD_COPY.mandate.label}
+                <InfoDot tip={FIELD_COPY.mandate.tip} />
+              </span>
               <select
                 value={mandate}
                 onChange={(e) => onMandateChange(e.target.value as Mandate)}
                 aria-label="Risk mandate"
-                className={INPUT_CLASS}
+                className={SELECT_CLASS}
               >
                 {MANDATES.map((m) => (
                   <option key={m.value} value={m.value}>
@@ -394,52 +467,67 @@ export function BuilderView() {
                 ))}
               </select>
             </label>
-            {objective === "max_return_cvar" && (
-              <NumField
-                label="Teto CVaR diário %"
+          </div>
+
+          <p className="ix-fs mb-0 mt-3 max-w-[680px] leading-relaxed text-text-secondary">
+            {objectiveCopy.description}
+          </p>
+
+          {broadUniverse && (
+            <p className="ix-fs mb-0 mt-2 max-w-[680px] leading-relaxed text-text-muted">
+              Broad mode allocates on a pairwise covariance, so only
+              covariance-based goals are available — &ldquo;Smallest worst-case
+              loss&rdquo; (needs a common scenario window) and &ldquo;Follow my
+              views&rdquo; (return-based) are not.
+            </p>
+          )}
+
+          <div className="mt-4 flex flex-wrap items-start gap-x-[22px] gap-y-4 border-t border-border pt-4">
+            {objectiveCopy.usesLossLimit && (
+              <AffixField
+                label={FIELD_COPY.lossLimit.label}
+                tip={FIELD_COPY.lossLimit.tip}
+                affix={FIELD_COPY.lossLimit.affix}
                 value={cvarLimitPct}
                 onChange={setCvarLimitPct}
-                placeholder="2.0"
-                width="w-[160px]"
+                ariaLabel="Daily loss limit"
+                width="w-[172px]"
               />
             )}
-            <NumField
-              label="Cap per asset %"
+            <AffixField
+              label={FIELD_COPY.cap.label}
+              tip={FIELD_COPY.cap.tip}
+              affix={FIELD_COPY.cap.affix}
               value={capPct}
               onChange={setCapPct}
-              placeholder="25 (blank = uncapped)"
-              width="w-[150px]"
+              placeholder="25"
+              ariaLabel="Max per holding"
+              width="w-[172px]"
             />
-            <NumField
-              label="Min weight % (opt.)"
+            <AffixField
+              label={FIELD_COPY.minWeight.label}
+              optional
+              affix={FIELD_COPY.minWeight.affix}
               value={minWeightPct}
               onChange={setMinWeightPct}
               placeholder="—"
-              width="w-[140px]"
+              ariaLabel="Min per holding"
+              width="w-[172px]"
             />
-            <NumField
-              label="Window (days, opt.)"
+            <AffixField
+              label={FIELD_COPY.window.label}
+              tip={FIELD_COPY.window.tip}
+              affix={FIELD_COPY.window.affix}
               value={windowDays}
               onChange={setWindowDays}
-              placeholder="blank = full history"
-              width="w-[180px]"
+              placeholder="all history"
+              ariaLabel="History window"
+              width="w-[208px]"
             />
           </div>
-          {objectiveDef && (
-            <p className="ix-fs mb-0 mt-2.5 text-text-muted">
-              {objectiveDef.description}
-            </p>
-          )}
-          {broadUniverse && (
-            <p className="ix-fs mb-0 mt-2 text-text-muted">
-              Broad mode allocates on a pairwise covariance, so only
-              covariance-based objectives are available — Min CVaR (needs a
-              common scenario window) and BL max utility (return-based, gate G5)
-              are not.
-            </p>
-          )}
-        </Card>
+        </NumberedSection>
 
+        {/* ── ③ Advanced (your market views) ────────────────────────── */}
         <ViewsCard
           open={advancedOpen}
           onToggle={() => setAdvancedOpen((v) => !v)}
@@ -454,42 +542,39 @@ export function BuilderView() {
           onTau={setTauText}
         />
 
-        <div className="flex flex-wrap items-center gap-3">
+        {/* ── Run ───────────────────────────────────────────────────── */}
+        <div className="flex flex-wrap items-center gap-3.5">
           <button
             type="button"
             onClick={onRun}
             disabled={!canRun || mutation.isPending}
-            className={`h-[34px] bg-accent px-5 text-[12.5px] font-bold text-on-accent transition-colors hover:bg-accent-muted disabled:cursor-not-allowed disabled:opacity-40 ${
+            className={`h-[38px] border border-accent bg-accent px-[22px] text-[13px] font-bold text-on-accent transition-colors hover:bg-accent-muted disabled:cursor-not-allowed disabled:opacity-40 ${
               mutation.isPending ? "opacity-70" : ""
             }`}
           >
             {mutation.isPending ? "Optimizing…" : "Suggest weights"}
           </button>
-          {mode === "simulate" && assets.length < 2 && (
-            <span className="ix-fs text-text-muted">
-              Add at least 2 assets to optimize.
+          <span className="ix-fs text-text-muted">{runHint}</span>
+          {!cvarLimitOk && (
+            <span className="ix-fs text-loss">
+              &ldquo;Most return within a loss limit&rdquo; needs a daily loss
+              limit — set a positive value.
+            </span>
+          )}
+          {!blParamsOk && (
+            <span className="ix-fs text-loss">
+              &ldquo;Follow my views&rdquo; needs positive model parameters (δ,
+              τ) — check the Advanced section.
             </span>
           )}
           {mode === "simulate" && assets.length >= 2 && !viewsValid && (
-            <span className="ix-fs text-text-muted">
+            <span className="ix-fs text-loss">
               Complete or remove incomplete views to run.
             </span>
           )}
           {mode === "universe" && !universeOk && (
-            <span className="ix-fs text-text-muted">
+            <span className="ix-fs text-loss">
               Fewer than 2 funds match — relax the filters.
-            </span>
-          )}
-          {!blParamsOk && (
-            <span className="ix-fs text-text-muted">
-              BL max utility needs positive model parameters (δ, τ) — check the
-              Advanced section.
-            </span>
-          )}
-          {!cvarLimitOk && (
-            <span className="ix-fs text-text-muted">
-              Max retorno sob CVaR needs a daily CVaR ceiling — set a positive
-              “Teto CVaR diário %”.
             </span>
           )}
         </div>
@@ -520,40 +605,137 @@ export function BuilderView() {
         ) : (
           <p className="ix-pad ix-fs m-0 border border-border bg-surface-2 text-text-muted">
             {mode === "simulate"
-              ? "Search and add stocks or funds (or import a saved portfolio), pick an objective, optionally add advanced views, then press Suggest weights."
-              : "Filter and rank the fund universe, pick an objective, then press Suggest weights — the optimizer selects the funds for you."}
+              ? "Search and add stocks or funds (or import a saved portfolio), pick a goal, optionally add advanced views, then press Suggest weights."
+              : "Filter and rank the fund universe, pick a goal, then press Suggest weights — the optimizer selects the funds for you."}
           </p>
         )}
+      </div>
+
+      {/* ── How it works side panel ───────────────────────────────────── */}
+      {methodOpen && (
+        <MethodPanel onClose={() => setMethodOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+const SELECT_CLASS =
+  "h-[36px] border border-border-strong bg-field px-2.5 text-[13px] text-text-primary outline-none focus:border-accent";
+
+function NumberedSection({
+  step,
+  title,
+  children,
+}: {
+  step: number;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="border border-border bg-surface-2">
+      <div className="flex items-center gap-2.5 border-b border-border px-[var(--ix-pad)] py-3">
+        <h2 className="ix-label m-0 flex items-center gap-2">
+          <span className="inline-flex h-[18px] w-[18px] items-center justify-center bg-accent text-[10px] text-on-accent">
+            {step}
+          </span>
+          {title}
+        </h2>
+      </div>
+      <div className="ix-pad">{children}</div>
+    </section>
+  );
+}
+
+function AffixField({
+  label,
+  tip,
+  optional,
+  affix,
+  value,
+  onChange,
+  placeholder,
+  ariaLabel,
+  width,
+}: {
+  label: string;
+  tip?: string;
+  optional?: boolean;
+  affix: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  ariaLabel: string;
+  width: string;
+}) {
+  return (
+    <div className={`flex ${width} flex-col gap-1.5`}>
+      <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.07em] text-text-muted">
+        {label}
+        {optional && (
+          <span className="font-normal normal-case tracking-normal text-text-muted">
+            (optional)
+          </span>
+        )}
+        {tip && <InfoDot tip={tip} />}
+      </span>
+      <div className="flex h-[36px] items-center border border-border-strong bg-field focus-within:border-accent">
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          inputMode="decimal"
+          aria-label={ariaLabel}
+          className="h-full min-w-0 flex-1 border-0 bg-transparent pl-2.5 text-right text-[14px] tabular-nums text-text-primary outline-none placeholder:text-text-muted"
+        />
+        <span className="whitespace-nowrap px-2.5 text-[12px] text-text-muted">
+          {affix}
+        </span>
       </div>
     </div>
   );
 }
 
-function NumField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  width,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-  width: string;
-}) {
+function MethodPanel({ onClose }: { onClose: () => void }) {
   return (
-    <label className={`flex ${width} flex-col gap-1`}>
-      <span className={FIELD_LABEL_CLASS}>{label}</span>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        inputMode="decimal"
-        aria-label={label}
-        className={`${INPUT_CLASS} tabular-nums`}
+    <>
+      <div
+        onClick={onClose}
+        className="fixed inset-0 z-[70] bg-black/30"
+        aria-hidden="true"
       />
-    </label>
+      <aside
+        role="dialog"
+        aria-label="How it works"
+        className="fixed inset-y-0 right-0 z-[71] flex h-screen w-[380px] max-w-[92vw] flex-col overflow-auto border-l border-border-strong bg-surface-2 shadow-[-6px_0_24px_rgba(0,0,0,0.16)]"
+      >
+        <div className="sticky top-0 flex items-center justify-between gap-2.5 border-b border-border bg-surface-2 px-[var(--ix-pad)] py-4">
+          <h2 className="ix-title m-0 text-[16px]">How it works</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="border-0 bg-transparent text-[18px] text-text-muted hover:text-text-primary"
+          >
+            ×
+          </button>
+        </div>
+        <div className="ix-pad flex flex-col gap-4">
+          {METHOD_ITEMS.map((m) => (
+            <div key={m.title}>
+              <h3 className="m-0 mb-1 text-[12.5px] font-bold text-text-primary">
+                {m.title}
+              </h3>
+              <p className="m-0 text-[12px] leading-relaxed text-text-secondary">
+                {m.body}
+              </p>
+            </div>
+          ))}
+          <p className="m-0 border-t border-border pt-3 text-[10.5px] text-text-muted">
+            {METHOD_FOOTNOTE}
+          </p>
+        </div>
+      </aside>
+    </>
   );
 }
 
@@ -564,7 +746,7 @@ function ResultsSkeleton() {
       aria-label="Optimizing portfolio"
       className="flex animate-pulse flex-col gap-px"
     >
-      <div className="h-[84px] bg-surface-2" />
+      <div className="h-[88px] bg-surface-2" />
       <div className="h-[320px] bg-surface-2" />
     </div>
   );

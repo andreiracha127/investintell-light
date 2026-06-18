@@ -174,10 +174,10 @@ describe("BacktestTab", () => {
       risk_free_annual: 0,
     });
 
-    expect(await screen.findByText("Mean Sharpe")).toBeInTheDocument();
-    expect(screen.getByText("Sharpe std")).toBeInTheDocument();
+    expect(await screen.findByText("Average Sharpe")).toBeInTheDocument();
+    expect(screen.getByText("Consistency")).toBeInTheDocument();
     expect(screen.getByText("2 / 2")).toBeInTheDocument();
-    expect(screen.getByText("Mean turnover")).toBeInTheDocument();
+    expect(screen.getByText("Average turnover")).toBeInTheDocument();
     expect(screen.getAllByText("F1").length).toBeGreaterThan(0);
     expect(screen.getAllByText("F2").length).toBeGreaterThan(0);
     expect(screen.getAllByTestId("highcharts-chart")).toHaveLength(2);
@@ -236,7 +236,7 @@ describe("BacktestTab", () => {
       expect(mocked.postBacktestWalkForward).toHaveBeenCalledTimes(2),
     );
     expect(mocked.postBacktestWalkForward.mock.calls[1][0]).toEqual(firstBody);
-    expect(await screen.findByText("Mean Sharpe")).toBeInTheDocument();
+    expect(await screen.findByText("Average Sharpe")).toBeInTheDocument();
   });
 
   it("renders with empty OOS curve defaults when optional response fields are absent", async () => {
@@ -247,7 +247,7 @@ describe("BacktestTab", () => {
 
     renderTab({ objective: "min_vol" });
 
-    expect(await screen.findByText("Mean Sharpe")).toBeInTheDocument();
+    expect(await screen.findByText("Average Sharpe")).toBeInTheDocument();
     expect(screen.getAllByTestId("highcharts-chart")).toHaveLength(2);
   });
 });

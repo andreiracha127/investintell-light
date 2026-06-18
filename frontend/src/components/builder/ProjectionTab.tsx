@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef } from "react";
 
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { ErrorPanel } from "@/components/screener/shared";
-import { Card, KpiTile } from "@/components/ui/panels";
+import { KpiTile } from "@/components/ui/panels";
 import {
   postPortfolioMonteCarlo,
   type MonteCarloStatistic,
@@ -14,19 +14,47 @@ import {
   type PortfolioMonteCarloResponse,
 } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
-import { buildHcConeOption, type ConeUnit } from "@/lib/charts/hc/cone";
+import {
+  buildHcBuilderProjectionOption,
+  type ProjectionUnit,
+} from "@/lib/charts/hc/builder-projection";
 import { formatNumber, formatPercent } from "@/lib/format";
 
 import { buildActiveWeights } from "./activeWeights";
-import { TabSkeleton } from "./tabShared";
+import { ChartCard, TabSkeleton } from "./tabShared";
 
-const STATISTICS: Array<[MonteCarloStatistic, string]> = [
-  ["return", "Return"],
-  ["max_drawdown", "Max drawdown"],
-  ["sharpe", "Sharpe"],
+/** Plain-language label, axis title and chart heading per projected statistic. */
+const STATISTICS: Array<{
+  key: MonteCarloStatistic;
+  label: string;
+  axisTitle: string;
+  chartTitle: string;
+}> = [
+  {
+    key: "return",
+    label: "Return",
+    axisTitle: "Projected outcome",
+    chartTitle: "Projected return — range of outcomes",
+  },
+  {
+    key: "max_drawdown",
+    label: "Worst drop",
+    axisTitle: "Projected outcome",
+    chartTitle: "Projected worst drop — range of outcomes",
+  },
+  {
+    key: "sharpe",
+    label: "Sharpe",
+    axisTitle: "Projected Sharpe",
+    chartTitle: "Projected Sharpe — range of outcomes",
+  },
 ];
 
-function unitFor(statistic: MonteCarloStatistic): ConeUnit {
+function statMeta(statistic: MonteCarloStatistic) {
+  return STATISTICS.find((s) => s.key === statistic) ?? STATISTICS[0];
+}
+
+function unitFor(statistic: MonteCarloStatistic): ProjectionUnit {
   return statistic === "sharpe" ? "unitless" : "fraction";
 }
 
@@ -76,52 +104,53 @@ export function ProjectionTab({
 
   return (
     <div className="flex flex-col gap-px">
-      <Card
-        title="Forward projection"
-        subtitle="block-bootstrap, target weights held"
-        actions={
-          <div className="flex items-stretch border border-border-strong">
-            {STATISTICS.map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => run(key)}
-                aria-pressed={activeStatistic === key}
-                disabled={mutation.isPending || !activeWeights.isValid}
-                className={`h-[28px] px-3 text-[11px] font-bold uppercase tracking-[0.06em] transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                  activeStatistic === key
-                    ? "bg-accent text-on-accent"
-                    : "bg-field text-text-secondary hover:bg-layer-hover"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        }
-      >
-        {!activeWeights.isValid ? (
-          <ErrorPanel
-            title="Cannot run projection"
-            message="At least two active positions above the weight floor are required."
-            onRetry={() => undefined}
-          />
-        ) : mutation.isIdle || mutation.isPending ? (
-          <TabSkeleton label="Running Monte Carlo projection" />
-        ) : mutation.isError ? (
-          <ErrorPanel
-            title="Projection failed"
-            message={mutation.error.message}
-            onRetry={() => run(activeStatistic)}
-          />
-        ) : (
-          <ProjectionBody
-            data={mutation.data}
-            statistic={activeStatistic}
-            colors={colors}
-          />
-        )}
-      </Card>
+      {/* ── Intro + stat switch ─────────────────────────────────────────── */}
+      <div className="ix-pad flex flex-wrap items-center justify-between gap-3 border border-border bg-surface-2">
+        <p className="ix-fs m-0 max-w-[560px] leading-relaxed text-text-secondary">
+          A range of where the portfolio could land over time, simulated from
+          its own history. This is a spread of scenarios, not a promise.
+        </p>
+        <div className="flex items-stretch border border-border-strong">
+          {STATISTICS.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => run(key)}
+              aria-pressed={activeStatistic === key}
+              disabled={mutation.isPending || !activeWeights.isValid}
+              className={`h-[30px] px-3.5 text-[11px] font-bold uppercase tracking-[0.04em] transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                activeStatistic === key
+                  ? "bg-accent text-on-accent"
+                  : "bg-field text-text-secondary hover:bg-layer-hover"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {!activeWeights.isValid ? (
+        <ErrorPanel
+          title="Cannot run projection"
+          message="At least two active positions above the weight floor are required."
+          onRetry={() => undefined}
+        />
+      ) : mutation.isIdle || mutation.isPending ? (
+        <TabSkeleton label="Running Monte Carlo projection" />
+      ) : mutation.isError ? (
+        <ErrorPanel
+          title="Projection failed"
+          message={mutation.error.message}
+          onRetry={() => run(activeStatistic)}
+        />
+      ) : (
+        <ProjectionBody
+          data={mutation.data}
+          statistic={activeStatistic}
+          colors={colors}
+        />
+      )}
     </div>
   );
 }
@@ -136,8 +165,14 @@ function ProjectionBody({
   colors: ChartColors | null;
 }) {
   const unit = unitFor(statistic);
+  const meta = statMeta(statistic);
   const coneOption = colors
-    ? buildHcConeOption(data.confidence_bars, unit, colors)
+    ? buildHcBuilderProjectionOption(
+        data.confidence_bars,
+        unit,
+        colors,
+        meta.axisTitle,
+      )
     : null;
   const last = data.confidence_bars[data.confidence_bars.length - 1] ?? null;
   const formatValue = (value: number) =>
@@ -146,52 +181,56 @@ function ProjectionBody({
       : formatNumber(value, 2);
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-px">
       {data.degraded && (
         <p className="ix-fs m-0 border-l-[3px] border-loss bg-surface-2 px-2.5 py-1.5 text-loss">
           {data.degraded_reason ?? "Projection degraded."}
         </p>
       )}
 
-      <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
+      <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
         {last && (
           <>
             <KpiTile
-              label={`Median @ ${last.horizon}`}
+              label="Median outcome"
               value={formatValue(last.pct_50)}
+              detail={`${last.horizon} ahead`}
               tone="text-accent"
             />
             <KpiTile
-              label={`5th–95th @ ${last.horizon}`}
+              label="Likely range"
               value={`${formatValue(last.pct_5)} … ${formatValue(last.pct_95)}`}
+              detail="5th–95th percentile"
             />
           </>
         )}
         <KpiTile
-          label="Historical percentile rank"
+          label="History rank"
           value={
             data.historical_percentile_rank !== null
               ? `Percentile ${formatNumber(data.historical_percentile_rank, 0)}`
-              : "-"
+              : "—"
           }
-          detail="realized history vs bootstrap"
+          detail="realized vs. simulated"
         />
       </div>
 
-      {coneOption ? (
-        <HighchartsChart
-          options={coneOption}
-          className="h-[360px] w-full"
-          isEmpty={data.confidence_bars.length === 0}
-          emptyMessage="No projection horizons returned."
-        />
-      ) : (
-        <p className="py-8 text-center text-[13px] text-text-muted">
-          Preparing chart
-        </p>
-      )}
+      <ChartCard title={meta.chartTitle}>
+        {coneOption ? (
+          <HighchartsChart
+            options={coneOption}
+            className="h-[340px] w-full"
+            isEmpty={data.confidence_bars.length === 0}
+            emptyMessage="No projection horizons returned."
+          />
+        ) : (
+          <p className="py-8 text-center text-[13px] text-text-muted">
+            Preparing chart
+          </p>
+        )}
+      </ChartCard>
 
-      <p className="ix-fs m-0 text-text-muted">
+      <p className="ix-fs m-0 px-1 pt-1 text-text-muted">
         Block-bootstrap projection from the portfolio&apos;s common history with
         target weights held; this is a distribution of scenarios, not a
         guarantee.

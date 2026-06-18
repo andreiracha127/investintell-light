@@ -113,7 +113,7 @@ export function ViewsCard({
 
   const summary = showViews
     ? views.length === 0
-      ? "optional market views & model"
+      ? "optional — add your own return expectations"
       : `${views.length} view${views.length > 1 ? "s" : ""}`
     : "model parameters";
 
@@ -126,9 +126,9 @@ export function ViewsCard({
         className="ix-pad flex w-full items-center justify-between gap-2 text-left transition-colors hover:bg-layer-hover"
       >
         <h2 className="ix-label m-0">
-          Advanced
+          Advanced — your market views
           <span className="ml-2 font-normal normal-case tracking-normal text-text-secondary">
-            {summary}
+            · {summary}
           </span>
         </h2>
         <span aria-hidden className="text-[11px] text-text-muted">

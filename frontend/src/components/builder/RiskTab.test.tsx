@@ -191,7 +191,7 @@ describe("RiskTab", () => {
     });
 
     expect(await screen.findByText("Sharpe")).toBeInTheDocument();
-    expect(screen.getByText("Beta (SPY)")).toBeInTheDocument();
+    expect(screen.getByText("Market sensitivity")).toBeInTheDocument();
     expect(screen.getAllByTestId("highcharts-chart")).toHaveLength(3);
   });
 

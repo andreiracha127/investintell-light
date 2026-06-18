@@ -96,7 +96,7 @@ describe("BuilderView max_return_cvar controls", () => {
     renderView();
     const mandate = screen.getByLabelText("Risk mandate") as HTMLSelectElement;
     const ceiling = screen.getByLabelText(
-      "Teto CVaR diário %",
+      "Daily loss limit",
     ) as HTMLInputElement;
     expect(mandate.value).toBe("moderate");
     expect(ceiling.value).toBe("2");
@@ -127,8 +127,8 @@ describe("BuilderView max_return_cvar controls", () => {
     await user.click(screen.getByRole("button", { name: /suggest weights/i }));
 
     await waitFor(() => expect(resultsPanelMock).toHaveBeenCalled());
-    await user.clear(screen.getByLabelText("Cap per asset %"));
-    await user.type(screen.getByLabelText("Cap per asset %"), "40");
+    await user.clear(screen.getByLabelText("Max per holding"));
+    await user.type(screen.getByLabelText("Max per holding"), "40");
     await user.selectOptions(screen.getByLabelText("Risk mandate"), "aggressive");
 
     const latestProps = resultsPanelMock.mock.calls.at(-1)?.[0];
@@ -151,13 +151,13 @@ describe("BuilderView max_return_cvar controls", () => {
     const user = userEvent.setup();
     renderView();
     await user.click(screen.getByRole("button", { name: "seed-two" }));
-    await user.clear(screen.getByLabelText("Cap per asset %"));
+    await user.clear(screen.getByLabelText("Max per holding"));
     await user.click(screen.getByRole("button", { name: /suggest weights/i }));
 
     await waitFor(() => expect(resultsPanelMock).toHaveBeenCalled());
-    await user.type(screen.getByLabelText("Cap per asset %"), "40");
-    await user.type(screen.getByLabelText("Min weight % (opt.)"), "5");
-    await user.type(screen.getByLabelText("Window (days, opt.)"), "252");
+    await user.type(screen.getByLabelText("Max per holding"), "40");
+    await user.type(screen.getByLabelText("Min per holding"), "5");
+    await user.type(screen.getByLabelText("History window"), "252");
 
     const latestProps = resultsPanelMock.mock.calls.at(-1)?.[0];
     expect(latestProps).toBeDefined();
@@ -173,11 +173,11 @@ describe("BuilderView max_return_cvar controls", () => {
     const user = userEvent.setup();
     renderView();
     await user.click(screen.getByRole("button", { name: "seed-two" }));
-    await user.clear(screen.getByLabelText("Teto CVaR diário %"));
+    await user.clear(screen.getByLabelText("Daily loss limit"));
     const run = screen.getByRole("button", { name: /suggest weights/i });
     expect(run).toBeDisabled();
     expect(
-      screen.getByText(/Max retorno sob CVaR needs a daily CVaR ceiling/i),
+      screen.getByText(/needs a daily loss limit/i),
     ).toBeInTheDocument();
   });
 });

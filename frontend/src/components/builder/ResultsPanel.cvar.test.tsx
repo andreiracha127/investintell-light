@@ -66,7 +66,7 @@ afterEach(cleanup);
 describe("ResultsPanel effective CVaR ceiling", () => {
   it("renders a tile with requested -> effective ceiling and the regime state", () => {
     renderPanel();
-    expect(screen.getByText(/CVaR ceiling/i)).toBeInTheDocument();
+    expect(screen.getByText("Loss limit")).toBeInTheDocument();
     expect(screen.getByText(/2\.00%.*1\.00%/)).toBeInTheDocument();
     expect(screen.getByText(/risk-off/i)).toBeInTheDocument();
   });

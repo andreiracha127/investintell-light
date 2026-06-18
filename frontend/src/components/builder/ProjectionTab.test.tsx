@@ -178,9 +178,9 @@ describe("ProjectionTab", () => {
       risk_free_rate: 0.04,
     });
 
-    expect(await screen.findByText("Median @ 10Y")).toBeInTheDocument();
-    expect(screen.getByText("5th–95th @ 10Y")).toBeInTheDocument();
-    expect(screen.getByText("Historical percentile rank")).toBeInTheDocument();
+    expect(await screen.findByText("Median outcome")).toBeInTheDocument();
+    expect(screen.getByText("Likely range")).toBeInTheDocument();
+    expect(screen.getByText("History rank")).toBeInTheDocument();
     expect(screen.getByText("Percentile 62")).toBeInTheDocument();
     expect(screen.getByTestId("highcharts-chart")).toBeInTheDocument();
   });
@@ -194,7 +194,7 @@ describe("ProjectionTab", () => {
       expect(mocked.postPortfolioMonteCarlo).toHaveBeenCalledTimes(1),
     );
 
-    await user.click(screen.getByRole("button", { name: "Max drawdown" }));
+    await user.click(screen.getByRole("button", { name: "Worst drop" }));
 
     await waitFor(() =>
       expect(mocked.postPortfolioMonteCarlo).toHaveBeenCalledTimes(2),
@@ -261,7 +261,7 @@ describe("ProjectionTab", () => {
       expect(mocked.postPortfolioMonteCarlo).toHaveBeenCalledTimes(2),
     );
     expect(sentBody(1).statistic).toBe("return");
-    expect(await screen.findByText("Median @ 10Y")).toBeInTheDocument();
+    expect(await screen.findByText("Median outcome")).toBeInTheDocument();
   });
 
   it("handles a Sharpe projection with null historical rank", async () => {
@@ -273,7 +273,7 @@ describe("ProjectionTab", () => {
     const user = userEvent.setup();
     renderTab();
 
-    await screen.findByText("Median @ 10Y");
+    await screen.findByText("Median outcome");
     await user.click(screen.getByRole("button", { name: "Sharpe" }));
 
     await waitFor(() =>
@@ -281,6 +281,6 @@ describe("ProjectionTab", () => {
     );
     expect(sentBody(1).statistic).toBe("sharpe");
     expect(await screen.findByText("1.00")).toBeInTheDocument();
-    expect(screen.getByText("-")).toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
   });
 });

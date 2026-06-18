@@ -11,6 +11,7 @@ import type { BuilderObjective, OptimizeResponse } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
 
 import type { UniverseAsset } from "./assets";
+import { OBJECTIVE_COPY } from "./BuilderCopy";
 import { AllocationTab } from "./AllocationTab";
 import { BacktestTab } from "./BacktestTab";
 import { ProjectionTab } from "./ProjectionTab";
@@ -107,11 +108,28 @@ export function ResultsPanel({
     });
   };
 
+  const metaParts = [
+    OBJECTIVE_COPY[objective].label,
+    `${result.weights.length} ${result.weights.length === 1 ? "holding" : "holdings"}`,
+    constraints.cap != null
+      ? `max ${(constraints.cap * 100).toFixed(0)}% each`
+      : "uncapped",
+  ];
+
   return (
-    <div className="flex flex-col gap-px">
-      <div className="border-b border-border-strong">
+    <div className="border border-border bg-surface-2">
+      {/* ── Results header: serif title + meta + result tabs ──────────── */}
+      <div className="border-b border-border px-[var(--ix-pad)] pt-3.5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="ix-title m-0 text-[17px]">Suggested portfolio</h2>
+            <div className="mt-0.5 text-[11.5px] text-text-muted">
+              {metaParts.join(" · ")}
+            </div>
+          </div>
+        </div>
         <div
-          className="flex flex-wrap gap-1"
+          className="mt-3.5 flex flex-wrap gap-0"
           role="tablist"
           aria-label="Builder result tabs"
         >
@@ -124,10 +142,10 @@ export function ResultsPanel({
               aria-selected={activeTab === tab.id}
               aria-controls={`builder-result-panel-${tab.id}`}
               onClick={() => selectTab(tab.id)}
-              className={`h-[34px] border border-b-0 px-3 text-[11px] font-bold uppercase tracking-[0.06em] transition-colors ${
+              className={`relative h-[38px] border border-b-0 border-border px-5 text-[12px] font-bold uppercase tracking-[0.04em] transition-colors ${
                 activeTab === tab.id
-                  ? "border-border-strong bg-surface-2 text-text-primary"
-                  : "border-transparent bg-transparent text-text-muted hover:bg-layer-hover hover:text-text-primary"
+                  ? "top-px bg-surface-2 text-accent shadow-[inset_0_2px_0_var(--color-accent)]"
+                  : "bg-zebra text-text-secondary hover:bg-layer-hover hover:text-text-primary"
               }`}
             >
               {tab.label}
@@ -136,6 +154,7 @@ export function ResultsPanel({
         </div>
       </div>
 
+      <div className="ix-pad">
       <TabPanel active={activeTab === "allocation"} id="allocation">
         <AllocationTab
           key={`allocation-${version}`}
@@ -180,6 +199,7 @@ export function ResultsPanel({
           />
         </TabPanel>
       )}
+      </div>
     </div>
   );
 }
