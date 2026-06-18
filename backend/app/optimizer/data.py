@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.eod_price import EodPrice
 from app.models.fund import Fund, FundNav, FundRiskLatest
+from app.models.universe import FundamentalsSnapshot
 from app.services import funds_catalog
 
 # None = use the FULL nav_timeseries history (the 2-year window gate is removed;
@@ -265,6 +266,43 @@ async def load_fund_aum(
     )
     found = {row[0]: (float(row[1]) if row[1] is not None else None) for row in result.all()}
     return {fund_id: found.get(fund_id) for fund_id in fund_ids}
+
+
+async def load_equity_market_cap(
+    session: AsyncSession, tickers: list[str]
+) -> dict[str, float | None]:
+    """Market cap per equity ticker = shares_outstanding * latest adj_close.
+
+    ``shares_outstanding`` comes from ``fundamentals_snapshot``; price comes
+    from the most recent ``eod_prices`` row. None means either input is missing
+    or non-positive. The caller decides whether that should fail loud.
+    """
+    if not tickers:
+        return {}
+    shares_result = await session.execute(
+        select(
+            FundamentalsSnapshot.ticker,
+            FundamentalsSnapshot.shares_outstanding,
+        ).where(FundamentalsSnapshot.ticker.in_(tickers))
+    )
+    shares = {row[0]: row[1] for row in shares_result.all()}
+    price_result = await session.execute(
+        select(EodPrice.ticker, EodPrice.adj_close)
+        .distinct(EodPrice.ticker)
+        .where(EodPrice.ticker.in_(tickers))
+        .order_by(EodPrice.ticker, EodPrice.date.desc())
+    )
+    prices = {row[0]: row[1] for row in price_result.all()}
+    out: dict[str, float | None] = {}
+    for ticker in tickers:
+        s = shares.get(ticker)
+        p = prices.get(ticker)
+        out[ticker] = (
+            float(s) * float(p)
+            if s is not None and s > 0 and p is not None and p > 0
+            else None
+        )
+    return out
 
 
 async def load_fund_asset_class(

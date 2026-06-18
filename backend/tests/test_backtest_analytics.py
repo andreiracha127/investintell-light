@@ -107,3 +107,49 @@ def test_too_few_observations_is_fail_loud() -> None:
         assemble_walk_forward_backtest(
             frame, _equal_weight_solver, n_splits=5, gap=2, test_size=63, min_train_size=252
         )
+
+
+def test_oos_curve_chains_folds_in_time_order() -> None:
+    # cost_bps=0 so the chained growth factor equals the product of per-fold
+    # (1 + net_return) exactly (no first-day cost perturbing the chain).
+    frame = _synthetic_returns(seed=11)
+    result = assemble_walk_forward_backtest(
+        frame,
+        _equal_weight_solver,
+        n_splits=5,
+        gap=2,
+        test_size=63,
+        min_train_size=252,
+        cost_bps=0.0,
+    )
+    # One point per OOS observation across all folds.
+    assert len(result.oos_curve) == sum(f.n_obs for f in result.folds)
+    # Dates strictly increasing in time.
+    dates = [d for d, _ in result.oos_curve]
+    assert all(earlier < later for earlier, later in zip(dates, dates[1:], strict=False))
+    # Final chained growth factor == product of per-fold (1 + net_return).
+    final_nav = result.oos_curve[-1][1]
+    expected = float(np.prod([1.0 + f.net_return for f in result.folds]))
+    assert final_nav == pytest.approx(expected, rel=1e-4)
+    # First curve date == start of the first test fold (the final 63*5 window's
+    # first test block start). It must equal the first OOS date the loop saw.
+    first_date = result.oos_curve[0][0]
+    assert first_date == dates[0]
+    # fold_boundaries: one per fold, each the first date of that fold's OOS block.
+    assert len(result.fold_boundaries) == len(result.folds)
+    assert result.fold_boundaries[0] == first_date
+    assert all(b in set(dates) for b in result.fold_boundaries)
+
+
+def test_oos_curve_values_are_finite_and_positive() -> None:
+    frame = _synthetic_returns(seed=12)
+    result = assemble_walk_forward_backtest(
+        frame,
+        _equal_weight_solver,
+        n_splits=5,
+        gap=2,
+        test_size=63,
+        min_train_size=252,
+    )
+    navs = [v for _, v in result.oos_curve]
+    assert all(np.isfinite(v) and v > 0 for v in navs)

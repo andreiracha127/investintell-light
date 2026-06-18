@@ -39,6 +39,8 @@ type ScreenResultsCsvOperation =
   paths["/screener/screens/{screen_id}/results.csv"]["get"];
 type FundsOperation = paths["/funds"]["get"];
 type BuilderOptimizeOperation = paths["/builder/optimize"]["post"];
+type BacktestWalkForwardOperation = paths["/backtest/walk-forward"]["post"];
+type PortfolioMonteCarloOperation = paths["/monte-carlo/portfolio"]["post"];
 type BuilderSaveOperation = paths["/builder/save"]["post"];
 type FundsCsvOperation = paths["/funds.csv"]["get"];
 type FundProfileOperation = paths["/funds/{instrument_id}"]["get"];
@@ -280,6 +282,17 @@ export type OptimizeRequest =
   BuilderOptimizeOperation["requestBody"]["content"]["application/json"];
 export type OptimizeResponse =
   BuilderOptimizeOperation["responses"]["200"]["content"]["application/json"];
+export type WalkForwardRequest =
+  BacktestWalkForwardOperation["requestBody"]["content"]["application/json"];
+export type WalkForwardResponse =
+  BacktestWalkForwardOperation["responses"]["200"]["content"]["application/json"];
+export type FoldMetrics = WalkForwardResponse["folds"][number];
+export type PortfolioMonteCarloRequest =
+  PortfolioMonteCarloOperation["requestBody"]["content"]["application/json"];
+export type PortfolioMonteCarloResponse =
+  PortfolioMonteCarloOperation["responses"]["200"]["content"]["application/json"];
+export type ConfidenceBar = PortfolioMonteCarloResponse["confidence_bars"][number];
+export type MonteCarloStatistic = PortfolioMonteCarloRequest["statistic"];
 /** Discriminated asset reference: a synced fund (uuid) or an equity ticker. */
 export type BuilderAssetRef = NonNullable<OptimizeRequest["assets"]>[number];
 /** Filter+rank spec to optimize over the fund universe (no explicit list). */
@@ -1117,6 +1130,26 @@ export function postBuilderOptimize(
   signal?: AbortSignal,
 ): Promise<OptimizeResponse> {
   return request<OptimizeResponse>("/builder/optimize", signal, {
+    method: "POST",
+    json: body,
+  });
+}
+
+export function postBacktestWalkForward(
+  body: WalkForwardRequest,
+  signal?: AbortSignal,
+): Promise<WalkForwardResponse> {
+  return request<WalkForwardResponse>("/backtest/walk-forward", signal, {
+    method: "POST",
+    json: body,
+  });
+}
+
+export function postPortfolioMonteCarlo(
+  body: PortfolioMonteCarloRequest,
+  signal?: AbortSignal,
+): Promise<PortfolioMonteCarloResponse> {
+  return request<PortfolioMonteCarloResponse>("/monte-carlo/portfolio", signal, {
     method: "POST",
     json: body,
   });

@@ -7,11 +7,21 @@ constraints reuse the builder vocabulary so a backtest takes the exact request
 a user already built in POST /builder/optimize.
 """
 
+import datetime as dt
 from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
+from app.schemas.analysis import SeriesPoint
 from app.schemas.builder import AssetRefIn, ConstraintsIn, Objective
+
+__all__ = [
+    "SeriesPoint",
+    "WalkForwardRequest",
+    "FoldMetricsOut",
+    "WalkForwardParams",
+    "WalkForwardResponse",
+]
 
 # -- Request -------------------------------------------------------------------
 
@@ -38,6 +48,20 @@ class WalkForwardRequest(BaseModel):
     min_train_size: Annotated[int, Field(ge=60, le=5000)] = 252
     cost_bps: Annotated[float, Field(ge=0, le=1000)] = 10.0
     risk_free_annual: Annotated[float, Field(ge=0, le=1)] = 0.0
+    # Daily tail-loss cap for the ``max_return_cvar`` (equilibrium) objective
+    # (decimal fraction, e.g. 0.02 = 2% daily CVaR_95). Required for that
+    # objective, ignored otherwise. Mirrors OptimizeRequest.cvar_limit.
+    cvar_limit: Annotated[float, Field(gt=0, le=1)] | None = None
+
+    @model_validator(mode="after")
+    def _check_cvar_limit(self) -> "WalkForwardRequest":
+        if self.objective == "max_return_cvar" and self.cvar_limit is None:
+            raise ValueError(
+                "max_return_cvar requires a cvar_limit (daily tail-loss cap) - "
+                "the walk-forward runs the equilibrium objective (pi = delta * Sigma * w_mkt) "
+                "with no views"
+            )
+        return self
 
 
 # -- Response ------------------------------------------------------------------
@@ -76,3 +100,14 @@ class WalkForwardResponse(BaseModel):
     # Consistency, not significance: how many of n folds had a positive Sharpe.
     positive_folds: int
     mean_turnover: float
+    # Realized out-of-sample equity curve: [date, nav] points compounded across
+    # folds in time order (nav fraction, starts near 1.0). The fold boundaries
+    # are the per-fold first OOS dates (re-optimization / rebalancing points).
+    oos_curve: list[SeriesPoint] = Field(
+        default_factory=list,
+        description="Chained OOS NAV as [date, nav] points (decimal fraction NAV).",
+    )
+    fold_boundaries: list[dt.date] = Field(
+        default_factory=list,
+        description="First OOS date of each fold (plotLine markers).",
+    )

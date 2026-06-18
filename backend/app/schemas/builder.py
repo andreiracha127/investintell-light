@@ -130,8 +130,7 @@ class ConstraintsIn(BaseModel):
 class UniverseSpecIn(BaseModel):
     """Filter + rank a slice of the FUND universe instead of listing assets.
 
-    The optimizer then runs over the resolved candidates (funds only, v1 —
-    same rule as views: equities have no AUM/market cap in the builder yet).
+    The optimizer then runs over the resolved candidates (funds only, v1).
     Candidates are restricted to funds that EACH have enough NAV history; the
     cross-asset overlap requirement is still enforced on the resolved set. All
     filter fields share the GET /funds vocabulary; ``rank_by``/``rank_dir``
@@ -192,8 +191,8 @@ class OptimizeRequest(BaseModel):
     # None = use the FULL nav_timeseries history (the 2-year window gate is
     # removed). An explicit int (30..3650 days) opts into a narrower window.
     window_days: Annotated[int | None, Field(ge=30, le=3650)] = None
-    # Views require every asset in the universe to have a known AUM (v1:
-    # funds only — equities have no market cap in the builder yet).
+    # Views/BL objectives require every explicit asset to have a known market
+    # size (AUM for funds, market cap for equities).
     views: list[ViewIn] | None = None
     bl: BLParamsIn = BLParamsIn()
     # Optional investor mandate; resolves the BL risk-aversion (delta) ladder.
@@ -236,18 +235,13 @@ class OptimizeRequest(BaseModel):
             if self.universe is not None and self.universe.broad_universe:
                 raise ValueError(
                     "max_return_cvar cannot run in broad_universe mode — it needs "
-                    "expected returns (Black-Litterman views on an explicit 'assets' "
-                    "list); broad_universe is risk-structure-only (gate G5)"
+                    "Black-Litterman market weights on an explicit 'assets' list; "
+                    "broad_universe is risk-structure-only (gate G5)"
                 )
             if self.universe is not None:
                 raise ValueError(
-                    "max_return_cvar needs expected returns and so requires views on an "
+                    "max_return_cvar needs Black-Litterman market weights on an "
                     "explicit 'assets' list — it cannot run over a 'universe'"
-                )
-            if not self.views:
-                raise ValueError(
-                    "max_return_cvar needs expected returns — supply Black-Litterman "
-                    "'views' (gate G5: no sample mean is ever used as the objective)"
                 )
         if (
             self.objective == "bl_utility"
@@ -325,6 +319,9 @@ class DiagnosticsOut(BaseModel):
     view_consistency: ViewConsistencyOut | None = None
     # Present only on the broad-universe path.
     selection: SelectionDiagnosticsOut | None = None
+    # Present only on the max_return_cvar path.
+    cvar_limit_effective: float | None = None
+    regime_state: str | None = None
 
 
 class OptimizeResponse(BaseModel):

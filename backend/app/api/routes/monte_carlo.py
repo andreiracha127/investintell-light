@@ -19,8 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
-from app.schemas.monte_carlo import MonteCarloRequest, MonteCarloResponse
-from app.services.monte_carlo import run_monte_carlo
+from app.schemas.monte_carlo import (
+    MonteCarloRequest,
+    MonteCarloResponse,
+    PortfolioMonteCarloRequest,
+    PortfolioMonteCarloResponse,
+)
+from app.services.monte_carlo import run_monte_carlo, run_portfolio_monte_carlo
 from app.services.stock_analysis import InsufficientDataError, StockAnalysisError
 from app.tiingo.client import TiingoClient
 
@@ -58,4 +63,28 @@ async def project_monte_carlo(
             raise HTTPException(status_code=404, detail=message) from exc
         raise HTTPException(status_code=422, detail=message) from exc
     except StockAnalysisError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/portfolio", response_model=PortfolioMonteCarloResponse)
+async def project_portfolio_monte_carlo(
+    payload: PortfolioMonteCarloRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PortfolioMonteCarloResponse:
+    """Block-bootstrap Monte Carlo over a synthetic portfolio NAV.
+
+    Builds the portfolio return series from the positions' common-history
+    aligned returns (target weights held = implicit rebalancing) and runs the
+    same block-bootstrap core as the single-instrument projection. Drawdown/
+    return fields are decimal fractions (0.05 = 5%); sharpe is unitless.
+
+    Error mapping (fail loud):
+    - request shape / weight bounds / position count -> 422 (Pydantic)
+    - unknown asset / no history in window           -> 422
+    - insufficient common observations               -> 422
+    - history too short for the requested horizon    -> 422
+    """
+    try:
+        return await run_portfolio_monte_carlo(session, payload)
+    except InsufficientDataError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

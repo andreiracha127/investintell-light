@@ -14,11 +14,14 @@ Error contract: every domain failure (bad/short history, solver non-optimal,
 zero-variance fold) raises ``BacktestError`` -> 422 with the message verbatim.
 """
 
+from typing import cast
+
 import numpy as np
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.backtest import SolveFn, assemble_walk_forward_backtest
+from app.optimizer import black_litterman as bl
 from app.optimizer import data as optimizer_data
 from app.optimizer import engine
 from app.schemas.backtest import (
@@ -28,7 +31,7 @@ from app.schemas.backtest import (
     WalkForwardResponse,
 )
 from app.schemas.builder import Objective
-from app.services.portfolio_builder import _to_data_ref
+from app.services.portfolio_builder import _market_weights_for, _to_data_ref
 
 
 class BacktestError(ValueError):
@@ -36,30 +39,62 @@ class BacktestError(ValueError):
 
 
 def _solve_fn_for(
-    objective: Objective, cap: float | None, min_weight: float | None
+    objective: Objective,
+    cap: float | None,
+    min_weight: float | None,
+    *,
+    w_mkt: np.ndarray | None = None,
+    cvar_limit: float | None = None,
+    delta: float = bl.DEFAULT_DELTA,
 ) -> SolveFn:
-    """Build the per-fold solver closure for a mu-free objective.
+    """Build the per-fold solver closure for a backtestable objective.
 
     Wraps ``app.optimizer.engine`` so each call re-optimizes on the fold's TRAIN
     matrix. ``min_cvar`` solves on the raw scenarios (Rockafellar-Uryasev); the
-    covariance objectives shrink Sigma with Ledoit-Wolf first. The two
-    BL-posterior-mu objectives (``bl_utility`` and ``max_return_cvar``) are
-    rejected up-front — both maximize Black-Litterman posterior returns formed
-    with hindsight views, so backtests are mu-free. Each engine solver returns a
+    covariance objectives shrink Sigma with Ledoit-Wolf first.
+
+    ``max_return_cvar`` runs in equilibrium mode: with no views, mu is the BL
+    equilibrium return pi = delta * Sigma_train * w_mkt (reverse optimization),
+    which is G5-safe because pi is not a sample-mean return forecast. The closure
+    needs ``w_mkt`` (computed once by the service from current AUM/market cap)
+    and ``cvar_limit``; without them it fails loud. ``w_mkt`` is an exogenous,
+    stable input held fixed across folds - a mild, defensible hindsight because
+    AUM/market cap is slow-moving. delta scales pi but does not move the argmax
+    of this linear objective; only the direction Sigma * w_mkt and cvar_limit
+    matter.
+
+    ``bl_utility`` is rejected up-front: it maximizes the Black-Litterman
+    posterior formed with hindsight views. Each engine solver returns a
     ``(weights, status)`` tuple, so the closure keeps weights.
     """
     if objective == "bl_utility":
         raise BacktestError(
             "bl_utility is not backtestable: Black-Litterman views are formed "
             "with hindsight; backtest a mu-free objective (min_cvar/min_vol/erc/"
-            "max_diversification/equal_weight)"
+            "max_diversification/equal_weight) or max_return_cvar (equilibrium)"
         )
     if objective == "max_return_cvar":
-        raise BacktestError(
-            "max_return_cvar is not backtestable: it maximizes Black-Litterman "
-            "posterior returns formed with hindsight views; backtest a mu-free "
-            "objective (min_cvar/min_vol/erc/max_diversification/equal_weight)"
-        )
+        if w_mkt is None or cvar_limit is None:
+            raise BacktestError(
+                "max_return_cvar backtest requires market weights and a "
+                "cvar_limit (equilibrium mode); none were supplied"
+            )
+
+        w_mkt_vec = np.asarray(w_mkt, dtype=float).ravel()
+
+        def solve_equilibrium(train: np.ndarray) -> np.ndarray:
+            sigma = engine.sigma_ledoit_wolf(train)
+            pi = bl.equilibrium(sigma, w_mkt_vec, delta=delta)
+            weights, _ = engine.solve_max_return_cvar_capped(
+                train,
+                mu=pi,
+                cvar_limit=cvar_limit,
+                cap=cap,
+                min_weight=min_weight,
+            )
+            return cast(np.ndarray, weights)
+
+        return solve_equilibrium
 
     def solve(train: np.ndarray) -> np.ndarray:
         if objective == "min_cvar":
@@ -81,7 +116,7 @@ def _solve_fn_for(
             )
         else:  # pragma: no cover - all Objective Literal members handled above
             raise BacktestError(f"unknown objective: {objective}")
-        return weights
+        return cast(np.ndarray, weights)
 
     return solve
 
@@ -97,8 +132,26 @@ async def run_walk_forward_backtest(
     except ValueError as exc:
         raise BacktestError(str(exc)) from exc
 
+    # Equilibrium-mode max_return_cvar needs market weights for
+    # pi = delta * Sigma * w_mkt. Compute them once from the same path the
+    # builder uses and thread them into every fold's solve closure.
+    w_mkt: np.ndarray | None = None
+    if payload.objective == "max_return_cvar":
+        labels = list(frame.columns)
+        try:
+            w_mkt = await _market_weights_for(session, list(payload.assets), labels)
+        except ValueError as exc:
+            raise BacktestError(
+                "max_return_cvar market weights require positive fund AUM / "
+                f"equities market cap: {exc}"
+            ) from exc
+
     solve_fn = _solve_fn_for(
-        payload.objective, payload.constraints.cap, payload.constraints.min_weight
+        payload.objective,
+        payload.constraints.cap,
+        payload.constraints.min_weight,
+        w_mkt=w_mkt,
+        cvar_limit=payload.cvar_limit,
     )
     try:
         result = assemble_walk_forward_backtest(
@@ -144,4 +197,6 @@ async def run_walk_forward_backtest(
         std_sharpe=result.std_sharpe,
         positive_folds=result.positive_folds,
         mean_turnover=result.mean_turnover,
+        oos_curve=list(result.oos_curve),
+        fold_boundaries=list(result.fold_boundaries),
     )

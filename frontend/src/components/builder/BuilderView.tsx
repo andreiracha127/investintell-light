@@ -35,7 +35,9 @@ import {
   universeDraftToSpec,
   type UniverseAsset,
   type UniverseDraft,
+  type Mandate,
   OBJECTIVES,
+  MANDATE_CVAR_PRESETS,
   objectivesForBroad,
   resolveObjectiveForBroad,
 } from "./assets";
@@ -50,6 +52,19 @@ const MODES: { value: BuilderMode; label: string; hint: string }[] = [
   { value: "simulate", label: "Simulate", hint: "Pick stocks & funds to test" },
   { value: "universe", label: "Fund universe", hint: "Optimize a filtered set" },
 ];
+
+const MANDATES: { value: Mandate; label: string }[] = [
+  { value: "conservative", label: "Conservative" },
+  { value: "defensive", label: "Defensive" },
+  { value: "moderate_conservative", label: "Moderate conservative" },
+  { value: "moderate", label: "Moderate" },
+  { value: "balanced", label: "Balanced" },
+  { value: "moderate_aggressive", label: "Moderate aggressive" },
+  { value: "aggressive", label: "Aggressive" },
+  { value: "growth", label: "Growth" },
+];
+
+const DEFAULT_MANDATE: Mandate = "moderate";
 
 /** Parse a non-empty numeric input; invalid/blank -> null. */
 function parseNum(text: string): number | null {
@@ -122,12 +137,21 @@ export function BuilderView() {
   const [universeKeptIds, setUniverseKeptIds] = useState<string[]>([]);
 
   /* ── Constraints & objective ───────────────────────────────────────── */
-  const [objective, setObjective] = useState<BuilderObjective>("min_cvar");
+  const [objective, setObjective] = useState<BuilderObjective>("max_return_cvar");
   const [capPct, setCapPct] = useState("25");
   const [minWeightPct, setMinWeightPct] = useState("");
   // Blank = full nav_timeseries history (backend default; the 2-year gate is
   // removed). A typed value opts into a narrower estimation window.
   const [windowDays, setWindowDays] = useState("");
+  const [mandate, setMandate] = useState<Mandate>(DEFAULT_MANDATE);
+  const [cvarLimitPct, setCvarLimitPct] = useState(
+    String(MANDATE_CVAR_PRESETS[DEFAULT_MANDATE]),
+  );
+
+  const onMandateChange = (next: Mandate) => {
+    setMandate(next);
+    setCvarLimitPct(String(MANDATE_CVAR_PRESETS[next]));
+  };
 
   /* ── Advanced (views + BL model params) ────────────────────────────── */
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -176,6 +200,7 @@ export function BuilderView() {
   const minWeight = parseNum(minWeightPct);
   const delta = parseNum(deltaText);
   const tau = parseNum(tauText);
+  const cvarLimit = parseNum(cvarLimitPct);
   // Blank cap = uncapped (null); a typed but non-numeric cap blocks the run.
   const capOk = capPct.trim() === "" || cap !== null;
   // Blank window = full history (null → backend uses all of nav_timeseries);
@@ -186,12 +211,15 @@ export function BuilderView() {
   const blParamsOk =
     objective !== "bl_utility" ||
     (delta !== null && delta > 0 && tau !== null && tau > 0);
+  const cvarLimitOk =
+    objective !== "max_return_cvar" || (cvarLimit !== null && cvarLimit > 0);
   const universeOk = universeCount === null || universeCount >= 2;
 
   const canRun =
     windowOk &&
     capOk &&
     blParamsOk &&
+    cvarLimitOk &&
     (mode === "simulate"
       ? assets.length >= 2 && viewsValid
       : universeOk);
@@ -206,6 +234,7 @@ export function BuilderView() {
       objective,
       constraints,
       window_days: windowVal,
+      mandate,
       // turnover_lambda has a backend default (0.0) but the generated contract
       // types it as required; the builder has no turnover control, so send 0
       // (no turnover penalty — the backend skips the current_weights guard).
@@ -216,6 +245,9 @@ export function BuilderView() {
         delta: delta !== null && delta > 0 ? delta : 2.5,
         tau: tau !== null && tau > 0 ? tau : 0.05,
       },
+      ...(objective === "max_return_cvar" && cvarLimit !== null
+        ? { cvar_limit: cvarLimit / 100 }
+        : {}),
     };
     if (mode === "universe") {
       mutation.mutate({
@@ -241,6 +273,40 @@ export function BuilderView() {
   useEffect(() => {
     setObjective((o) => resolveObjectiveForBroad(o, broadUniverse));
   }, [broadUniverse]);
+
+  const submittedRequest = mutation.variables;
+  const resultObjective = submittedRequest?.objective ?? objective;
+  const resultConstraints = {
+    cap: submittedRequest
+      ? (submittedRequest.constraints.cap ?? null)
+      : cap !== null
+        ? cap / 100
+        : null,
+    min_weight: submittedRequest
+      ? (submittedRequest.constraints.min_weight ?? null)
+      : minWeight !== null
+        ? minWeight / 100
+        : null,
+  };
+  const resultWindowDays = submittedRequest
+    ? (submittedRequest.window_days ?? null)
+    : windowVal;
+  const resultCvarLimit =
+    resultObjective === "max_return_cvar"
+      ? submittedRequest
+        ? (submittedRequest.cvar_limit ?? null)
+        : cvarLimit !== null
+          ? cvarLimit / 100
+          : null
+      : null;
+  const resultCvarLimitPct =
+    resultObjective === "max_return_cvar"
+      ? submittedRequest
+        ? submittedRequest.cvar_limit != null
+          ? String(submittedRequest.cvar_limit * 100)
+          : null
+        : cvarLimitPct
+      : null;
 
   return (
     <div className="mx-auto max-w-[1400px] px-5 py-5">
@@ -313,6 +379,30 @@ export function BuilderView() {
                 ))}
               </select>
             </label>
+            <label className="flex min-w-[180px] flex-col gap-1">
+              <span className={FIELD_LABEL_CLASS}>Risk mandate</span>
+              <select
+                value={mandate}
+                onChange={(e) => onMandateChange(e.target.value as Mandate)}
+                aria-label="Risk mandate"
+                className={INPUT_CLASS}
+              >
+                {MANDATES.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {objective === "max_return_cvar" && (
+              <NumField
+                label="Teto CVaR diário %"
+                value={cvarLimitPct}
+                onChange={setCvarLimitPct}
+                placeholder="2.0"
+                width="w-[160px]"
+              />
+            )}
             <NumField
               label="Cap per asset %"
               value={capPct}
@@ -396,6 +486,12 @@ export function BuilderView() {
               Advanced section.
             </span>
           )}
+          {!cvarLimitOk && (
+            <span className="ix-fs text-text-muted">
+              Max retorno sob CVaR needs a daily CVaR ceiling — set a positive
+              “Teto CVaR diário %”.
+            </span>
+          )}
         </div>
 
         {/* ── Result area ─────────────────────────────────────────────── */}
@@ -411,11 +507,15 @@ export function BuilderView() {
           <ResultsPanel
             key={mutation.submittedAt}
             result={mutation.data}
-            objective={objective}
+            objective={resultObjective}
+            constraints={resultConstraints}
+            windowDays={resultWindowDays}
+            cvarLimit={resultCvarLimit}
             assetsByKey={assetsByKey}
             base={mode === "simulate" ? base : null}
             colors={colors}
             grouped={mode === "universe"}
+            cvarLimitPct={resultCvarLimitPct}
           />
         ) : (
           <p className="ix-pad ix-fs m-0 border border-border bg-surface-2 text-text-muted">

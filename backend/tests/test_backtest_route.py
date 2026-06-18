@@ -105,13 +105,64 @@ async def test_bl_utility_rejected_with_422(monkeypatch: pytest.MonkeyPatch) -> 
     assert "bl_utility is not backtestable" in response.json()["detail"]
 
 
-async def test_max_return_cvar_rejected_with_422(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_walk_forward_max_return_cvar_equilibrium_happy_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+
+    async def fake_w_mkt(session: Any, assets: Any, labels: list[str]) -> np.ndarray:
+        return np.full(len(labels), 1.0 / len(labels))
+
+    # The route calls the service; patch _market_weights_for at the service module.
+    from app.services import backtest as backtest_service
+
+    monkeypatch.setattr(backtest_service, "_market_weights_for", fake_w_mkt)
+    payload = {
+        "assets": [_fund(0), _fund(1), _fund(2)],
+        "objective": "max_return_cvar",
+        "cvar_limit": 0.05,
+        "constraints": {"cap": 0.6},
+    }
+    async with _client() as client:
+        response = await client.post("/backtest/walk-forward", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["params"]["objective"] == "max_return_cvar"
+    assert body["params"]["n_splits_computed"] == 5
+
+
+async def test_walk_forward_max_return_cvar_missing_cvar_limit_422(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _stub_returns(monkeypatch)
     payload = {"assets": [_fund(0), _fund(1)], "objective": "max_return_cvar"}
     async with _client() as client:
         response = await client.post("/backtest/walk-forward", json=payload)
     assert response.status_code == 422
-    assert "is not backtestable" in response.json()["detail"]
+
+
+async def test_walk_forward_max_return_cvar_equities_422(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+
+    async def fake_mcap(session: Any, tickers: list[str]) -> dict[str, float | None]:
+        return {ticker: None for ticker in tickers}
+
+    monkeypatch.setattr(optimizer_data, "load_equity_market_cap", fake_mcap)
+    payload = {
+        "assets": [
+            {"kind": "equity", "ticker": "SPY"},
+            {"kind": "equity", "ticker": "AGG"},
+        ],
+        "objective": "max_return_cvar",
+        "cvar_limit": 0.05,
+        "constraints": {"cap": 0.6},
+    }
+    async with _client() as client:
+        response = await client.post("/backtest/walk-forward", json=payload)
+    assert response.status_code == 422
+    assert "equities" in response.json()["detail"]
 
 
 async def test_bad_n_splits_is_pydantic_422() -> None:
@@ -119,3 +170,29 @@ async def test_bad_n_splits_is_pydantic_422() -> None:
     async with _client() as client:
         response = await client.post("/backtest/walk-forward", json=payload)
     assert response.status_code == 422  # Field(ge=2)
+
+
+async def test_walk_forward_response_carries_oos_curve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_returns(monkeypatch)
+    payload = {
+        "assets": [_fund(0), _fund(1), _fund(2)],
+        "objective": "min_cvar",
+        "constraints": {"cap": 0.5},
+    }
+    async with _client() as client:
+        response = await client.post("/backtest/walk-forward", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    # One OOS point per observation across all folds (5 folds x 63 = 315).
+    total_obs = sum(f["n_obs"] for f in body["folds"])
+    assert len(body["oos_curve"]) == total_obs
+    # Each point is a [iso_date, nav] 2-element array; nav is finite & positive.
+    first = body["oos_curve"][0]
+    assert isinstance(first, list) and len(first) == 2
+    assert isinstance(first[0], str)  # ISO date
+    assert float(first[1]) > 0
+    # One boundary per fold; the first boundary == the first curve date.
+    assert len(body["fold_boundaries"]) == len(body["folds"])
+    assert body["fold_boundaries"][0] == first[0]

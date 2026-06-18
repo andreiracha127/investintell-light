@@ -1,10 +1,16 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/api/client", () => ({}));
 
 import {
   defaultUniverseDraft,
+  OBJECTIVES,
+  MANDATE_CVAR_PRESETS,
   objectivesForBroad,
   resolveObjectiveForBroad,
   universeDraftToSpec,
+  type Mandate,
 } from "./assets";
 
 describe("universeDraftToSpec", () => {
@@ -69,5 +75,70 @@ describe("objective gating for broad mode", () => {
     // Ranked mode never rewrites the objective.
     expect(resolveObjectiveForBroad("min_cvar", false)).toBe("min_cvar");
     expect(resolveObjectiveForBroad("bl_utility", false)).toBe("bl_utility");
+  });
+});
+
+describe("max_return_cvar objective entry", () => {
+  it("is the FIRST objective (the default) and is labelled + described", () => {
+    const first = OBJECTIVES[0];
+    expect(first.value).toBe("max_return_cvar");
+    expect(first.label.length).toBeGreaterThan(0);
+    expect(first.description.length).toBeGreaterThan(0);
+  });
+
+  it("ranked mode still exposes max_return_cvar", () => {
+    const values = objectivesForBroad(false).map((o) => o.value);
+    expect(values).toContain("max_return_cvar");
+  });
+
+  it("broad mode EXCLUDES max_return_cvar (covariance objectives only)", () => {
+    const values = objectivesForBroad(true).map((o) => o.value);
+    expect(values).not.toContain("max_return_cvar");
+    expect(values).toEqual([
+      "min_vol",
+      "erc",
+      "max_diversification",
+      "equal_weight",
+    ]);
+  });
+
+  it("resolveObjectiveForBroad steers max_return_cvar to min_vol in broad mode", () => {
+    expect(resolveObjectiveForBroad("max_return_cvar", true)).toBe("min_vol");
+    expect(resolveObjectiveForBroad("max_return_cvar", false)).toBe(
+      "max_return_cvar",
+    );
+  });
+});
+
+describe("MANDATE_CVAR_PRESETS ladder", () => {
+  it("covers every Mandate key exactly", () => {
+    const keys = Object.keys(MANDATE_CVAR_PRESETS).sort();
+    const expected: Mandate[] = [
+      "aggressive",
+      "balanced",
+      "conservative",
+      "defensive",
+      "growth",
+      "moderate",
+      "moderate_aggressive",
+      "moderate_conservative",
+    ];
+    expect(keys).toEqual([...expected].sort());
+  });
+
+  it("maps mandates to daily CVaR ceilings in PERCENT, monotonically rising", () => {
+    const p = MANDATE_CVAR_PRESETS;
+    expect(p.conservative).toBe(1.0);
+    expect(p.defensive).toBe(1.0);
+    expect(p.moderate_conservative).toBe(1.5);
+    expect(p.moderate).toBe(2.0);
+    expect(p.balanced).toBe(2.0);
+    expect(p.moderate_aggressive).toBe(2.5);
+    expect(p.aggressive).toBe(3.0);
+    expect(p.growth).toBe(3.5);
+    for (const v of Object.values(p)) {
+      expect(v).toBeGreaterThan(0);
+      expect(v).toBeLessThan(10);
+    }
   });
 });

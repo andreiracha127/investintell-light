@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 from app.optimizer import engine
+from app.optimizer.engine import SolveTelemetry, _finalize, _verify_constraints
 
 _SUM_ATOL = 1e-6
 
@@ -376,8 +377,6 @@ def test_max_return_cvar_capped_rejects_nan_mu() -> None:
 
 # ── T3F-2: SCS fallback + post-solve re-verification + telemetry ──────────────
 
-from app.optimizer.engine import SolveTelemetry, _finalize, _verify_constraints
-
 
 def test_finalize_telemetry_records_solver_and_realized_constraints() -> None:
     import cvxpy as cp
@@ -449,3 +448,18 @@ def test_solve_min_vol_still_passes_post_verification() -> None:
     sigma = np.diag([0.05**2, 0.2**2, 0.2**2, 0.2**2, 0.2**2])
     weights, status = engine.solve_min_vol(sigma, cap=0.25)
     _assert_valid(weights, status, cap=0.25)
+
+
+def test_max_return_cvar_argmax_invariant_to_mu_scale() -> None:
+    """delta scales mu but not the max_return_cvar linear objective argmax."""
+    rng = np.random.default_rng(3)
+    scenarios = rng.normal(0.0005, 0.01, size=(300, 4))
+    mu = np.array([0.02, 0.05, 0.03, 0.08])
+    w1, s1 = engine.solve_max_return_cvar_capped(
+        scenarios, mu=mu, cvar_limit=0.03, cap=0.6
+    )
+    w2, s2 = engine.solve_max_return_cvar_capped(
+        scenarios, mu=5.0 * mu, cvar_limit=0.03, cap=0.6
+    )
+    assert s1 == "optimal" and s2 == "optimal"
+    assert np.allclose(w1, w2, atol=1e-4)

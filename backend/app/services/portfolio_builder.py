@@ -173,22 +173,26 @@ def _build_views(
 async def _market_weights_for(
     session: AsyncSession, assets: list[AssetRefIn], labels: list[str]
 ) -> np.ndarray:
-    """w_mkt from real AUM. Fail-loud on equities and on funds without AUM."""
-    equity_labels = [
-        _ref_key(ref) for ref in assets if isinstance(ref, EquityRefIn)
-    ]
-    if equity_labels:
-        raise BuilderError(
-            "views requerem AUM para todos os ativos; equities ainda sem market cap "
-            f"no builder: {', '.join(equity_labels)} — remova-as ou otimize sem views"
-        )
+    """w_mkt from real sizes: AUM for funds, market cap for equities.
+
+    Sizes are assembled in the same order as ``assets``/``labels`` so the
+    weight vector aligns with Sigma. Unknown or non-positive sizes fail loud via
+    ``bl.market_weights``.
+    """
     fund_ids: list[uuid.UUID] = [
         ref.id for ref in assets if isinstance(ref, FundRefIn)
     ]
+    tickers: list[str] = [ref.ticker for ref in assets if isinstance(ref, EquityRefIn)]
     aum_by_id = await optimizer_data.load_fund_aum(session, fund_ids)
-    aums: list[float | None] = [aum_by_id.get(fund_id) for fund_id in fund_ids]
+    mcap_by_ticker = await optimizer_data.load_equity_market_cap(session, tickers)
+    sizes: list[float | None] = []
+    for ref in assets:
+        if isinstance(ref, FundRefIn):
+            sizes.append(aum_by_id.get(ref.id))
+        else:
+            sizes.append(mcap_by_ticker.get(ref.ticker))
     try:
-        return bl.market_weights(aums, labels)
+        return bl.market_weights(sizes, labels)
     except ValueError as exc:
         raise BuilderError(str(exc)) from exc
 
@@ -515,6 +519,8 @@ async def run_optimize(
     mu_equilibrium: np.ndarray | None = None
     mu_posterior: np.ndarray | None = None
     view_consistency: ViewConsistencyOut | None = None
+    cvar_limit_effective: float | None = None
+    regime_state: str | None = None
     w_mkt: np.ndarray | None = None
     if needs_bl:
         w_mkt = await _market_weights_for(session, assets, labels)
@@ -571,11 +577,10 @@ async def run_optimize(
             )
         elif payload.objective == "max_return_cvar":
             assert payload.cvar_limit is not None  # schema validator guarantees it
-            if mu_posterior is None:
-                raise BuilderError(
-                    "max_return_cvar needs expected returns — provide views so the "
-                    "Black-Litterman posterior exists (gate G5)"
-                )
+            assert mu_equilibrium is not None  # needs_bl computes it for this objective
+            # Gate G5-safe mu: the BL posterior when views exist, otherwise the
+            # equilibrium return pi = delta*Sigma*w_mkt. Never the historical mean.
+            mu = mu_posterior if mu_posterior is not None else mu_equilibrium
             state = _OVERRIDE_REGIME_STATE
             if state is None and datalake is not None:
                 snap = await macro_regime.fetch_credit_regime(datalake)
@@ -583,13 +588,15 @@ async def run_optimize(
             limit = apply_regime_cvar_limit(
                 payload.cvar_limit, state, risk_off_factor=DEFAULT_RISK_OFF_CVAR_FACTOR
             )
+            regime_state = state
+            cvar_limit_effective = limit
             # Reuse cvar_bounds (already built above with the same promotion
             # logic) — the max_return_cvar engine path is structurally identical
             # to min_cvar: BoundsBundle replaces the scalar (cap, min_weight)
             # block, so no duplicate construction is needed.
             weights, status = engine.solve_max_return_cvar_capped(
                 scenarios,
-                mu=mu_posterior,
+                mu=mu,
                 cvar_limit=limit,
                 cap=cap,
                 min_weight=min_weight,
@@ -678,5 +685,7 @@ async def run_optimize(
             ),
             view_consistency=view_consistency,
             selection=selection_diag,
+            cvar_limit_effective=cvar_limit_effective,
+            regime_state=regime_state,
         ),
     )

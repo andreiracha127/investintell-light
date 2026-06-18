@@ -1,5 +1,6 @@
 """Schema contract for POST /backtest/walk-forward."""
 
+import datetime as dt
 import uuid
 
 import pytest
@@ -7,6 +8,7 @@ from pydantic import ValidationError
 
 from app.schemas.backtest import (
     FoldMetricsOut,
+    SeriesPoint,  # noqa: F401 - re-exported alias
     WalkForwardParams,
     WalkForwardRequest,
     WalkForwardResponse,
@@ -65,3 +67,78 @@ def test_response_round_trips() -> None:
     assert dumped["folds"][0]["max_drawdown"] == -0.08
     assert dumped["positive_folds"] == 1
     assert dumped["params"]["objective"] == "min_cvar"
+
+
+def test_response_carries_oos_curve_and_fold_boundaries() -> None:
+    fold = FoldMetricsOut(
+        fold=0,
+        train_size=283,
+        n_obs=2,
+        sharpe=1.1,
+        cvar_95=0.02,
+        max_drawdown=-0.08,
+        turnover=1.0,
+        gross_return=0.03,
+        net_return=0.029,
+    )
+    resp = WalkForwardResponse(
+        folds=[fold],
+        params=WalkForwardParams(
+            objective="min_cvar",
+            n_obs=600,
+            n_splits_computed=1,
+            gap=2,
+            test_size=63,
+            min_train_size=252,
+            cost_bps=10.0,
+        ),
+        mean_sharpe=1.1,
+        std_sharpe=0.0,
+        positive_folds=1,
+        mean_turnover=1.0,
+        oos_curve=[(dt.date(2020, 1, 2), 1.0), (dt.date(2020, 1, 3), 1.01)],
+        fold_boundaries=[dt.date(2020, 1, 2)],
+    )
+    dumped = resp.model_dump()
+    # SeriesPoint serializes as a [date, number] 2-tuple.
+    assert dumped["oos_curve"][0] == (dt.date(2020, 1, 2), 1.0)
+    assert dumped["oos_curve"][1][1] == 1.01
+    assert dumped["fold_boundaries"] == [dt.date(2020, 1, 2)]
+
+
+def test_request_accepts_cvar_limit() -> None:
+    req = WalkForwardRequest.model_validate(
+        {
+            "assets": [_fund(1), _fund(2)],
+            "objective": "max_return_cvar",
+            "cvar_limit": 0.02,
+        }
+    )
+    assert req.objective == "max_return_cvar"
+    assert req.cvar_limit == 0.02
+
+
+def test_request_max_return_cvar_requires_cvar_limit() -> None:
+    with pytest.raises(ValidationError, match="cvar_limit"):
+        WalkForwardRequest.model_validate(
+            {"assets": [_fund(1), _fund(2)], "objective": "max_return_cvar"}
+        )
+
+
+def test_request_cvar_limit_bounds() -> None:
+    with pytest.raises(ValidationError):
+        WalkForwardRequest.model_validate(
+            {
+                "assets": [_fund(1), _fund(2)],
+                "objective": "max_return_cvar",
+                "cvar_limit": 0.0,
+            }
+        )
+    with pytest.raises(ValidationError):
+        WalkForwardRequest.model_validate(
+            {
+                "assets": [_fund(1), _fund(2)],
+                "objective": "max_return_cvar",
+                "cvar_limit": 1.5,
+            }
+        )
