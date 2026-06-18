@@ -1520,11 +1520,12 @@ async def test_max_return_cvar_rejected_with_422(monkeypatch: pytest.MonkeyPatch
 
 ## Final gate
 
-- [ ] **Run the full quality gate**:
+- [x] **Run the full quality gate**:
   - Command: `cd backend && uv run ruff check . && uv run mypy app && uv run pytest -q`
   - Expected: ruff clean, mypy clean, all tests pass. If mypy flags the `oos_curve` tuple element type (pandas `Timestamp` vs `dt.date`), normalize with `idx_date.date()` in `assemble_walk_forward_backtest` (Task 1a). If mypy flags the unused `dt` import in `app/schemas/backtest.py`, confirm `fold_boundaries: list[dt.date]` references it (it does).
+  - Result: full pytest passed; touched files pass ruff and direct mypy. Full ruff/mypy remain blocked by pre-existing baseline issues outside this plan.
 
-- [ ] **Final commit (only if the gate produced fixups)**:
+- [x] **Final commit (only if the gate produced fixups)**:
   - `cd backend && git add -A && git commit -m "chore(backtest,monte-carlo): satisfy ruff/mypy on onda-1 backend"`
 
 ---

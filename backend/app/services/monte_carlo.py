@@ -14,6 +14,7 @@ InsufficientDataError so the route maps them to HTTP 422.
 from __future__ import annotations
 
 import datetime as dt
+from typing import cast
 
 import numpy as np
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,7 +34,6 @@ from app.schemas.monte_carlo import (
     PortfolioMonteCarloResponse,
     Statistic,
 )
-from app.services.portfolio_builder import _to_data_ref
 from app.services._series import (
     RANGE_DAYS,
 )
@@ -43,6 +43,7 @@ from app.services._series import (
 from app.services._series import (
     select_date_bounds as _select_date_bounds,
 )
+from app.services.portfolio_builder import _to_data_ref
 from app.services.stock_analysis import (
     InsufficientDataError,
     build_adj_close_series,
@@ -50,6 +51,22 @@ from app.services.stock_analysis import (
 from app.tiingo.client import TiingoClient
 
 _MIN_RETURNS = 42
+
+
+def _confidence_bar_from_mapping(bar: dict[str, object]) -> ConfidenceBar:
+    """Convert analytics confidence-bar dicts into the typed response schema."""
+    return ConfidenceBar(
+        horizon=str(bar["horizon"]),
+        horizon_days=int(cast(int | str, bar["horizon_days"])),
+        pct_5=float(cast(float | int | str, bar["pct_5"])),
+        pct_10=float(cast(float | int | str, bar["pct_10"])),
+        pct_25=float(cast(float | int | str, bar["pct_25"])),
+        pct_50=float(cast(float | int | str, bar["pct_50"])),
+        pct_75=float(cast(float | int | str, bar["pct_75"])),
+        pct_90=float(cast(float | int | str, bar["pct_90"])),
+        pct_95=float(cast(float | int | str, bar["pct_95"])),
+        mean=float(cast(float | int | str, bar["mean"])),
+    )
 
 
 def assemble_monte_carlo(
@@ -99,7 +116,9 @@ def assemble_monte_carlo(
         historical_value=result.historical_value,
         historical_horizon_days=result.historical_horizon_days,
         historical_percentile_rank=result.historical_percentile_rank,
-        confidence_bars=[ConfidenceBar(**bar) for bar in result.confidence_bars],
+        confidence_bars=[
+            _confidence_bar_from_mapping(bar) for bar in result.confidence_bars
+        ],
         degraded=result.degraded,
         degraded_reason=result.degraded_reason,
     )
@@ -214,7 +233,9 @@ def assemble_portfolio_monte_carlo(
         historical_value=result.historical_value,
         historical_horizon_days=result.historical_horizon_days,
         historical_percentile_rank=result.historical_percentile_rank,
-        confidence_bars=[ConfidenceBar(**bar) for bar in result.confidence_bars],
+        confidence_bars=[
+            _confidence_bar_from_mapping(bar) for bar in result.confidence_bars
+        ],
         degraded=result.degraded,
         degraded_reason=result.degraded_reason,
     )

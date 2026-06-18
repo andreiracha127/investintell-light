@@ -14,6 +14,8 @@ Error contract: every domain failure (bad/short history, solver non-optimal,
 zero-variance fold) raises ``BacktestError`` -> 422 with the message verbatim.
 """
 
+from typing import cast
+
 import numpy as np
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -90,7 +92,7 @@ def _solve_fn_for(
                 cap=cap,
                 min_weight=min_weight,
             )
-            return weights
+            return cast(np.ndarray, weights)
 
         return solve_equilibrium
 
@@ -114,7 +116,7 @@ def _solve_fn_for(
             )
         else:  # pragma: no cover - all Objective Literal members handled above
             raise BacktestError(f"unknown objective: {objective}")
-        return weights
+        return cast(np.ndarray, weights)
 
     return solve
 

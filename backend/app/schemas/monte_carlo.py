@@ -6,7 +6,7 @@ validation is fail-loud (422 via Pydantic); the service maps analytics
 ValueErrors to 422 as well.
 """
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -54,7 +54,7 @@ class MonteCarloRequest(BaseModel):
     @field_validator("ticker")
     @classmethod
     def _check_ticker(cls, value: str) -> str:
-        return _normalize_ticker(value, "ticker")
+        return cast(str, _normalize_ticker(value, "ticker"))
 
     @field_validator("horizons")
     @classmethod

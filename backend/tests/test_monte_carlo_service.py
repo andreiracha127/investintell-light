@@ -17,8 +17,8 @@ from app.schemas.monte_carlo import (
     PortfolioMonteCarloRequest,
     PortfolioMonteCarloResponse,
 )
-from app.services.monte_carlo import assemble_monte_carlo
 from app.services.monte_carlo import (
+    assemble_monte_carlo,
     assemble_portfolio_monte_carlo,
     run_portfolio_monte_carlo,
 )
@@ -181,7 +181,7 @@ def test_assemble_portfolio_uses_frame_at_w_synthetic_series() -> None:
     assert resp.percentiles == expected.percentiles
 
 
-def test_assemble_short_history_maps_to_insufficient_data() -> None:
+def test_assemble_portfolio_short_history_maps_to_insufficient_data() -> None:
     short = np.random.default_rng(0).normal(0.0004, 0.01, 40)
     with pytest.raises(InsufficientDataError, match="insufficient_history"):
         assemble_portfolio_monte_carlo(

@@ -1219,6 +1219,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/monte-carlo/portfolio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Project Portfolio Monte Carlo
+         * @description Block-bootstrap Monte Carlo over a synthetic portfolio NAV.
+         *
+         *     Builds the portfolio return series from the positions' common-history
+         *     aligned returns (target weights held = implicit rebalancing) and runs the
+         *     same block-bootstrap core as the single-instrument projection. Drawdown/
+         *     return fields are decimal fractions (0.05 = 5%); sharpe is unitless.
+         *
+         *     Error mapping (fail loud):
+         *     - request shape / weight bounds / position count -> 422 (Pydantic)
+         *     - unknown asset / no history in window           -> 422
+         *     - insufficient common observations               -> 422
+         *     - history too short for the requested horizon    -> 422
+         */
+        post: operations["project_portfolio_monte_carlo_monte_carlo_portfolio_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/portfolios/{portfolio_id}/rebalance/policy": {
         parameters: {
             query?: never;
@@ -4035,6 +4066,127 @@ export interface components {
             };
         };
         /**
+         * PortfolioMonteCarloParams
+         * @description Echo of the resolved portfolio MC parameters (no ticker; n_assets instead).
+         */
+        PortfolioMonteCarloParams: {
+            /**
+             * Statistic
+             * @enum {string}
+             */
+            statistic: "max_drawdown" | "return" | "sharpe";
+            /** N Assets */
+            n_assets: number;
+            /** N Simulations */
+            n_simulations: number;
+            /** Risk Free Rate */
+            risk_free_rate: number;
+            /**
+             * Seed
+             * @description Seed used, or null when unseeded.
+             */
+            seed: number | null;
+        };
+        /**
+         * PortfolioMonteCarloRequest
+         * @description Block-bootstrap Monte Carlo over a synthetic portfolio NAV.
+         *
+         *     The service builds ``portfolio_returns = frame @ w`` from the common-history
+         *     aligned returns of the positions (target weights held = implicit continuous
+         *     rebalancing), then runs the SAME pure ``block_bootstrap_monte_carlo`` the
+         *     single-instrument projection uses.
+         */
+        PortfolioMonteCarloRequest: {
+            /** Positions */
+            positions: components["schemas"]["PortfolioPositionIn"][];
+            /**
+             * Statistic
+             * @description Which statistic to project: max_drawdown | return | sharpe.
+             * @default max_drawdown
+             * @enum {string}
+             */
+            statistic: "max_drawdown" | "return" | "sharpe";
+            /**
+             * N Simulations
+             * @description Number of bootstrap paths (1000-50000).
+             * @default 10000
+             */
+            n_simulations: number;
+            /**
+             * Horizons
+             * @description Trading-day horizons for the confidence fan; default 1Y/3Y/5Y/7Y/10Y.
+             */
+            horizons?: number[] | null;
+            /**
+             * Risk Free Rate
+             * @description Annualized risk-free rate for the Sharpe statistic (decimal fraction).
+             * @default 0.04
+             */
+            risk_free_rate: number;
+            /**
+             * Seed
+             * @description Optional RNG seed for a reproducible projection.
+             */
+            seed?: number | null;
+            /** Window Days */
+            window_days?: number | null;
+        };
+        /**
+         * PortfolioMonteCarloResponse
+         * @description Render-ready portfolio Monte Carlo payload.
+         *
+         *     Reuses the single-instrument distribution shape (``ConfidenceBar``,
+         *     percentiles, historical rank, degraded flags); only ``params`` differs
+         *     (n_assets instead of ticker/range). Drawdown/return fields are decimal
+         *     fractions (0.05 = 5%); sharpe is unitless.
+         */
+        PortfolioMonteCarloResponse: {
+            params: components["schemas"]["PortfolioMonteCarloParams"];
+            /**
+             * Percentiles
+             * @description Distribution of the statistic at the longest horizon, keyed by percentile ('1st'..'99th').
+             */
+            percentiles: {
+                [key: string]: number;
+            };
+            /** Mean */
+            mean: number;
+            /** Median */
+            median: number;
+            /** Std */
+            std: number;
+            /**
+             * Historical Value
+             * @description The statistic computed on the ACTUAL synthetic portfolio series.
+             */
+            historical_value: number;
+            /**
+             * Historical Horizon Days
+             * @description Length of the synthetic portfolio series in trading days.
+             */
+            historical_horizon_days: number;
+            /**
+             * Historical Percentile Rank
+             * @description Percentile rank (0-100) of the historical value within a horizon-matched bootstrap; null for the sharpe statistic.
+             */
+            historical_percentile_rank: number | null;
+            /**
+             * Confidence Bars
+             * @description Per-horizon percentile fans (the projection chart).
+             */
+            confidence_bars: components["schemas"]["ConfidenceBar"][];
+            /**
+             * Degraded
+             * @description True only when a flat-NAV Sharpe collapse made the result uninformative.
+             */
+            degraded: boolean;
+            /**
+             * Degraded Reason
+             * @description Diagnostic when degraded is True, else null.
+             */
+            degraded_reason: string | null;
+        };
+        /**
          * PortfolioNewsResponse
          * @description Aggregated news across all portfolio tickers, newest first.
          *
@@ -4151,6 +4303,21 @@ export interface components {
              * @description New cash balance, currency units.
              */
             cash?: number | null;
+        };
+        /**
+         * PortfolioPositionIn
+         * @description One position in a synthetic portfolio MC request.
+         *
+         *     ``asset`` reuses the builder ref (FundRefIn | EquityRefIn) so the request is
+         *     the exact weight list the optimizer returned; ``weight`` is a decimal
+         *     fraction (0 < w <= 1). The service aligns weights to the loaded return
+         *     frame's columns by the 'fund:{id}' / 'equity:{TICKER}' label scheme.
+         */
+        PortfolioPositionIn: {
+            /** Asset */
+            asset: components["schemas"]["FundRefIn"] | components["schemas"]["EquityRefIn"];
+            /** Weight */
+            weight: number;
         };
         /**
          * PortfolioRef
@@ -5504,6 +5671,8 @@ export interface components {
              * @default 0
              */
             risk_free_annual: number;
+            /** Cvar Limit */
+            cvar_limit?: number | null;
         };
         /** WalkForwardResponse */
         WalkForwardResponse: {
@@ -5518,6 +5687,19 @@ export interface components {
             positive_folds: number;
             /** Mean Turnover */
             mean_turnover: number;
+            /**
+             * Oos Curve
+             * @description Chained OOS NAV as [date, nav] points (decimal fraction NAV).
+             */
+            oos_curve?: [
+                string,
+                number
+            ][];
+            /**
+             * Fold Boundaries
+             * @description First OOS date of each fold (plotLine markers).
+             */
+            fold_boundaries?: string[];
         };
         /** WeightOut */
         WeightOut: {
@@ -7481,6 +7663,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MonteCarloResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    project_portfolio_monte_carlo_monte_carlo_portfolio_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortfolioMonteCarloRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioMonteCarloResponse"];
                 };
             };
             /** @description Validation Error */

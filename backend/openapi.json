@@ -3501,6 +3501,48 @@
         }
       }
     },
+    "/monte-carlo/portfolio": {
+      "post": {
+        "tags": [
+          "monte-carlo"
+        ],
+        "summary": "Project Portfolio Monte Carlo",
+        "description": "Block-bootstrap Monte Carlo over a synthetic portfolio NAV.\n\nBuilds the portfolio return series from the positions' common-history\naligned returns (target weights held = implicit rebalancing) and runs the\nsame block-bootstrap core as the single-instrument projection. Drawdown/\nreturn fields are decimal fractions (0.05 = 5%); sharpe is unitless.\n\nError mapping (fail loud):\n- request shape / weight bounds / position count -> 422 (Pydantic)\n- unknown asset / no history in window           -> 422\n- insufficient common observations               -> 422\n- history too short for the requested horizon    -> 422",
+        "operationId": "project_portfolio_monte_carlo_monte_carlo_portfolio_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioMonteCarloRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioMonteCarloResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/portfolios/{portfolio_id}/rebalance/policy": {
       "get": {
         "tags": [
@@ -10838,6 +10880,227 @@
         ],
         "title": "PortfolioLookthroughResponse"
       },
+      "PortfolioMonteCarloParams": {
+        "properties": {
+          "statistic": {
+            "type": "string",
+            "enum": [
+              "max_drawdown",
+              "return",
+              "sharpe"
+            ],
+            "title": "Statistic"
+          },
+          "n_assets": {
+            "type": "integer",
+            "title": "N Assets"
+          },
+          "n_simulations": {
+            "type": "integer",
+            "title": "N Simulations"
+          },
+          "risk_free_rate": {
+            "type": "number",
+            "title": "Risk Free Rate"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "Seed used, or null when unseeded."
+          }
+        },
+        "type": "object",
+        "required": [
+          "statistic",
+          "n_assets",
+          "n_simulations",
+          "risk_free_rate",
+          "seed"
+        ],
+        "title": "PortfolioMonteCarloParams",
+        "description": "Echo of the resolved portfolio MC parameters (no ticker; n_assets instead)."
+      },
+      "PortfolioMonteCarloRequest": {
+        "properties": {
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/PortfolioPositionIn"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 2,
+            "title": "Positions"
+          },
+          "statistic": {
+            "type": "string",
+            "enum": [
+              "max_drawdown",
+              "return",
+              "sharpe"
+            ],
+            "title": "Statistic",
+            "description": "Which statistic to project: max_drawdown | return | sharpe.",
+            "default": "max_drawdown"
+          },
+          "n_simulations": {
+            "type": "integer",
+            "maximum": 50000.0,
+            "minimum": 1000.0,
+            "title": "N Simulations",
+            "description": "Number of bootstrap paths (1000-50000).",
+            "default": 10000
+          },
+          "horizons": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Horizons",
+            "description": "Trading-day horizons for the confidence fan; default 1Y/3Y/5Y/7Y/10Y."
+          },
+          "risk_free_rate": {
+            "type": "number",
+            "title": "Risk Free Rate",
+            "description": "Annualized risk-free rate for the Sharpe statistic (decimal fraction).",
+            "default": 0.04
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "Optional RNG seed for a reproducible projection."
+          },
+          "window_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 3650.0,
+                "minimum": 30.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "positions"
+        ],
+        "title": "PortfolioMonteCarloRequest",
+        "description": "Block-bootstrap Monte Carlo over a synthetic portfolio NAV.\n\nThe service builds ``portfolio_returns = frame @ w`` from the common-history\naligned returns of the positions (target weights held = implicit continuous\nrebalancing), then runs the SAME pure ``block_bootstrap_monte_carlo`` the\nsingle-instrument projection uses."
+      },
+      "PortfolioMonteCarloResponse": {
+        "properties": {
+          "params": {
+            "$ref": "#/components/schemas/PortfolioMonteCarloParams"
+          },
+          "percentiles": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Percentiles",
+            "description": "Distribution of the statistic at the longest horizon, keyed by percentile ('1st'..'99th')."
+          },
+          "mean": {
+            "type": "number",
+            "title": "Mean"
+          },
+          "median": {
+            "type": "number",
+            "title": "Median"
+          },
+          "std": {
+            "type": "number",
+            "title": "Std"
+          },
+          "historical_value": {
+            "type": "number",
+            "title": "Historical Value",
+            "description": "The statistic computed on the ACTUAL synthetic portfolio series."
+          },
+          "historical_horizon_days": {
+            "type": "integer",
+            "title": "Historical Horizon Days",
+            "description": "Length of the synthetic portfolio series in trading days."
+          },
+          "historical_percentile_rank": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Historical Percentile Rank",
+            "description": "Percentile rank (0-100) of the historical value within a horizon-matched bootstrap; null for the sharpe statistic."
+          },
+          "confidence_bars": {
+            "items": {
+              "$ref": "#/components/schemas/ConfidenceBar"
+            },
+            "type": "array",
+            "title": "Confidence Bars",
+            "description": "Per-horizon percentile fans (the projection chart)."
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded",
+            "description": "True only when a flat-NAV Sharpe collapse made the result uninformative."
+          },
+          "degraded_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degraded Reason",
+            "description": "Diagnostic when degraded is True, else null."
+          }
+        },
+        "type": "object",
+        "required": [
+          "params",
+          "percentiles",
+          "mean",
+          "median",
+          "std",
+          "historical_value",
+          "historical_horizon_days",
+          "historical_percentile_rank",
+          "confidence_bars",
+          "degraded",
+          "degraded_reason"
+        ],
+        "title": "PortfolioMonteCarloResponse",
+        "description": "Render-ready portfolio Monte Carlo payload.\n\nReuses the single-instrument distribution shape (``ConfidenceBar``,\npercentiles, historical rank, degraded flags); only ``params`` differs\n(n_assets instead of ticker/range). Drawdown/return fields are decimal\nfractions (0.05 = 5%); sharpe is unitless."
+      },
       "PortfolioNewsResponse": {
         "properties": {
           "portfolio_id": {
@@ -11041,6 +11304,41 @@
         "type": "object",
         "title": "PortfolioPatch",
         "description": "Body for PATCH /portfolios/{id} \u2014 at least one field must be present."
+      },
+      "PortfolioPositionIn": {
+        "properties": {
+          "asset": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FundRefIn"
+              },
+              {
+                "$ref": "#/components/schemas/EquityRefIn"
+              }
+            ],
+            "title": "Asset",
+            "discriminator": {
+              "propertyName": "kind",
+              "mapping": {
+                "equity": "#/components/schemas/EquityRefIn",
+                "fund": "#/components/schemas/FundRefIn"
+              }
+            }
+          },
+          "weight": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Weight"
+          }
+        },
+        "type": "object",
+        "required": [
+          "asset",
+          "weight"
+        ],
+        "title": "PortfolioPositionIn",
+        "description": "One position in a synthetic portfolio MC request.\n\n``asset`` reuses the builder ref (FundRefIn | EquityRefIn) so the request is\nthe exact weight list the optimizer returned; ``weight`` is a decimal\nfraction (0 < w <= 1). The service aligns weights to the loaded return\nframe's columns by the 'fund:{id}' / 'equity:{TICKER}' label scheme."
       },
       "PortfolioRef": {
         "properties": {
@@ -13829,6 +14127,19 @@
             "minimum": 0.0,
             "title": "Risk Free Annual",
             "default": 0.0
+          },
+          "cvar_limit": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cvar Limit"
           }
         },
         "type": "object",
@@ -13865,6 +14176,34 @@
           "mean_turnover": {
             "type": "number",
             "title": "Mean Turnover"
+          },
+          "oos_curve": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Oos Curve",
+            "description": "Chained OOS NAV as [date, nav] points (decimal fraction NAV)."
+          },
+          "fold_boundaries": {
+            "items": {
+              "type": "string",
+              "format": "date"
+            },
+            "type": "array",
+            "title": "Fold Boundaries",
+            "description": "First OOS date of each fold (plotLine markers)."
           }
         },
         "type": "object",
