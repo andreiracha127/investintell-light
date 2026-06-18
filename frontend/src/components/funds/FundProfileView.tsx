@@ -15,7 +15,7 @@ import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { InteractiveChart } from "@/components/charts/InteractiveChart";
 import { FundLookthroughSection } from "@/components/funds/FundLookthroughSection";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
-import { Card, KpiTile, StatRow } from "@/components/ui/panels";
+import { Card, InfoDot, KpiTile, StatRow } from "@/components/ui/panels";
 import {
   fetchFundActiveShare,
   fetchFundAnalysis,
@@ -56,7 +56,9 @@ import {
   buildHcStyleDriftOption,
   buildHcTailRiskOption,
 } from "@/lib/charts/hc/fundDossier";
+import { buildHcFactorRadarOption } from "@/lib/charts/hc/fund-radar";
 import { buildHcHistogramOption } from "@/lib/charts/hc/histogram";
+import { buildHcBellCurveOption } from "@/lib/charts/hc/stats-bellcurve";
 import { buildHcRollingOption } from "@/lib/charts/hc/rolling";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import {
@@ -155,6 +157,19 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     setBenchmarkId("");
     setSelectedCusip("");
   }, [instrumentId]);
+
+  // Escape closes whichever side panel is open (Deep analysis / Ownership).
+  useEffect(() => {
+    if (!deepOpen && !relationshipsOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setDeepOpen(false);
+        setRelationshipsOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [deepOpen, relationshipsOpen]);
 
   const benchmarkQuery = benchmarkId ? { benchmark_id: benchmarkId } : {};
   const isPerformanceTab = activeTab === "performance";
@@ -347,6 +362,18 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     return buildHcHistogramOption(analysisQuery.data.histogram, colors);
   }, [analysisQuery.data, colors]);
 
+  // Return distribution: fitted-normal bell with ±1σ shading and Mean / VaR-95
+  // reference lines (Funds.dc.html #ix-dist). `stats.var_95` is a signed loss
+  // fraction; the bell builder wants the positive magnitude.
+  const distributionBellOption = useMemo(() => {
+    if (!colors || !analysisQuery.data) return null;
+    return buildHcBellCurveOption(
+      analysisQuery.data.histogram,
+      Math.abs(analysisQuery.data.stats.var_95 ?? 0),
+      colors,
+    );
+  }, [analysisQuery.data, colors]);
+
   const riskTimeseriesOption = useMemo(() => {
     if (!colors || !riskTimeseriesQuery.data) return null;
     if (riskTimeseriesQuery.data.empty_state) return null;
@@ -369,6 +396,15 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
   const styleBiasOption = useMemo(() => {
     if (!colors || !factorsQuery.data?.style_bias.length) return null;
     return buildHcStyleBiasOption(factorsQuery.data, colors);
+  }, [factorsQuery.data, colors]);
+
+  // Factors tab style-bias spider/radar (Funds.dc.html #ix-bias). Needs at least
+  // three spokes to read as a polygon; below that the diverging bars carry it.
+  const factorRadarOption = useMemo(() => {
+    if (!colors || !factorsQuery.data || factorsQuery.data.style_bias.length < 3) {
+      return null;
+    }
+    return buildHcFactorRadarOption(factorsQuery.data, colors);
   }, [factorsQuery.data, colors]);
 
   const scatterOption = useMemo(() => {
@@ -512,12 +548,28 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
       </div>
 
       <div className="mb-4 grid gap-px border border-border bg-border [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
-        <KpiTile label="AUM" value={money(fund.aum_usd)} />
-        <KpiTile label="Expense" value={pct(fund.expense_ratio)} />
+        <KpiTile label="Net assets" value={money(fund.aum_usd)} />
+        <KpiTile
+          label="Expense ratio"
+          value={pct(fund.expense_ratio)}
+          tip="Annual fee charged by the fund, as a percent of assets."
+        />
         <KpiTile label="Return 1Y" value={signedPct(risk?.return_1y)} tone={riskTone} />
-        <KpiTile label="Vol 1Y" value={pct(risk?.volatility_1y)} />
-        <KpiTile label="Sharpe 1Y" value={num(risk?.sharpe_1y)} />
-        <KpiTile label="CVaR 95 12M" value={pct(risk?.cvar_95_12m)} />
+        <KpiTile
+          label="Volatility 1Y"
+          value={pct(risk?.volatility_1y)}
+          tip="Annualized standard deviation of returns — how widely the value swings over a year."
+        />
+        <KpiTile
+          label="Sharpe 1Y"
+          value={num(risk?.sharpe_1y)}
+          tip="Return earned per unit of risk. Higher is better; above 1.0 is strong."
+        />
+        <KpiTile
+          label="Exp. shortfall"
+          value={pct(risk?.cvar_95_12m)}
+          tip="Expected shortfall (CVaR 95): the average loss on the worst 5% of days — a more conservative tail measure than Value-at-Risk."
+        />
       </div>
 
       <div className="mb-4 border-b border-border-strong">
@@ -554,6 +606,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
           volatilityOption={volatilityOption}
           sharpeOption={sharpeOption}
           histogramOption={histogramOption}
+          distributionBellOption={distributionBellOption}
           riskTimeseriesOption={riskTimeseriesOption}
           risk={risk}
           fundType={fund.fund_type}
@@ -585,6 +638,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
           factorsQuery={factorsQuery}
           factorSensitivityOption={factorSensitivityOption}
           styleBiasOption={styleBiasOption}
+          factorRadarOption={factorRadarOption}
         />
       )}
 
@@ -640,6 +694,7 @@ function PerformanceTab({
   volatilityOption,
   sharpeOption,
   histogramOption,
+  distributionBellOption,
   riskTimeseriesOption,
   risk,
   fundType,
@@ -656,6 +711,7 @@ function PerformanceTab({
   volatilityOption: Highcharts.Options | null;
   sharpeOption: Highcharts.Options | null;
   histogramOption: Highcharts.Options | null;
+  distributionBellOption: Highcharts.Options | null;
   riskTimeseriesOption: Highcharts.Options | null;
   risk: FundRisk | null;
   fundType: string;
@@ -672,7 +728,7 @@ function PerformanceTab({
           <div className="relative">
             {isRefreshing ? (
               <span className="absolute right-2 top-2 z-10 rounded bg-surface px-2 py-0.5 text-[11px] text-text-muted">
-                Atualizando…
+                Updating…
               </span>
             ) : null}
             <div
@@ -701,25 +757,28 @@ function PerformanceTab({
 
         <div className="grid gap-4 xl:grid-cols-2">
           <ChartCard
-            title="Growth of 100"
+            title="Growth of $100"
             option={growthOption}
             query={analysisQuery}
             emptyMessage="No rebased performance series for this window."
           />
           <ChartCard
-            title="Return histogram"
-            option={histogramOption}
+            title="Return distribution"
+            subtitle="daily"
+            option={distributionBellOption ?? histogramOption}
             query={analysisQuery}
             emptyMessage="No return distribution for this window."
           />
           <ChartCard
             title="Rolling volatility"
+            subtitle="63 sessions"
             option={volatilityOption}
             query={analysisQuery}
             emptyMessage="No rolling volatility for this window."
           />
           <ChartCard
             title="Rolling Sharpe"
+            subtitle="63 sessions"
             option={sharpeOption}
             query={analysisQuery}
             emptyMessage="No rolling Sharpe for this window."
@@ -906,28 +965,34 @@ function FactorsTab({
   factorsQuery,
   factorSensitivityOption,
   styleBiasOption,
+  factorRadarOption,
 }: {
   factorsQuery: UseQueryResult<FundFactors, Error>;
   factorSensitivityOption: Highcharts.Options | null;
   styleBiasOption: Highcharts.Options | null;
+  factorRadarOption: Highcharts.Options | null;
 }) {
   return (
-    <div className="grid gap-4 xl:grid-cols-2">
+    <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))]">
       <ChartCard
         title="Market sensitivities"
+        subtitle="beta"
         option={factorSensitivityOption}
         query={factorsQuery}
         emptyMessage="No factor sensitivities available."
+        tip="How strongly the fund moves with each driver. A market beta of 1.0 tracks the index; positive size / value tilts mean a small-cap or value lean."
         className="h-[320px]"
       />
+      {/* Style bias spider — falls back to diverging bars below 3 spokes. */}
       <ChartCard
         title="Style bias"
-        option={styleBiasOption}
+        subtitle="holdings-weighted z-score"
+        option={factorRadarOption ?? styleBiasOption}
         query={factorsQuery}
         emptyMessage="No style-bias snapshot available."
         className="h-[320px]"
       />
-      <Card title="Source metadata">
+      <Card title="Factor source metadata">
         {factorsQuery.data ? (
           factorsQuery.data.source_metadata.length > 0 ? (
             <dl className="m-0">
@@ -1025,30 +1090,17 @@ function DeepAnalysisModal({
     : [];
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-[rgba(22,22,22,0.72)] px-4 py-6"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Deep fund analysis"
+    <SidePanel
+      title="Deep Analysis"
+      subtitle={
+        data
+          ? `${data.name} · ${data.window} · ${formatDate(data.as_of_date)}`
+          : "Loading"
+      }
+      ariaLabel="Deep fund analysis"
+      closeLabel="Close deep analysis"
+      onClose={onClose}
     >
-      <div className="mx-auto flex max-h-[calc(100vh-48px)] max-w-[1180px] flex-col border border-border-strong bg-surface shadow-2xl">
-        <div className="flex items-center justify-between gap-3 border-b border-border-strong px-4 py-3">
-          <div>
-            <h2 className="ix-title m-0 text-[22px]">Deep Analysis</h2>
-            <p className="m-0 text-[12px] text-text-secondary">
-              {data ? `${data.name} - ${data.window} - ${formatDate(data.as_of_date)}` : "Loading"}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-[30px] min-w-[30px] border border-border-strong bg-surface-2 px-2 text-[14px] font-bold text-text-secondary hover:bg-layer-hover"
-            aria-label="Close deep analysis"
-          >
-            x
-          </button>
-        </div>
-
         <div className="overflow-y-auto px-4 py-4">
           <div className="mb-4">
             <BenchmarkControl
@@ -1209,8 +1261,7 @@ function DeepAnalysisModal({
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </SidePanel>
   );
 }
 
@@ -1233,32 +1284,17 @@ function RelationshipsModal({
 }) {
   const data = institutionalRevealQuery.data;
   return (
-    <div
-      className="fixed inset-0 z-50 bg-[rgba(22,22,22,0.72)] px-4 py-6"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Fund relationships"
+    <SidePanel
+      title="Ownership"
+      subtitle={
+        data
+          ? `${data.fund_name} · ${data.period ? formatDate(data.period) : "no 13F period"}`
+          : "Loading"
+      }
+      ariaLabel="Fund relationships"
+      closeLabel="Close relationships"
+      onClose={onClose}
     >
-      <div className="mx-auto flex max-h-[calc(100vh-48px)] max-w-[1180px] flex-col border border-border-strong bg-surface shadow-2xl">
-        <div className="flex items-center justify-between gap-3 border-b border-border-strong px-4 py-3">
-          <div>
-            <h2 className="ix-title m-0 text-[22px]">Relationships</h2>
-            <p className="m-0 text-[12px] text-text-secondary">
-              {data
-                ? `${data.fund_name} - ${data.period ? formatDate(data.period) : "no 13F period"}`
-                : "Loading"}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="h-[30px] min-w-[30px] border border-border-strong bg-surface-2 px-2 text-[14px] font-bold text-text-secondary hover:bg-layer-hover"
-            aria-label="Close relationships"
-          >
-            x
-          </button>
-        </div>
-
         <div className="overflow-y-auto px-4 py-4">
           {!data ? (
             <QueryMessage
@@ -1315,8 +1351,7 @@ function RelationshipsModal({
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </SidePanel>
   );
 }
 
@@ -1406,6 +1441,7 @@ function ChartCard({
   option,
   query,
   emptyMessage,
+  tip,
   className = "h-[260px]",
 }: {
   title: string;
@@ -1413,10 +1449,15 @@ function ChartCard({
   option: Highcharts.Options | null;
   query: UseQueryResult<unknown, Error>;
   emptyMessage: string;
+  tip?: string;
   className?: string;
 }) {
   return (
-    <Card title={title} subtitle={subtitle}>
+    <Card
+      title={title}
+      subtitle={subtitle}
+      actions={tip ? <InfoDot tip={tip} /> : undefined}
+    >
       {option ? (
         <HighchartsChart options={option} className={`${className} w-full`} />
       ) : (
@@ -1704,6 +1745,61 @@ function Td({
   return <td className={`ix-cell px-2.5 ${alignClass} ${className}`}>{children}</td>;
 }
 
+/**
+ * Right-docked side panel (Funds.dc.html Deep analysis / Ownership drawers).
+ * Backdrop click and Escape (wired in the parent) close it; the panel itself
+ * stops propagation. The sticky serif header carries the title, a muted
+ * subtitle, and the × close affordance.
+ */
+function SidePanel({
+  title,
+  subtitle,
+  ariaLabel,
+  closeLabel,
+  onClose,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  ariaLabel: string;
+  closeLabel: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex justify-end bg-[rgba(22,22,22,0.5)]"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={ariaLabel}
+        onClick={(event) => event.stopPropagation()}
+        className="ix-thin-scroll flex h-full w-[min(720px,94vw)] flex-col overflow-y-auto border-l border-border-strong bg-surface shadow-2xl"
+      >
+        <div className="sticky top-0 z-[5] flex items-center justify-between gap-3 border-b border-border bg-surface-2 px-4 py-3">
+          <div className="min-w-0">
+            <h2 className="ix-title m-0 text-[18px]">{title}</h2>
+            {subtitle && (
+              <p className="m-0 truncate text-[11px] text-text-muted">{subtitle}</p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={closeLabel}
+            className="flex h-[30px] min-w-[30px] items-center justify-center border border-border-strong bg-surface-2 px-2 text-[16px] font-bold leading-none text-text-secondary hover:bg-layer-hover"
+          >
+            ×
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function ModalSection({
   title,
   children,
@@ -1740,7 +1836,41 @@ function Tag({ children }: { children: ReactNode }) {
   );
 }
 
-type RiskRow = { label: string; value: string; detail?: string };
+type RiskRow = { label: string; value: string; detail?: string; tip?: string };
+
+/**
+ * One catalog of plain-language tooltips for the dossier's technical risk
+ * rows (Funds.dc.html / revised/FundRiskSnapshot.tsx RISK_COPY). The data
+ * layer stays field-keyed; the wording is reviewed in one place.
+ */
+const RISK_TIP: Record<string, string> = {
+  "Max drawdown 1Y":
+    "The largest peak-to-trough decline over the past year — the worst loss an investor would have sat through.",
+  "VaR 95 1M":
+    "Value-at-Risk: a loss this size or worse is expected on the worst 5% of days. A rough floor for a normal bad day.",
+  "CVaR 95 1M":
+    "Expected shortfall (CVaR): average loss on the worst 5% of days. More conservative than VaR because it measures how bad the tail actually is.",
+  "Sortino 1Y":
+    "Like Sharpe, but only counts downside moves as risk — it doesn't penalize upside volatility.",
+  "Calmar 3Y":
+    "Return relative to the worst peak-to-trough loss. Higher means smoother recovery from drawdowns.",
+  "Alpha 1Y":
+    "Return above what the benchmark exposure alone would predict — the manager's value-add after market risk.",
+  "Beta 1Y":
+    "How strongly the fund moves with its benchmark. 1.0 tracks it; above 1 amplifies the swings, below 1 is calmer.",
+  "Info ratio 1Y":
+    "Excess return over the benchmark per unit of tracking error — the consistency of out-performance.",
+  "Tracking error 1Y":
+    "How far the fund's returns stray from the benchmark. Low means index-like; high means it goes its own way.",
+  "Downside capture 1Y":
+    "Share of the benchmark's down moves the fund takes on. Below 100% means it cushions losses.",
+  "Upside capture 1Y":
+    "Share of the benchmark's up moves the fund captures. Above 100% means it beats the market in rallies.",
+  "Empirical duration":
+    "Estimated sensitivity to rate moves from the fund's own return history — its effective interest-rate exposure.",
+  "Credit beta":
+    "Sensitivity to credit-spread moves — how much the fund swings when corporate risk premia widen or tighten.",
+};
 
 function riskClass(
   fundType: string,
@@ -1827,41 +1957,41 @@ function RiskRows({
     { label: "Elite", value: risk.elite_flag === null ? "--" : risk.elite_flag ? "Yes" : "No" },
   ];
 
+  const renderRow = (row: RiskRow) => (
+    <StatRow
+      key={row.label}
+      label={row.label}
+      value={row.value}
+      detail={row.detail}
+      tip={row.tip ?? RISK_TIP[row.label]}
+    />
+  );
+
   return (
     <>
-      {common.map((row) => (
-        <StatRow key={row.label} label={row.label} value={row.value} detail={row.detail} />
-      ))}
+      {common.map(renderRow)}
       {byClass[cls].length > 0 && (
         <>
           <RiskGroupHeader>{RISK_CLASS_TITLE[cls]}</RiskGroupHeader>
-          {byClass[cls].map((row) => (
-            <StatRow key={row.label} label={row.label} value={row.value} detail={row.detail} />
-          ))}
+          {byClass[cls].map(renderRow)}
         </>
       )}
       <RiskGroupHeader>Peer comparison</RiskGroupHeader>
-      {peers.map((row) => (
-        <StatRow key={row.label} label={row.label} value={row.value} detail={row.detail} />
-      ))}
+      {peers.map(renderRow)}
       {(risk.empirical_duration != null ||
         risk.credit_beta != null ||
         risk.inflation_beta != null ||
         risk.crisis_alpha_score != null) && (
         <>
           <RiskGroupHeader>FI/Alt analytics</RiskGroupHeader>
-          {risk.empirical_duration != null && (
-            <StatRow label="Empirical duration" value={num(risk.empirical_duration)} />
-          )}
-          {risk.credit_beta != null && (
-            <StatRow label="Credit beta" value={num(risk.credit_beta)} />
-          )}
-          {risk.inflation_beta != null && (
-            <StatRow label="Inflation beta" value={num(risk.inflation_beta)} />
-          )}
-          {risk.crisis_alpha_score != null && (
-            <StatRow label="Crisis alpha score" value={num(risk.crisis_alpha_score)} />
-          )}
+          {risk.empirical_duration != null &&
+            renderRow({ label: "Empirical duration", value: num(risk.empirical_duration) })}
+          {risk.credit_beta != null &&
+            renderRow({ label: "Credit beta", value: num(risk.credit_beta) })}
+          {risk.inflation_beta != null &&
+            renderRow({ label: "Inflation beta", value: num(risk.inflation_beta) })}
+          {risk.crisis_alpha_score != null &&
+            renderRow({ label: "Crisis alpha score", value: num(risk.crisis_alpha_score) })}
         </>
       )}
     </>

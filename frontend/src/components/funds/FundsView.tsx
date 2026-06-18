@@ -8,6 +8,11 @@
  * filters/sorts/pages — every metric is the mother-DB value (never
  * recomputed here).
  *
+ * Presentation follows the Claude Design "Funds" mockup (Funds.dc.html):
+ * a labelled Filters card with `$`/`%` affixes + jargon tooltips and an
+ * active-filter tag, an accent match-count Tag with `aria-live`, and the
+ * dense windowed DataGrid (kept for sort/export/infinite-scroll plumbing).
+ *
  * Scope (Task C): rows load incrementally as the user scrolls the virtualized
  * grid near the bottom; a "Load more" button is the always-present a11y +
  * safety-net fallback. Filters/sort live in the query key, so any change resets
@@ -29,7 +34,7 @@ import {
   useGridInfiniteScroll,
   useInfiniteGrid,
 } from "@/lib/grid/useInfiniteGrid";
-import { PageTitle } from "@/components/ui/panels";
+import { InfoDot, PageTitle } from "@/components/ui/panels";
 import {
   BUTTON_CLASS,
   ErrorPanel,
@@ -109,6 +114,30 @@ export function FundsView() {
   };
   const filterKey = JSON.stringify(query);
 
+  // Count of populated filters (search/type/class/strategy + four bounds), for
+  // the "N active" tag in the filter card header.
+  const activeFilterCount = [
+    searchText.trim() !== "",
+    fundType !== "",
+    assetClass !== "",
+    strategyText.trim() !== "",
+    expenseMaxPct.trim() !== "",
+    aumMinM.trim() !== "",
+    sharpeMin.trim() !== "",
+    volMaxPct.trim() !== "",
+  ].filter(Boolean).length;
+
+  const resetFilters = useCallback(() => {
+    setSearchText("");
+    setFundType("");
+    setAssetClass("");
+    setStrategyText("");
+    setExpenseMaxPct("");
+    setAumMinM("");
+    setSharpeMin("");
+    setVolMaxPct("");
+  }, []);
+
   // Infinite-windowed loader: filters/sort live in the key, so any change
   // restarts at page 1. Virtualization renders only the visible window.
   const fundsQuery = useInfiniteGrid({
@@ -160,32 +189,78 @@ export function FundsView() {
     [lastPage, mergedItems],
   );
 
-  const meta = lastPage
-    ? `${formatCompact(lastPage.total)} funds${
-        lastPage.staleness.source_calc_date
-          ? ` · data as of ${formatDate(lastPage.staleness.source_calc_date)}`
-          : ""
-      }`
-    : "—";
+  const meta =
+    lastPage && lastPage.staleness.source_calc_date
+      ? `Data as of ${formatDate(lastPage.staleness.source_calc_date)}`
+      : undefined;
 
   return (
     <div className="mx-auto w-full max-w-[1800px] px-[clamp(16px,2vw,28px)] py-5">
-      <PageTitle title="Funds" meta={meta} />
+      <PageTitle
+        title="Funds"
+        meta="Screen ETFs, mutual funds and money-market funds on the latest computed risk & return snapshot. Open any fund for the full dossier."
+      >
+        {lastPage && (
+          <span className="inline-flex items-center gap-1.5 border border-border bg-field px-[9px] py-1 text-[11px] text-text-muted">
+            <span
+              title="Metrics come from the latest computed fundamentals & NAV snapshot, refreshed after each market close. Nothing is recalculated in the browser."
+              className="cursor-help border-b border-dotted border-current"
+            >
+              Fundamentals
+            </span>
+            {meta ? ` · ${meta}` : ""} · {formatCompact(lastPage.total)} funds
+          </span>
+        )}
+      </PageTitle>
 
       {/* ── Filters ─────────────────────────────────────────────────────── */}
-      <section className="mb-4 border border-border bg-surface-2 px-[var(--ix-pad)] py-3">
-        <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(160px,1fr))]">
-          <label className="flex flex-col gap-1">
+      <section
+        aria-label="Filters"
+        className="mb-3.5 border border-border bg-surface-2"
+      >
+        <div className="flex items-center gap-2.5 border-b border-border px-[var(--ix-pad)] py-2.5">
+          <span className="ix-label m-0">Filters</span>
+          {activeFilterCount > 0 && (
+            <span className="inline-flex h-[20px] items-center border border-accent bg-accent-wash px-[7px] text-[10px] font-bold text-accent">
+              {activeFilterCount} active
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={resetFilters}
+            disabled={activeFilterCount === 0}
+            className={`ml-auto h-[28px] px-3 text-[11.5px] font-semibold ${BUTTON_CLASS}`}
+          >
+            Reset
+          </button>
+        </div>
+
+        <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(168px,1fr))] p-[var(--ix-pad)]">
+          <label className="flex min-w-0 flex-col gap-1.5 sm:[grid-column:span_2]">
             <span className={FIELD_LABEL_CLASS}>Search</span>
-            <input
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-              placeholder="Ticker / name…"
-              aria-label="Search funds by ticker or name"
-              className={INPUT_CLASS}
-            />
+            <div className="flex h-[36px] items-center gap-2 border border-border-strong bg-field px-2.5 focus-within:border-accent">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+                className="flex-none text-text-muted"
+              >
+                <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.4" />
+                <path d="M11 11l3 3" stroke="currentColor" strokeWidth="1.4" />
+              </svg>
+              <input
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                placeholder="Ticker or fund name…"
+                aria-label="Search funds by ticker or name"
+                className="min-w-0 flex-1 border-none bg-transparent text-[12.5px] text-text-primary outline-none placeholder:text-text-muted"
+              />
+            </div>
           </label>
-          <label className="flex flex-col gap-1">
+
+          <label className="flex min-w-0 flex-col gap-1.5">
             <span className={FIELD_LABEL_CLASS}>Type</span>
             <select
               value={fundType}
@@ -193,7 +268,7 @@ export function FundsView() {
               aria-label="Fund type"
               className={INPUT_CLASS}
             >
-              <option value="">All</option>
+              <option value="">All types</option>
               {FUND_TYPES.map((t) => (
                 <option key={t.value} value={t.value}>
                   {t.label}
@@ -201,7 +276,8 @@ export function FundsView() {
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1">
+
+          <label className="flex min-w-0 flex-col gap-1.5">
             <span className={FIELD_LABEL_CLASS}>Asset class</span>
             <select
               value={assetClass}
@@ -209,7 +285,7 @@ export function FundsView() {
               aria-label="Asset class"
               className={INPUT_CLASS}
             >
-              <option value="">All</option>
+              <option value="">All classes</option>
               {ASSET_CLASSES.map((a) => (
                 <option key={a.value} value={a.value}>
                   {a.label}
@@ -217,7 +293,8 @@ export function FundsView() {
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1">
+
+          <label className="flex min-w-0 flex-col gap-1.5">
             <span className={FIELD_LABEL_CLASS}>Strategy</span>
             <input
               value={strategyText}
@@ -227,29 +304,35 @@ export function FundsView() {
               className={INPUT_CLASS}
             />
           </label>
+
           <BoundField
-            label="Expense ≤ %"
+            label="Max expense ratio"
+            tip="Annual fee charged by the fund, as a percent of assets. Lower is cheaper to hold."
             value={expenseMaxPct}
             onChange={setExpenseMaxPct}
             placeholder="0.50"
+            suffix="%"
           />
           <BoundField
-            label="AUM ≥ $M"
+            label="Min assets ($M)"
             value={aumMinM}
             onChange={setAumMinM}
             placeholder="100"
           />
           <BoundField
-            label="Sharpe 1Y ≥"
+            label="Min Sharpe 1Y"
+            tip="Sharpe ratio: return earned per unit of risk over the past year. Higher is better; above 1.0 is strong."
             value={sharpeMin}
             onChange={setSharpeMin}
             placeholder="0.5"
           />
           <BoundField
-            label="Vol 1Y ≤ %"
+            label="Max volatility 1Y"
+            tip="Annualized standard deviation of returns — how widely the fund's value swings over a year."
             value={volMaxPct}
             onChange={setVolMaxPct}
             placeholder="20"
+            suffix="%"
           />
         </div>
       </section>
@@ -279,8 +362,14 @@ export function FundsView() {
           exporting={exporting}
           exportError={exportError}
           onExport={() => void exportCsv()}
+          onResetFilters={resetFilters}
         />
       )}
+
+      <p className="mt-2.5 px-0.5 text-[11px] text-text-muted">
+        Classification follows the latest N-PORT / prospectus mapping.
+        Money-market funds report a $1.00 stable NAV.
+      </p>
     </div>
   );
 }
@@ -290,23 +379,37 @@ function BoundField({
   value,
   onChange,
   placeholder,
+  tip,
+  suffix,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
+  tip?: string;
+  suffix?: string;
 }) {
   return (
-    <label className="flex flex-col gap-1">
-      <span className={FIELD_LABEL_CLASS}>{label}</span>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        inputMode="decimal"
-        aria-label={label}
-        className={`${INPUT_CLASS} tabular-nums`}
-      />
+    <label className="flex min-w-0 flex-col gap-1.5">
+      <span className={`${FIELD_LABEL_CLASS} flex items-center gap-1.5`}>
+        {label}
+        {tip && <InfoDot tip={tip} />}
+      </span>
+      <div className="relative">
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          inputMode="decimal"
+          aria-label={label}
+          className={`${INPUT_CLASS} w-full tabular-nums ${suffix ? "pr-6" : ""}`}
+        />
+        {suffix && (
+          <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-text-muted">
+            {suffix}
+          </span>
+        )}
+      </div>
     </label>
   );
 }
@@ -324,6 +427,7 @@ function FundsTable({
   exporting,
   exportError,
   onExport,
+  onResetFilters,
 }: {
   data: FundsList;
   loadedCount: number;
@@ -337,8 +441,10 @@ function FundsTable({
   exporting: boolean;
   exportError: string | null;
   onExport: () => void;
+  onResetFilters: () => void;
 }) {
   const { total } = data;
+  const isEmpty = data.items.length === 0;
   const gridOptions = useMemo(
     () => fundsListToGridOptions(data, { sort, dir }, { onSortChange }),
     [data, sort, dir, onSortChange],
@@ -353,10 +459,15 @@ function FundsTable({
 
   return (
     <section className="bg-surface-2 border border-border">
-      <div className="flex flex-wrap items-center gap-2.5 px-[var(--ix-pad)] py-3">
-        <h2 className="ix-label m-0">Universe</h2>
-        <span className="inline-flex h-[22px] items-center bg-accent-wash border border-accent px-2 tabular-nums text-[11px] font-bold text-accent">
-          {formatCompact(total)} matches
+      <div className="flex flex-wrap items-center gap-2.5 border-b border-border px-[var(--ix-pad)] py-3">
+        <h2 className="m-0 text-[13px] font-bold text-text-primary">
+          Fund universe
+        </h2>
+        <span
+          aria-live="polite"
+          className="inline-flex h-[22px] items-center bg-accent-wash border border-accent px-2 tabular-nums text-[11px] font-bold text-accent"
+        >
+          {formatCompact(loadedCount)} of {formatCompact(total)} funds
         </span>
         <div className="ml-auto" />
         <button
@@ -379,14 +490,33 @@ function FundsTable({
         </p>
       )}
 
-      <div className={`overflow-x-auto transition-opacity ${isFetching ? "opacity-60" : ""}`}>
-        <DataGrid
-          options={gridOptions}
-          className="h-[600px] min-w-[1600px] w-full"
-          onReady={onGridReady}
-          emptyMessage="No funds match the current filters."
-        />
-      </div>
+      {isEmpty ? (
+        <div className="flex flex-col items-center gap-2 px-4 py-11 text-center text-text-muted">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.6" />
+            <path d="M16 16l5 5" stroke="currentColor" strokeWidth="1.6" />
+          </svg>
+          <div className="text-[13px] text-text-secondary">
+            No funds match the current filters.
+          </div>
+          <button
+            type="button"
+            onClick={onResetFilters}
+            className={`mt-1 ${BUTTON_CLASS} text-[12px] font-semibold`}
+          >
+            Clear filters
+          </button>
+        </div>
+      ) : (
+        <div className={`overflow-x-auto transition-opacity ${isFetching ? "opacity-60" : ""}`}>
+          <DataGrid
+            options={gridOptions}
+            className="h-[600px] min-w-[1600px] w-full"
+            onReady={onGridReady}
+            emptyMessage="No funds match the current filters."
+          />
+        </div>
+      )}
 
       {data.classification_note && (
         <p className="border-t border-border px-[var(--ix-pad)] py-2 text-[11px] text-text-muted">
