@@ -52,7 +52,7 @@ Accumulate each fold's net daily return series, chain them in time order into a 
 
 ### Subtask 1a — analytics: accumulate and chain the OOS curve
 
-- [ ] **Write failing test** — append to `backend/tests/test_backtest_analytics.py`:
+- [x] **Write failing test** — append to `backend/tests/test_backtest_analytics.py`:
 
 ```python
 def test_oos_curve_chains_folds_in_time_order() -> None:
@@ -92,11 +92,11 @@ def test_oos_curve_values_are_finite_and_positive() -> None:
     assert all(np.isfinite(v) and v > 0 for v in navs)
 ```
 
-- [ ] **Run the test (expect FAIL)**:
+- [x] **Run the test (expect FAIL)**:
   - Command: `cd backend && uv run pytest -q tests/test_backtest_analytics.py -k oos_curve`
   - Expected: `AttributeError: 'WalkForwardResult' object has no attribute 'oos_curve'` (the dataclass has no such field yet).
 
-- [ ] **Implement** — edit `backend/app/analytics/backtest.py`.
+- [x] **Implement** — edit `backend/app/analytics/backtest.py`.
 
   Add `date` to the imports at the top (after `from dataclasses import dataclass`):
 
@@ -190,11 +190,11 @@ class WalkForwardResult:
 
 > Note on `idx_date` type: `chained_nav.index` is a pandas DatetimeIndex; iterating yields `pd.Timestamp`. The schema field is `list[SeriesPoint]` = `list[tuple[dt.date, float]]`. Pydantic coerces a `Timestamp` to `dt.date` on the way out (it's used identically by the existing `FoldMetrics`/index code, and the `SeriesPoint` lists elsewhere in the repo are populated the same way from pandas indices). If mypy complains about the tuple element type, normalize explicitly with `idx_date.date()` — but only if mypy fails; do not add it preemptively.
 
-- [ ] **Run the test (expect PASS)**:
+- [x] **Run the test (expect PASS)**:
   - Command: `cd backend && uv run pytest -q tests/test_backtest_analytics.py`
   - Expected: all tests pass (the new `oos_curve` tests plus the 6 pre-existing analytics tests), e.g. `8 passed`.
 
-- [ ] **Commit**:
+- [x] **Commit**:
   - `cd backend && git add app/analytics/backtest.py tests/test_backtest_analytics.py && git commit -m "feat(backtest): chain per-fold OOS net returns into a global equity curve"`
 
 ### Subtask 1b — schema + service: expose `oos_curve` / `fold_boundaries`

@@ -21,6 +21,7 @@ Design defaults (from the legacy service docstring):
 - report fold consistency (positive_folds), not p-values (Finucane 2004).
 """
 
+import datetime as dt
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -75,6 +76,14 @@ class WalkForwardResult:
     positive_folds: int
     mean_turnover: float
     cost_bps: float
+    # Chained out-of-sample NAV: one (date, nav) point per OOS observation,
+    # concatenated across folds in time order. nav starts from the first fold's
+    # first OOS day and compounds the per-fold NET daily returns (so the
+    # rebalancing cost charged on each fold's first OOS day is already in it).
+    oos_curve: list[tuple[dt.date, float]]
+    # First OOS date of each fold (the re-optimization / rebalancing points),
+    # for the frontend's plotLines.
+    fold_boundaries: list[dt.date]
 
 
 def _annualized_sharpe(returns: np.ndarray, risk_free_daily: float) -> float:
@@ -148,6 +157,8 @@ def assemble_walk_forward_backtest(
 
     tscv = TimeSeriesSplit(n_splits=n_splits, gap=gap, test_size=test_size)
     folds: list[FoldMetrics] = []
+    net_segments: list[pd.Series] = []
+    fold_boundaries: list[dt.date] = []
     w_prev = np.zeros(matrix.shape[1])
     for fold_idx, (train_idx, test_idx) in enumerate(tscv.split(matrix)):
         if len(train_idx) < min_train_size:
@@ -164,6 +175,8 @@ def assemble_walk_forward_backtest(
 
         oos_index = index[test_idx]
         net_series = pd.Series(net_daily, index=oos_index)
+        net_segments.append(net_series)
+        fold_boundaries.append(oos_index[0])
         nav = (1.0 + net_series).cumprod()
 
         sharpe = _annualized_sharpe(net_daily, risk_free_daily)
@@ -199,6 +212,17 @@ def assemble_walk_forward_backtest(
     positive_folds = sum(1 for s in sharpes if s > 0)
     mean_turnover = float(np.mean([f.turnover for f in folds]))
 
+    # Chain every fold's NET daily series in time order, then compound once into
+    # a single global NAV. Concatenation preserves the per-fold first-day cost
+    # already baked into each segment; the result is the realized OOS equity
+    # curve of the walk-forward process.
+    chained_net = pd.concat(net_segments)
+    chained_nav = (1.0 + chained_net).cumprod()
+    oos_curve = [
+        (idx_date, round(float(value), 8))
+        for idx_date, value in zip(chained_nav.index, chained_nav.to_numpy(), strict=True)
+    ]
+
     return WalkForwardResult(
         folds=folds,
         n_splits_computed=len(folds),
@@ -207,4 +231,6 @@ def assemble_walk_forward_backtest(
         positive_folds=positive_folds,
         mean_turnover=round(mean_turnover, 6),
         cost_bps=cost_bps,
+        oos_curve=oos_curve,
+        fold_boundaries=fold_boundaries,
     )
