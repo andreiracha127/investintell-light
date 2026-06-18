@@ -458,12 +458,16 @@ git commit -m "feat(builder): expose effective CVaR ceiling + regime state in re
 
 ### Task 4: Full backend gate
 
-- [ ] **Step 1: Run the full backend quality gate**
+- [x] **Step 1: Run the full backend quality gate**
 
 Run: `cd backend && uv run ruff check . && uv run mypy app && uv run pytest -q`
 Expected: clean ruff, clean mypy, all tests PASS. Fix any regressions before proceeding (the changed files are `data.py`, `portfolio_builder.py`, `builder.py` schema, plus three test files).
 
-- [ ] **Step 2: Commit any gate fixes**
+Gate result: `uv run pytest -q` PASS (1226 tests). `uv run ruff check .` and
+`uv run mypy app` remain blocked by pre-existing baseline issues outside this
+builder objective lane; touched builder files were cleaned where needed.
+
+- [x] **Step 2: Commit any gate fixes**
 
 ```bash
 git add -A

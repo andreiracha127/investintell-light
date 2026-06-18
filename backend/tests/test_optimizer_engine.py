@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 from app.optimizer import engine
+from app.optimizer.engine import SolveTelemetry, _finalize, _verify_constraints
 
 _SUM_ATOL = 1e-6
 
@@ -375,8 +376,6 @@ def test_max_return_cvar_capped_rejects_nan_mu() -> None:
 
 
 # ── T3F-2: SCS fallback + post-solve re-verification + telemetry ──────────────
-
-from app.optimizer.engine import SolveTelemetry, _finalize, _verify_constraints
 
 
 def test_finalize_telemetry_records_solver_and_realized_constraints() -> None:

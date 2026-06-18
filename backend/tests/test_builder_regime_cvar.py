@@ -38,12 +38,10 @@ async def test_run_optimize_risk_off_halves_the_cvar_limit(
 
     from app.optimizer import data as optimizer_data
     from app.optimizer import engine
-
     from app.schemas.builder import OptimizeRequest
 
     n_obs = 500
     index = pd.bdate_range("2024-01-02", periods=n_obs)
-    labels = [f"fund:00000000-0000-0000-0000-00000000000{i}" for i in range(1, 5)]
     rng = np.random.default_rng(5)
 
     async def fake_load(session, assets, window_days=None, today=None):
@@ -76,10 +74,23 @@ async def test_run_optimize_risk_off_halves_the_cvar_limit(
     monkeypatch.setattr(pb, "_OVERRIDE_REGIME_STATE", "risk_off", raising=False)
 
     payload = OptimizeRequest(
-        assets=[{"kind": "fund", "id": f"00000000-0000-0000-0000-00000000000{i}"} for i in range(1, 5)],
+        assets=[
+            {"kind": "fund", "id": f"00000000-0000-0000-0000-00000000000{i}"}
+            for i in range(1, 5)
+        ],
         objective="max_return_cvar",
         cvar_limit=0.20,
-        views=[{"type": "absolute", "asset": {"kind": "fund", "id": "00000000-0000-0000-0000-000000000001"}, "q": 0.15, "confidence": 0.6}],
+        views=[
+            {
+                "type": "absolute",
+                "asset": {
+                    "kind": "fund",
+                    "id": "00000000-0000-0000-0000-000000000001",
+                },
+                "q": 0.15,
+                "confidence": 0.6,
+            }
+        ],
     )
     await pb.run_optimize(session=None, payload=payload)  # type: ignore[arg-type]
     assert captured["cvar_limit"] == pytest.approx(0.10)  # 0.20 * 0.5
