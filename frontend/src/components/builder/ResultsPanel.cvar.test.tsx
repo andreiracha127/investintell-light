@@ -48,6 +48,9 @@ function renderPanel() {
       <ResultsPanel
         result={result}
         objective="max_return_cvar"
+        constraints={{ cap: null, min_weight: null }}
+        windowDays={null}
+        cvarLimit={0.02}
         assetsByKey={new Map()}
         base={null}
         colors={null}

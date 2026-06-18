@@ -6,6 +6,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { OptimizeRequest } from "@/lib/api/client";
 
+const resultsPanelMock = vi.hoisted(() =>
+  vi.fn((props: unknown) => {
+    void props;
+    return <div data-testid="results" />;
+  }),
+);
+
 const optimizeMock = vi.fn(async (body: OptimizeRequest) => {
   void body;
   return {
@@ -53,7 +60,7 @@ vi.mock("./ViewsCard", () => ({
   toApiView: () => null,
 }));
 vi.mock("./ResultsPanel", () => ({
-  ResultsPanel: () => <div data-testid="results" />,
+  ResultsPanel: (props: unknown) => resultsPanelMock(props),
 }));
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
@@ -72,6 +79,7 @@ function renderView() {
 afterEach(() => {
   cleanup();
   optimizeMock.mockClear();
+  resultsPanelMock.mockClear();
 });
 
 describe("BuilderView max_return_cvar controls", () => {
@@ -110,6 +118,55 @@ describe("BuilderView max_return_cvar controls", () => {
     expect(body?.objective).toBe("max_return_cvar");
     expect(body?.mandate).toBe("aggressive");
     expect(body?.cvar_limit).toBeCloseTo(0.03, 6);
+  });
+
+  it("keeps result tabs pinned to the submitted run parameters after edits", async () => {
+    const user = userEvent.setup();
+    renderView();
+    await user.click(screen.getByRole("button", { name: "seed-two" }));
+    await user.click(screen.getByRole("button", { name: /suggest weights/i }));
+
+    await waitFor(() => expect(resultsPanelMock).toHaveBeenCalled());
+    await user.clear(screen.getByLabelText("Cap per asset %"));
+    await user.type(screen.getByLabelText("Cap per asset %"), "40");
+    await user.selectOptions(screen.getByLabelText("Risk mandate"), "aggressive");
+
+    const latestProps = resultsPanelMock.mock.calls.at(-1)?.[0];
+    expect(latestProps).toBeDefined();
+    const props = latestProps as {
+      constraints: { cap: number | null; min_weight: number | null };
+      cvarLimit: number | null;
+      cvarLimitPct: string | null;
+      objective: string;
+      windowDays: number | null;
+    };
+    expect(props.objective).toBe("max_return_cvar");
+    expect(props.constraints).toEqual({ cap: 0.25, min_weight: null });
+    expect(props.windowDays).toBeNull();
+    expect(props.cvarLimit).toBeCloseTo(0.02, 6);
+    expect(props.cvarLimitPct).toBe("2");
+  });
+
+  it("keeps submitted null constraints pinned after edits", async () => {
+    const user = userEvent.setup();
+    renderView();
+    await user.click(screen.getByRole("button", { name: "seed-two" }));
+    await user.clear(screen.getByLabelText("Cap per asset %"));
+    await user.click(screen.getByRole("button", { name: /suggest weights/i }));
+
+    await waitFor(() => expect(resultsPanelMock).toHaveBeenCalled());
+    await user.type(screen.getByLabelText("Cap per asset %"), "40");
+    await user.type(screen.getByLabelText("Min weight % (opt.)"), "5");
+    await user.type(screen.getByLabelText("Window (days, opt.)"), "252");
+
+    const latestProps = resultsPanelMock.mock.calls.at(-1)?.[0];
+    expect(latestProps).toBeDefined();
+    const props = latestProps as {
+      constraints: { cap: number | null; min_weight: number | null };
+      windowDays: number | null;
+    };
+    expect(props.constraints).toEqual({ cap: null, min_weight: null });
+    expect(props.windowDays).toBeNull();
   });
 
   it("blocks the run when the CVaR ceiling is cleared under max_return_cvar", async () => {

@@ -274,6 +274,40 @@ export function BuilderView() {
     setObjective((o) => resolveObjectiveForBroad(o, broadUniverse));
   }, [broadUniverse]);
 
+  const submittedRequest = mutation.variables;
+  const resultObjective = submittedRequest?.objective ?? objective;
+  const resultConstraints = {
+    cap: submittedRequest
+      ? (submittedRequest.constraints.cap ?? null)
+      : cap !== null
+        ? cap / 100
+        : null,
+    min_weight: submittedRequest
+      ? (submittedRequest.constraints.min_weight ?? null)
+      : minWeight !== null
+        ? minWeight / 100
+        : null,
+  };
+  const resultWindowDays = submittedRequest
+    ? (submittedRequest.window_days ?? null)
+    : windowVal;
+  const resultCvarLimit =
+    resultObjective === "max_return_cvar"
+      ? submittedRequest
+        ? (submittedRequest.cvar_limit ?? null)
+        : cvarLimit !== null
+          ? cvarLimit / 100
+          : null
+      : null;
+  const resultCvarLimitPct =
+    resultObjective === "max_return_cvar"
+      ? submittedRequest
+        ? submittedRequest.cvar_limit != null
+          ? String(submittedRequest.cvar_limit * 100)
+          : null
+        : cvarLimitPct
+      : null;
+
   return (
     <div className="mx-auto max-w-[1400px] px-5 py-5">
       <PageTitle
@@ -473,12 +507,15 @@ export function BuilderView() {
           <ResultsPanel
             key={mutation.submittedAt}
             result={mutation.data}
-            objective={objective}
+            objective={resultObjective}
+            constraints={resultConstraints}
+            windowDays={resultWindowDays}
+            cvarLimit={resultCvarLimit}
             assetsByKey={assetsByKey}
             base={mode === "simulate" ? base : null}
             colors={colors}
             grouped={mode === "universe"}
-            cvarLimitPct={objective === "max_return_cvar" ? cvarLimitPct : null}
+            cvarLimitPct={resultCvarLimitPct}
           />
         ) : (
           <p className="ix-pad ix-fs m-0 border border-border bg-surface-2 text-text-muted">
