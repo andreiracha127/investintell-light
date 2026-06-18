@@ -6,20 +6,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { OptimizeRequest } from "@/lib/api/client";
 
-const optimizeMock = vi.fn(async (_body: OptimizeRequest) => ({
-  weights: [],
-  expected: { vol_ann: 0.1, cvar_95_in_sample: 0.02, return_ann_bl: null },
-  diagnostics: {
-    n_obs: 500,
-    status: "optimal",
-    mu_equilibrium: null,
-    mu_posterior: null,
-    view_consistency: null,
-    selection: null,
-    cvar_limit_effective: 0.01,
-    regime_state: "risk_off",
-  },
-}));
+const optimizeMock = vi.fn(async (body: OptimizeRequest) => {
+  void body;
+  return {
+    weights: [],
+    expected: { vol_ann: 0.1, cvar_95_in_sample: 0.02, return_ann_bl: null },
+    diagnostics: {
+      n_obs: 500,
+      status: "optimal",
+      mu_equilibrium: null,
+      mu_posterior: null,
+      view_consistency: null,
+      selection: null,
+      cvar_limit_effective: 0.01,
+      regime_state: "risk_off",
+    },
+  };
+});
 
 vi.mock("@/lib/api/client", () => ({
   postBuilderOptimize: (body: OptimizeRequest) => optimizeMock(body),
