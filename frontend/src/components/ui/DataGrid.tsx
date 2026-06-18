@@ -13,6 +13,15 @@ import { gridRowCount } from "@/lib/grid/gridEmpty";
 import "@highcharts/grid-pro/css/grid-pro.css";
 import "@/lib/grid/grid-theme.css";
 
+/**
+ * Force-disable the Highcharts Grid credits badge on every grid, mirroring the
+ * charts' `theme.ts` which already sets `credits.enabled = false`. Applied at
+ * the single wrapper so individual grid adapters don't each repeat it.
+ */
+function withGridChrome(options: Options): Options {
+  return { ...options, credits: { enabled: false } };
+}
+
 export function DataGrid({
   options,
   className,
@@ -54,7 +63,7 @@ export function DataGrid({
     // Async factory overload: resolves AFTER load, so viewport is ready.
     void import("@highcharts/grid-pro").then(({ grid }) => {
       if (disposed || !containerRef.current) return;
-      void grid(containerRef.current, latestOptions.current, true).then((g) => {
+      void grid(containerRef.current, withGridChrome(latestOptions.current), true).then((g) => {
         if (disposed) {
           g.destroy();
           return;
@@ -75,7 +84,7 @@ export function DataGrid({
     if (!grid) return;
     // update() may rebuild the viewport/tbody; re-notify once it settles so the
     // consumer can rebind its scroll listener to the fresh tbodyElement.
-    void grid.update(options).then(() => notifyReady(grid));
+    void grid.update(withGridChrome(options)).then(() => notifyReady(grid));
   }, [options]);
 
   const showEmpty = !!emptyMessage && gridRowCount(options) === 0;
