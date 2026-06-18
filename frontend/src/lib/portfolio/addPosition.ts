@@ -44,11 +44,32 @@ export function weightedAvgCost(
   return (existing.quantity * existing.acqPrice + addedQty * lotPrice) / total;
 }
 
-export interface AmountAdd {
-  /** Resulting position quantity to PUT (accumulated when a holding exists). */
+export interface AccumulateResult {
+  /** Resulting position quantity to PUT. */
   quantity: number;
-  /** Resulting acquisition price to PUT (weighted when a holding exists). */
+  /** Resulting acquisition price to PUT. */
   acqPrice: number | null;
+}
+
+/**
+ * Accumulate `addedQty` shares (bought at `lotPrice`, or null when unknown)
+ * onto an existing holding. Shared by both Shares and Amount entry modes:
+ *  - no holding  → opens a new position at `lotPrice`;
+ *  - lotPrice null (no price for the new lot) → keeps the prior average cost;
+ *  - otherwise   → quantity summed, average cost blended by quantity.
+ */
+export function accumulate(
+  addedQty: number,
+  lotPrice: number | null,
+  existing: ExistingHolding | null,
+): AccumulateResult {
+  if (!existing) return { quantity: addedQty, acqPrice: lotPrice };
+  const quantity = existing.quantity + addedQty;
+  if (lotPrice == null) return { quantity, acqPrice: existing.acqPrice };
+  return { quantity, acqPrice: weightedAvgCost(existing, addedQty, lotPrice) };
+}
+
+export interface AmountAdd extends AccumulateResult {
   /** Shares this contribution adds (amount / spot). */
   addedQuantity: number;
 }
@@ -64,12 +85,5 @@ export function buildAmountAdd(
   existing: ExistingHolding | null,
 ): AmountAdd {
   const addedQuantity = amount / spot;
-  if (existing) {
-    return {
-      quantity: existing.quantity + addedQuantity,
-      acqPrice: weightedAvgCost(existing, addedQuantity, spot),
-      addedQuantity,
-    };
-  }
-  return { quantity: addedQuantity, acqPrice: spot, addedQuantity };
+  return { ...accumulate(addedQuantity, spot, existing), addedQuantity };
 }

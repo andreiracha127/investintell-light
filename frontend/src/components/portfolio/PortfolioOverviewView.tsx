@@ -59,6 +59,7 @@ import { PortfolioPerformanceView } from "@/components/portfolio/PortfolioPerfor
 import { usePortfolioNav } from "@/components/portfolio/usePortfolioNav";
 import { formatTimestampDate } from "@/lib/charts/hc/dateAxis";
 import {
+  accumulate,
   buildAmountAdd,
   resolveSpot,
   type ExistingHolding,
@@ -1460,10 +1461,16 @@ function AddPositionRowForm({
   const existingSpot = existing?.lastClose ?? null;
   const spot = resolveSpot(explicitPrice, existing);
   const spotOk = spot != null && spot > 0;
-  // Amount mode accumulates onto an existing holding (qty summed, cost blended).
+  // Both modes accumulate onto an existing holding (qty summed, cost blended).
+  // Amount: qty = amount / spot. Shares: the typed avg cost is the new lot's
+  // price (empty → keep the prior average cost).
   const amountAdd =
     isAmount && parsedAmount !== undefined && spotOk
       ? buildAmountAdd(parsedAmount, spot, existing)
+      : null;
+  const sharesAdd =
+    !isAmount && parsedShares !== undefined
+      ? accumulate(parsedShares, typeof parsedCost === "number" ? parsedCost : null, existing)
       : null;
 
   const canAdd = isAmount
@@ -1490,11 +1497,9 @@ function AddPositionRowForm({
       setTouched(true);
       return;
     }
-    const body: PositionBody =
-      isAmount && amountAdd
-        ? { quantity: amountAdd.quantity, acq_price: amountAdd.acqPrice }
-        : { quantity: parsedShares!, acq_price: parsedCost! };
-    void onAdd(t, body).then((ok) => {
+    const add = isAmount ? amountAdd : sharesAdd;
+    if (!add) return;
+    void onAdd(t, { quantity: add.quantity, acq_price: add.acqPrice }).then((ok) => {
       if (ok) reset();
     });
   };
@@ -1521,6 +1526,8 @@ function AddPositionRowForm({
         ? `+${formatNumber(amountAdd.addedQuantity, 4)} shares at ${at} · new total ${formatNumber(amountAdd.quantity, 4)}`
         : `≈ ${formatNumber(amountAdd.addedQuantity, 4)} shares at ${at}`;
     }
+  } else if (sharesAdd && existing && parsedShares !== undefined) {
+    computedStr = `+${formatNumber(parsedShares, 4)} shares · new total ${formatNumber(sharesAdd.quantity, 4)}`;
   }
 
   const modeBtn = (active: boolean) =>
@@ -1646,7 +1653,7 @@ function AddPositionRowForm({
         </button>
       </div>
 
-      {isAmount && computedStr && (
+      {computedStr && (
         <div className="mt-1.5 text-[11px] tabular-nums text-text-muted">{computedStr}</div>
       )}
       {error && (

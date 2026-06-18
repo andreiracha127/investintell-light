@@ -21,7 +21,7 @@ import {
   fetchPortfolios,
   putPosition,
 } from "@/lib/api/client";
-import { buildAmountAdd, resolveSpot } from "@/lib/portfolio/addPosition";
+import { accumulate, buildAmountAdd, resolveSpot } from "@/lib/portfolio/addPosition";
 import { formatCurrency, formatNumber } from "@/lib/format";
 
 export function AddToPortfolio({
@@ -66,15 +66,7 @@ export function AddToPortfolio({
 
   const add = useMutation({
     mutationFn: async ({ portfolioId }: { portfolioId: number }) => {
-      if (mode === "shares") {
-        const q = Number(qty);
-        await putPosition(portfolioId, ticker, {
-          quantity: Number.isFinite(q) && q > 0 ? q : 1,
-        });
-        return portfolioId;
-      }
-      // Amount mode: read the target portfolio's current holding, then
-      // accumulate amount/spot onto it (cost blended).
+      // Read the target portfolio's current holding, then accumulate onto it.
       const overview = await queryClient.fetchQuery({
         queryKey: ["overview", portfolioId],
         queryFn: ({ signal }) => fetchPortfolioOverview(portfolioId, signal),
@@ -84,14 +76,24 @@ export function AddToPortfolio({
       const existing = pos
         ? { quantity: pos.quantity, acqPrice: pos.acq_price, lastClose: pos.last_close }
         : null;
+
+      if (mode === "shares") {
+        const q = Number(qty);
+        const addedQty = Number.isFinite(q) && q > 0 ? q : 1;
+        // The new lot is bought at the current price (when known); empty → the
+        // prior average cost is kept.
+        const lotPrice = price != null && price > 0 ? price : null;
+        const r = accumulate(addedQty, lotPrice, existing);
+        await putPosition(portfolioId, ticker, { quantity: r.quantity, acq_price: r.acqPrice });
+        return portfolioId;
+      }
+
+      // Amount mode: accumulate amount/spot onto the holding (cost blended).
       let spot = resolveSpot(explicitOk ? explicitPrice! : null, existing);
       if (spot == null && price != null && price > 0) spot = price;
       if (spot == null) throw new Error("No price available — enter a price.");
-      const result = buildAmountAdd(amountVal, spot, existing);
-      await putPosition(portfolioId, ticker, {
-        quantity: result.quantity,
-        acq_price: result.acqPrice,
-      });
+      const r = buildAmountAdd(amountVal, spot, existing);
+      await putPosition(portfolioId, ticker, { quantity: r.quantity, acq_price: r.acqPrice });
       return portfolioId;
     },
     onSuccess: (portfolioId) => {
