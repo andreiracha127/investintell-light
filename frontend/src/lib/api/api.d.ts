@@ -1918,6 +1918,10 @@ export interface components {
             mu_posterior?: number[] | null;
             view_consistency?: components["schemas"]["ViewConsistencyOut"] | null;
             selection?: components["schemas"]["SelectionDiagnosticsOut"] | null;
+            /** Cvar Limit Effective */
+            cvar_limit_effective?: number | null;
+            /** Regime State */
+            regime_state?: string | null;
         };
         /** DimensionOut */
         DimensionOut: {
@@ -5336,8 +5340,7 @@ export interface components {
          * UniverseSpecIn
          * @description Filter + rank a slice of the FUND universe instead of listing assets.
          *
-         *     The optimizer then runs over the resolved candidates (funds only, v1 —
-         *     same rule as views: equities have no AUM/market cap in the builder yet).
+         *     The optimizer then runs over the resolved candidates (funds only, v1).
          *     Candidates are restricted to funds that EACH have enough NAV history; the
          *     cross-asset overlap requirement is still enforced on the resolved set. All
          *     filter fields share the GET /funds vocabulary; ``rank_by``/``rank_dir``
