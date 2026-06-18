@@ -7,7 +7,7 @@ PROMOVIDO (bate o credit-only em todas as métricas; neutro em 2022); o composit
 legado por score foi refutado e não é consumido.
 """
 
-from typing import Annotated
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -131,7 +131,7 @@ async def get_macro_regional(
                         last_date=f.last_date,
                         days_stale=f.days_stale,
                         weight=f.weight,
-                        status=f.status,
+                        status=cast(Literal["fresh", "decaying", "stale"], f.status),
                     )
                     for sid, f in r.data_freshness.items()
                 },

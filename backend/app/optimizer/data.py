@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.eod_price import EodPrice
@@ -464,7 +464,7 @@ async def select_universe_funds(
     today = today or dt.date.today()
     since = None if window_days is None else today - dt.timedelta(days=window_days)
 
-    nav_count_where = [FundNav.nav.is_not(None)]
+    nav_count_where: list[ColumnElement[bool]] = [FundNav.nav.is_not(None)]
     if since is not None:
         nav_count_where.append(FundNav.nav_date >= since)
     nav_counts = (

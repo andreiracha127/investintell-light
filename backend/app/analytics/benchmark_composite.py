@@ -17,6 +17,7 @@ currency units.
 """
 
 from collections.abc import Mapping
+from typing import cast
 
 import pandas as pd
 
@@ -108,6 +109,6 @@ def composite_benchmark_nav(
 
         current = current * (1.0 + composite_return)
         navs.append(current)
-        out_index.append(date)
+        out_index.append(cast(pd.Timestamp, date))
 
     return pd.Series(navs, index=pd.Index(out_index))

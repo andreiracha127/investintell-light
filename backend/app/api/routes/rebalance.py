@@ -13,7 +13,7 @@ impossível (<2 posições, otimização inviável) → 422; preço local ausent
 """
 
 import datetime as dt
-from typing import Annotated
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -152,7 +152,7 @@ async def get_rebalance_preview(
                 drift_abs=d.drift_abs,
                 drift_rel=d.drift_rel,
                 breach=d.breach,
-                status=d.status,
+                status=cast(Literal["ok", "maintenance", "urgent"], d.status),
             )
             for d in evaluation.drifts
         ],

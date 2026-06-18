@@ -30,6 +30,7 @@ are rejected with the explicit list. The caller decides what to exclude.
 """
 
 import uuid
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -374,13 +375,21 @@ async def run_optimize(
         kept_assets = [candidate_assets[i] for i in kept]
         fund_ids = [ref.id for ref in kept_assets if isinstance(ref, FundRefIn)]
         quality_by_id = await optimizer_data.load_fund_quality_metrics(session, fund_ids)
-        neutral = {"sharpe_1y": None, "expense_ratio": None, "aum_usd": None}
+        neutral: dict[str, float | None] = {
+            "sharpe_1y": None,
+            "expense_ratio": None,
+            "aum_usd": None,
+        }
         quality = [
             quality_by_id.get(ref.id, neutral) if isinstance(ref, FundRefIn) else neutral
             for ref in kept_assets
         ]
         scores = optimizer_selection.quality_score(quality)
-        feature_rows = [features_by_id[ref.id] for ref in kept_assets]
+        feature_rows = [
+            features_by_id[ref.id]
+            for ref in kept_assets
+            if isinstance(ref, FundRefIn)
+        ]
         feature_matrix = optimizer_selection.build_feature_matrix(
             feature_rows, optimizer_data.RISK_FEATURE_KEYS
         )
@@ -540,9 +549,9 @@ async def run_optimize(
                 )
                 view_consistency = ViewConsistencyOut(
                     inconsistent=bool(vc["inconsistent"]),
-                    n_flagged=int(vc["n_flagged"]),
-                    max_z=float(vc["max_z"]),
-                    threshold_sigma=float(vc["threshold_sigma"]),
+                    n_flagged=int(cast(int, vc["n_flagged"])),
+                    max_z=float(cast(float, vc["max_z"])),
+                    threshold_sigma=float(cast(float, vc["threshold_sigma"])),
                 )
             except ValueError as exc:
                 raise BuilderError(str(exc)) from exc

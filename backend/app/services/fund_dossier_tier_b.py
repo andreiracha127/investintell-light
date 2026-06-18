@@ -9,9 +9,9 @@ import datetime as dt
 import math
 import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import numpy as np
 import pandas as pd
@@ -109,7 +109,9 @@ def _float(value: Any) -> float | None:
 
 def _series_points(series: pd.Series) -> list[SeriesPoint]:
     clean = series.dropna()
-    return [(idx.date(), float(value)) for idx, value in clean.items()]
+    return [
+        (cast(pd.Timestamp, idx).date(), float(value)) for idx, value in clean.items()
+    ]
 
 
 def _significance(t_stat: float | None) -> str | None:
@@ -497,8 +499,8 @@ def _window_nav(nav: pd.Series, window: WindowKey) -> pd.Series:
 def _annualized_return(returns: pd.Series) -> float | None:
     if returns.empty:
         return None
-    compounded = float((1.0 + returns).prod())
-    return compounded ** (_TRADING_DAYS / len(returns)) - 1.0
+    compounded = float(cast(float, (1.0 + returns).prod()))
+    return float(compounded ** (_TRADING_DAYS / len(returns)) - 1.0)
 
 
 def _annualized_vol(returns: pd.Series) -> float | None:
@@ -531,7 +533,8 @@ def _drawdown_periods(nav: pd.Series) -> list[FundDrawdownPeriod]:
     start: pd.Timestamp | None = None
     trough: pd.Timestamp | None = None
     trough_depth = 0.0
-    for idx, depth in drawdowns.items():
+    for raw_idx, depth in drawdowns.items():
+        idx = cast(pd.Timestamp, raw_idx)
         value = float(depth)
         if value < 0 and not in_period:
             in_period = True
@@ -705,8 +708,8 @@ def _distribution(returns: pd.Series) -> FundReturnDistribution:
     return FundReturnDistribution(
         bin_edges=[float(v) for v in edges],
         bin_counts=[int(v) for v in counts],
-        skewness=float(pd.Series(values).skew()),
-        kurtosis=float(pd.Series(values).kurt()),
+        skewness=float(cast(float, pd.Series(values).skew())),
+        kurtosis=float(cast(float, pd.Series(values).kurt())),
         var_95=-q05,
         cvar_95=-float(tail.mean()) if len(tail) else None,
     )
@@ -719,7 +722,9 @@ def _return_statistics(returns: pd.Series) -> FundReturnStatistics:
     gains = monthly[monthly > 0]
     losses = monthly[monthly < 0]
     arithmetic = float(monthly.mean())
-    geometric = float((1.0 + monthly).prod() ** (1.0 / len(monthly)) - 1.0)
+    geometric = float(
+        cast(float, (1.0 + monthly).prod()) ** (1.0 / len(monthly)) - 1.0
+    )
     avg_gain = float(gains.mean()) if len(gains) else None
     avg_loss = float(losses.mean()) if len(losses) else None
     downside = returns[returns < 0]
@@ -762,8 +767,8 @@ def _modified_var(returns: pd.Series, confidence: float) -> float | None:
         return None
     z_map = {0.95: 1.6448536269514722, 0.99: 2.3263478740408408}
     z = z_map[confidence]
-    skew = float(returns.skew())
-    kurt = float(returns.kurt())
+    skew = float(cast(float, returns.skew()))
+    kurt = float(cast(float, returns.kurt()))
     z_cf = (
         z
         + ((z**2 - 1.0) * skew / 6.0)
@@ -791,8 +796,8 @@ def _tail_risk(returns: pd.Series) -> FundTailRiskMetrics:
         else None
     )
     rachev = (etr_95 / etl_95) if etr_95 is not None and etl_95 else None
-    skew = float(clean.skew())
-    kurt = float(clean.kurt())
+    skew = float(cast(float, clean.skew()))
+    kurt = float(cast(float, clean.kurt()))
     jb = len(clean) / 6.0 * (skew**2 + (kurt**2) / 4.0)
     return FundTailRiskMetrics(
         var_parametric_90=_normal_var(clean, 0.90),
@@ -1017,7 +1022,7 @@ def _build_holder_network(
     fund: Fund,
     holders: list[InstitutionalHolder],
     overlap: list[InstitutionalOverlapSecurity],
-    rows: list[Mapping[str, Any]],
+    rows: Sequence[Mapping[str, Any]],
 ) -> HolderNetwork:
     nodes: list[HolderNetworkNode] = [
         HolderNetworkNode(
@@ -1074,7 +1079,7 @@ def _institutional_payload(
     fund: Fund,
     holdings_report_date: dt.date | None,
     holdings: list[FundHolding],
-    rows: list[Mapping[str, Any]],
+    rows: Sequence[Mapping[str, Any]],
     *,
     empty_state: EmptyState | None = None,
 ) -> FundInstitutionalRevealResponse:
@@ -1114,7 +1119,7 @@ def _institutional_payload(
         holder["shares"] += _float(row["shares"]) or 0.0
         holder["holding_count"] += 1
 
-        overlap = overlap_map.setdefault(
+        overlap_entry = overlap_map.setdefault(
             row["cusip"],
             {
                 "name": row["name"],
@@ -1123,10 +1128,10 @@ def _institutional_payload(
                 "managers": [],
             },
         )
-        overlap["value_usd"] += _float(row["value_usd"]) or 0.0
-        overlap["institutions"].add(row["cik"])
-        if row["manager_name"] not in overlap["managers"]:
-            overlap["managers"].append(row["manager_name"])
+        overlap_entry["value_usd"] += _float(row["value_usd"]) or 0.0
+        overlap_entry["institutions"].add(row["cik"])
+        if row["manager_name"] not in overlap_entry["managers"]:
+            overlap_entry["managers"].append(row["manager_name"])
 
     holders = sorted(
         [
@@ -1283,7 +1288,12 @@ async def fetch_fund_institutional_reveal(
             [],
             empty_state=_empty("No 13F institutional holdings matched this fund's CUSIPs.", "sec_13f_holdings"),
         )
-    return _institutional_payload(fund, holdings_report_date, holdings, rows)
+    return _institutional_payload(
+        fund,
+        holdings_report_date,
+        holdings,
+        cast(Sequence[Mapping[str, Any]], rows),
+    )
 
 
 async def _fund_exposures_for_cusip(

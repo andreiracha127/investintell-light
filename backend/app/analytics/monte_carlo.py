@@ -63,7 +63,7 @@ def _block_bootstrap_paths(
     block_offsets = np.arange(_BLOCK_SIZE)
     idx = starts[:, :, None] + block_offsets[None, None, :]
     paths = daily_returns[idx].reshape(n_simulations, n_blocks * _BLOCK_SIZE)
-    return paths[:, :horizon]
+    return np.asarray(paths[:, :horizon])
 
 
 def _compute_statistic(

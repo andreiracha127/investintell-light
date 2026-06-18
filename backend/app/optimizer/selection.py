@@ -212,7 +212,7 @@ def build_feature_matrix(
     if not metrics:
         raise ValueError("metrics must be non-empty")
     rows = [
-        [np.nan if m.get(k) is None else float(m[k]) for k in keys] for m in metrics
+        [np.nan if (v := m.get(k)) is None else float(v) for k in keys] for m in metrics
     ]
     return np.asarray(rows, dtype=float)
 
@@ -295,7 +295,7 @@ def select_diversified_features(
     link = linkage(z, method="ward")
     labels = fcluster(link, t=k_eff, criterion="maxclust")
 
-    selected: list[int] = []
+    selected = []
     cluster_of: dict[int, int] = {}
     score_of: dict[int, float] = {}
     for cluster_id in np.unique(labels):

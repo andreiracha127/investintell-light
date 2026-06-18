@@ -18,6 +18,7 @@ Scale contract: correlations/ratios are decimal fractions.
 from __future__ import annotations
 
 import datetime as dt
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -47,7 +48,7 @@ def _corr_from_cov(cov: np.ndarray) -> np.ndarray:
     d[d == 0] = 1.0
     corr = cov / np.outer(d, d)
     np.fill_diagonal(corr, 1.0)
-    return corr
+    return np.asarray(corr)
 
 
 def _concentration(corr_denoised: np.ndarray, q: float) -> ConcentrationOut:
@@ -65,6 +66,7 @@ def _concentration(corr_denoised: np.ndarray, q: float) -> ConcentrationOut:
             n_signal_eigenvalues=n_signal,
         )
     first_ratio = float(eigenvalues[0] / total)
+    status: Literal["diversified", "moderate_concentration", "high_concentration"]
     if first_ratio > _CONCENTRATION_HIGH:
         status = "high_concentration"
     elif first_ratio > _CONCENTRATION_MODERATE:
@@ -72,6 +74,7 @@ def _concentration(corr_denoised: np.ndarray, q: float) -> ConcentrationOut:
     else:
         status = "diversified"
     ar = rmt.absorption_ratio(corr_denoised)
+    ar_status: Literal["normal", "warning", "critical"]
     if ar > _ABSORPTION_CRITICAL:
         ar_status = "critical"
     elif ar > _ABSORPTION_WARNING:

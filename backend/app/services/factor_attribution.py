@@ -341,7 +341,8 @@ async def run_factor_attribution(
             + ", ".join(str(m) for m in missing)
         )
 
-    chars = ranked.loc[fund_ids, CHARS_COLS].to_numpy(dtype=float)  # N×L
+    chars_df = ranked.reindex(index=fund_ids, columns=CHARS_COLS)  # N×L
+    chars = chars_df.to_numpy(dtype=float)
     weight_vec = np.array([float(weights[fid]) for fid in fund_ids], dtype=float)
 
     factor_names = [f"ipca_factor_{k + 1}" for k in range(fit.k_factors)]

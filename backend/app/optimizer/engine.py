@@ -18,6 +18,7 @@ Fail-loud: any solver status other than ``optimal`` raises
 """
 
 from dataclasses import dataclass
+from typing import Literal, overload
 
 import cvxpy as cp
 import numpy as np
@@ -369,6 +370,29 @@ def _verify_constraints(
     if min_weight is not None and (w < min_weight - 1e-6).any():
         return False, f"min_weight {min_weight} violated (min weight {float(w.min())})"
     return True, ""
+
+
+@overload
+def _finalize(
+    problem: cp.Problem,
+    w: cp.Variable,
+    label: str,
+    cap: float | None = ...,
+    min_weight: float | None = ...,
+    with_telemetry: Literal[False] = ...,
+) -> tuple[np.ndarray, str]: ...
+
+
+@overload
+def _finalize(
+    problem: cp.Problem,
+    w: cp.Variable,
+    label: str,
+    cap: float | None = ...,
+    min_weight: float | None = ...,
+    *,
+    with_telemetry: Literal[True],
+) -> tuple[np.ndarray, str, SolveTelemetry]: ...
 
 
 def _finalize(
