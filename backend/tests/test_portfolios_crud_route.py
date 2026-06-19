@@ -113,7 +113,9 @@ async def test_create_portfolio_201_normalizes_and_ensures(
 ) -> None:
     received: list[Any] = []
 
-    async def fake_create(session: Any, payload: Any, owner_sub: str, org_id: Any) -> SimpleNamespace:
+    async def fake_create(
+        session: Any, payload: Any, owner_sub: str, org_id: Any
+    ) -> SimpleNamespace:
         received.append(payload)
         return _portfolio(
             positions=[_position(), _position("MSFT", 5.0, None)]
@@ -151,7 +153,9 @@ async def test_create_portfolio_201_normalizes_and_ensures(
 async def test_create_without_positions_skips_the_ensure(
     monkeypatch: pytest.MonkeyPatch, ensure_calls: list[list[str]]
 ) -> None:
-    async def fake_create(session: Any, payload: Any, owner_sub: str, org_id: Any) -> SimpleNamespace:
+    async def fake_create(
+        session: Any, payload: Any, owner_sub: str, org_id: Any
+    ) -> SimpleNamespace:
         return _portfolio(name="Empty", cash=100.0)
 
     monkeypatch.setattr(portfolio_crud, "create_portfolio", fake_create)
@@ -166,7 +170,9 @@ async def test_create_without_positions_skips_the_ensure(
 async def test_create_duplicate_name_returns_409(
     monkeypatch: pytest.MonkeyPatch, ensure_calls: list[list[str]]
 ) -> None:
-    async def fake_create(session: Any, payload: Any, owner_sub: str, org_id: Any) -> SimpleNamespace:
+    async def fake_create(
+        session: Any, payload: Any, owner_sub: str, org_id: Any
+    ) -> SimpleNamespace:
         raise portfolio_crud.DuplicatePortfolioNameError(
             "A portfolio named 'Test' already exists."
         )
@@ -187,7 +193,9 @@ async def test_create_with_tiingo_unknown_ticker_returns_404_before_persisting(
 
     created: list[Any] = []
 
-    async def fake_create(session: Any, payload: Any, owner_sub: str, org_id: Any) -> SimpleNamespace:
+    async def fake_create(
+        session: Any, payload: Any, owner_sub: str, org_id: Any
+    ) -> SimpleNamespace:
         created.append(payload)
         return _portfolio()
 

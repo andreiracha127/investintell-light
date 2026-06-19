@@ -10,9 +10,9 @@ from sqlalchemy.pool import StaticPool
 
 from app.models.base import Base
 from app.models.portfolio import Portfolio, Position
+from app.schemas.portfolios import PortfolioCreate, PositionCreate
 from app.services import portfolio_crud
 from app.services.portfolio_crud import DuplicatePortfolioNameError
-from app.schemas.portfolios import PortfolioCreate, PositionCreate
 
 
 @pytest_asyncio.fixture
