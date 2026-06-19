@@ -32,11 +32,12 @@ export interface PortfolioNav {
   recon: NavReconstruction;
   isLoading: boolean;
   isError: boolean;
+  refetch: () => void;
 }
 
-export function usePortfolioNav(overview: PortfolioOverview): PortfolioNav {
-  const positions = overview.positions;
-  const cash = overview.aggregates.cash;
+export function usePortfolioNav(overview: PortfolioOverview | null | undefined): PortfolioNav {
+  const positions = overview?.positions ?? [];
+  const cash = overview?.aggregates.cash ?? 0;
 
   const results = useQueries({
     queries: positions.map((p) => {
@@ -82,5 +83,10 @@ export function usePortfolioNav(overview: PortfolioOverview): PortfolioNav {
     recon,
     isLoading: results.some((r) => r.isPending),
     isError: results.some((r) => r.isError),
+    refetch: () => {
+      results.forEach((r) => {
+        void r.refetch();
+      });
+    },
   };
 }

@@ -10,17 +10,16 @@ import {
   fetchMacroRegime,
   fetchPortfolioOverview,
   fetchStockTimeseries,
-  postPortfolioAnalysis,
   stockTimeseriesToHistoryBars,
   type FundTimeseries,
   type MacroRegime,
-  type PortfolioAnalysisRequest,
   type RangePreset,
   type StockTimeseries,
   type SymbolSearchResult,
 } from "@/lib/api/client";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { SymbolSearchInput } from "@/components/charts/SymbolSearchInput";
+import { usePortfolioNav } from "@/components/portfolio/usePortfolioNav";
 import { PortfolioSelect } from "@/components/statistics/PortfolioSelect";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
 import { InfoDot, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
@@ -117,26 +116,20 @@ function assetLabel(asset: SymbolSearchResult): string {
   return asset.symbol || asset.name || "Asset";
 }
 
-function buildPortfolioRequest(
-  positions: Array<{ ticker: string; quantity: number }>,
-  range: RangePreset,
-  benchmark: string,
-): PortfolioAnalysisRequest {
-  return {
-    mode: "quantities",
-    range,
-    benchmark,
-    positions: positions.map((position) => ({
-      ticker: position.ticker,
-      quantity: position.quantity,
-    })),
-  };
-}
-
 /** History sliced to the selected period window. */
 function sliceHistory(history: RegimeHistoryPoint[], range: RangePreset): RegimeHistoryPoint[] {
   const k = RANGE_DAYS[range];
   return history.slice(Math.max(0, history.length - k));
+}
+
+function navToDatePoints(nav: Array<[number, number]>): DatePoint[] {
+  return nav.map(([time, value]) => [new Date(time).toISOString().slice(0, 10), value]);
+}
+
+function sliceDatePoints(points: DatePoint[], range: RangePreset): DatePoint[] {
+  if (range === "MAX") return points;
+  const k = RANGE_DAYS[range];
+  return points.slice(Math.max(0, points.length - k));
 }
 
 interface RegimeSegment {
@@ -201,22 +194,7 @@ export function MacroRegimeView() {
 
   const canAnalyzePortfolio =
     (portfolioQuery.data?.positions.length ?? 0) >= 2 && asset.symbol.length > 0;
-
-  const portfolioAnalysisQuery = useQuery({
-    queryKey: ["macro-portfolio-analysis", portfolioId, range, asset.symbol],
-    queryFn: ({ signal }) =>
-      postPortfolioAnalysis(
-        buildPortfolioRequest(
-          portfolioQuery.data?.positions ?? [],
-          range,
-          asset.symbol.toUpperCase(),
-        ),
-        signal,
-      ),
-    enabled: canAnalyzePortfolio,
-    staleTime: 60_000,
-    retry: retryPolicy,
-  });
+  const portfolioNav = usePortfolioNav(portfolioQuery.data);
 
   const assetQuery = useQuery<FundTimeseries | StockTimeseries>({
     queryKey: ["macro-asset-timeseries", asset.kind, asset.symbol, asset.instrument_id, range],
@@ -246,9 +224,9 @@ export function MacroRegimeView() {
   }, [asset.instrument_id, assetQuery.data]);
 
   const performanceOption = useMemo<Options | null>(() => {
-    if (!colors || !macroQuery.data || !portfolioAnalysisQuery.data) return null;
+    if (!colors || !macroQuery.data) return null;
     return buildHcMacroPerformanceOption({
-      portfolio: portfolioAnalysisQuery.data.nav,
+      portfolio: sliceDatePoints(navToDatePoints(portfolioNav.recon.nav), range),
       asset: assetPoints,
       regimes: macroQuery.data.history,
       colors,
@@ -262,8 +240,9 @@ export function MacroRegimeView() {
     colors,
     macroQuery.data,
     perfView,
-    portfolioAnalysisQuery.data,
+    portfolioNav.recon.nav,
     portfolioQuery.data?.name,
+    range,
   ]);
 
   // 404 → empty state.
@@ -538,12 +517,16 @@ export function MacroRegimeView() {
           <PerformancePanel
             portfolioError={portfolioQuery.isError ? portfolioQuery.error.message : null}
             onPortfolioRetry={() => portfolioQuery.refetch()}
-            analysisError={portfolioAnalysisQuery.isError ? portfolioAnalysisQuery.error.message : null}
-            onAnalysisRetry={() => portfolioAnalysisQuery.refetch()}
+            portfolioHistoryError={
+              canAnalyzePortfolio && portfolioNav.isError
+                ? "Could not load price history for some portfolio holdings."
+                : null
+            }
+            onPortfolioHistoryRetry={portfolioNav.refetch}
             assetError={assetQuery.isError ? assetQuery.error.message : null}
             onAssetRetry={() => assetQuery.refetch()}
             canAnalyze={canAnalyzePortfolio}
-            isPending={portfolioAnalysisQuery.isPending || assetQuery.isPending}
+            isPending={(canAnalyzePortfolio && portfolioNav.isLoading) || assetQuery.isPending}
             option={performanceOption}
           />
         </section>
@@ -638,8 +621,8 @@ function VoteChip({ label, active, tip }: { label: string; active: boolean; tip:
 function PerformancePanel({
   portfolioError,
   onPortfolioRetry,
-  analysisError,
-  onAnalysisRetry,
+  portfolioHistoryError,
+  onPortfolioHistoryRetry,
   assetError,
   onAssetRetry,
   canAnalyze,
@@ -648,8 +631,8 @@ function PerformancePanel({
 }: {
   portfolioError: string | null;
   onPortfolioRetry: () => void;
-  analysisError: string | null;
-  onAnalysisRetry: () => void;
+  portfolioHistoryError: string | null;
+  onPortfolioHistoryRetry: () => void;
   assetError: string | null;
   onAssetRetry: () => void;
   canAnalyze: boolean;
@@ -659,9 +642,13 @@ function PerformancePanel({
   if (portfolioError) {
     return <ErrorPanel title="Portfolio failed" message={portfolioError} onRetry={onPortfolioRetry} />;
   }
-  if (analysisError) {
+  if (portfolioHistoryError) {
     return (
-      <ErrorPanel title="Portfolio replay failed" message={analysisError} onRetry={onAnalysisRetry} />
+      <ErrorPanel
+        title="Portfolio history failed"
+        message={portfolioHistoryError}
+        onRetry={onPortfolioHistoryRetry}
+      />
     );
   }
   if (assetError) {
