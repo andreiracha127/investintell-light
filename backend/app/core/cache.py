@@ -18,6 +18,7 @@ não documentado — exatamente por isso o fail-open é obrigatório aqui, e o
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Any
 
@@ -28,6 +29,16 @@ from starlette.responses import Response
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Cache namespace. The middleware stores ALREADY-SERIALIZED bodies, so a deploy
+# that changes the response SHAPE/FORMATTING (e.g. title-casing manager_name)
+# must NOT keep serving bodies serialized by the previous build. Two guards:
+#   * ``_CACHE_SCHEMA_VERSION`` — bump by hand on any cached-response format
+#     change (deterministic, works even off-platform);
+#   * ``RAILWAY_DEPLOYMENT_ID`` — rotates the namespace on every deploy when
+#     present (automatic). Old keys fall out by TTL.
+_CACHE_SCHEMA_VERSION = "2"
+_CACHE_VERSION = f"{_CACHE_SCHEMA_VERSION}.{(os.getenv('RAILWAY_DEPLOYMENT_ID') or 'base')[:20]}"
 
 # Rotas GET cacheáveis — catálogo público, espelho atualizado 1×/dia.
 # NUNCA adicionar aqui rotas de portfólio/usuário/screener.
@@ -148,9 +159,13 @@ catalog_cache = CatalogCache()
 
 
 def cache_key(request: Request) -> str:
-    """Chave determinística: path + querystring ordenada (rotas sem auth)."""
+    """Chave determinística: namespace de versão + path + querystring ordenada.
+
+    O namespace (``_CACHE_VERSION``) isola o cache por build/deploy, de modo que
+    uma mudança de formato da resposta nunca seja servida de uma versão antiga.
+    """
     query = "&".join(sorted(request.url.query.split("&"))) if request.url.query else ""
-    return f"catalog:{request.url.path}?{query}"
+    return f"catalog:{_CACHE_VERSION}:{request.url.path}?{query}"
 
 
 class CatalogCacheMiddleware(BaseHTTPMiddleware):
