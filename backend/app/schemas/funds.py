@@ -12,13 +12,50 @@ visible errors. Every list/profile response carries a fixed
 import datetime as dt
 import uuid
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 # Fixed disclaimer — the sync mirrors the source faithfully and we do not
 # store per-row provenance, so the caveat applies to the whole column.
 CLASSIFICATION_NOTE = (
     "Labels da fonte podem conter erros do classificador automático"
 )
+
+# Adviser names arrive ALL-CAPS from the Form ADV (sec_managers) source. We
+# present them in title case for legibility. Legal-suffix / abbreviation tokens
+# stay upper-case; small connectors stay lower-case.
+_MANAGER_KEEP_UPPER = frozenset({
+    "LLC", "LP", "LLP", "PLC", "LTD", "NA", "USA", "US", "UK", "ETF", "REIT",
+    "SA", "AG", "NV", "II", "III", "IV", "&", "DBA", "TIAA-CREF", "PIMCO",
+})
+_MANAGER_KEEP_LOWER = frozenset({"and", "of", "the", "for", "de", "da", "to", "in"})
+
+
+def format_company_name(name: str | None) -> str | None:
+    """Title-case an ALL-CAPS company name for display (pure — unit-tested).
+
+    Names that already carry mixed case (e.g. the N-CEN source) are trusted and
+    returned unchanged. For all-caps input, each word is capitalized, except:
+    known abbreviations (LLC, LP, &, US…) stay upper; connectors (and, of…) stay
+    lower; and short dotted initials (J.P., T.) keep their case.
+    """
+    if not name:
+        return name
+    if not name.isupper():
+        return name
+    words = name.split()
+    out: list[str] = []
+    for index, word in enumerate(words):
+        bare = word.strip(".,").upper()
+        letters = bare.replace(".", "").replace("&", "")
+        if bare in _MANAGER_KEEP_UPPER:
+            out.append(word)
+        elif "." in word and len(letters) <= 2:
+            out.append(word)  # initials: J.P., T.
+        elif index > 0 and bare.lower() in _MANAGER_KEEP_LOWER:
+            out.append(word.lower())
+        else:
+            out.append(word[:1].upper() + word[1:].lower())
+    return " ".join(out)
 
 
 class FundsStaleness(BaseModel):
@@ -51,10 +88,16 @@ class FundListItem(BaseModel):
     peer_sharpe_pctl: float | None
     manager_score: float | None
     elite_flag: bool | None
-    # Management company, resolved per page via the CIK identity crosswalk
-    # (instrument_identity.cik -> sec_managers.firm_name); not stored in the list
-    # MV. None when the fund's CIK maps to no SEC manager.
+    # Investment adviser, resolved per page from the N-CEN crosswalk
+    # (series_id -> sec_fund_adviser -> sec_managers firm name via CRD); not
+    # stored in the list MV. None when the fund has no resolved adviser.
+    # Presented in title case (the Form ADV source is ALL-CAPS).
     manager_name: str | None = None
+
+    @field_validator("manager_name")
+    @classmethod
+    def _title_case_manager(cls, value: str | None) -> str | None:
+        return format_company_name(value)
 
 
 class FundsListResponse(BaseModel):
