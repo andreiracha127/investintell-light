@@ -1,0 +1,74 @@
+
+> frontend@0.1.0 build
+> next build --turbopack
+
+ ⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
+ We detected multiple lockfiles and selected the directory of E:\investintell-light\pnpm-lock.yaml as the root directory.
+ To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
+   See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
+ Detected additional lockfiles: 
+   * E:\investintell-light\frontend\package-lock.json
+
+   ▲ Next.js 15.5.19 (Turbopack)
+   - Environments: .env.local
+
+   Creating an optimized production build ...
+Found 1 warning while optimizing generated CSS:
+
+[2m│ @layer theme, base, carbon, components, utilities;[22m
+[2m│ @layer carbon {[22m
+[2m│[22m   @charset "UTF-8";
+[2m┆[22m           [33m[2m^--[22m Unknown at rule: @charset[39m
+[2m┆[22m
+[2m│   a,abbr,acronym,address,applet,article,aside,audio,b,big,blockquote,body,canvas,caption,center,cite,code,dd,del,details,dfn,div,dl,dt,em,embed,fieldset,figcaption,figure,footer,form,h1,h2,h3,h4,h5,h6,header,hgroup,html,i,iframe,img,ins,kbd,label,legend,li,mark,menu,nav,object,ol,output,p,pre,q,ruby,s,samp,section,small,span,strike,strong,sub,summary,sup,table,tbody,td,tfoot,th,thead,time,tr,tt,u,ul,var,video {[22m
+[2m│     padding: 0;[22m
+
+ ✓ Finished writing to disk in 37ms
+ ✓ Compiled successfully in 7.2s
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/21) ...
+   Generating static pages (5/21) 
+   Generating static pages (10/21) 
+   Generating static pages (15/21) 
+ ✓ Generating static pages (21/21)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                  Size  First Load JS
+┌ ○ /                                         0 B         354 kB
+├ ○ /_not-found                               0 B         354 kB
+├ ƒ /api/auth/refresh                         0 B            0 B
+├ ƒ /api/auth/sign-in                         0 B            0 B
+├ ƒ /api/auth/sign-out                        0 B            0 B
+├ ƒ /api/funds/[id]/[sub]                     0 B            0 B
+├ ƒ /api/funds/scatter                        0 B            0 B
+├ ƒ /api/holdings/[cusip]/reverse-lookup      0 B            0 B
+├ ○ /builder                              22.9 kB         385 kB
+├ ○ /funds                                6.99 kB         369 kB
+├ ƒ /funds/[id]                           25.5 kB         388 kB
+├ ○ /login                                  973 B         355 kB
+├ ○ /macro                                8.86 kB         371 kB
+├ ○ /portfolio                            18.3 kB         381 kB
+├ ○ /portfolio/static                     13.7 kB         367 kB
+├ ○ /screener                             14.6 kB         377 kB
+├ ○ /statistics/beta                      6.79 kB         369 kB
+├ ○ /statistics/correlation               7.52 kB         370 kB
+├ ○ /statistics/scenario                  7.68 kB         370 kB
+├ ○ /statistics/stock-correlation         6.18 kB         368 kB
+├ ○ /stocks                               5.57 kB         368 kB
+└ ƒ /stocks/[ticker]                      15.3 kB         377 kB
++ First Load JS shared by all              503 kB
+  ├ chunks/79d8496ed33ae1dd.js             220 kB
+  └ chunks/958ff74179981c5b.js            59.2 kB
+  ├ chunks/ef124a8a3470972e.js            17.2 kB
+  ├ chunks/fbcfd6a3d5a10269.js            13.4 kB
+  ├ chunks/8c17efcf5e0c3f6b.css            149 kB
+  └ other shared chunks (total)           44.1 kB
+
+
+ƒ Middleware                              85.5 kB
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

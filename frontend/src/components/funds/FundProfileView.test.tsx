@@ -183,7 +183,7 @@ function makeHoldingsTop(): client.FundHoldingsTop {
         cusip: "037833100",
         isin: null,
         asset_class: "equity",
-        sector: null,
+        sector: "CORP",
         gics_sector: "Information Technology",
         sector_label: "Information Technology",
         market_value: 100,
@@ -481,7 +481,22 @@ function mockDossierResponses() {
   mocked.fetchFundStyleDrift.mockResolvedValue(makeStyleDrift());
   mocked.fetchFundRiskTimeseries.mockResolvedValue(makeRiskTimeseries());
   mocked.fetchFundEntityAnalytics.mockResolvedValue(makeEntityAnalytics());
-  mocked.fetchFundActiveShare.mockResolvedValue(makeActiveShare());
+  mocked.fetchFundActiveShare.mockImplementation(async (_instrumentId, query) => {
+    const benchmarkId = query?.benchmark_id ?? null;
+    return {
+      ...makeActiveShare(),
+      benchmark_id: benchmarkId,
+      benchmark_name: benchmarkId ? "Vanguard Total Stock Market ETF" : null,
+      active_share: benchmarkId ? 0.12 : null,
+      overlap: benchmarkId ? 0.88 : null,
+      n_benchmark_positions: benchmarkId ? 500 : 0,
+      n_common_positions: benchmarkId ? 1 : 0,
+      as_of_date: benchmarkId ? "2026-03-31" : null,
+      empty_state: benchmarkId
+        ? null
+        : { reason: "benchmark_id is required", source: "request" },
+    };
+  });
   mocked.fetchFundInstitutionalReveal.mockResolvedValue(makeInstitutionalReveal());
   mocked.fetchHoldingReverseLookup.mockResolvedValue(makeReverseLookup());
 }
@@ -565,6 +580,23 @@ describe("FundProfileView", () => {
       {},
       expect.any(AbortSignal),
     );
+    expect(screen.getAllByText("Information Technology").length).toBeGreaterThan(0);
+    expect(screen.queryByText("CORP")).not.toBeInTheDocument();
+
+    const benchmarkUuid = "11111111-2222-4333-8444-555555555555";
+    await user.type(screen.getByLabelText("Benchmark fund id"), benchmarkUuid);
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() =>
+      expect(mocked.fetchFundActiveShare).toHaveBeenCalledWith(
+        FUND_ID,
+        { benchmark_id: benchmarkUuid },
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(
+      await screen.findByText("Active benchmark: Vanguard Total Stock Market ETF"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(`Active benchmark: ${benchmarkUuid}`)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Style" }));
     await waitFor(() =>
@@ -600,7 +632,7 @@ describe("FundProfileView", () => {
     await waitFor(() =>
       expect(mocked.fetchFundEntityAnalytics).toHaveBeenCalledWith(
         FUND_ID,
-        { window: "1Y" },
+        { window: "1Y", benchmark_id: benchmarkUuid },
         expect.any(AbortSignal),
       ),
     );

@@ -103,6 +103,78 @@ function signedPct(value: number | null | undefined): string {
     : "--";
 }
 
+function displayText(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+const RAW_NPORT_SECTOR_CODES = new Set([
+  "ABS",
+  "CMO",
+  "CORP",
+  "GOVT",
+  "MBS",
+  "MUNI",
+  "OTHER",
+  "SUPRA",
+]);
+
+function friendlySectorText(value: string | null | undefined): string | null {
+  const text = displayText(value);
+  if (!text) return null;
+  return RAW_NPORT_SECTOR_CODES.has(text.toUpperCase()) ? null : text;
+}
+
+function holdingSectorLabel(
+  holding: FundHoldingsTop["top_holdings"][number],
+): string {
+  return (
+    friendlySectorText(holding.sector_label) ??
+    friendlySectorText(holding.gics_sector) ??
+    friendlySectorText(holding.sector) ??
+    "--"
+  );
+}
+
+function isUuidLike(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+}
+
+function benchmarkLabelText(value: string | null | undefined): string | null {
+  const text = displayText(value);
+  if (!text || isUuidLike(text)) return null;
+  return text;
+}
+
+function benchmarkDisplayLabel(
+  benchmarkId: string,
+  activeShare: FundActiveShare | null | undefined,
+  entityAnalytics: FundEntityAnalytics | null | undefined,
+): string {
+  const selected = displayText(benchmarkId);
+  if (!selected) return "none";
+  return (
+    benchmarkLabelText(activeShare?.benchmark_name) ??
+    benchmarkLabelText(entityAnalytics?.capture.benchmark_label) ??
+    (isUuidLike(selected) ? "resolving..." : selected)
+  );
+}
+
+function benchmarkMetricLabel(
+  benchmarkId: string | null | undefined,
+  label: string | null | undefined,
+  fallbackLabel?: string,
+): string {
+  const resolved = benchmarkLabelText(label) ?? benchmarkLabelText(fallbackLabel);
+  if (resolved && resolved !== "none" && resolved !== "resolving...") return resolved;
+
+  const selected = displayText(benchmarkId);
+  if (!selected || isUuidLike(selected)) return "--";
+  return selected;
+}
+
 function money(value: number | null | undefined): string {
   return value !== null && value !== undefined ? `$${formatCompact(value)}` : "--";
 }
@@ -494,6 +566,11 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
   const applyBenchmark = (value = benchmarkDraft) => {
     setBenchmarkId(value.trim());
   };
+  const activeBenchmarkLabel = benchmarkDisplayLabel(
+    benchmarkId,
+    activeShareQuery.data,
+    entityAnalyticsQuery.data,
+  );
 
   return (
     <div className="mx-auto max-w-[1400px] px-5 py-5">
@@ -621,6 +698,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
           activeShareQuery={activeShareQuery}
           benchmarkDraft={benchmarkDraft}
           benchmarkId={benchmarkId}
+          activeBenchmarkLabel={activeBenchmarkLabel}
           onBenchmarkDraftChange={setBenchmarkDraft}
           onApplyBenchmark={applyBenchmark}
         />
@@ -657,6 +735,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
           entityAnalyticsQuery={entityAnalyticsQuery}
           benchmarkDraft={benchmarkDraft}
           benchmarkId={benchmarkId}
+          activeBenchmarkLabel={activeBenchmarkLabel}
           onBenchmarkDraftChange={setBenchmarkDraft}
           onApplyBenchmark={applyBenchmark}
           onClose={() => setDeepOpen(false)}
@@ -859,6 +938,7 @@ function HoldingsTab({
   activeShareQuery,
   benchmarkDraft,
   benchmarkId,
+  activeBenchmarkLabel,
   onBenchmarkDraftChange,
   onApplyBenchmark,
 }: {
@@ -867,6 +947,7 @@ function HoldingsTab({
   activeShareQuery: UseQueryResult<FundActiveShare, Error>;
   benchmarkDraft: string;
   benchmarkId: string;
+  activeBenchmarkLabel: string;
   onBenchmarkDraftChange: (value: string) => void;
   onApplyBenchmark: (value?: string) => void;
 }) {
@@ -896,6 +977,7 @@ function HoldingsTab({
           <BenchmarkControl
             benchmarkDraft={benchmarkDraft}
             benchmarkId={benchmarkId}
+            activeBenchmarkLabel={activeBenchmarkLabel}
             onBenchmarkDraftChange={onBenchmarkDraftChange}
             onApplyBenchmark={onApplyBenchmark}
           />
@@ -1062,6 +1144,7 @@ function DeepAnalysisModal({
   entityAnalyticsQuery,
   benchmarkDraft,
   benchmarkId,
+  activeBenchmarkLabel,
   onBenchmarkDraftChange,
   onApplyBenchmark,
   onClose,
@@ -1073,6 +1156,7 @@ function DeepAnalysisModal({
   entityAnalyticsQuery: UseQueryResult<FundEntityAnalytics, Error>;
   benchmarkDraft: string;
   benchmarkId: string;
+  activeBenchmarkLabel: string;
   onBenchmarkDraftChange: (value: string) => void;
   onApplyBenchmark: (value?: string) => void;
   onClose: () => void;
@@ -1106,6 +1190,7 @@ function DeepAnalysisModal({
             <BenchmarkControl
               benchmarkDraft={benchmarkDraft}
               benchmarkId={benchmarkId}
+              activeBenchmarkLabel={activeBenchmarkLabel}
               onBenchmarkDraftChange={onBenchmarkDraftChange}
               onApplyBenchmark={onApplyBenchmark}
             />
@@ -1164,7 +1249,11 @@ function DeepAnalysisModal({
                   <StatRow label="Down periods" value={String(data.capture.down_periods)} />
                   <StatRow
                     label="Benchmark"
-                    value={data.capture.benchmark_label ?? data.capture.benchmark_id ?? "--"}
+                    value={benchmarkMetricLabel(
+                      data.capture.benchmark_id ?? benchmarkId,
+                      data.capture.benchmark_label,
+                      activeBenchmarkLabel,
+                    )}
                   />
                   {data.capture.empty_state && (
                     <StatRow label="Status" value={data.capture.empty_state.reason} />
@@ -1497,11 +1586,13 @@ function EmptyMessage({ message }: { message: string }) {
 function BenchmarkControl({
   benchmarkDraft,
   benchmarkId,
+  activeBenchmarkLabel,
   onBenchmarkDraftChange,
   onApplyBenchmark,
 }: {
   benchmarkDraft: string;
   benchmarkId: string;
+  activeBenchmarkLabel: string;
   onBenchmarkDraftChange: (value: string) => void;
   onApplyBenchmark: (value?: string) => void;
 }) {
@@ -1538,7 +1629,7 @@ function BenchmarkControl({
         )}
       </div>
       <p className="mt-2 text-[11px] tabular-nums text-text-muted">
-        Active benchmark: {benchmarkId || "none"}
+        Active benchmark: {benchmarkId ? activeBenchmarkLabel : "none"}
       </p>
     </section>
   );
@@ -1558,6 +1649,10 @@ function ActiveSharePanel({ query }: { query: UseQueryResult<FundActiveShare, Er
             <KpiTile label="Active share" value={pct(query.data.active_share)} />
             <KpiTile label="Overlap" value={pct(query.data.overlap)} />
             <KpiTile label="Portfolio positions" value={String(query.data.n_portfolio_positions)} />
+            <KpiTile
+              label="Benchmark"
+              value={benchmarkMetricLabel(query.data.benchmark_id, query.data.benchmark_name)}
+            />
             <KpiTile label="Benchmark positions" value={String(query.data.n_benchmark_positions)} />
             <KpiTile label="Common positions" value={String(query.data.n_common_positions)} />
             <KpiTile label="As of" value={formatDate(query.data.as_of_date)} />
@@ -1620,7 +1715,7 @@ function HoldingsTable({ data }: { data: FundHoldingsTop }) {
               </Td>
               <Td className="text-text-secondary">
                 <span className="block max-w-[220px] truncate">
-                  {holding.sector_label ?? holding.gics_sector ?? holding.sector ?? "--"}
+                  {holdingSectorLabel(holding)}
                 </span>
               </Td>
               <Td align="right">
