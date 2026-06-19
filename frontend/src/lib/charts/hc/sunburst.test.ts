@@ -29,24 +29,32 @@ const COLORS: ChartColors = {
 
 const TREE: PortfolioLookthrough["tree"] = [
   {
-    id: "asset|EC",
+    id: "asset|equity",
     parent_id: null,
-    key: "EC",
-    label: "EC",
+    key: "equity",
+    label: "Equity",
     kind: "asset_class",
     value_pct: 60,
   },
   {
-    id: "series|EC|S_A",
-    parent_id: "asset|EC",
+    id: "strategy|equity|Large Blend",
+    parent_id: "asset|equity",
+    key: "Large Blend",
+    label: "Large Blend",
+    kind: "strategy",
+    value_pct: 60,
+  },
+  {
+    id: "series|equity|Large Blend|S_A",
+    parent_id: "strategy|equity|Large Blend",
     key: "S_A",
     label: "Parent ETF",
     kind: "series",
     value_pct: 60,
   },
   {
-    id: "cusip|EC|S_A|037833100",
-    parent_id: "series|EC|S_A",
+    id: "cusip|equity|Large Blend|S_A|037833100",
+    parent_id: "series|equity|Large Blend|S_A",
     key: "037833100",
     label: "Apple Inc",
     kind: "cusip",
@@ -55,7 +63,7 @@ const TREE: PortfolioLookthrough["tree"] = [
 ];
 
 const ASSETS: ExposureItem[] = [
-  { key: "EC", label: null, direct_pct: 60, indirect_pct: 0, total_pct: 60 },
+  { key: "equity", label: null, direct_pct: 60, indirect_pct: 0, total_pct: 60 },
 ];
 
 describe("buildHcExposureSunburstOption", () => {
@@ -72,24 +80,28 @@ describe("buildHcExposureSunburstOption", () => {
     const series = opt.series?.[0] as SeriesSunburstOptions;
     const data = series.data as Array<{ id?: string; parent?: string; name?: string; value?: number }>;
     expect(data.find((point) => point.id === "portfolio-root")?.parent).toBe("");
-    expect(data.find((point) => point.id === "asset|EC")?.parent).toBe("portfolio-root");
-    expect(data.find((point) => point.id === "asset|EC")?.name).toBe("Equity");
-    expect(data.find((point) => point.id === "series|EC|S_A")?.name).toBe("Parent ETF");
-    expect(data.find((point) => point.id === "cusip|EC|S_A|037833100")?.name).toBe("Apple Inc");
+    expect(data.find((point) => point.id === "asset|equity")?.parent).toBe("portfolio-root");
+    expect(data.find((point) => point.id === "asset|equity")?.name).toBe("Equity");
+    expect(data.find((point) => point.id === "strategy|equity|Large Blend")?.name).toBe("Large Blend");
+    expect(data.find((point) => point.id === "series|equity|Large Blend|S_A")?.name).toBe("Parent ETF");
+    expect(data.find((point) => point.id === "cusip|equity|Large Blend|S_A|037833100")?.name).toBe("Apple Inc");
   });
 
   it("assigns values only to leaf holdings", () => {
     const opt = buildHcExposureSunburstOption(TREE, ASSETS, COLORS);
     const series = opt.series?.[0] as SeriesSunburstOptions;
     const data = series.data as Array<{ id?: string; value?: number }>;
-    expect(data.find((point) => point.id === "asset|EC")?.value).toBeUndefined();
-    expect(data.find((point) => point.id === "series|EC|S_A")?.value).toBeUndefined();
-    expect(data.find((point) => point.id === "cusip|EC|S_A|037833100")?.value).toBe(60);
+    expect(data.find((point) => point.id === "asset|equity")?.value).toBeUndefined();
+    expect(data.find((point) => point.id === "strategy|equity|Large Blend")?.value).toBeUndefined();
+    expect(data.find((point) => point.id === "series|equity|Large Blend|S_A")?.value).toBeUndefined();
+    expect(data.find((point) => point.id === "cusip|equity|Large Blend|S_A|037833100")?.value).toBe(60);
   });
 
   it("sanitizes N-PORT asset class codes", () => {
     expect(assetClassLabel("EC")).toBe("Equity");
     expect(assetClassLabel("DBT")).toBe("Debt");
     expect(assetClassLabel("RA")).toBe("Real assets");
+    expect(assetClassLabel("fixed_income")).toBe("Fixed Income");
+    expect(assetClassLabel("alternatives")).toBe("Alternatives");
   });
 });

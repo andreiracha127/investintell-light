@@ -25,7 +25,7 @@ import { InfoDot, KpiTile } from "@/components/ui/panels";
 import { formatDate, formatNumber } from "@/lib/format";
 
 const LOOKTHROUGH_TIP =
-  "“Look-through”: sees through each fund/ETF in the portfolio down to its final underlying holdings, aggregating true exposure by asset class, source series and CUSIP.";
+  "“Look-through”: sees through each fund/ETF in the portfolio down to its final underlying holdings, aggregating true exposure by asset class, strategy, fund series and CUSIP.";
 
 export function PortfolioLookthroughSection({
   portfolioId,
@@ -132,7 +132,7 @@ export function PortfolioLookthroughSection({
             Look-through sunburst
           </h3>
           <span className="text-[10.5px] text-text-muted">
-            Asset class → series ID → CUSIP
+            Asset class → strategy → fund (series) → final holding
           </span>
         </div>
         {sunburstOption && (

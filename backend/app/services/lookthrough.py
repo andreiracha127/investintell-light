@@ -5,8 +5,9 @@ the datalake repo and materialized in the TimescaleDB Cloud
 (``nport_lookthrough_exposures`` + ``nport_lookthrough_summary``). This module
 READS those tables and does portfolio-level weighted consolidation for the
 official totals. Portfolio chart drilldown can additionally build a bounded
-asset-class → series ID → CUSIP tree from raw N-PORT rows; that path is capped
-and lazy-loaded by the frontend so it does not block the main exposure payload.
+asset-class → strategy → fund series → final holding tree from raw N-PORT rows;
+that path is capped and lazy-loaded by the frontend so it does not block the
+main exposure payload.
 
 Semantics inherited from the worker (do not reinterpret here):
 - pct values are percentage points of the SERIES NAV, sign preserved;
@@ -18,6 +19,7 @@ Semantics inherited from the worker (do not reinterpret here):
 
 import datetime as dt
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -29,7 +31,7 @@ from app.models.fund import Fund
 DIMENSIONS = ("issuer", "asset_class", "sector", "currency")
 SYNTHETIC_PREFIXES = ("IS:", "LE:", "H:", "CIK:")
 UNIDENTIFIED_PREFIXES = ("LE:", "H:", "CIK:")
-MAX_TREE_DEPTH = 2
+MAX_TREE_DEPTH = 8
 MAX_TREE_LEAVES = 180
 MAX_TREE_HOLDINGS_PER_SERIES = 40
 
@@ -78,6 +80,37 @@ class PortfolioAggregates:
     expanded_weight_pct: float
     sum_pct_total: float
     oldest_report_date: dt.date | None
+
+
+@dataclass(frozen=True)
+class SeriesTaxonomy:
+    """Display taxonomy for a fund series in the exposure drilldown."""
+
+    label: str
+    asset_class: str | None
+    strategy_label: str | None
+
+
+@dataclass(frozen=True)
+class DirectHoldingInput:
+    """Direct portfolio position that should appear as a final holding leaf."""
+
+    ticker: str
+    label: str | None
+    weight_pct: float
+    asset_class: str | None
+    strategy_label: str | None
+
+
+@dataclass(frozen=True)
+class DirectHolding:
+    """Resolved direct security leaf for portfolio exposure drilldown."""
+
+    key: str
+    label: str
+    value_pct: float
+    asset_class: str | None
+    strategy_label: str | None
 
 
 @dataclass(frozen=True)
@@ -130,6 +163,30 @@ async def get_fund_labels_by_series(
     for series_id, name in result.all():
         labels.setdefault(series_id, name)
     return labels
+
+
+async def get_fund_taxonomy_by_series(
+    session: AsyncSession, series_ids: list[str]
+) -> dict[str, SeriesTaxonomy]:
+    """series_id → product taxonomy for known local funds."""
+    if not series_ids:
+        return {}
+    result = await session.execute(
+        select(Fund.series_id, Fund.name, Fund.asset_class, Fund.strategy_label)
+        .where(Fund.series_id.in_(series_ids))
+        .order_by(Fund.series_id, Fund.instrument_id)
+    )
+    taxonomy: dict[str, SeriesTaxonomy] = {}
+    for series_id, name, asset_class, strategy_label in result.all():
+        taxonomy.setdefault(
+            series_id,
+            SeriesTaxonomy(
+                label=name,
+                asset_class=asset_class,
+                strategy_label=strategy_label,
+            ),
+        )
+    return taxonomy
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +293,44 @@ _CHILD_SERIES_MAP_SQL = text("""
     GROUP BY kind, ident
 """)
 
+_DIRECT_HOLDINGS_SQL = text("""
+    WITH requested AS (
+        SELECT *
+        FROM unnest(
+            CAST(:tickers AS text[]),
+            CAST(:labels AS text[]),
+            CAST(:weights AS double precision[]),
+            CAST(:asset_classes AS text[]),
+            CAST(:strategies AS text[])
+        ) AS t(ticker, label, weight_pct, asset_class, strategy_label)
+    )
+    SELECT r.ticker,
+           r.label,
+           r.weight_pct,
+           r.asset_class,
+           COALESCE(NULLIF(btrim(r.strategy_label), ''),
+                    NULLIF(btrim(m.gics_sector), '')) AS strategy_label,
+           COALESCE(NULLIF(btrim(m.cusip), ''),
+                    NULLIF(btrim(ii.cusip_9), ''),
+                    r.ticker) AS holding_key
+    FROM requested r
+    LEFT JOIN LATERAL (
+        SELECT cusip, gics_sector
+        FROM sec_cusip_ticker_map
+        WHERE upper(ticker) = upper(r.ticker)
+        ORDER BY (cusip IS NULL), cusip
+        LIMIT 1
+    ) m ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT cusip_9
+        FROM instrument_identity
+        WHERE upper(ticker) = upper(r.ticker)
+          AND cusip_9 IS NOT NULL
+        ORDER BY cusip_9
+        LIMIT 1
+    ) ii ON TRUE
+""")
+
 
 def _summary_from_row(row: Any) -> LookthroughSummary:
     def f(value: Any) -> float | None:
@@ -277,6 +372,79 @@ def _cusip_key(cusip: str | None, isin: str | None) -> str:
         if embedded:
             return embedded
     return "UNKNOWN"
+
+
+def _title_asset_class(code: str) -> str:
+    labels = {
+        "cash": "Cash",
+        "equity": "Equity",
+        "fixed_income": "Fixed Income",
+        "alternatives": "Alternatives",
+    }
+    return labels.get(code, "Alternatives")
+
+
+def _fallback_taxonomy_from_nport(asset_class: str | None) -> tuple[str, str]:
+    raw = (asset_class or "").strip().upper()
+    if raw in {"EC", "EP"}:
+        return "equity", "Equity"
+    if raw in {"DBT", "ABS", "ABS-MBS", "ABS-O", "CMBS", "MBS", "UST", "CORP"}:
+        return "fixed_income", "Fixed Income"
+    if raw in {"RA", "RE"}:
+        return "alternatives", "Real Assets"
+    return "alternatives", "Unclassified"
+
+
+def _normalize_asset_class(value: str | None) -> str | None:
+    normalized = (value or "").strip().lower().replace(" ", "_")
+    if normalized == "real_assets":
+        return "alternatives"
+    if normalized in {"cash", "equity", "fixed_income", "alternatives"}:
+        return normalized
+    return None
+
+
+def _series_taxonomy(
+    series_id: str,
+    row_asset_class: str | None,
+    taxonomy_by_series: dict[str, SeriesTaxonomy],
+    fallback_label: str | None = None,
+) -> tuple[str, str, str, str, str]:
+    taxonomy = taxonomy_by_series.get(series_id)
+    asset_code = (taxonomy.asset_class if taxonomy else None) or ""
+    strategy = (taxonomy.strategy_label if taxonomy else None) or ""
+    if asset_code:
+        normalized = _normalize_asset_class(asset_code) or "alternatives"
+        if normalized == "alternatives" and asset_code.strip().lower() == "real_assets":
+            strategy = strategy or "Real Assets"
+        if not strategy or strategy == "Unclassified":
+            _, fallback_strategy = _fallback_taxonomy_from_nport(row_asset_class)
+            strategy = fallback_strategy
+        return (
+            normalized,
+            _title_asset_class(normalized),
+            strategy,
+            strategy,
+            taxonomy.label if taxonomy else (fallback_label or series_id),
+        )
+
+    fallback_asset, fallback_strategy = _fallback_taxonomy_from_nport(row_asset_class)
+    return (
+        fallback_asset,
+        _title_asset_class(fallback_asset),
+        strategy or fallback_strategy,
+        strategy or fallback_strategy,
+        taxonomy.label if taxonomy else (fallback_label or series_id),
+    )
+
+
+def _direct_taxonomy(
+    asset_class: str | None,
+    strategy_label: str | None,
+) -> tuple[str, str, str, str]:
+    normalized = _normalize_asset_class(asset_class) or "equity"
+    strategy = (strategy_label or "").strip() or "Direct holdings"
+    return normalized, _title_asset_class(normalized), strategy, strategy
 
 
 def _child_lookup_key(row: Any) -> tuple[str | None, str | None]:
@@ -426,8 +594,40 @@ async def _resolve_child_series(
     return child_by_cusip, child_by_isin
 
 
+async def resolve_direct_holdings(
+    datalake: AsyncSession, inputs: list[DirectHoldingInput]
+) -> list[DirectHolding]:
+    """Resolve direct stock positions to holding leaves, preferring CUSIP keys."""
+    visible = [item for item in inputs if item.weight_pct > 0]
+    if not visible:
+        return []
+    result = await datalake.execute(
+        _DIRECT_HOLDINGS_SQL,
+        {
+            "tickers": [item.ticker for item in visible],
+            "labels": [item.label or item.ticker for item in visible],
+            "weights": [item.weight_pct for item in visible],
+            "asset_classes": [item.asset_class for item in visible],
+            "strategies": [item.strategy_label for item in visible],
+        },
+    )
+    holdings: list[DirectHolding] = []
+    for row in result.all():
+        holding_key = (row.holding_key or row.ticker).strip().upper()
+        holdings.append(
+            DirectHolding(
+                key=holding_key,
+                label=row.label or row.ticker,
+                value_pct=float(row.weight_pct),
+                asset_class=row.asset_class,
+                strategy_label=row.strategy_label,
+            )
+        )
+    return holdings
+
+
 def _build_tree_nodes(
-    leaf_totals: dict[tuple[str, str, str], dict[str, Any]],
+    leaf_totals: dict[tuple[str, str, str | None, str], dict[str, Any]],
     *,
     max_leaves: int,
 ) -> list[ExposureTreeNode]:
@@ -450,10 +650,13 @@ def _build_tree_nodes(
                 {
                     "asset_key": asset_key,
                     "asset_label": data["asset_label"],
-                    "series_key": "__OTHER__",
-                    "series_label": "Other series",
-                    "cusip_key": "__OTHER__",
-                    "cusip_label": "Other CUSIPs",
+                    "strategy_key": "__OTHER__",
+                    "strategy_label": "Other strategies",
+                    "series_key": None,
+                    "series_label": None,
+                    "leaf_key": "__OTHER__",
+                    "leaf_label": "Other holdings",
+                    "leaf_kind": "security",
                     "value_pct": 0.0,
                 },
             )
@@ -461,16 +664,23 @@ def _build_tree_nodes(
         visible_leaves.extend(other_by_asset.values())
 
     asset_totals: dict[str, float] = {}
-    series_totals: dict[tuple[str, str], float] = {}
+    strategy_totals: dict[tuple[str, str], float] = {}
+    series_totals: dict[tuple[str, str, str], float] = {}
     for data in visible_leaves:
         value = float(data["value_pct"])
         asset_key = str(data["asset_key"])
-        series_key = str(data["series_key"])
+        strategy_key = str(data["strategy_key"])
         asset_totals[asset_key] = asset_totals.get(asset_key, 0.0) + value
-        series_total_key = (asset_key, series_key)
-        series_totals[series_total_key] = (
-            series_totals.get(series_total_key, 0.0) + value
+        strategy_total_key = (asset_key, strategy_key)
+        strategy_totals[strategy_total_key] = (
+            strategy_totals.get(strategy_total_key, 0.0) + value
         )
+        series_key = data.get("series_key")
+        if series_key is not None:
+            series_total_key = (asset_key, strategy_key, str(series_key))
+            series_totals[series_total_key] = (
+                series_totals.get(series_total_key, 0.0) + value
+            )
 
     nodes: list[ExposureTreeNode] = []
     asset_labels = {
@@ -488,19 +698,38 @@ def _build_tree_nodes(
             )
         )
 
-    series_labels = {
-        (data["asset_key"], data["series_key"]): data["series_label"]
+    strategy_labels = {
+        (data["asset_key"], data["strategy_key"]): data["strategy_label"]
         for data in visible_leaves
     }
-    for (asset_key, series_key), value in sorted(
+    for (asset_key, strategy_key), value in sorted(
+        strategy_totals.items(), key=lambda item: (item[0][0], -item[1])
+    ):
+        nodes.append(
+            ExposureTreeNode(
+                id=_node_id("strategy", asset_key, strategy_key),
+                parent_id=_node_id("asset", asset_key),
+                key=strategy_key,
+                label=strategy_labels.get((asset_key, strategy_key)) or strategy_key,
+                kind="strategy",
+                value_pct=value,
+            )
+        )
+
+    series_labels = {
+        (data["asset_key"], data["strategy_key"], data["series_key"]): data["series_label"]
+        for data in visible_leaves
+        if data.get("series_key") is not None
+    }
+    for (asset_key, strategy_key, series_key), value in sorted(
         series_totals.items(), key=lambda item: (item[0][0], -item[1])
     ):
         nodes.append(
             ExposureTreeNode(
-                id=_node_id("series", asset_key, series_key),
-                parent_id=_node_id("asset", asset_key),
+                id=_node_id("series", asset_key, strategy_key, series_key),
+                parent_id=_node_id("strategy", asset_key, strategy_key),
                 key=series_key,
-                label=series_labels.get((asset_key, series_key)) or series_key,
+                label=series_labels.get((asset_key, strategy_key, series_key)) or series_key,
                 kind="series",
                 value_pct=value,
             )
@@ -508,20 +737,37 @@ def _build_tree_nodes(
 
     for data in sorted(
         visible_leaves,
-        key=lambda item: (item["asset_key"], item["series_key"], -float(item["value_pct"])),
+        key=lambda item: (
+            item["asset_key"],
+            item["strategy_key"],
+            item.get("series_key") or "",
+            -float(item["value_pct"]),
+        ),
     ):
+        series_key = data.get("series_key")
+        leaf_kind = str(data.get("leaf_kind") or "cusip")
+        leaf_key = str(data["leaf_key"])
+        parent_id = (
+            _node_id(
+                "series",
+                data["asset_key"],
+                data["strategy_key"],
+                series_key,
+            )
+            if series_key is not None
+            else _node_id("strategy", data["asset_key"], data["strategy_key"])
+        )
+        node_id_parts = [data["asset_key"], data["strategy_key"]]
+        if series_key is not None:
+            node_id_parts.append(series_key)
+        node_id_parts.append(leaf_key)
         nodes.append(
             ExposureTreeNode(
-                id=_node_id(
-                    "cusip",
-                    data["asset_key"],
-                    data["series_key"],
-                    data["cusip_key"],
-                ),
-                parent_id=_node_id("series", data["asset_key"], data["series_key"]),
-                key=data["cusip_key"],
-                label=data["cusip_label"] or data["cusip_key"],
-                kind="cusip",
+                id=_node_id(leaf_kind, *node_id_parts),
+                parent_id=parent_id,
+                key=leaf_key,
+                label=data["leaf_label"] or leaf_key,
+                kind=leaf_kind,
                 value_pct=float(data["value_pct"]),
             )
         )
@@ -532,37 +778,71 @@ async def build_portfolio_exposure_tree(
     datalake: AsyncSession,
     weighted: list[tuple[float, SeriesLookthrough]],
     *,
-    series_labels: dict[str, str] | None = None,
+    series_taxonomy: dict[str, SeriesTaxonomy] | None = None,
+    taxonomy_loader: (
+        Callable[[list[str]], Awaitable[dict[str, SeriesTaxonomy]]] | None
+    ) = None,
+    direct_holdings: list[DirectHolding] | None = None,
     max_depth: int = MAX_TREE_DEPTH,
     max_leaves: int = MAX_TREE_LEAVES,
     holdings_per_series: int = MAX_TREE_HOLDINGS_PER_SERIES,
 ) -> list[ExposureTreeNode]:
-    """Build asset-class → series ID → CUSIP nodes for portfolio drilldown.
+    """Build asset-class → strategy → fund series → final holding nodes.
 
     Official totals still come from ``nport_lookthrough_exposures``. This tree
     is a bounded visualization aid: it uses raw N-PORT rows in batches, follows
     fund-of-fund edges when identifiable, and caps the CUSIP tail.
     """
-    labels = series_labels or {}
-    states: list[tuple[str, dt.date, float, frozenset[str], str]] = [
-        (
-            data.series_id,
-            data.report_date,
-            weight,
-            frozenset({data.series_id}),
-            labels.get(data.series_id, data.series_id),
-        )
+    taxonomy_by_series = dict(series_taxonomy or {})
+
+    async def ensure_taxonomy(series_ids: list[str]) -> None:
+        missing = sorted({sid for sid in series_ids if sid not in taxonomy_by_series})
+        if missing and taxonomy_loader is not None:
+            taxonomy_by_series.update(await taxonomy_loader(missing))
+
+    states: list[tuple[str, dt.date, float, frozenset[str]]] = [
+        (data.series_id, data.report_date, weight, frozenset({data.series_id}))
         for weight, data in weighted
         if weight > 0
     ]
-    leaf_totals: dict[tuple[str, str, str], dict[str, Any]] = {}
+    leaf_totals: dict[tuple[str, str, str | None, str], dict[str, Any]] = {}
+
+    for holding in direct_holdings or []:
+        asset_key, asset_label, strategy_key, strategy_label = _direct_taxonomy(
+            holding.asset_class,
+            holding.strategy_label,
+        )
+        leaf_key = holding.key.strip().upper() or holding.label
+        key: tuple[str, str, str | None, str] = (
+            asset_key,
+            strategy_key,
+            None,
+            leaf_key,
+        )
+        entry = leaf_totals.setdefault(
+            key,
+            {
+                "asset_key": asset_key,
+                "asset_label": asset_label,
+                "strategy_key": strategy_key,
+                "strategy_label": strategy_label,
+                "series_key": None,
+                "series_label": None,
+                "leaf_key": leaf_key,
+                "leaf_label": holding.label,
+                "leaf_kind": "security",
+                "value_pct": 0.0,
+            },
+        )
+        entry["value_pct"] += holding.value_pct
 
     for depth in range(max_depth + 1):
         if not states:
             break
+        await ensure_taxonomy([series_id for series_id, *_ in states])
         holdings_by_series = await _fetch_tree_holdings(
             datalake,
-            [(series_id, as_of) for series_id, as_of, _, _, _ in states],
+            [(series_id, as_of) for series_id, as_of, _, _ in states],
             limit_rows=holdings_per_series,
         )
         current_rows = [
@@ -573,44 +853,55 @@ async def build_portfolio_exposure_tree(
         child_by_cusip, child_by_isin = await _resolve_child_series(
             datalake, current_rows
         )
-        next_states: list[tuple[str, dt.date, float, frozenset[str], str]] = []
-        for series_id, as_of, weight, ancestors, series_label in states:
+        next_states: list[tuple[str, dt.date, float, frozenset[str]]] = []
+        for series_id, as_of, weight, ancestors in states:
             for row in holdings_by_series.get((series_id, as_of), []):
                 raw_pct = float(row.pct_of_nav) if row.pct_of_nav is not None else 0.0
                 contribution = weight * raw_pct
                 child = _match_child_series(row, child_by_cusip, child_by_isin)
                 if child and child not in ancestors and depth < max_depth:
-                    child_label = row.issuer_name or labels.get(child) or child
                     next_states.append(
                         (
                             child,
                             row.report_date,
                             weight * raw_pct / 100.0,
                             ancestors | {child},
-                            child_label,
                         )
                     )
                     continue
 
-                asset_key = (row.asset_class or "UNKNOWN").strip().upper()
+                (
+                    asset_key,
+                    asset_label,
+                    strategy_key,
+                    strategy_label,
+                    series_label,
+                ) = _series_taxonomy(
+                    series_id,
+                    row.asset_class,
+                    taxonomy_by_series,
+                )
                 series_key = series_id
                 cusip_key = _cusip_key(row.cusip, row.isin)
-                key = (asset_key, series_key, cusip_key)
+                key = (asset_key, strategy_key, series_key, cusip_key)
                 entry = leaf_totals.setdefault(
                     key,
                     {
                         "asset_key": asset_key,
-                        "asset_label": asset_key,
+                        "asset_label": asset_label,
+                        "strategy_key": strategy_key,
+                        "strategy_label": strategy_label,
                         "series_key": series_key,
                         "series_label": series_label,
-                        "cusip_key": cusip_key,
-                        "cusip_label": row.issuer_name or cusip_key,
+                        "leaf_key": cusip_key,
+                        "leaf_label": row.issuer_name or cusip_key,
+                        "leaf_kind": "cusip",
                         "value_pct": 0.0,
                     },
                 )
                 entry["value_pct"] += contribution
-                if row.issuer_name and entry["cusip_label"] == entry["cusip_key"]:
-                    entry["cusip_label"] = row.issuer_name
+                if row.issuer_name and entry["leaf_label"] == entry["leaf_key"]:
+                    entry["leaf_label"] = row.issuer_name
         states = next_states
 
     return _build_tree_nodes(leaf_totals, max_leaves=max_leaves)

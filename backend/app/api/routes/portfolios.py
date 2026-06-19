@@ -36,6 +36,8 @@ from app.models.news_item import NewsItem
 from app.schemas._tickers import normalize_ticker
 from app.schemas.lookthrough import (
     ExposureTreeNode as ExposureTreeNodeOut,
+)
+from app.schemas.lookthrough import (
     PortfolioLookthroughResponse,
     UnexpandedPosition,
     build_dimensions,
@@ -570,12 +572,14 @@ async def get_portfolio_lookthrough(
 
     weighted: list[tuple[float, lookthrough.SeriesLookthrough]] = []
     unexpanded: list[UnexpandedPosition] = []
+    direct_position_weights: list[tuple[str, float]] = []
     for position in positions:
         weight = (
             market_values[position.ticker] / total_value if total_value else 0.0
         )
         series_id = series_by_ticker.get(position.ticker)
         if series_id is None:
+            direct_position_weights.append((position.ticker, weight))
             unexpanded.append(
                 UnexpandedPosition(
                     ticker=position.ticker,
@@ -595,13 +599,45 @@ async def get_portfolio_lookthrough(
             weighted.append((weight, lookthroughs[series_id]))
 
     rows, aggregates = lookthrough.consolidate_portfolio(weighted)
+    direct_holdings: list[lookthrough.DirectHolding] = []
+    if include_tree and direct_position_weights:
+        direct_tickers = [ticker for ticker, _ in direct_position_weights]
+        direct_names = await portfolio_crud.select_instrument_names(
+            session, direct_tickers
+        )
+        direct_taxonomy = await portfolio_crud.resolve_position_taxonomy(
+            session, direct_tickers
+        )
+        direct_holdings = await lookthrough.resolve_direct_holdings(
+            datalake,
+            [
+                lookthrough.DirectHoldingInput(
+                    ticker=ticker,
+                    label=direct_names.get(ticker),
+                    weight_pct=100.0 * weight,
+                    asset_class=direct_taxonomy.get(
+                        ticker,
+                        portfolio_crud.PositionTaxonomy("equity", None, None),
+                    ).asset_class,
+                    strategy_label=direct_taxonomy.get(
+                        ticker,
+                        portfolio_crud.PositionTaxonomy("equity", None, None),
+                    ).strategy_label,
+                )
+                for ticker, weight in direct_position_weights
+            ],
+        )
     tree = (
         await lookthrough.build_portfolio_exposure_tree(
             datalake,
             weighted,
-            series_labels=await lookthrough.get_fund_labels_by_series(
+            series_taxonomy=await lookthrough.get_fund_taxonomy_by_series(
                 session, series_ids
             ),
+            taxonomy_loader=lambda child_series_ids: (
+                lookthrough.get_fund_taxonomy_by_series(session, child_series_ids)
+            ),
+            direct_holdings=direct_holdings,
         )
         if include_tree
         else []

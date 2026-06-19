@@ -1,8 +1,9 @@
 /**
  * Pure option builder: portfolio exposure sunburst.
  *
- * The API supplies a parent-linked tree: asset class -> series ID -> CUSIP.
- * Parent rings carry labels and color; leaf rings carry values.
+ * The API supplies a parent-linked tree: asset class -> strategy -> fund series
+ * -> final holding. Direct stocks can skip the fund series level and appear as
+ * final holding leaves under strategy.
  */
 import type { Options, PointOptionsObject } from "highcharts";
 
@@ -11,6 +12,9 @@ import type { ChartColors } from "@/lib/charts/chartColors";
 import { formatNumber } from "@/lib/format";
 
 const ASSET_CLASS_LABELS: Record<string, string> = {
+  alternatives: "Alternatives",
+  equity: "Equity",
+  fixed_income: "Fixed Income",
   ABS: "Asset-backed securities",
   "ABS-MBS": "ABS / MBS",
   "ABS-O": "Asset-backed securities",
@@ -32,8 +36,11 @@ const ASSET_CLASS_LABELS: Record<string, string> = {
 const round4 = (value: number) => parseFloat(value.toFixed(4));
 
 export function assetClassLabel(key: string, fallback?: string | null): string {
-  const normalized = key.trim().toUpperCase();
-  return ASSET_CLASS_LABELS[normalized] ?? fallback ?? key;
+  const trimmed = key.trim();
+  return ASSET_CLASS_LABELS[trimmed.toLowerCase()]
+    ?? ASSET_CLASS_LABELS[trimmed.toUpperCase()]
+    ?? fallback
+    ?? key;
 }
 
 function nodeLabel(node: PortfolioLookthrough["tree"][number]): string {
@@ -147,6 +154,19 @@ export function buildHcExposureSunburstOption(
         borderColor: colors.surface,
         borderWidth: 1,
         cursor: "pointer",
+        dataLabels: {
+          formatter() {
+            const point = (
+              this as unknown as {
+                point: {
+                  name: string;
+                  options: { custom?: { kind?: string } };
+                };
+              }
+            ).point;
+            return point.name;
+          },
+        },
       },
     },
     series: [

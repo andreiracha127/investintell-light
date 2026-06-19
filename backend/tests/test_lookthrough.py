@@ -350,7 +350,7 @@ async def test_build_portfolio_exposure_tree_expands_child_funds() -> None:
                             report_date=_REPORT,
                             cusip="111111111",
                             isin=None,
-                            issuer_name="Child ETF",
+                            issuer_name="Child Trust",
                             asset_class="EC",
                             sector="CORP",
                             currency="USD",
@@ -384,25 +384,50 @@ async def test_build_portfolio_exposure_tree_expands_child_funds() -> None:
                     ])
             return Result(rows)
 
+    async def taxonomy_loader(series_ids):
+        assert series_ids == ["S_CHILD"]
+        return {
+            "S_CHILD": lt.SeriesTaxonomy(
+                label="Child ETF",
+                asset_class=None,
+                strategy_label=None,
+            )
+        }
+
     nodes = await lt.build_portfolio_exposure_tree(
         FakeDatalake(),
         [(0.5, _series_lookthrough("S_A"))],
-        series_labels={"S_A": "Parent ETF"},
+        series_taxonomy={
+            "S_A": lt.SeriesTaxonomy(
+                label="Parent ETF",
+                asset_class=None,
+                strategy_label=None,
+            )
+        },
+        taxonomy_loader=taxonomy_loader,
     )
 
     by_id = {node.id: node for node in nodes}
-    assert by_id["asset|EC"].value_pct == pytest.approx(35.0)
-    assert by_id["asset|DBT"].value_pct == pytest.approx(15.0)
-    assert by_id["series|EC|S_A"].value_pct == pytest.approx(25.0)
-    assert by_id["series|EC|S_CHILD"].value_pct == pytest.approx(10.0)
-    assert by_id["series|DBT|S_CHILD"].value_pct == pytest.approx(15.0)
-    assert by_id["series|EC|S_A"].label == "Parent ETF"
-    assert by_id["series|EC|S_CHILD"].label == "Child ETF"
-    assert by_id["cusip|EC|S_A|037833100"].value_pct == pytest.approx(25.0)
-    assert by_id["cusip|EC|S_CHILD|594918104"].value_pct == pytest.approx(10.0)
-    assert by_id["cusip|DBT|S_CHILD|9128285M8"].value_pct == pytest.approx(15.0)
-    assert by_id["cusip|EC|S_A|037833100"].label == "Apple Inc"
-    assert by_id["cusip|EC|S_CHILD|594918104"].label == "Microsoft"
+    assert by_id["asset|equity"].value_pct == pytest.approx(35.0)
+    assert by_id["asset|fixed_income"].value_pct == pytest.approx(15.0)
+    assert by_id["strategy|equity|Equity"].value_pct == pytest.approx(35.0)
+    assert by_id["strategy|fixed_income|Fixed Income"].value_pct == pytest.approx(15.0)
+    assert by_id["series|equity|Equity|S_A"].value_pct == pytest.approx(25.0)
+    assert by_id["series|equity|Equity|S_CHILD"].value_pct == pytest.approx(10.0)
+    assert by_id["series|fixed_income|Fixed Income|S_CHILD"].value_pct == pytest.approx(15.0)
+    assert by_id["series|equity|Equity|S_A"].key == "S_A"
+    assert by_id["series|equity|Equity|S_A"].label == "Parent ETF"
+    assert by_id["series|equity|Equity|S_CHILD"].key == "S_CHILD"
+    assert by_id["series|equity|Equity|S_CHILD"].label == "Child ETF"
+    assert by_id["cusip|equity|Equity|S_A|037833100"].value_pct == pytest.approx(25.0)
+    assert by_id["cusip|equity|Equity|S_CHILD|594918104"].value_pct == pytest.approx(10.0)
+    assert by_id[
+        "cusip|fixed_income|Fixed Income|S_CHILD|9128285M8"
+    ].value_pct == pytest.approx(15.0)
+    assert by_id["cusip|equity|Equity|S_A|037833100"].key == "037833100"
+    assert by_id["cusip|equity|Equity|S_A|037833100"].label == "Apple Inc"
+    assert by_id["cusip|equity|Equity|S_CHILD|594918104"].key == "594918104"
+    assert by_id["cusip|equity|Equity|S_CHILD|594918104"].label == "Microsoft"
 
 
 @pytest.mark.asyncio
@@ -440,9 +465,203 @@ async def test_portfolio_exposure_tree_does_not_surface_cik_as_cusip() -> None:
 
     leaves = [node for node in nodes if node.kind == "cusip"]
     assert len(leaves) == 1
-    assert leaves[0].id == "cusip|EC|S_A|UNKNOWN"
+    assert leaves[0].id == "cusip|equity|Equity|S_A|UNKNOWN"
     assert leaves[0].key == "UNKNOWN"
     assert leaves[0].label == "Apple Inc"
+
+
+@pytest.mark.asyncio
+async def test_portfolio_exposure_tree_places_direct_stocks_as_final_holding_leaf() -> None:
+    nodes = await lt.build_portfolio_exposure_tree(
+        datalake=None,
+        weighted=[],
+        direct_holdings=[
+            lt.DirectHolding(
+                key="037833100",
+                label="Apple Inc",
+                value_pct=20.0,
+                asset_class="equity",
+                strategy_label="Technology",
+            )
+        ],
+    )
+
+    by_id = {node.id: node for node in nodes}
+    assert not any(node.kind == "series" for node in nodes)
+    assert by_id["asset|equity"].label == "Equity"
+    assert by_id["strategy|equity|Technology"].label == "Technology"
+    assert by_id["security|equity|Technology|037833100"].parent_id == (
+        "strategy|equity|Technology"
+    )
+    assert by_id["security|equity|Technology|037833100"].label == "Apple Inc"
+    assert by_id["security|equity|Technology|037833100"].value_pct == pytest.approx(
+        20.0
+    )
+
+
+@pytest.mark.asyncio
+async def test_portfolio_exposure_tree_places_real_assets_under_alternatives() -> None:
+    class Result:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def all(self):
+            return self._rows
+
+    class FakeDatalake:
+        async def execute(self, stmt, params):
+            sql = str(stmt)
+            if "sec_cusip_ticker_map" in sql:
+                return Result([])
+            return Result([
+                SimpleNamespace(
+                    series_id="S_RA",
+                    report_date=_REPORT,
+                    cusip="123456789",
+                    isin=None,
+                    issuer_name="Real Asset Holding",
+                    asset_class="RA",
+                    sector="REAL",
+                    currency="USD",
+                    pct_of_nav=100.0,
+                )
+            ])
+
+    nodes = await lt.build_portfolio_exposure_tree(
+        FakeDatalake(),
+        [(0.25, _series_lookthrough("S_RA"))],
+        series_taxonomy={
+            "S_RA": lt.SeriesTaxonomy(
+                label="Real Assets Fund",
+                asset_class="alternatives",
+                strategy_label="Real Assets",
+            )
+        },
+    )
+
+    by_id = {node.id: node for node in nodes}
+    assert "asset|Real Assets" not in by_id
+    assert by_id["asset|alternatives"].label == "Alternatives"
+    assert by_id["strategy|alternatives|Real Assets"].label == "Real Assets"
+    assert by_id["series|alternatives|Real Assets|S_RA"].key == "S_RA"
+    assert by_id["series|alternatives|Real Assets|S_RA"].label == "Real Assets Fund"
+
+
+@pytest.mark.asyncio
+async def test_portfolio_exposure_tree_expands_deep_fund_of_funds() -> None:
+    class Result:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def all(self):
+            return self._rows
+
+    class FakeDatalake:
+        async def execute(self, stmt, params):
+            sql = str(stmt)
+            if "sec_cusip_ticker_map" in sql:
+                mapped = {
+                    "111111111": "S_B",
+                    "222222222": "S_C",
+                    "333333333": "S_D",
+                }
+                return Result([
+                    SimpleNamespace(kind="cusip", ident=cusip, series_id=series_id)
+                    for cusip, series_id in mapped.items()
+                    if cusip in params["cusips"]
+                ])
+
+            rows = []
+            for series_id in params["series_ids"]:
+                if series_id == "S_A":
+                    rows.append(
+                        SimpleNamespace(
+                            series_id="S_A",
+                            report_date=_REPORT,
+                            cusip="111111111",
+                            isin=None,
+                            issuer_name="Fund B",
+                            asset_class="EC",
+                            sector="ETF",
+                            currency="USD",
+                            pct_of_nav=100.0,
+                        )
+                    )
+                elif series_id == "S_B":
+                    rows.append(
+                        SimpleNamespace(
+                            series_id="S_B",
+                            report_date=_REPORT,
+                            cusip="222222222",
+                            isin=None,
+                            issuer_name="Fund C",
+                            asset_class="EC",
+                            sector="ETF",
+                            currency="USD",
+                            pct_of_nav=100.0,
+                        )
+                    )
+                elif series_id == "S_C":
+                    rows.append(
+                        SimpleNamespace(
+                            series_id="S_C",
+                            report_date=_REPORT,
+                            cusip="333333333",
+                            isin=None,
+                            issuer_name="Fund D",
+                            asset_class="EC",
+                            sector="ETF",
+                            currency="USD",
+                            pct_of_nav=100.0,
+                        )
+                    )
+                elif series_id == "S_D":
+                    rows.append(
+                        SimpleNamespace(
+                            series_id="S_D",
+                            report_date=_REPORT,
+                            cusip="037833100",
+                            isin=None,
+                            issuer_name="Apple Inc",
+                            asset_class="EC",
+                            sector="CORP",
+                            currency="USD",
+                            pct_of_nav=80.0,
+                        )
+                    )
+            return Result(rows)
+
+    async def taxonomy_loader(series_ids):
+        labels = {
+            "S_A": "Fund A Series",
+            "S_B": "Fund B Series",
+            "S_C": "Fund C Series",
+            "S_D": "Fund D Series",
+        }
+        return {
+            series_id: lt.SeriesTaxonomy(
+                label=labels[series_id],
+                asset_class=None,
+                strategy_label=None,
+            )
+            for series_id in series_ids
+        }
+
+    nodes = await lt.build_portfolio_exposure_tree(
+        FakeDatalake(),
+        [(0.5, _series_lookthrough("S_A"))],
+        taxonomy_loader=taxonomy_loader,
+    )
+
+    by_id = {node.id: node for node in nodes}
+    assert "cusip|equity|Equity|S_A|111111111" not in by_id
+    assert "cusip|equity|Equity|S_B|222222222" not in by_id
+    assert "cusip|equity|Equity|S_C|333333333" not in by_id
+    assert by_id["series|equity|Equity|S_D"].key == "S_D"
+    assert by_id["series|equity|Equity|S_D"].label == "Fund D Series"
+    assert by_id["cusip|equity|Equity|S_D|037833100"].key == "037833100"
+    assert by_id["cusip|equity|Equity|S_D|037833100"].label == "Apple Inc"
+    assert by_id["cusip|equity|Equity|S_D|037833100"].value_pct == pytest.approx(40.0)
 
 
 # ---------------------------------------------------------------------------
@@ -539,19 +758,27 @@ async def test_portfolio_lookthrough_tree_can_request_only_asset_class(
         assert dimension == "asset_class"
         return {"S_A": _series_lookthrough("S_A")}
 
-    async def fake_labels(session, series_ids):
+    async def fake_taxonomy(session, series_ids):
         assert series_ids == ["S_A"]
-        return {"S_A": "Fund X"}
+        return {
+            "S_A": lt.SeriesTaxonomy(
+                label="Fund X",
+                asset_class="alternatives",
+                strategy_label="Real Assets",
+            )
+        }
 
     async def fake_tree(dl, weighted, **kwargs):
         assert len(weighted) == 1
-        assert kwargs["series_labels"] == {"S_A": "Fund X"}
+        assert kwargs["series_taxonomy"]["S_A"].label == "Fund X"
+        assert kwargs["series_taxonomy"]["S_A"].asset_class == "alternatives"
+        assert kwargs["taxonomy_loader"] is not None
         return [
             lt.ExposureTreeNode(
-                id="asset|EC",
+                id="asset|alternatives",
                 parent_id=None,
-                key="EC",
-                label="EC",
+                key="alternatives",
+                label="Alternatives",
                 kind="asset_class",
                 value_pct=60.0,
             )
@@ -562,7 +789,7 @@ async def test_portfolio_lookthrough_tree_can_request_only_asset_class(
     monkeypatch.setattr(portfolio_crud, "select_last_two_closes", fake_closes)
     monkeypatch.setattr(portfolio_crud, "select_last_two_navs", fake_navs)
     monkeypatch.setattr(lt, "fetch_many_lookthroughs", fake_fetch_many)
-    monkeypatch.setattr(lt, "get_fund_labels_by_series", fake_labels)
+    monkeypatch.setattr(lt, "get_fund_taxonomy_by_series", fake_taxonomy)
     monkeypatch.setattr(lt, "build_portfolio_exposure_tree", fake_tree)
 
     async with _client() as client:
@@ -575,7 +802,108 @@ async def test_portfolio_lookthrough_tree_can_request_only_asset_class(
     body = resp.json()
     assert list(body["dimensions"]) == ["asset_class"]
     assert body["dimensions"]["asset_class"][0]["key"] == "EC"
-    assert body["tree"][0]["id"] == "asset|EC"
+    assert body["tree"][0]["id"] == "asset|alternatives"
+
+
+@pytest.mark.anyio
+async def test_portfolio_lookthrough_tree_includes_direct_stocks_as_leaf_holdings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    portfolio = SimpleNamespace(
+        id=7,
+        name="P",
+        cash=0.0,
+        positions=[_position("FUNDX", 100.0), _position("AAPL", 10.0)],
+    )
+
+    async def fake_get_portfolio(session, portfolio_id):
+        return portfolio
+
+    async def fake_fund_series_by_ticker(session, tickers):
+        return {"FUNDX": "S_A"}
+
+    async def fake_closes(session, tickers):
+        return {"AAPL": [(dt.date(2026, 6, 11), 100.0)]}
+
+    async def fake_navs(session, tickers):
+        return {"FUNDX": [(dt.date(2026, 6, 11), 10.0)]}
+
+    async def fake_fetch_many(dl, series_ids, dimension=None):
+        assert series_ids == ["S_A"]
+        return {"S_A": _series_lookthrough("S_A")}
+
+    async def fake_taxonomy(session, series_ids):
+        return {
+            "S_A": lt.SeriesTaxonomy(
+                label="Fund X",
+                asset_class="equity",
+                strategy_label="Large Blend",
+            )
+        }
+
+    async def fake_names(session, tickers):
+        assert tickers == ["AAPL"]
+        return {"AAPL": "Apple Inc"}
+
+    async def fake_position_taxonomy(session, tickers):
+        assert tickers == ["AAPL"]
+        return {"AAPL": portfolio_crud.PositionTaxonomy("equity", None, None)}
+
+    async def fake_direct_holdings(dl, inputs):
+        assert len(inputs) == 1
+        assert inputs[0].ticker == "AAPL"
+        assert inputs[0].label == "Apple Inc"
+        assert inputs[0].weight_pct == pytest.approx(50.0)
+        return [
+            lt.DirectHolding(
+                key="037833100",
+                label="Apple Inc",
+                value_pct=50.0,
+                asset_class="equity",
+                strategy_label="Technology",
+            )
+        ]
+
+    async def fake_tree(dl, weighted, **kwargs):
+        assert len(weighted) == 1
+        assert kwargs["direct_holdings"][0].key == "037833100"
+        return [
+            lt.ExposureTreeNode(
+                id="security|equity|Technology|037833100",
+                parent_id="strategy|equity|Technology",
+                key="037833100",
+                label="Apple Inc",
+                kind="security",
+                value_pct=50.0,
+            )
+        ]
+
+    monkeypatch.setattr(portfolio_crud, "get_portfolio", fake_get_portfolio)
+    monkeypatch.setattr(lt, "get_fund_series_by_ticker", fake_fund_series_by_ticker)
+    monkeypatch.setattr(portfolio_crud, "select_last_two_closes", fake_closes)
+    monkeypatch.setattr(portfolio_crud, "select_last_two_navs", fake_navs)
+    monkeypatch.setattr(lt, "fetch_many_lookthroughs", fake_fetch_many)
+    monkeypatch.setattr(lt, "get_fund_taxonomy_by_series", fake_taxonomy)
+    monkeypatch.setattr(portfolio_crud, "select_instrument_names", fake_names)
+    monkeypatch.setattr(
+        portfolio_crud,
+        "resolve_position_taxonomy",
+        fake_position_taxonomy,
+    )
+    monkeypatch.setattr(lt, "resolve_direct_holdings", fake_direct_holdings)
+    monkeypatch.setattr(lt, "build_portfolio_exposure_tree", fake_tree)
+
+    async with _client() as client:
+        resp = await client.get(
+            "/portfolios/7/lookthrough",
+            params={"include_tree": "true", "dimension": "asset_class"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["unexpanded"][0]["ticker"] == "AAPL"
+    assert body["tree"][0]["kind"] == "security"
+    assert body["tree"][0]["key"] == "037833100"
 
 
 @pytest.mark.anyio
