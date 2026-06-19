@@ -110,7 +110,7 @@ def _stub_metric_values(monkeypatch: pytest.MonkeyPatch, values: list[float]) ->
 async def test_metrics_catalog_is_public() -> None:
     async with _client_noauth() as ac:
         response = await ac.get("/screener/metrics")
-    assert response.status_code != 401
+    assert response.status_code == 200
 
 
 async def test_screens_list_requires_auth() -> None:

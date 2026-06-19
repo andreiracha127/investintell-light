@@ -562,5 +562,6 @@ async def test_save_forwards_owner(monkeypatch: pytest.MonkeyPatch) -> None:
         ],
     }
     async with _client() as ac:
-        await ac.post("/builder/save", json=payload)
+        resp = await ac.post("/builder/save", json=payload)
+    assert resp.status_code == 201
     assert captured == [("u-1", None)]

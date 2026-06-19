@@ -66,7 +66,11 @@ async def get_rebalance_policy(
     session: SessionDep,
     user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> RebalancePolicyOut:
-    """Política salva do portfólio; 404 quando nenhuma foi configurada."""
+    """Política salva do portfólio.
+
+    Raises 404 when the portfolio doesn't exist or doesn't belong to the
+    caller, and also when no policy has been configured for it yet.
+    """
     if not await portfolio_crud.portfolio_exists(session, portfolio_id, user.sub):
         raise HTTPException(
             status_code=404, detail=f"Portfolio {portfolio_id} not found."
