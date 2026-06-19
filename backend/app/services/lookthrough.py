@@ -5,7 +5,7 @@ the datalake repo and materialized in the TimescaleDB Cloud
 (``nport_lookthrough_exposures`` + ``nport_lookthrough_summary``). This module
 READS those tables and does portfolio-level weighted consolidation for the
 official totals. Portfolio chart drilldown can additionally build a bounded
-asset-class → issuer → security tree from raw N-PORT rows; that path is capped
+asset-class → series ID → CUSIP tree from raw N-PORT rows; that path is capped
 and lazy-loaded by the frontend so it does not block the main exposure payload.
 
 Semantics inherited from the worker (do not reinterpret here):
@@ -115,6 +115,21 @@ async def get_fund_series_by_ticker(
         select(Fund.ticker, Fund.series_id).where(Fund.ticker.in_(tickers))
     )
     return {ticker: series_id for ticker, series_id in result.all()}
+
+
+async def get_fund_labels_by_series(
+    session: AsyncSession, series_ids: list[str]
+) -> dict[str, str]:
+    """series_id → display name for known local funds."""
+    if not series_ids:
+        return {}
+    result = await session.execute(
+        select(Fund.series_id, Fund.name).where(Fund.series_id.in_(series_ids))
+    )
+    labels: dict[str, str] = {}
+    for series_id, name in result.all():
+        labels.setdefault(series_id, name)
+    return labels
 
 
 # ---------------------------------------------------------------------------
@@ -249,29 +264,18 @@ def _embedded_cusip9(isin: str | None) -> str | None:
     return None
 
 
-def _issuer_key(cusip: str | None, isin: str | None) -> str:
+def _cusip_key(cusip: str | None, isin: str | None) -> str:
     cusip = (cusip or "").strip().upper()
-    isin = (isin or "").strip().upper() or None
-    if cusip and not cusip.startswith(SYNTHETIC_PREFIXES):
-        return cusip[:6]
+    isin = (isin or "").strip().upper()
     if cusip.startswith("IS:"):
-        embedded = _embedded_cusip9(cusip[3:])
-        return embedded[:6] if embedded else cusip
-    if cusip:
+        isin = isin or cusip[3:]
+        cusip = ""
+    if cusip and not cusip.startswith(SYNTHETIC_PREFIXES):
         return cusip
     if isin:
         embedded = _embedded_cusip9(isin)
-        return embedded[:6] if embedded else f"IS:{isin}"
-    return "UNKNOWN"
-
-
-def _security_key(cusip: str | None, isin: str | None) -> str:
-    cusip = (cusip or "").strip().upper()
-    isin = (isin or "").strip().upper()
-    if cusip:
-        return cusip
-    if isin:
-        return f"IS:{isin}"
+        if embedded:
+            return embedded
     return "UNKNOWN"
 
 
@@ -446,10 +450,10 @@ def _build_tree_nodes(
                 {
                     "asset_key": asset_key,
                     "asset_label": data["asset_label"],
-                    "issuer_key": "__OTHER__",
-                    "issuer_label": "Other holdings",
-                    "security_key": "__OTHER__",
-                    "security_label": "Other holdings",
+                    "series_key": "__OTHER__",
+                    "series_label": "Other series",
+                    "cusip_key": "__OTHER__",
+                    "cusip_label": "Other CUSIPs",
                     "value_pct": 0.0,
                 },
             )
@@ -457,15 +461,15 @@ def _build_tree_nodes(
         visible_leaves.extend(other_by_asset.values())
 
     asset_totals: dict[str, float] = {}
-    issuer_totals: dict[tuple[str, str], float] = {}
+    series_totals: dict[tuple[str, str], float] = {}
     for data in visible_leaves:
         value = float(data["value_pct"])
         asset_key = str(data["asset_key"])
-        issuer_key = str(data["issuer_key"])
+        series_key = str(data["series_key"])
         asset_totals[asset_key] = asset_totals.get(asset_key, 0.0) + value
-        issuer_total_key = (asset_key, issuer_key)
-        issuer_totals[issuer_total_key] = (
-            issuer_totals.get(issuer_total_key, 0.0) + value
+        series_total_key = (asset_key, series_key)
+        series_totals[series_total_key] = (
+            series_totals.get(series_total_key, 0.0) + value
         )
 
     nodes: list[ExposureTreeNode] = []
@@ -484,40 +488,40 @@ def _build_tree_nodes(
             )
         )
 
-    issuer_labels = {
-        (data["asset_key"], data["issuer_key"]): data["issuer_label"]
+    series_labels = {
+        (data["asset_key"], data["series_key"]): data["series_label"]
         for data in visible_leaves
     }
-    for (asset_key, issuer_key), value in sorted(
-        issuer_totals.items(), key=lambda item: (item[0][0], -item[1])
+    for (asset_key, series_key), value in sorted(
+        series_totals.items(), key=lambda item: (item[0][0], -item[1])
     ):
         nodes.append(
             ExposureTreeNode(
-                id=_node_id("issuer", asset_key, issuer_key),
+                id=_node_id("series", asset_key, series_key),
                 parent_id=_node_id("asset", asset_key),
-                key=issuer_key,
-                label=issuer_labels.get((asset_key, issuer_key)) or issuer_key,
-                kind="issuer",
+                key=series_key,
+                label=series_labels.get((asset_key, series_key)) or series_key,
+                kind="series",
                 value_pct=value,
             )
         )
 
     for data in sorted(
         visible_leaves,
-        key=lambda item: (item["asset_key"], item["issuer_key"], -float(item["value_pct"])),
+        key=lambda item: (item["asset_key"], item["series_key"], -float(item["value_pct"])),
     ):
         nodes.append(
             ExposureTreeNode(
                 id=_node_id(
-                    "security",
+                    "cusip",
                     data["asset_key"],
-                    data["issuer_key"],
-                    data["security_key"],
+                    data["series_key"],
+                    data["cusip_key"],
                 ),
-                parent_id=_node_id("issuer", data["asset_key"], data["issuer_key"]),
-                key=data["security_key"],
-                label=data["security_label"] or data["security_key"],
-                kind="security",
+                parent_id=_node_id("series", data["asset_key"], data["series_key"]),
+                key=data["cusip_key"],
+                label=data["cusip_label"] or data["cusip_key"],
+                kind="cusip",
                 value_pct=float(data["value_pct"]),
             )
         )
@@ -528,18 +532,26 @@ async def build_portfolio_exposure_tree(
     datalake: AsyncSession,
     weighted: list[tuple[float, SeriesLookthrough]],
     *,
+    series_labels: dict[str, str] | None = None,
     max_depth: int = MAX_TREE_DEPTH,
     max_leaves: int = MAX_TREE_LEAVES,
     holdings_per_series: int = MAX_TREE_HOLDINGS_PER_SERIES,
 ) -> list[ExposureTreeNode]:
-    """Build asset-class → issuer → security nodes for portfolio drilldown.
+    """Build asset-class → series ID → CUSIP nodes for portfolio drilldown.
 
     Official totals still come from ``nport_lookthrough_exposures``. This tree
     is a bounded visualization aid: it uses raw N-PORT rows in batches, follows
-    fund-of-fund edges when identifiable, and caps the security tail.
+    fund-of-fund edges when identifiable, and caps the CUSIP tail.
     """
-    states: list[tuple[str, dt.date, float, frozenset[str]]] = [
-        (data.series_id, data.report_date, weight, frozenset({data.series_id}))
+    labels = series_labels or {}
+    states: list[tuple[str, dt.date, float, frozenset[str], str]] = [
+        (
+            data.series_id,
+            data.report_date,
+            weight,
+            frozenset({data.series_id}),
+            labels.get(data.series_id, data.series_id),
+        )
         for weight, data in weighted
         if weight > 0
     ]
@@ -550,7 +562,7 @@ async def build_portfolio_exposure_tree(
             break
         holdings_by_series = await _fetch_tree_holdings(
             datalake,
-            [(series_id, as_of) for series_id, as_of, _, _ in states],
+            [(series_id, as_of) for series_id, as_of, _, _, _ in states],
             limit_rows=holdings_per_series,
         )
         current_rows = [
@@ -561,43 +573,44 @@ async def build_portfolio_exposure_tree(
         child_by_cusip, child_by_isin = await _resolve_child_series(
             datalake, current_rows
         )
-        next_states: list[tuple[str, dt.date, float, frozenset[str]]] = []
-        for series_id, as_of, weight, ancestors in states:
+        next_states: list[tuple[str, dt.date, float, frozenset[str], str]] = []
+        for series_id, as_of, weight, ancestors, series_label in states:
             for row in holdings_by_series.get((series_id, as_of), []):
                 raw_pct = float(row.pct_of_nav) if row.pct_of_nav is not None else 0.0
                 contribution = weight * raw_pct
                 child = _match_child_series(row, child_by_cusip, child_by_isin)
                 if child and child not in ancestors and depth < max_depth:
+                    child_label = row.issuer_name or labels.get(child) or child
                     next_states.append(
                         (
                             child,
                             row.report_date,
                             weight * raw_pct / 100.0,
                             ancestors | {child},
+                            child_label,
                         )
                     )
                     continue
 
                 asset_key = (row.asset_class or "UNKNOWN").strip().upper()
-                issuer_key = _issuer_key(row.cusip, row.isin)
-                security_key = _security_key(row.cusip, row.isin)
-                key = (asset_key, issuer_key, security_key)
+                series_key = series_id
+                cusip_key = _cusip_key(row.cusip, row.isin)
+                key = (asset_key, series_key, cusip_key)
                 entry = leaf_totals.setdefault(
                     key,
                     {
                         "asset_key": asset_key,
                         "asset_label": asset_key,
-                        "issuer_key": issuer_key,
-                        "issuer_label": row.issuer_name or issuer_key,
-                        "security_key": security_key,
-                        "security_label": row.issuer_name or security_key,
+                        "series_key": series_key,
+                        "series_label": series_label,
+                        "cusip_key": cusip_key,
+                        "cusip_label": row.issuer_name or cusip_key,
                         "value_pct": 0.0,
                     },
                 )
                 entry["value_pct"] += contribution
-                if row.issuer_name and entry["issuer_label"] == issuer_key:
-                    entry["issuer_label"] = row.issuer_name
-                    entry["security_label"] = row.issuer_name
+                if row.issuer_name and entry["cusip_label"] == entry["cusip_key"]:
+                    entry["cusip_label"] = row.issuer_name
         states = next_states
 
     return _build_tree_nodes(leaf_totals, max_leaves=max_leaves)

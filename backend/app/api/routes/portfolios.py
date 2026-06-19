@@ -596,7 +596,13 @@ async def get_portfolio_lookthrough(
 
     rows, aggregates = lookthrough.consolidate_portfolio(weighted)
     tree = (
-        await lookthrough.build_portfolio_exposure_tree(datalake, weighted)
+        await lookthrough.build_portfolio_exposure_tree(
+            datalake,
+            weighted,
+            series_labels=await lookthrough.get_fund_labels_by_series(
+                session, series_ids
+            ),
+        )
         if include_tree
         else []
     )

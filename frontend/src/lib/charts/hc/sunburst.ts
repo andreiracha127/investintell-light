@@ -1,8 +1,8 @@
 /**
  * Pure option builder: portfolio exposure sunburst.
  *
- * The API supplies a parent-linked tree: asset class -> issuer -> final
- * holding. Parent rings carry labels and color; leaf rings carry values.
+ * The API supplies a parent-linked tree: asset class -> series ID -> CUSIP.
+ * Parent rings carry labels and color; leaf rings carry values.
  */
 import type { Options, PointOptionsObject } from "highcharts";
 
@@ -119,7 +119,7 @@ export function buildHcExposureSunburstOption(
     chart: {
       type: "sunburst",
       backgroundColor: "transparent",
-      spacing: [4, 4, 4, 4],
+      spacing: [24, 18, 18, 18],
     },
     legend: { enabled: false },
     tooltip: {
@@ -135,12 +135,8 @@ export function buildHcExposureSunburstOption(
             };
           }
         ).point;
-        const rawKey = point.options.custom?.rawKey;
         const value = point.options.custom?.valuePct ?? 0;
-        const suffix = rawKey && rawKey !== point.name && rawKey !== "__OTHER__"
-          ? ` <span style="opacity:.65">(${rawKey})</span>`
-          : "";
-        return `<div style="font-size:12px"><b>${point.name}</b>${suffix}<br/>${formatNumber(
+        return `<div style="font-size:12px"><b>${point.name}</b><br/>${formatNumber(
           value,
           2,
         )}% of portfolio</div>`;
@@ -159,6 +155,7 @@ export function buildHcExposureSunburstOption(
         name: "Exposure",
         allowDrillToNode: true,
         levelIsConstant: false,
+        size: "92%",
         data,
         levels: [
           {

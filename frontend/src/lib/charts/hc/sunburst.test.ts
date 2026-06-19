@@ -37,19 +37,19 @@ const TREE: PortfolioLookthrough["tree"] = [
     value_pct: 60,
   },
   {
-    id: "issuer|EC|037833",
+    id: "series|EC|S_A",
     parent_id: "asset|EC",
-    key: "037833",
-    label: "Apple Inc",
-    kind: "issuer",
+    key: "S_A",
+    label: "Parent ETF",
+    kind: "series",
     value_pct: 60,
   },
   {
-    id: "security|EC|037833|037833100",
-    parent_id: "issuer|EC|037833",
+    id: "cusip|EC|S_A|037833100",
+    parent_id: "series|EC|S_A",
     key: "037833100",
     label: "Apple Inc",
-    kind: "security",
+    kind: "cusip",
     value_pct: 60,
   },
 ];
@@ -74,6 +74,8 @@ describe("buildHcExposureSunburstOption", () => {
     expect(data.find((point) => point.id === "portfolio-root")?.parent).toBe("");
     expect(data.find((point) => point.id === "asset|EC")?.parent).toBe("portfolio-root");
     expect(data.find((point) => point.id === "asset|EC")?.name).toBe("Equity");
+    expect(data.find((point) => point.id === "series|EC|S_A")?.name).toBe("Parent ETF");
+    expect(data.find((point) => point.id === "cusip|EC|S_A|037833100")?.name).toBe("Apple Inc");
   });
 
   it("assigns values only to leaf holdings", () => {
@@ -81,8 +83,8 @@ describe("buildHcExposureSunburstOption", () => {
     const series = opt.series?.[0] as SeriesSunburstOptions;
     const data = series.data as Array<{ id?: string; value?: number }>;
     expect(data.find((point) => point.id === "asset|EC")?.value).toBeUndefined();
-    expect(data.find((point) => point.id === "issuer|EC|037833")?.value).toBeUndefined();
-    expect(data.find((point) => point.id === "security|EC|037833|037833100")?.value).toBe(60);
+    expect(data.find((point) => point.id === "series|EC|S_A")?.value).toBeUndefined();
+    expect(data.find((point) => point.id === "cusip|EC|S_A|037833100")?.value).toBe(60);
   });
 
   it("sanitizes N-PORT asset class codes", () => {

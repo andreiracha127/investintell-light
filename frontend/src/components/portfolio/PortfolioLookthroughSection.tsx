@@ -25,7 +25,7 @@ import { InfoDot, KpiTile } from "@/components/ui/panels";
 import { formatDate, formatNumber } from "@/lib/format";
 
 const LOOKTHROUGH_TIP =
-  "“Look-through”: sees through each fund/ETF in the portfolio down to its final underlying holdings, aggregating true exposure by asset class, sector, currency and issuer.";
+  "“Look-through”: sees through each fund/ETF in the portfolio down to its final underlying holdings, aggregating true exposure by asset class, source series and CUSIP.";
 
 export function PortfolioLookthroughSection({
   portfolioId,
@@ -85,7 +85,9 @@ export function PortfolioLookthroughSection({
   if (tree.length === 0 && assetItems.length === 0) return null;
 
   // ── KPIs (computed defensively from the dimensions that exist) ──────────
-  const securityCount = tree.filter((node) => node.kind === "security").length;
+  const securityCount = tree.filter(
+    (node) => node.kind === "cusip" || node.kind === "security",
+  ).length;
   const assetClassCount = tree.filter((node) => node.kind === "asset_class").length;
 
   return (
@@ -124,19 +126,19 @@ export function PortfolioLookthroughSection({
         />
       </div>
 
-      <section className="ix-pad border border-border bg-surface-2">
-        <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
+      <section className="border border-border bg-surface-2 px-5 pb-6 pt-7">
+        <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
           <h3 className="ix-label m-0">
             Look-through sunburst
           </h3>
           <span className="text-[10.5px] text-text-muted">
-            Asset class → issuer → holding
+            Asset class → series ID → CUSIP
           </span>
         </div>
         {sunburstOption && (
           <HighchartsChart
             options={sunburstOption}
-            className="h-[340px] w-full md:h-[380px]"
+            className="h-[520px] w-full md:h-[640px]"
             isEmpty={tree.length === 0}
             emptyMessage="No exposure hierarchy available."
           />

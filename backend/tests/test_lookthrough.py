@@ -387,14 +387,62 @@ async def test_build_portfolio_exposure_tree_expands_child_funds() -> None:
     nodes = await lt.build_portfolio_exposure_tree(
         FakeDatalake(),
         [(0.5, _series_lookthrough("S_A"))],
+        series_labels={"S_A": "Parent ETF"},
     )
 
     by_id = {node.id: node for node in nodes}
     assert by_id["asset|EC"].value_pct == pytest.approx(35.0)
     assert by_id["asset|DBT"].value_pct == pytest.approx(15.0)
-    assert by_id["security|EC|037833|037833100"].value_pct == pytest.approx(25.0)
-    assert by_id["security|EC|594918|594918104"].value_pct == pytest.approx(10.0)
-    assert by_id["security|DBT|912828|9128285M8"].value_pct == pytest.approx(15.0)
+    assert by_id["series|EC|S_A"].value_pct == pytest.approx(25.0)
+    assert by_id["series|EC|S_CHILD"].value_pct == pytest.approx(10.0)
+    assert by_id["series|DBT|S_CHILD"].value_pct == pytest.approx(15.0)
+    assert by_id["series|EC|S_A"].label == "Parent ETF"
+    assert by_id["series|EC|S_CHILD"].label == "Child ETF"
+    assert by_id["cusip|EC|S_A|037833100"].value_pct == pytest.approx(25.0)
+    assert by_id["cusip|EC|S_CHILD|594918104"].value_pct == pytest.approx(10.0)
+    assert by_id["cusip|DBT|S_CHILD|9128285M8"].value_pct == pytest.approx(15.0)
+    assert by_id["cusip|EC|S_A|037833100"].label == "Apple Inc"
+    assert by_id["cusip|EC|S_CHILD|594918104"].label == "Microsoft"
+
+
+@pytest.mark.asyncio
+async def test_portfolio_exposure_tree_does_not_surface_cik_as_cusip() -> None:
+    class Result:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def all(self):
+            return self._rows
+
+    class FakeDatalake:
+        async def execute(self, stmt, params):
+            sql = str(stmt)
+            if "sec_cusip_ticker_map" in sql:
+                return Result([])
+            return Result([
+                SimpleNamespace(
+                    series_id="S_A",
+                    report_date=_REPORT,
+                    cusip="CIK:320193",
+                    isin=None,
+                    issuer_name="Apple Inc",
+                    asset_class="EC",
+                    sector="CORP",
+                    currency="USD",
+                    pct_of_nav=50.0,
+                )
+            ])
+
+    nodes = await lt.build_portfolio_exposure_tree(
+        FakeDatalake(),
+        [(0.5, _series_lookthrough("S_A"))],
+    )
+
+    leaves = [node for node in nodes if node.kind == "cusip"]
+    assert len(leaves) == 1
+    assert leaves[0].id == "cusip|EC|S_A|UNKNOWN"
+    assert leaves[0].key == "UNKNOWN"
+    assert leaves[0].label == "Apple Inc"
 
 
 # ---------------------------------------------------------------------------
@@ -491,8 +539,13 @@ async def test_portfolio_lookthrough_tree_can_request_only_asset_class(
         assert dimension == "asset_class"
         return {"S_A": _series_lookthrough("S_A")}
 
-    async def fake_tree(dl, weighted):
+    async def fake_labels(session, series_ids):
+        assert series_ids == ["S_A"]
+        return {"S_A": "Fund X"}
+
+    async def fake_tree(dl, weighted, **kwargs):
         assert len(weighted) == 1
+        assert kwargs["series_labels"] == {"S_A": "Fund X"}
         return [
             lt.ExposureTreeNode(
                 id="asset|EC",
@@ -509,6 +562,7 @@ async def test_portfolio_lookthrough_tree_can_request_only_asset_class(
     monkeypatch.setattr(portfolio_crud, "select_last_two_closes", fake_closes)
     monkeypatch.setattr(portfolio_crud, "select_last_two_navs", fake_navs)
     monkeypatch.setattr(lt, "fetch_many_lookthroughs", fake_fetch_many)
+    monkeypatch.setattr(lt, "get_fund_labels_by_series", fake_labels)
     monkeypatch.setattr(lt, "build_portfolio_exposure_tree", fake_tree)
 
     async with _client() as client:
