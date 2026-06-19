@@ -37,14 +37,14 @@ function LoginForm() {
   }
 
   const fieldClass =
-    "h-11 w-full border-0 border-b border-border-strong bg-surface-0 text-[13.5px] text-text-primary outline-none transition-[background,box-shadow,border-color] placeholder:text-text-muted focus:border-accent focus:bg-field focus:shadow-[inset_0_-1px_0_0_var(--color-accent)]";
+    "h-11 w-full border-0 border-b border-field-underline bg-surface-0 text-[13.5px] text-text-primary outline-none transition-[background,box-shadow,border-color] placeholder:text-placeholder focus:border-accent focus:bg-field focus:shadow-[inset_0_-1px_0_0_var(--color-accent)]";
 
   return (
     <div
       className="ix-carbon-scope relative flex min-h-screen items-center justify-center px-4"
       style={{
         background:
-          "radial-gradient(125% 90% at 50% -8%, var(--color-surface-1) 0%, var(--color-surface-0) 50%, var(--color-surface-0) 100%)",
+          "radial-gradient(125% 90% at 50% -8%, var(--color-surface-1) 0%, var(--color-surface-0) 42%, var(--color-gradient-outer) 100%)",
       }}
     >
       <div className="w-full max-w-[396px] border border-border bg-surface-1 px-10 pb-10 pt-11 shadow-[0_1px_1px_rgba(22,22,22,0.04),0_4px_10px_rgba(22,22,22,0.05),0_18px_40px_rgba(22,22,22,0.10)]">
@@ -119,7 +119,7 @@ function LoginForm() {
           <button
             type="submit"
             disabled={submitting}
-            className="flex h-12 w-full items-center justify-between bg-accent px-[18px] text-[14px] font-bold tracking-[0.01em] text-on-accent transition hover:brightness-90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex h-12 w-full items-center justify-between bg-accent px-[18px] text-[14px] font-bold tracking-[0.01em] text-on-accent transition hover:bg-accent-muted active:bg-accent-pressed disabled:cursor-not-allowed disabled:opacity-60"
           >
             <span>{submitting ? "Signing in…" : "Sign in"}</span>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
@@ -129,7 +129,7 @@ function LoginForm() {
         </form>
       </div>
 
-      <div className="absolute bottom-[22px] left-0 right-0 text-center text-[11px] text-text-muted">
+      <div className="absolute bottom-[22px] left-0 right-0 text-center text-[11px] text-field-underline">
         Protected workspace · Investintell Cockpit
       </div>
     </div>
