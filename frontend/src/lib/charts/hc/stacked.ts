@@ -48,9 +48,9 @@ export function buildHcStackedAreaOption(
       data: toDatetimeData(entry.points),
       stacking: "normal",
       color,
-      lineWidth: 1,
+      lineWidth: 0.6,
       marker: { enabled: false },
-      fillOpacity: 0.35,
+      fillOpacity: 0.85,
       // Explicit base layer so the accent TOTAL line (zIndex 5) always draws
       // on top of the stacked areas regardless of series add-order.
       zIndex: 1,
@@ -73,7 +73,7 @@ export function buildHcStackedAreaOption(
     chart: { type: "area" },
     xAxis: compactDatetimeXAxis(),
     yAxis: {
-      title: { text: undefined },
+      title: { text: "Value (USD)" },
       labels: {
         formatter() {
           return `$${formatCompact(this.value as number)}`;
@@ -110,8 +110,9 @@ export function buildHcStackedPercentOption(
     chart: { type: "area" },
     xAxis: compactDatetimeXAxis(),
     yAxis: {
-      title: { text: undefined },
+      title: { text: "Weight" },
       min: 0,
+      max: 100,
       labels: {
         // stacking:"percent" normalises the y-axis to 0..100 at runtime, so
         // `this.value` is already 0,20,40,...,100 — NOT the raw 0..1 fraction.
@@ -167,7 +168,19 @@ export function buildHcMultiLineOption(
     chart: { type: "line" },
     xAxis: compactDatetimeXAxis(),
     yAxis: {
-      title: { text: undefined },
+      // The series are cumulative returns "rebased to 100": the baseline (0%
+      // cumulative return) is the rebasing anchor. A dashed plotLine marks it,
+      // and the tooltip reports each series' signed delta vs that baseline.
+      title: { text: "Rebased to 100" },
+      plotLines: [
+        {
+          value: 0,
+          color: colors.textMuted,
+          width: 1,
+          dashStyle: "Dash",
+          zIndex: 2,
+        },
+      ],
       labels: {
         formatter() {
           return formatPercent(this.value as number, 0);
@@ -181,6 +194,8 @@ export function buildHcMultiLineOption(
         const points = (this as unknown as { points?: Point[] }).points ?? [];
         const rows = points
           .map(
+            // `p.y` is the cumulative return from the rebasing baseline, i.e.
+            // the signed delta vs baseline; render it signed.
             (p) =>
               `<span style="color:${String(p.color)}">●</span> ${p.series.name}: <b>${formatPercent(p.y as number, 2, { signed: true })}</b>`,
           )

@@ -98,7 +98,12 @@ function Results({
   colors: ChartColors;
 }) {
   const heatmapOption = useMemo(
-    () => buildHcHeatmapOption(data, colors),
+    () =>
+      buildHcHeatmapOption(data, colors, {
+        diverging: true,
+        negativeColor: colors.loss,
+        zeroColor: colors.surface,
+      }),
     [data, colors],
   );
 

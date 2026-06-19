@@ -47,13 +47,17 @@ export function RunButton({
   );
 }
 
-/** Heatmap gradient legend (0.0 → 1.0) for a Card's `actions` slot. */
+/**
+ * Diverging heatmap gradient legend (−1.0 → 0 → +1.0) for a Card's `actions`
+ * slot. Mirrors the diverging colorAxis the Statistics correlation matrix
+ * draws: loss at −1, the chart surface at 0, accent at +1.
+ */
 export function HeatmapLegend() {
   return (
     <span className="flex items-center gap-2 text-[10.5px] tabular-nums text-text-muted">
-      0.0
-      <span className="h-[9px] w-[90px] bg-[linear-gradient(90deg,var(--color-accent-wash),var(--color-accent))]" />
-      1.0
+      −1.0
+      <span className="h-[9px] w-[120px] bg-[linear-gradient(90deg,var(--color-loss),var(--color-surface-3),var(--color-accent))]" />
+      +1.0
     </span>
   );
 }

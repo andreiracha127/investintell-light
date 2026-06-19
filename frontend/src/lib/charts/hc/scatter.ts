@@ -26,11 +26,13 @@ export function buildHcScatterOption(
   return {
     chart: { type: "scatter", animation: false },
     xAxis: {
-      title: { text: labels.x },
+      title: { text: `${labels.x} daily return` },
       startOnTick: false,
       endOnTick: false,
       minPadding: 0,
       maxPadding: 0,
+      gridLineWidth: 1,
+      plotLines: [{ value: 0, color: colors.grid, width: 1, zIndex: 2 }],
       labels: {
         formatter() {
           return formatPercent(this.value as number, 1);
@@ -38,11 +40,12 @@ export function buildHcScatterOption(
       },
     },
     yAxis: {
-      title: { text: labels.y },
+      title: { text: `${labels.y} daily return` },
       startOnTick: false,
       endOnTick: false,
       minPadding: 0,
       maxPadding: 0,
+      plotLines: [{ value: 0, color: colors.grid, width: 1, zIndex: 2 }],
       labels: {
         formatter() {
           return formatPercent(this.value as number, 1);
@@ -64,14 +67,14 @@ export function buildHcScatterOption(
         data: scatter,
         color: colors.accent,
         marker: { radius: 3 },
-        opacity: 0.65,
+        opacity: 0.45,
       },
       {
         type: "line",
         name: "Regression",
         data: regressionLine,
-        color: colors.bar,
-        lineWidth: 1.5,
+        color: colors.text,
+        lineWidth: 1.8,
         marker: { enabled: false },
         enableMouseTracking: false,
       },

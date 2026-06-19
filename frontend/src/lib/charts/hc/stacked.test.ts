@@ -177,6 +177,26 @@ describe("buildHcStackedAreaOption", () => {
     expect(out).toBe(`$${formatCompact(1200000)}`);
   });
 
+  it("titles the yAxis 'Value (USD)'", () => {
+    const opt = buildHcStackedAreaOption([SERIES_A], null, TEST_COLORS);
+    const yAxis = opt.yAxis as { title?: { text?: string } };
+    expect(yAxis.title?.text).toBe("Value (USD)");
+  });
+
+  it("draws the area fills bold (fillOpacity 0.85, lineWidth 0.6)", () => {
+    const opt = buildHcStackedAreaOption([SERIES_A, SERIES_B], TOTAL, TEST_COLORS);
+    const series = opt.series as Array<{
+      type?: string;
+      fillOpacity?: number;
+      lineWidth?: number;
+    }>;
+    const areaSeries = series.filter((s) => s.type === "area");
+    for (const area of areaSeries) {
+      expect(area.fillOpacity).toBe(0.85);
+      expect(area.lineWidth).toBe(0.6);
+    }
+  });
+
   it("renders the tooltip from the real shared context as currency", () => {
     const opt = buildHcStackedAreaOption([SERIES_A], null, TEST_COLORS);
     const tooltip = opt.tooltip as {
@@ -256,10 +276,17 @@ describe("buildHcStackedPercentOption", () => {
     expect(series[1].color).toBe(palette[1]);
   });
 
-  it("sets yAxis min to 0", () => {
+  it("sets yAxis min to 0 and max to 100", () => {
     const opt = buildHcStackedPercentOption([WEIGHT_A], TEST_COLORS);
-    const yAxis = opt.yAxis as { min?: number };
+    const yAxis = opt.yAxis as { min?: number; max?: number };
     expect(yAxis.min).toBe(0);
+    expect(yAxis.max).toBe(100);
+  });
+
+  it("titles the yAxis 'Weight'", () => {
+    const opt = buildHcStackedPercentOption([WEIGHT_A], TEST_COLORS);
+    const yAxis = opt.yAxis as { title?: { text?: string } };
+    expect(yAxis.title?.text).toBe("Weight");
   });
 
   it("formats yAxis labels from the runtime-normalised 0..100 axis value", () => {
@@ -374,6 +401,21 @@ describe("buildHcMultiLineOption", () => {
     };
     const out = yAxis.labels!.formatter!.call({ value: 0.15 });
     expect(out).toBe(formatPercent(0.15, 0));
+  });
+
+  it("titles the yAxis 'Rebased to 100'", () => {
+    const opt = buildHcMultiLineOption([PERF_A], TEST_COLORS);
+    const yAxis = opt.yAxis as { title?: { text?: string } };
+    expect(yAxis.title?.text).toBe("Rebased to 100");
+  });
+
+  it("draws a dashed baseline plotLine at the rebasing anchor (value 0)", () => {
+    const opt = buildHcMultiLineOption([PERF_A], TEST_COLORS);
+    const yAxis = opt.yAxis as {
+      plotLines?: Array<{ value?: number; dashStyle?: string }>;
+    };
+    expect(yAxis.plotLines?.[0].value).toBe(0);
+    expect(yAxis.plotLines?.[0].dashStyle).toBe("Dash");
   });
 
   it("renders the tooltip from the real shared context as signed percent", () => {

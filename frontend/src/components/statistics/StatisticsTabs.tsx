@@ -27,7 +27,7 @@ export function StatisticsTabs() {
             key={tool.href}
             href={tool.href}
             aria-current={active ? "page" : undefined}
-            className={`flex h-[38px] flex-1 items-center justify-center whitespace-nowrap border border-border-strong px-3.5 text-[12.5px] no-underline transition-colors ${
+            className={`flex h-[40px] flex-1 items-center justify-center whitespace-nowrap border border-border-strong px-3.5 text-[12.5px] no-underline transition-colors ${
               index > 0 ? "border-l-0" : ""
             } ${
               active

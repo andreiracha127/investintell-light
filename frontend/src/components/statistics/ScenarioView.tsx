@@ -35,7 +35,63 @@ import { Card, StatRow } from "@/components/ui/panels";
 import { DateRangeInputs, defaultDateRange } from "@/components/statistics/DateRangeInputs";
 import { PortfolioSelect } from "@/components/statistics/PortfolioSelect";
 import { StatisticsShell } from "@/components/statistics/StatisticsShell";
-import { ErrorPanel, ParamsPanel, RunButton } from "@/components/statistics/ui";
+import { ErrorPanel, LABEL_CLASS, ParamsPanel, RunButton } from "@/components/statistics/ui";
+
+/** Local-time ISO date (YYYY-MM-DD). */
+function toIsoDate(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/** Quick-range presets: trailing windows ending today. "All" reaches back a
+ * decade so it spans any persisted portfolio's full price history. */
+const QUICK_RANGES: ReadonlyArray<{ key: string; label: string; months: number }> = [
+  { key: "3m", label: "3M", months: 3 },
+  { key: "6m", label: "6M", months: 6 },
+  { key: "all", label: "All", months: 120 },
+];
+
+/**
+ * Segmented control that snaps the Scenario date window to a trailing range.
+ * Design source: Statistics.dc.html — a Carbon segmented control beside the
+ * Start/End inputs; selecting a preset sets End=today and Start=today−window.
+ */
+function QuickRange({
+  onSelect,
+}: {
+  onSelect: (start: string, end: string) => void;
+}) {
+  const apply = (months: number) => {
+    const end = new Date();
+    const start = new Date(end);
+    start.setMonth(start.getMonth() - months);
+    onSelect(toIsoDate(start), toIsoDate(end));
+  };
+  return (
+    <div className={LABEL_CLASS}>
+      Quick range
+      <div
+        role="group"
+        aria-label="Quick range"
+        className="flex h-[34px] border border-border-strong"
+      >
+        {QUICK_RANGES.map((r, index) => (
+          <button
+            key={r.key}
+            type="button"
+            onClick={() => apply(r.months)}
+            className={`h-full whitespace-nowrap bg-field px-3 text-[12.5px] font-medium text-text-secondary transition-colors hover:bg-layer-hover ${
+              index > 0 ? "border-l border-border-strong" : ""
+            }`}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function ScenarioView() {
   // Design tokens are only readable from the DOM — resolve after mount.
@@ -75,6 +131,12 @@ export function ScenarioView() {
           onStartChange={setStartDate}
           onEndChange={setEndDate}
         />
+        <QuickRange
+          onSelect={(start, end) => {
+            setStartDate(start);
+            setEndDate(end);
+          }}
+        />
         <RunButton
           pending={mutation.isPending}
           disabled={!canRun}
@@ -105,7 +167,7 @@ type ChartTab = "perf" | "weights" | "perf2" | "dist";
 const CHART_TABS: ReadonlyArray<{ key: ChartTab; label: string; hint: string }> = [
   { key: "perf", label: "Performance", hint: "Stacked holding value, $ — Total drawn on top." },
   { key: "weights", label: "Weights", hint: "Each holding's share of total value." },
-  { key: "perf2", label: "Asset return", hint: "Cumulative return, rebased." },
+  { key: "perf2", label: "Asset return", hint: "Cumulative return, rebased to 100." },
   { key: "dist", label: "Distribution", hint: "Fitted normal of daily NAV returns." },
 ];
 
