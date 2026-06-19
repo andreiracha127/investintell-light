@@ -100,30 +100,36 @@ class Distribution:
 # ---------------------------------------------------------------------------
 
 
-async def create_screen(session: AsyncSession, name: str) -> Screen:
+async def create_screen(
+    session: AsyncSession, name: str, owner_sub: str, org_id: str | None
+) -> Screen:
     """Insert a screen; raise DuplicateScreenNameError on a name conflict."""
-    screen = Screen(name=name, filters=[])
+    screen = Screen(name=name, owner_sub=owner_sub, org_id=org_id, filters=[])
     session.add(screen)
     try:
         await session.commit()
     except IntegrityError as exc:
         await session.rollback()
         raise DuplicateScreenNameError(f"A screen named {name!r} already exists.") from exc
-    loaded = await get_screen(session, screen.id)
-    if loaded is None:  # pragma: no cover — the row was just committed
+    loaded = await get_screen(session, screen.id, owner_sub)
+    if loaded is None:  # pragma: no cover
         raise RuntimeError(f"Screen {screen.id} vanished after commit.")
     return loaded
 
 
-async def get_screen(session: AsyncSession, screen_id: int) -> Screen | None:
+async def get_screen(
+    session: AsyncSession, screen_id: int, owner_sub: str
+) -> Screen | None:
     """Load one screen WITH its filters (explicit selectinload — lazy='raise')."""
     result = await session.execute(
-        select(Screen).options(selectinload(Screen.filters)).where(Screen.id == screen_id)
+        select(Screen)
+        .options(selectinload(Screen.filters))
+        .where(Screen.id == screen_id, Screen.owner_sub == owner_sub)
     )
     return result.scalar_one_or_none()
 
 
-async def list_screens(session: AsyncSession) -> Sequence[Row]:
+async def list_screens(session: AsyncSession, owner_sub: str) -> Sequence[Row]:
     """Rows of (id, name, filter_count, created_at, updated_at), id order, capped."""
     result = await session.execute(
         select(
@@ -134,6 +140,7 @@ async def list_screens(session: AsyncSession) -> Sequence[Row]:
             Screen.updated_at,
         )
         .outerjoin(ScreenFilter)
+        .where(Screen.owner_sub == owner_sub)
         .group_by(Screen.id)
         .order_by(Screen.id)
         .limit(LIST_HARD_CAP)
@@ -141,9 +148,11 @@ async def list_screens(session: AsyncSession) -> Sequence[Row]:
     return result.all()
 
 
-async def rename_screen(session: AsyncSession, screen_id: int, name: str) -> Screen | None:
+async def rename_screen(
+    session: AsyncSession, screen_id: int, owner_sub: str, name: str
+) -> Screen | None:
     """Rename a screen; None when missing; DuplicateScreenNameError on conflict."""
-    screen = await get_screen(session, screen_id)
+    screen = await get_screen(session, screen_id, owner_sub)
     if screen is None:
         return None
     screen.name = name
@@ -153,14 +162,20 @@ async def rename_screen(session: AsyncSession, screen_id: int, name: str) -> Scr
         await session.rollback()
         raise DuplicateScreenNameError(f"A screen named {name!r} already exists.") from exc
     # Re-select so the DB-computed updated_at is reflected in the response.
-    return await get_screen(session, screen_id)
+    return await get_screen(session, screen_id, owner_sub)
 
 
-async def delete_screen(session: AsyncSession, screen_id: int) -> bool:
+async def delete_screen(
+    session: AsyncSession, screen_id: int, owner_sub: str
+) -> bool:
     """Delete one screen; filters go with it via ON DELETE CASCADE."""
     result = cast(
         "CursorResult[Any]",
-        await session.execute(delete(Screen).where(Screen.id == screen_id)),
+        await session.execute(
+            delete(Screen).where(
+                Screen.id == screen_id, Screen.owner_sub == owner_sub
+            )
+        ),
     )
     await session.commit()
     return bool(result.rowcount)
