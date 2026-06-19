@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.core.auth import CurrentUser, get_current_user
 from app.core.db import get_session
 from app.main import create_app
 from app.screener.catalog import CATALOG
@@ -23,6 +24,8 @@ from app.services import screener as screener_service
 _CREATED = dt.datetime(2026, 6, 11, 12, 0, tzinfo=dt.UTC)
 
 _INJECTION_CODE = "pe_ratio; DROP TABLE screener_metrics;--"
+
+_OWNER_SUB = "u-1"
 
 
 def _filter(
@@ -53,13 +56,24 @@ def _screen(
 def _client() -> AsyncClient:
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        sub=_OWNER_SUB, org_id=None, claims={}
+    )
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+def _client_noauth() -> AsyncClient:
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: None
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
 def _stub_get_screen(
     monkeypatch: pytest.MonkeyPatch, screen: SimpleNamespace | None
 ) -> None:
-    async def fake_get(session: Any, screen_id: int) -> SimpleNamespace | None:
+    async def fake_get(
+        session: Any, screen_id: int, owner_sub: str
+    ) -> SimpleNamespace | None:
         return screen
 
     monkeypatch.setattr(screener_service, "get_screen", fake_get)
@@ -86,6 +100,23 @@ def _stub_metric_values(monkeypatch: pytest.MonkeyPatch, values: list[float]) ->
         return values
 
     monkeypatch.setattr(screener_service, "select_metric_values", fake_values)
+
+
+# ---------------------------------------------------------------------------
+# Protection tests
+# ---------------------------------------------------------------------------
+
+
+async def test_metrics_catalog_is_public() -> None:
+    async with _client_noauth() as ac:
+        response = await ac.get("/screener/metrics")
+    assert response.status_code != 401
+
+
+async def test_screens_list_requires_auth() -> None:
+    async with _client_noauth() as ac:
+        response = await ac.get("/screener/screens")
+    assert response.status_code in (401, 403)
 
 
 # ---------------------------------------------------------------------------
@@ -116,10 +147,12 @@ async def test_metric_catalog_serializes_every_metric() -> None:
 
 
 async def test_create_screen_201(monkeypatch: pytest.MonkeyPatch) -> None:
-    received: list[str] = []
+    received: list[tuple[str, str, str | None]] = []
 
-    async def fake_create(session: Any, name: str) -> SimpleNamespace:
-        received.append(name)
+    async def fake_create(
+        session: Any, name: str, owner_sub: str, org_id: str | None
+    ) -> SimpleNamespace:
+        received.append((name, owner_sub, org_id))
         return _screen(name=name)
 
     monkeypatch.setattr(screener_service, "create_screen", fake_create)
@@ -131,11 +164,13 @@ async def test_create_screen_201(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["id"] == 1
     assert body["name"] == "My screen"
     assert body["filters"] == []
-    assert received == ["My screen"]  # trimmed BEFORE the service sees it
+    assert received == [("My screen", _OWNER_SUB, None)]  # trimmed + owner forwarded
 
 
 async def test_create_screen_duplicate_name_409(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_create(session: Any, name: str) -> SimpleNamespace:
+    async def fake_create(
+        session: Any, name: str, owner_sub: str, org_id: str | None
+    ) -> SimpleNamespace:
         raise screener_service.DuplicateScreenNameError("A screen named 'X' already exists.")
 
     monkeypatch.setattr(screener_service, "create_screen", fake_create)
@@ -153,7 +188,7 @@ async def test_create_screen_blank_name_422() -> None:
 
 
 async def test_list_screens(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_list(session: Any) -> list[SimpleNamespace]:
+    async def fake_list(session: Any, owner_sub: str) -> list[SimpleNamespace]:
         return [
             SimpleNamespace(
                 id=1, name="A", filter_count=2, created_at=_CREATED, updated_at=_CREATED
@@ -188,7 +223,9 @@ async def test_get_screen_404(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_patch_screen_renames(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_rename(session: Any, screen_id: int, name: str) -> SimpleNamespace:
+    async def fake_rename(
+        session: Any, screen_id: int, owner_sub: str, name: str
+    ) -> SimpleNamespace:
         return _screen(name=name)
 
     monkeypatch.setattr(screener_service, "rename_screen", fake_rename)
@@ -200,14 +237,18 @@ async def test_patch_screen_renames(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_patch_screen_404_and_409(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_missing(session: Any, screen_id: int, name: str) -> None:
+    async def fake_missing(
+        session: Any, screen_id: int, owner_sub: str, name: str
+    ) -> None:
         return None
 
     monkeypatch.setattr(screener_service, "rename_screen", fake_missing)
     async with _client() as ac:
         assert (await ac.patch("/screener/screens/9", json={"name": "N"})).status_code == 404
 
-    async def fake_dup(session: Any, screen_id: int, name: str) -> SimpleNamespace:
+    async def fake_dup(
+        session: Any, screen_id: int, owner_sub: str, name: str
+    ) -> SimpleNamespace:
         raise screener_service.DuplicateScreenNameError("dup")
 
     monkeypatch.setattr(screener_service, "rename_screen", fake_dup)
@@ -216,7 +257,9 @@ async def test_patch_screen_404_and_409(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 async def test_delete_screen_204_and_404(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_delete(session: Any, screen_id: int) -> bool:
+    async def fake_delete(
+        session: Any, screen_id: int, owner_sub: str
+    ) -> bool:
         return screen_id == 1
 
     monkeypatch.setattr(screener_service, "delete_screen", fake_delete)
@@ -411,7 +454,9 @@ async def test_reorder_filters_rewrites_position_order(
     # First get_screen → validation (original order); second → post-reorder response.
     screens = iter([original, _reorder(original.filters, new_order)])
 
-    async def fake_get(session: Any, screen_id: int) -> SimpleNamespace:
+    async def fake_get(
+        session: Any, screen_id: int, owner_sub: str
+    ) -> SimpleNamespace:
         return next(screens)
 
     monkeypatch.setattr(screener_service, "reorder_filters", fake_reorder)
