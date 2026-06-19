@@ -143,20 +143,22 @@ export interface MacroRrgColors {
 
 /**
  * Derive the rotation palette from the design tokens. The composite uses the
- * accent; the three signals use gain/bar/loss-family hues so the tails fan out
- * legibly; quadrant washes reuse the gain (improving/leading) and loss
- * (lagging/weakening) semantics.
+ * design accent; the three signals fan out blue / green / amber; the four
+ * quadrant washes are improving=blue, leading=green, lagging=red, weakening=amber
+ * — matching the `Macro.dc.html` prototype. Blue and amber come from the token
+ * layer (`--color-chart-blue/amber`, themed) via `chartColors()`; green and red
+ * are `colors.gain` / `colors.loss`.
  */
 function rrgColors(colors: ChartColors): MacroRrgColors {
   return {
     composite: colors.accent,
-    credit: colors.categories[1] ?? colors.bar,
+    credit: colors.blue,
     trend: colors.gain,
-    conditions: colors.categories[3] ?? colors.barMute,
-    improving: rgbTriplet(colors.accent),
+    conditions: colors.amber,
+    improving: rgbTriplet(colors.blue),
     leading: rgbTriplet(colors.gain),
     lagging: rgbTriplet(colors.loss),
-    weakening: rgbTriplet(colors.barMute),
+    weakening: rgbTriplet(colors.amber),
   };
 }
 
@@ -331,12 +333,12 @@ export function buildHcMacroRrgOption(
         style: {
           color:
             q.colorKey === "improving"
-              ? colors.accent
+              ? rc.credit
               : q.colorKey === "leading"
                 ? colors.gain
                 : q.colorKey === "lagging"
                   ? colors.loss
-                  : colors.textMuted,
+                  : rc.conditions,
           fontSize: "10px",
           fontWeight: "700",
           textOutline: "none",

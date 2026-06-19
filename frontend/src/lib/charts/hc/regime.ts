@@ -1,29 +1,14 @@
 /**
- * Pure option builder: credit regime timeline strip (Highcharts Core).
+ * Pure option builders for the Macro / Market Regime page (Highcharts Core).
  *
- * Highcharts port of the legacy ECharts `buildRegimeStripOption`. Where the
- * ECharts version faked a proportional timeline with one stacked-bar series per
- * period, Highcharts has a native time range type: `xrange`. Each period is a
- * single point with `x`/`x2` = start/end epoch-ms, so its bar width is the
- * period's real wall-clock duration. All points sit on the single y=0 row.
- *
- * The global Graphite theme owns axis/grid/tooltip/legend chrome; this builder
- * sets only the series, per-point token colors (gain wash for risk_on, full
- * loss for risk_off), the hidden value x-axis, and the per-point tooltip.
- *
- * **Binary-state assumption (preserved from the source):** only `"risk_on"`
- * and `"risk_off"` are recognised. Any other state renders with the risk_off
- * styling/label (the source treated "not risk_on" as risk_off).
- *
- * The `highcharts/modules/xrange` module is registered globally by the chart
- * controller (HighchartsChart) — it is NOT registered here.
- *
- * Empty/null flips -> returns `null` (caller should hide the panel entirely).
+ * Currently exposes `buildHcMacroPerformanceOption` (portfolio vs benchmark with
+ * risk-off plot bands). The regime rotation graph lives in `macro-rrg.ts`; the
+ * earlier `buildHcRegimeStripOption` / `buildHcMacroRotationOption` builders were
+ * superseded and removed.
  */
-import type Highcharts from "highcharts";
 import type { Options } from "highcharts";
 
-import type { MacroRegime, RegimeFlip } from "@/lib/api/client";
+import type { MacroRegime } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
 import { compactDatetimeXAxis, dateToUtcMs } from "@/lib/charts/hc/dateAxis";
 import { formatDate, formatNumber } from "@/lib/format";
@@ -32,11 +17,8 @@ import { formatDate, formatNumber } from "@/lib/format";
 
 /**
  * Encode an alpha into a `#RRGGBB` token as an `rgba(r, g, b, a)` string.
- *
- * Highcharts `xrange` points have no per-point `opacity` option (it is silently
- * ignored), so the gain-wash for risk_on periods must be baked into the point
- * `color`. Pass-through any input that is not a 6-digit hex (e.g. already-rgba
- * or named colors) so the helper never corrupts an unexpected token.
+ * Pass-through any input that is not a 6-digit hex (e.g. already-rgba or named
+ * colors) so the helper never corrupts an unexpected token.
  */
 function withAlpha(hex: string, a: number): string {
   const m = /^#([0-9a-fA-F]{6})$/.exec(hex);
@@ -48,176 +30,13 @@ function withAlpha(hex: string, a: number): string {
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
 
-// ── Date math ──────────────────────────────────────────────────────────────
-
-/**
- * Parse "YYYY-MM-DD" to a UTC epoch millisecond count.
- * Uses Date.UTC to avoid timezone-shift hazards (mirrors lib/perf.ts convention).
- */
-function isoToUtcMs(iso: string): number {
-  const [y, m, d] = iso.split("-").map(Number);
-  return Date.UTC(y, m - 1, d);
-}
-
-/** Duration in whole days between two ISO date strings (end − start). */
-function daysBetween(startIso: string, endIso: string): number {
-  return Math.round((isoToUtcMs(endIso) - isoToUtcMs(startIso)) / 86_400_000);
-}
-
-// ── Period derivation ──────────────────────────────────────────────────────
-
-interface RegimePeriod {
-  /** ISO date of period start (= flip date). */
-  start: string;
-  /** ISO date of period end (= next flip date, or asOf for the last period). */
-  end: string;
-  state: string;
-  durationDays: number;
-}
-
-/**
- * Derive contiguous periods from the flip list.
- *
- * Each flip record carries the date the state *changed to* `state`. Periods
- * run from one flip date to the next. The last period is closed by `asOf`.
- *
- * Returns [] for an empty/null flip list.
- */
-function derivePeriods(flips: RegimeFlip[], asOf: string): RegimePeriod[] {
-  if (!flips || flips.length === 0) return [];
-
-  const sorted = [...flips].sort((a, b) => a.date.localeCompare(b.date));
-
-  return sorted.map((flip, i) => {
-    const start = flip.date;
-    const end = sorted[i + 1]?.date ?? asOf;
-    const durationDays = daysBetween(start, end);
-    return { start, end, state: flip.state, durationDays };
-  });
-}
-
-// ── Option builder ─────────────────────────────────────────────────────────
-
-/** Faint wash applied to risk_on bars (mirrors the ECharts itemStyle.opacity). */
-const RISK_ON_ALPHA = 0.18;
-
-/**
- * Build a Highcharts option for the regime timeline strip.
- *
- * @param flips   Recent regime flip records from the API response.
- * @param colors  Design-token color bag.
- * @param asOf    ISO date string ("YYYY-MM-DD") used to close the final
- *                open-ended period (e.g. the API's `as_of` field). Falls back
- *                to today's date when not supplied.
- *
- * @returns A Highcharts `Options` ready to pass to `<HighchartsChart>`, or
- *          `null` when `flips` is empty (caller should hide the panel).
- */
-export function buildHcRegimeStripOption(
-  flips: RegimeFlip[],
-  colors: ChartColors,
-  asOf?: string,
-): Options | null {
-  // Fall back to today's ISO date if asOf is not supplied.
-  const anchor = asOf ?? new Date().toISOString().slice(0, 10);
-
-  const periods = derivePeriods(flips, anchor);
-
-  if (periods.length === 0) {
-    return null;
-  }
-
-  // One xrange point per period, all on the single y=0 row. `custom` carries
-  // the raw period context for the tooltip formatter.
-  const data = periods.map((period) => {
-    const isRiskOn = period.state === "risk_on";
-    return {
-      x: isoToUtcMs(period.start),
-      x2: isoToUtcMs(period.end),
-      y: 0,
-      name: isRiskOn ? "Risk-on" : "Risk-off",
-      // xrange has no per-point `opacity`; bake the gain-wash alpha into color.
-      color: isRiskOn ? withAlpha(colors.gain, RISK_ON_ALPHA) : colors.loss,
-      custom: { start: period.start, end: period.end, days: period.durationDays },
-    };
-  });
-
-  return {
-    chart: { type: "xrange" },
-    xAxis: {
-      // Cumulative wall-clock time, but the raw axis ticks carry no
-      // user-meaningful unit here; dates surface in the tooltip only.
-      type: "datetime",
-      visible: false,
-    },
-    yAxis: {
-      // Single unlabeled row.
-      title: { text: undefined },
-      categories: ["regime"],
-      min: 0,
-      max: 0,
-      visible: false,
-    },
-    legend: { enabled: true },
-    tooltip: {
-      // In Highcharts the tooltip formatter's `this` is the hovered Point
-      // itself (TooltipFormatterCallbackFunction => `this: Point`). Read the
-      // label and the custom period context directly off the point; cast
-      // narrowly for the `custom` bag which is not on the base Point type.
-      formatter(this: Highcharts.Point) {
-        const { custom } = this as unknown as {
-          custom?: { start?: string; end?: string; days?: number };
-        };
-        const label = this.name ?? "";
-        const start = custom?.start ?? "";
-        const end = custom?.end ?? "";
-        const days = custom?.days ?? 0;
-        return `<b>${label}</b><br/>${start} – ${end}<br/>${days} days`;
-      },
-    },
-    series: [
-      {
-        type: "xrange",
-        name: "Regime",
-        // Per-point colors carry the risk_on/risk_off styling; do not let the
-        // single series emit one legend item per point.
-        showInLegend: false,
-        // xrange bar height on the single category row.
-        pointWidth: 28,
-        borderWidth: 0,
-        data,
-        // Per-point data labels off; dates surface via tooltip only.
-        dataLabels: { enabled: false },
-      },
-      // Deduplicated legend placeholders: exactly one Risk-on and one Risk-off
-      // swatch, mirroring the source's two-entry legend.
-      {
-        type: "xrange",
-        name: "Risk-on",
-        // Match the alpha-encoded bar color so the swatch reads identically.
-        color: withAlpha(colors.gain, RISK_ON_ALPHA),
-        data: [],
-      },
-      {
-        type: "xrange",
-        name: "Risk-off",
-        color: colors.loss,
-        data: [],
-      },
-    ],
-  };
+/** Encode a `#RRGGBB` token at the given alpha (reuses the local helper). */
+function tint(hex: string, a: number): string {
+  return withAlpha(hex, a);
 }
 
 type RegimeHistoryPoint = MacroRegime["history"][number];
 type DatePoint = [string, number];
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function stateLabel(state: string): string {
-  return state === "risk_on" ? "Risk-on" : "Risk-off";
-}
 
 function normalizeSeries(points: DatePoint[]): Array<[number, number]> {
   const first = points.find(([, value]) => Number.isFinite(value) && value > 0);
@@ -241,6 +60,12 @@ function drawdownSeries(points: DatePoint[]): Array<[number, number]> {
   });
 }
 
+/**
+ * Risk-off windows drawn as FRED-style recession shading: only `risk_off`
+ * periods are shaded (risk_on windows are left clear). Each band carries a
+ * 1px border so the shaded run reads as a discrete window, and no per-band
+ * label text (the inline legend names the band instead).
+ */
 function deriveRegimePlotBands(
   history: RegimeHistoryPoint[],
   minX: number,
@@ -254,144 +79,31 @@ function deriveRegimePlotBands(
   for (let i = 0; i < sorted.length; i += 1) {
     const start = dateToUtcMs(sorted[i].date);
     if (start > maxX) break;
-    if (start < minX) continue;
     const state = sorted[i].state;
     let j = i + 1;
     while (j < sorted.length && sorted[j].state === state) j += 1;
+    // Only shade risk_off windows; advance past contiguous same-state runs.
+    if (state !== "risk_off") {
+      i = j - 1;
+      continue;
+    }
     const end = j < sorted.length ? dateToUtcMs(sorted[j].date) : maxX;
+    // Skip windows entirely left of the visible range; clamp ones that straddle
+    // the left edge so a risk-off run starting before minX still shades in-view.
+    if (end <= minX) {
+      i = j - 1;
+      continue;
+    }
     bands.push({
-      from: start,
+      from: Math.max(start, minX),
       to: Math.min(end, maxX),
-      color:
-        state === "risk_off"
-          ? withAlpha(colors.loss, 0.16)
-          : withAlpha(colors.gain, 0.06),
-      label:
-        state === "risk_off"
-          ? { text: "Risk-off", style: { color: colors.loss, fontSize: "10px" } }
-          : undefined,
+      color: withAlpha(colors.loss, 0.16),
+      borderColor: withAlpha(colors.loss, 0.4),
+      borderWidth: 1,
     });
     i = j - 1;
   }
   return bands;
-}
-
-export function buildHcMacroRotationOption(
-  history: RegimeHistoryPoint[],
-  colors: ChartColors,
-): Options | null {
-  const recent = history.slice(-126);
-  if (recent.length === 0) return null;
-
-  const data = recent.map((point, index) => {
-    const pressure = clamp(point.vote_count, 0, 3);
-    const prevPressure = index > 0 ? clamp(recent[index - 1].vote_count, 0, 3) : pressure;
-    const appetite = 3 - pressure;
-    const momentum = prevPressure - pressure;
-    return {
-      x: 96 + (appetite / 3) * 8,
-      y: clamp(100 + momentum * 2.4, 96, 104),
-      name: formatDate(point.date),
-      custom: {
-        date: point.date,
-        state: point.state,
-        voteCount: point.vote_count,
-        votes: point.votes,
-      },
-    };
-  });
-  const latest = data[data.length - 1];
-
-  return {
-    chart: { type: "line", spacing: [10, 18, 12, 12] },
-    legend: { enabled: false },
-    title: { text: undefined },
-    xAxis: {
-      min: 96,
-      max: 104,
-      tickInterval: 2,
-      gridLineWidth: 1,
-      title: { text: "Risk appetite" },
-      plotLines: [{ value: 100, width: 1, color: colors.textMuted, zIndex: 2 }],
-      plotBands: [
-        { from: 96, to: 100, color: withAlpha(colors.loss, 0.08) },
-        { from: 100, to: 104, color: withAlpha(colors.gain, 0.08) },
-      ],
-    },
-    yAxis: {
-      min: 96,
-      max: 104,
-      tickInterval: 2,
-      gridLineWidth: 1,
-      title: { text: "Regime momentum" },
-      plotLines: [{ value: 100, width: 1, color: colors.textMuted, zIndex: 2 }],
-      plotBands: [
-        { from: 96, to: 100, color: withAlpha(colors.accentMuted, 0.08) },
-        { from: 100, to: 104, color: withAlpha(colors.accent, 0.05) },
-      ],
-    },
-    tooltip: {
-      formatter(this: Highcharts.Point) {
-        const custom = (this as unknown as {
-          custom?: {
-            date?: string;
-            state?: string;
-            voteCount?: number;
-            votes?: { credit?: boolean; trend?: boolean; nfci?: boolean };
-          };
-        }).custom;
-        const votes = custom?.votes;
-        return [
-          `<b>${formatDate(custom?.date)}</b>`,
-          `${stateLabel(custom?.state ?? "")} · ${custom?.voteCount ?? 0}/3 votes`,
-          `Credit ${votes?.credit ? "on" : "off"} · Trend ${votes?.trend ? "on" : "off"} · NFCI ${votes?.nfci ? "on" : "off"}`,
-        ].join("<br/>");
-      },
-    },
-    annotations: [
-      {
-        draggable: "",
-        labelOptions: {
-          backgroundColor: "transparent",
-          borderWidth: 0,
-          style: { color: colors.textMuted, fontSize: "11px", fontWeight: "700" },
-        },
-        labels: [
-          { text: "LAGGING", point: { x: 96.4, y: 96.5, xAxis: 0, yAxis: 0 } },
-          { text: "IMPROVING", point: { x: 96.4, y: 103.5, xAxis: 0, yAxis: 0 } },
-          { text: "LEADING", point: { x: 103.6, y: 103.5, xAxis: 0, yAxis: 0 } },
-          { text: "WEAKENING", point: { x: 103.6, y: 96.5, xAxis: 0, yAxis: 0 } },
-        ],
-      },
-    ],
-    plotOptions: {
-      series: {
-        marker: { enabled: true, radius: 2.5 },
-        states: { hover: { lineWidthPlus: 1 } },
-      },
-    },
-    series: [
-      {
-        type: "line",
-        name: "Regime path",
-        data,
-        color: colors.accent,
-        lineWidth: 2,
-        marker: { enabled: true, radius: 2.5 },
-      },
-      {
-        type: "scatter",
-        name: "Current",
-        data: latest ? [{ ...latest, marker: { radius: 5, fillColor: colors.accent } }] : [],
-        color: colors.accent,
-      },
-    ],
-  };
-}
-
-/** Encode a `#RRGGBB` token at the given alpha (reuses the local helper). */
-function tint(hex: string, a: number): string {
-  return withAlpha(hex, a);
 }
 
 export type MacroPerformanceView = "indexed" | "drawdown";
@@ -426,14 +138,17 @@ export function buildHcMacroPerformanceOption({
 
   return {
     chart: { type: "line", zooming: { type: "x" } },
-    legend: { enabled: true },
+    // The page renders its own inline HTML legend; suppress the Highcharts one.
+    legend: { enabled: false },
     xAxis: compactDatetimeXAxis({
       min: minX,
       max: maxX,
+      crosshair: { color: colors.grid },
+      tickPixelInterval: 96,
       plotBands: deriveRegimePlotBands(regimes, minX, maxX, colors),
     }),
     yAxis: {
-      title: { text: isDrawdown ? "Drawdown from peak" : "Indexed to 100" },
+      title: { text: isDrawdown ? "Drawdown" : "Indexed to 100" },
       labels: {
         formatter() {
           return isDrawdown
@@ -441,7 +156,9 @@ export function buildHcMacroPerformanceOption({
             : formatNumber(this.value as number, 0);
         },
       },
-      plotLines: [{ value: refLine, width: 1, color: colors.grid, dashStyle: "Dash", zIndex: 2 }],
+      plotLines: [
+        { value: refLine, width: 1, color: colors.textMuted, dashStyle: "Dash", zIndex: 2 },
+      ],
     },
     tooltip: {
       shared: true,
@@ -464,7 +181,7 @@ export function buildHcMacroPerformanceOption({
         name: portfolioLabel,
         data: portfolioData,
         color: colors.accent,
-        lineWidth: 2.4,
+        lineWidth: 2.2,
         marker: { enabled: false },
         fillColor: isDrawdown ? tint(colors.accent, 0.12) : undefined,
         zIndex: 3,
@@ -474,7 +191,7 @@ export function buildHcMacroPerformanceOption({
         name: assetLabel,
         data: assetData,
         color: colors.barMute,
-        lineWidth: 1.8,
+        lineWidth: 1.6,
         marker: { enabled: false },
         dashStyle: isDrawdown ? "ShortDash" : "Solid",
         zIndex: 2,

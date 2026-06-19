@@ -232,7 +232,10 @@ export function MacroRegimeView() {
   const rotationOption = useMemo<Options | null>(() => {
     if (!colors || !macroQuery.data?.history) return null;
     const sliced = sliceHistory(macroQuery.data.history, range);
-    return buildHcMacroRrgOption(sliced, colors, { step: RRG_STEP[range] });
+    const darkTheme =
+      typeof document !== "undefined" &&
+      document.documentElement.dataset.theme === "dark";
+    return buildHcMacroRrgOption(sliced, colors, { step: RRG_STEP[range], darkTheme });
   }, [macroQuery.data, colors, range]);
 
   const assetPoints = useMemo<DatePoint[]>(() => {
@@ -568,13 +571,18 @@ export function MacroRegimeView() {
 const HERO_SUBTITLE =
   "A risk-on / risk-off read on markets, decided by a vote of three independent signals.";
 
-/** Composite legend swatches for the RRG, in token colors. */
+/**
+ * Composite legend swatches for the RRG. Credit reads blue and Conditions amber
+ * (theme-aware), matching `buildHcMacroRrgOption`; Composite uses the design
+ * accent and Trend the gain token. Blue/amber have no design token (the palette
+ * is graphite + accent), so they use the same Carbon hues as the chart builder.
+ */
 function ROT_LEGEND(colors: ChartColors): Array<{ label: string; color: string }> {
   return [
     { label: "Composite", color: colors.accent },
-    { label: "Credit", color: colors.categories[1] ?? colors.bar },
+    { label: "Credit", color: colors.blue },
     { label: "Trend", color: colors.gain },
-    { label: "Conditions", color: colors.categories[3] ?? colors.barMute },
+    { label: "Conditions", color: colors.amber },
   ];
 }
 
@@ -615,14 +623,14 @@ function VoteChip({ label, active, tip }: { label: string; active: boolean; tip:
     : "border-border-strong text-text-muted bg-field";
   return (
     <span
-      title={tip}
       aria-label={`${label} signal ${active ? "active" : "inactive"}`}
-      className={`inline-flex cursor-help items-center gap-[7px] whitespace-nowrap border px-2.5 py-1 text-[11.5px] font-bold ${cls}`}
+      className={`inline-flex items-center gap-[7px] whitespace-nowrap border px-2.5 py-1 text-[11.5px] font-bold ${cls}`}
     >
       <span
         className={`h-[7px] w-[7px] rounded-full ${active ? "bg-loss opacity-100" : "bg-text-muted opacity-40"}`}
       />
       {label}
+      <InfoDot tip={tip} />
     </span>
   );
 }

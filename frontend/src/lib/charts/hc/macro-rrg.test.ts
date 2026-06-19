@@ -126,6 +126,43 @@ describe("buildHcMacroRrgOption", () => {
     expect(typeof chart.events?.render).toBe("function");
   });
 
+  it("colors the signal tails blue / green / amber (light theme)", () => {
+    const opt = buildHcMacroRrgOption(makeHistory(120), TEST_COLORS)!;
+    const [composite, credit, trend, conditions] = splineSeries(opt) as Array<
+      SplineSeries & { color?: string }
+    >;
+    // Composite = design accent; Credit = blue token; Trend = gain; Conditions = amber token.
+    expect(composite.color).toBe(TEST_COLORS.accent);
+    expect(credit.color).toBe(TEST_COLORS.blue);
+    expect(trend.color).toBe(TEST_COLORS.gain);
+    expect(conditions.color).toBe(TEST_COLORS.amber);
+  });
+
+  it("sources blue / amber from the colors bag (theme-resolved tokens)", () => {
+    const darkColors = { ...TEST_COLORS, blue: "#78a9ff", amber: "#d2a106" };
+    const opt = buildHcMacroRrgOption(makeHistory(120), darkColors)!;
+    const series = splineSeries(opt) as Array<SplineSeries & { color?: string }>;
+    const credit = series.find((s) => s.name === "Credit");
+    const conditions = series.find((s) => s.name === "Conditions");
+    expect(credit?.color).toBe("#78a9ff");
+    expect(conditions?.color).toBe("#d2a106");
+  });
+
+  it("paints the quadrant labels blue / green / red / amber", () => {
+    const opt = buildHcMacroRrgOption(makeHistory(120), TEST_COLORS)!;
+    const quad = (opt.series ?? []).find(
+      (s) => (s as { type?: string }).type === "scatter",
+    ) as { data?: Array<{ dataLabels?: { format?: string; style?: { color?: string } } }> };
+    const byFormat = (fmt: string) =>
+      (quad.data ?? []).find((d) => d.dataLabels?.format === fmt)?.dataLabels?.style?.color;
+    // RECOVERY=improving=blue, EXPANSION=leading=green(gain),
+    // CONTRACTION=lagging=red(loss), SLOWDOWN=weakening=amber.
+    expect(byFormat("RECOVERY")).toBe(TEST_COLORS.blue);
+    expect(byFormat("EXPANSION")).toBe(TEST_COLORS.gain);
+    expect(byFormat("CONTRACTION")).toBe(TEST_COLORS.loss);
+    expect(byFormat("SLOWDOWN")).toBe(TEST_COLORS.amber);
+  });
+
   it("renders the per-point tooltip from the vertex's signal name and date", () => {
     const opt = buildHcMacroRrgOption(makeHistory(120), TEST_COLORS)!;
     const tooltip = opt.tooltip as {
