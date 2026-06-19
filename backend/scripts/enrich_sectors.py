@@ -13,6 +13,10 @@ mode() picks the most common sector when a ticker maps to several rows;
 COALESCE prefers the SEC CUSIP sector and falls back to the ISIN map.
 
 Requires DATALAKE_DB_URL (read-only data-lake) and the app DB.
+
+In production the same bridge runs as a scheduled TimescaleDB job (daily) — see
+scripts/refresh_universe_sectors_job.sql. This Python script is the manual /
+portable equivalent for local runs or one-off backfills.
 """
 
 import argparse
