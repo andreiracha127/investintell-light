@@ -1,13 +1,18 @@
-"""Enrich universe_constituents.sector from the data-lake sec_cusip_ticker_map.
+"""Enrich universe_constituents.sector from the data-lake GICS maps.
 
 Run from backend/:
     uv run python scripts/enrich_sectors.py            # real run (writes)
     uv run python scripts/enrich_sectors.py --dry-run  # counts only
 
-Requires DATALAKE_DB_URL (read-only data-lake) and the local DB. The map has
-~7.0k tickers with GICS sector (11 sectors); coverage over the ~5k-ticker
-universe is reported at the end. mode() picks the most common sector when a
-ticker maps to several CUSIPs.
+Sources (data lake), per ticker, CUSIP map first then the ISIN→GICS map:
+  - sec_cusip_ticker_map.gics_sector  — SEC CUSIP→ticker→GICS (US-centric core).
+  - sec_isin_sector.gics_sector       — ISIN→GICS enrichment (OpenFIGI/YFinance),
+                                        keyed by ticker; fills tickers the CUSIP
+                                        map misses.
+mode() picks the most common sector when a ticker maps to several rows;
+COALESCE prefers the SEC CUSIP sector and falls back to the ISIN map.
+
+Requires DATALAKE_DB_URL (read-only data-lake) and the app DB.
 """
 
 import argparse
@@ -27,12 +32,24 @@ from app.core.db import AsyncSessionLocal  # noqa: E402
 
 logger = logging.getLogger("enrich_sectors")
 
+# Per ticker: the SEC CUSIP GICS sector, falling back to the ISIN→GICS map.
 SECTOR_MAP_SQL = text("""
-    SELECT upper(ticker) AS ticker,
-           mode() WITHIN GROUP (ORDER BY gics_sector) AS sector
-    FROM sec_cusip_ticker_map
-    WHERE ticker IS NOT NULL AND gics_sector IS NOT NULL
-    GROUP BY upper(ticker)
+    WITH cusip AS (
+        SELECT ticker, mode() WITHIN GROUP (ORDER BY gics_sector) AS sector
+        FROM sec_cusip_ticker_map
+        WHERE ticker IS NOT NULL AND gics_sector IS NOT NULL
+        GROUP BY ticker
+    ),
+    isin AS (
+        SELECT ticker, mode() WITHIN GROUP (ORDER BY gics_sector) AS sector
+        FROM sec_isin_sector
+        WHERE ticker IS NOT NULL AND gics_sector IS NOT NULL
+        GROUP BY ticker
+    )
+    SELECT t.ticker, COALESCE(c.sector, i.sector) AS sector
+    FROM (SELECT ticker FROM cusip UNION SELECT ticker FROM isin) t
+    LEFT JOIN cusip c USING (ticker)
+    LEFT JOIN isin i USING (ticker)
 """)
 
 UPDATE_SQL = text("""
@@ -50,12 +67,14 @@ COVERAGE_SQL = text("""
 async def run(dry_run: bool) -> None:
     async for datalake in get_datalake_session():
         rows = (await datalake.execute(SECTOR_MAP_SQL)).all()
-    logger.info("sec_cusip_ticker_map: %d tickers com setor", len(rows))
+    logger.info("GICS maps (cusip+isin): %d tickers com setor", len(rows))
     if dry_run:
         return
+    params = [{"ticker": ticker, "sector": sector} for ticker, sector in rows]
     async with AsyncSessionLocal() as session:
-        for ticker, sector in rows:
-            await session.execute(UPDATE_SQL, {"ticker": ticker, "sector": sector})
+        if params:
+            # Single set-based executemany instead of one round-trip per ticker.
+            await session.execute(UPDATE_SQL, params)
         await session.commit()
         total, with_sector = (await session.execute(COVERAGE_SQL)).one()
     logger.info("cobertura: %d/%d constituintes ativos com setor", with_sector, total)
