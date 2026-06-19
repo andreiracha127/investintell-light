@@ -40,6 +40,37 @@ def test_default_sort_is_whitelisted() -> None:
     assert catalog.DEFAULT_SORT in catalog.SORT_WHITELIST
 
 
+def test_list_sort_whitelist_includes_manager_name() -> None:
+    # The Manager column is a correlated subquery resolved per query — it is
+    # sortable on the materialized list path even though it is NOT a column of
+    # fund_risk_latest (so it is absent from the non-materialized whitelist).
+    assert "manager_name" in catalog.LIST_SORT_WHITELIST
+    assert "manager_name" not in catalog.SORT_WHITELIST
+
+
+def test_list_sort_whitelist_agrees_with_build_funds_select() -> None:
+    # Regression guard: the route's validation gate and the SQL builder MUST
+    # accept exactly the same sort codes. A drift here is precisely the bug
+    # that 422-ed the Manager column (gate said no, builder said yes).
+    for code in catalog.LIST_SORT_WHITELIST:
+        catalog.build_funds_select(
+            catalog.FundFilters(), sort=code, direction="asc", limit=1, offset=0
+        )
+
+
+def test_list_sort_whitelist_excludes_columns_absent_from_the_mv() -> None:
+    # Tier-3 EVT/GARCH metrics exist on fund_risk_latest (and so on the
+    # non-materialized whitelist) but are not materialized in funds_list_mv,
+    # so the list path cannot sort by them.
+    for code in ("evt_xi_shape", "cvar_999_evt", "volatility_garch"):
+        assert code in catalog.SORT_WHITELIST
+        assert code not in catalog.LIST_SORT_WHITELIST
+        with pytest.raises(catalog.UnknownSortColumnError):
+            catalog.build_funds_select(
+                catalog.FundFilters(), sort=code, direction="asc", limit=1, offset=0
+            )
+
+
 # ---------------------------------------------------------------------------
 # Filter predicates
 # ---------------------------------------------------------------------------
@@ -101,6 +132,21 @@ def test_build_funds_select_rejects_non_whitelisted_sort() -> None:
         catalog.build_funds_select(
             catalog.FundFilters(), sort="evil", direction="asc", limit=1, offset=0
         )
+
+
+def test_manager_name_resolves_investment_adviser_not_registrant() -> None:
+    # The Manager column must resolve the INVESTMENT ADVISER via the N-CEN
+    # crosswalk (sec_fund_adviser) + Form ADV firm name (sec_managers), keyed
+    # by series_id — NOT the registrant/trust via the old instrument_identity
+    # CIK subquery (that was the bug: it surfaced the trust, e.g. "iSHARES
+    # TRUST" instead of "BLACKROCK FUND ADVISORS").
+    sql = str(
+        catalog.build_funds_select(
+            catalog.FundFilters(), sort="aum_usd", direction="desc", limit=1, offset=0
+        )
+    )
+    assert "sec_fund_adviser" in sql
+    assert "instrument_identity" not in sql
 
 
 # ---------------------------------------------------------------------------

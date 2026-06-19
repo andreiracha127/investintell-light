@@ -155,6 +155,20 @@ async def test_list_funds_filters_and_pagination_reach_service(
     assert call["offset"] == 200
 
 
+async def test_list_funds_sort_by_manager_name_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Regression: the Manager column is list-sortable (a correlated subquery),
+    # so the route gate must accept it and pass it through to the service
+    # instead of rejecting it with 422.
+    calls: list[dict[str, Any]] = []
+    _stub_list(monkeypatch, [_item_row()], 1, calls)
+    async with _client() as client:
+        resp = await client.get("/funds", params={"sort": "manager_name"})
+    assert resp.status_code == 200
+    assert calls[0]["sort"] == "manager_name"
+
+
 @pytest.mark.parametrize(
     "params",
     [

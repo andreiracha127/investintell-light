@@ -44,44 +44,51 @@ NAV_TARGET_POINTS = 260
 HOLDINGS_CAP = 50
 
 
-# Mother-DB identity crosswalk (no ORM model in the Light; referenced ad-hoc for
-# the management-company enrichment, which the list MV does not carry). Lives in
-# the same database as funds_list_mv.
-_identity_tbl = table(
-    "instrument_identity",
-    column("instrument_id"),
-    column("cik_padded"),
-    column("cik_unpadded"),
+# Investment-adviser crosswalk (no ORM models in the Light; referenced ad-hoc).
+# ``sec_fund_adviser`` is the N-CEN-sourced map series_id -> PRIMARY adviser
+# (name + CRD), populated by scripts/ncen_adviser_ingest.py. ``sec_managers``
+# carries the canonical Form ADV firm name, joined on the adviser CRD. Both live
+# in the same database as funds_list_mv.
+_fund_adviser_tbl = table(
+    "sec_fund_adviser",
+    column("series_id"),
+    column("adviser_name"),
+    column("adviser_crd"),
 )
 _managers_tbl = table(
-    "sec_managers", column("cik"), column("firm_name"), column("aum_total")
+    "sec_managers", column("crd_number"), column("firm_name")
 )
 
 
 def _build_manager_name_expr() -> ColumnElement[Any]:
-    """Correlated scalar subquery resolving a fund's management-company name.
+    """Correlated scalar subquery resolving a fund's INVESTMENT ADVISER name.
 
-    Joins the fund's CIK (padded/unpadded, indexed) to ``sec_managers`` (indexed)
-    and keeps the largest-AUM filing — the operating adviser. Selectable for
-    display AND usable in ORDER BY, so the column sorts server-side like the
-    rest (~50ms even ordering the whole universe by it; both join keys indexed).
+    Resolves the fund's primary adviser from ``sec_fund_adviser`` (the N-CEN
+    crosswalk, keyed by ``series_id``) and prefers the canonical Form ADV firm
+    name from ``sec_managers`` (joined on the adviser CRD), falling back to the
+    N-CEN adviser name. Returns NULL when no adviser is resolved (front-end shows
+    an em dash) — NEVER the registrant/trust name, which was the bug this
+    replaced (e.g. "iSHARES TRUST" instead of "BLACKROCK FUND ADVISORS").
+
+    Selectable for display AND usable in ORDER BY, so the Manager column sorts
+    server-side like the rest (series_id and crd are indexed).
     """
     return (
-        select(_managers_tbl.c.firm_name)
-        .select_from(
-            _identity_tbl.join(
-                _managers_tbl,
-                or_(
-                    _managers_tbl.c.cik == _identity_tbl.c.cik_padded,
-                    _managers_tbl.c.cik == _identity_tbl.c.cik_unpadded,
-                ),
+        select(
+            func.coalesce(
+                _managers_tbl.c.firm_name, _fund_adviser_tbl.c.adviser_name
             )
         )
-        .where(
-            _identity_tbl.c.instrument_id == FundListRow.instrument_id,
-            _managers_tbl.c.firm_name.isnot(None),
+        .select_from(
+            # Equi-join on the (numeric) adviser CRD: synthetic registrant rows
+            # in sec_managers (crd_number like 'cik_%') never match, so the
+            # registrant/trust name can no longer leak into the Manager column.
+            _fund_adviser_tbl.outerjoin(
+                _managers_tbl,
+                _managers_tbl.c.crd_number == _fund_adviser_tbl.c.adviser_crd,
+            )
         )
-        .order_by(_managers_tbl.c.aum_total.desc().nulls_last())
+        .where(_fund_adviser_tbl.c.series_id == FundListRow.series_id)
         .limit(1)
         .correlate(FundListRow)
         .scalar_subquery()
@@ -123,7 +130,7 @@ SORT_WHITELIST: dict[str, InstrumentedAttribute[Any]] = {
     **{name: getattr(Fund, name) for name in _FUND_SORT_FIELDS},
     **{name: getattr(FundRiskLatest, name) for name in _RISK_SORT_FIELDS},
 }
-_LIST_SORT_WHITELIST: dict[str, ColumnElement[Any]] = {
+LIST_SORT_WHITELIST: dict[str, ColumnElement[Any]] = {
     **{name: getattr(FundListRow, name) for name in _FUND_SORT_FIELDS},
     # The funds_list_mv materialized view does not (yet) carry the Tier-3 EVT /
     # GARCH risk columns added to FundRiskLatest, so restrict the list sort to
@@ -155,7 +162,7 @@ def sort_column(code: str) -> InstrumentedAttribute[Any]:
 
 def _list_sort_column(code: str) -> ColumnElement[Any]:
     """Resolve a list sort code against the materialized /funds projection."""
-    column = _LIST_SORT_WHITELIST.get(code)
+    column = LIST_SORT_WHITELIST.get(code)
     if column is None:
         raise UnknownSortColumnError(
             f"Cannot sort by {code!r}: not a whitelisted funds column."

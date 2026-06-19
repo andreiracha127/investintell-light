@@ -135,13 +135,19 @@ def _filters(
 
 
 def _sort_or_422(sort: str) -> str:
-    """Whitelist gate BEFORE the service builds any SQL."""
-    if sort not in catalog.SORT_WHITELIST:
+    """Whitelist gate BEFORE the service builds any SQL.
+
+    Validates against the materialized list whitelist — the SAME set the
+    service uses to build the ORDER BY — so the gate and the query never
+    disagree (the non-materialized SORT_WHITELIST omits ``manager_name`` and
+    carries Tier-3 columns the funds_list_mv does not materialize).
+    """
+    if sort not in catalog.LIST_SORT_WHITELIST:
         raise HTTPException(
             status_code=422,
             detail=(
                 f"Cannot sort by {sort!r}: not a whitelisted funds column. "
-                f"Expected one of {sorted(catalog.SORT_WHITELIST)}."
+                f"Expected one of {sorted(catalog.LIST_SORT_WHITELIST)}."
             ),
         )
     return sort
