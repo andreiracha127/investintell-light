@@ -163,7 +163,7 @@ _FUND_ID = uuid.UUID("00000000-0000-0000-0000-00000000000a")
 
 
 def _stub_pricing(monkeypatch: pytest.MonkeyPatch, portfolio) -> None:
-    async def fake_get_portfolio(session, portfolio_id):
+    async def fake_get_portfolio(session, portfolio_id, owner_sub):
         return portfolio
 
     async def fake_fund_ids(session, tickers):
@@ -308,13 +308,26 @@ async def test_preview_macro_trigger_forces_proposal(
 async def test_preview_unknown_portfolio_404(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_get_portfolio(session, portfolio_id):
+    async def fake_get_portfolio(session, portfolio_id, owner_sub):
         return None
 
     monkeypatch.setattr(portfolio_crud, "get_portfolio", fake_get_portfolio)
     async with _client() as client:
         resp = await client.get("/portfolios/99/rebalance/preview")
     assert resp.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_rebalance_policy_get_404_for_non_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_exists(session, portfolio_id, owner_sub):
+        return False  # portfolio não é do usuário -> indistinguível de inexistente
+
+    monkeypatch.setattr(portfolio_crud, "portfolio_exists", fake_exists)
+    async with _client() as ac:
+        response = await ac.get("/portfolios/1/rebalance/policy")
+    assert response.status_code == 404
 
 
 @pytest.mark.anyio
@@ -346,7 +359,7 @@ async def test_put_and_get_policy_roundtrip(
 ) -> None:
     stored: dict = {}
 
-    async def fake_get_portfolio_exists(session, portfolio_id):
+    async def fake_get_portfolio_exists(session, portfolio_id, owner_sub):
         return True
 
     async def fake_upsert(session, portfolio_id, **fields):
@@ -360,7 +373,7 @@ async def test_put_and_get_policy_roundtrip(
             return None
         return SimpleNamespace(last_evaluated_at=None, **stored)
 
-    monkeypatch.setattr(ev, "portfolio_exists", fake_get_portfolio_exists)
+    monkeypatch.setattr(portfolio_crud, "portfolio_exists", fake_get_portfolio_exists)
     monkeypatch.setattr(ev, "upsert_policy", fake_upsert)
     monkeypatch.setattr(ev, "get_policy", fake_get_policy)
 
@@ -388,10 +401,10 @@ async def test_put_and_get_policy_roundtrip(
 async def test_put_policy_validates_bands(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_get_portfolio_exists(session, portfolio_id):
+    async def fake_get_portfolio_exists(session, portfolio_id, owner_sub):
         return True
 
-    monkeypatch.setattr(ev, "portfolio_exists", fake_get_portfolio_exists)
+    monkeypatch.setattr(portfolio_crud, "portfolio_exists", fake_get_portfolio_exists)
     async with _client() as client:
         resp = await client.put(
             "/portfolios/7/rebalance/policy",

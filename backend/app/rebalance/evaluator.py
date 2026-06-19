@@ -222,9 +222,6 @@ async def get_policy(
     return await session.get(RebalancePolicy, portfolio_id)
 
 
-async def portfolio_exists(session: AsyncSession, portfolio_id: int) -> bool:
-    return await portfolio_crud.portfolio_exists(session, portfolio_id)
-
 
 async def upsert_policy(
     session: AsyncSession, portfolio_id: int, **fields: Any

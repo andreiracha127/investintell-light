@@ -18,7 +18,7 @@ from typing import Annotated, Literal, cast
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import get_current_user
+from app.core.auth import CurrentUser, get_current_user
 from app.core.datalake import get_optional_datalake_session
 from app.core.db import get_session
 from app.models.rebalance import RebalancePolicy
@@ -62,9 +62,15 @@ def _policy_out(
     "/{portfolio_id}/rebalance/policy", response_model=RebalancePolicyOut
 )
 async def get_rebalance_policy(
-    portfolio_id: int, session: SessionDep
+    portfolio_id: int,
+    session: SessionDep,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> RebalancePolicyOut:
     """Política salva do portfólio; 404 quando nenhuma foi configurada."""
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id, user.sub):
+        raise HTTPException(
+            status_code=404, detail=f"Portfolio {portfolio_id} not found."
+        )
     policy = await evaluator.get_policy(session, portfolio_id)
     if policy is None:
         raise HTTPException(
@@ -81,10 +87,13 @@ async def get_rebalance_policy(
     "/{portfolio_id}/rebalance/policy", response_model=RebalancePolicyOut
 )
 async def put_rebalance_policy(
-    portfolio_id: int, payload: RebalancePolicyIn, session: SessionDep
+    portfolio_id: int,
+    payload: RebalancePolicyIn,
+    session: SessionDep,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> RebalancePolicyOut:
     """Cria/atualiza a política (upsert por portfolio_id)."""
-    if not await evaluator.portfolio_exists(session, portfolio_id):
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id, user.sub):
         raise HTTPException(
             status_code=404, detail=f"Portfolio {portfolio_id} not found."
         )
@@ -107,9 +116,10 @@ async def get_rebalance_preview(
     portfolio_id: int,
     session: SessionDep,
     datalake: OptionalDatalakeDep,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> RebalancePreviewResponse:
     """Avaliação on-demand: decisão + drifts + proposta + turnover (advisory)."""
-    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, user.sub)
     if portfolio is None:
         raise HTTPException(
             status_code=404, detail=f"Portfolio {portfolio_id} not found."
