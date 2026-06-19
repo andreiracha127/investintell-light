@@ -26,15 +26,27 @@ import { formatNumber } from "@/lib/format";
 const isCash = (label: string) => label.trim().toLowerCase() === "cash";
 const round2 = (v: number) => parseFloat(v.toFixed(4));
 
+export interface ExposureTreemapConfig {
+  /**
+   * Opt-in zoomable look-through: click a bucket to zoom into its leaves, click
+   * the header breadcrumb to zoom back out (`allowTraversingTree` + a level-1
+   * traverse-up button). Off by default so existing callers keep the flat,
+   * non-traversable two-level map.
+   */
+  traversable?: boolean;
+}
+
 /**
  * Build a look-through treemap for one exposure dimension.
  *
  * @param items  Exposure items for the active dimension (percent-point values).
  * @param colors Design-token color bag (from chartColors()).
+ * @param config Opt-in behavior (e.g. zoomable traversal).
  */
 export function buildHcExposureTreemapOption(
   items: ExposureItem[],
   colors: ChartColors,
+  config: ExposureTreemapConfig = {},
 ): Options {
   const sorted = [...items]
     .filter((item) => item.total_pct > 0)
@@ -102,8 +114,11 @@ export function buildHcExposureTreemapOption(
         type: "treemap",
         name: "Exposure",
         layoutAlgorithm: "squarified",
-        allowTraversingTree: false,
+        allowTraversingTree: config.traversable === true,
         animationLimit: 1000,
+        // Header breadcrumb on the bucket level so zoom-out is one click. Only
+        // meaningful when traversal is on; Highcharts ignores it otherwise.
+        traverseUpButton: { position: { align: "left", x: 0, y: 0 } },
         levels: [
           {
             level: 1,

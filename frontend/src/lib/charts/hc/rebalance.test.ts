@@ -6,22 +6,23 @@ import type { PositionDrift } from "@/lib/api/client";
 import { formatPercent } from "@/lib/format";
 
 /**
- * Mirrors the legacy ECharts assertions in src/lib/charts/rebalance.ts:
+ * Claude Design drift chart: a SINGLE signed-drift (current − target) bar per
+ * position.
  *   - null on empty input
- *   - sort by target_weight DESC then reverse() (net: ASC by target)
- *   - fractions -> percent-points (x100, 4dp)
- *   - half-band = max(min(bandAbs, target*bandRel)*100, 0.5)
- *   - bar = current weight; breach -> colors.loss else colors.bar
- *   - scatter = per-row target tick in colors.accent
- *   - tolerance bands per row (yAxis.plotBands) accent-wash
- *   - rich pp tooltip
+ *   - horizontal bar chart, sorted by signed drift (largest positive at top)
+ *   - drift = (current − target) × 100, p.p.
+ *   - bar loss-colored when |drift| > band_abs, else neutral graphite
+ *   - 0 plotLine + ONE symmetric accent-wash ±band plotBand with a label
+ *   - y-axis title "Drift vs. target (p.p.)"
+ *   - per-bar signed p.p. data labels
+ *   - rich tooltip with band-breach styling
  */
 
 const BAND_ABS = 0.05; // 5 p.p.
-const BAND_REL = 0.25; // 25% of target
+const BAND_REL = 0.25; // 25% of target (accepted, not drawn)
 
 const DRIFTS: PositionDrift[] = [
-  // target 40%, current 47% -> drift_abs 0.07 > band_abs 0.05 -> breach
+  // target 40%, current 47% -> drift +7 p.p. -> |7| > 5 -> breach
   {
     ticker: "AAA",
     current_weight: 0.47,
@@ -31,7 +32,7 @@ const DRIFTS: PositionDrift[] = [
     breach: true,
     status: "urgent",
   },
-  // target 35%, current 34% -> within band -> safe
+  // target 35%, current 34% -> drift -1 p.p. -> within band
   {
     ticker: "BBB",
     current_weight: 0.34,
@@ -41,7 +42,7 @@ const DRIFTS: PositionDrift[] = [
     breach: false,
     status: "ok",
   },
-  // target 25%, current 19% -> safe
+  // target 25%, current 19% -> drift -6 p.p. -> |6| > 5 -> breach
   {
     ticker: "CCC",
     current_weight: 0.19,
@@ -63,114 +64,91 @@ describe("buildHcDriftBandsOption", () => {
     expect(opt.chart?.type).toBe("bar");
   });
 
-  it("sorts rows by target_weight DESC then reverse (net ASC) for the category axis", () => {
+  it("sorts categories by signed drift ascending (so largest positive draws on top)", () => {
     const opt = buildHcDriftBandsOption(DRIFTS, TEST_COLORS, BAND_ABS, BAND_REL)!;
     const cats = (opt.xAxis as { categories?: string[] }).categories;
-    // target weights: AAA .40, BBB .35, CCC .25 ; sort desc -> AAA,BBB,CCC ; reverse -> CCC,BBB,AAA
+    // drift: AAA +7, BBB -1, CCC -6 ; ascending -> CCC(-6), BBB(-1), AAA(+7)
     expect(cats).toEqual(["CCC", "BBB", "AAA"]);
   });
 
-  it("maps current weight -> bar series in percent-points, coloring breaches with loss", () => {
+  it("maps signed drift -> single bar series in p.p., coloring out-of-band rows with loss", () => {
     const opt = buildHcDriftBandsOption(DRIFTS, TEST_COLORS, BAND_ABS, BAND_REL)!;
-    const bar = opt.series?.find((s) => (s as { type?: string }).type === "bar") as {
-      data?: Array<{ y: number; color: string }>;
-      name?: string;
-    };
-    expect(bar.name).toBe("Current weight");
-    // order CCC, BBB, AAA -> current 19, 34, 47
-    expect(bar.data?.map((d) => d.y)).toEqual([19, 34, 47]);
-    // CCC safe -> bar, BBB safe -> bar, AAA breach -> loss
+    expect(opt.series).toHaveLength(1);
+    const bar = opt.series![0] as { type?: string; name?: string; data?: Array<{ y: number; color: string }> };
+    expect(bar.type).toBe("bar");
+    expect(bar.name).toBe("Drift");
+    // order CCC, BBB, AAA -> drift -6, -1, +7
+    expect(bar.data?.map((d) => d.y)).toEqual([-6, -1, 7]);
+    // |drift| > 5 -> loss (CCC, AAA); BBB within band -> neutral
     expect(bar.data?.map((d) => d.color)).toEqual([
-      TEST_COLORS.bar,
+      TEST_COLORS.loss,
       TEST_COLORS.bar,
       TEST_COLORS.loss,
     ]);
   });
 
-  it("maps target weight -> scatter ticks in accent, anchored to each row index", () => {
+  it("titles the value axis 'Drift vs. target (p.p.)'", () => {
     const opt = buildHcDriftBandsOption(DRIFTS, TEST_COLORS, BAND_ABS, BAND_REL)!;
-    const scatter = opt.series?.find((s) => (s as { type?: string }).type === "scatter") as {
-      data?: Array<{ x: number; y: number }>;
-      color?: string;
-      name?: string;
+    const yAxis = opt.yAxis as { title?: { text?: string } };
+    expect(yAxis.title?.text).toBe("Drift vs. target (p.p.)");
+  });
+
+  it("draws a single 0 plotLine and ONE symmetric accent-wash ±band with a label", () => {
+    const opt = buildHcDriftBandsOption(DRIFTS, TEST_COLORS, BAND_ABS, BAND_REL)!;
+    const yAxis = opt.yAxis as {
+      plotLines?: Array<{ value: number }>;
+      plotBands?: Array<{ from: number; to: number; color: string; label?: { text?: string } }>;
     };
-    expect(scatter.name).toBe("Target weight");
-    expect(scatter.color).toBe(TEST_COLORS.accent);
-    // order CCC, BBB, AAA -> target 25, 35, 40 ; x = category index, y = targetPct
-    expect(scatter.data).toEqual([
-      { x: 0, y: 25 },
-      { x: 1, y: 35 },
-      { x: 2, y: 40 },
-    ]);
+    expect(yAxis.plotLines).toHaveLength(1);
+    expect(yAxis.plotLines?.[0]?.value).toBe(0);
+    expect(yAxis.plotBands).toHaveLength(1);
+    const band = yAxis.plotBands![0]!;
+    expect(band.from).toBeCloseTo(-5, 4);
+    expect(band.to).toBeCloseTo(5, 4);
+    expect(band.color).toBe(TEST_COLORS.accentWash);
+    expect(band.label?.text).toContain("±5");
   });
 
-  it("emits one accent-wash tolerance band per row on the value (y) axis", () => {
-    const opt = buildHcDriftBandsOption(DRIFTS, TEST_COLORS, BAND_ABS, BAND_REL)!;
-    const bands = (opt.yAxis as { plotBands?: Array<{ from: number; to: number; color: string }> })
-      .plotBands;
-    expect(bands).toHaveLength(3);
-    expect(bands?.every((b) => b.color === TEST_COLORS.accentWash)).toBe(true);
-    // CCC: target 25, half = min(5, 25*0.25=6.25)=5 -> [20,30]
-    expect(bands?.[0]?.from).toBeCloseTo(20, 4);
-    expect(bands?.[0]?.to).toBeCloseTo(30, 4);
-    // AAA: target 40, half = min(5, 40*0.25=10)=5 -> [35,45]
-    expect(bands?.[2]?.from).toBeCloseTo(35, 4);
-    expect(bands?.[2]?.to).toBeCloseTo(45, 4);
-  });
-
-  it("floors the half-band at 0.5pp for tiny targets", () => {
-    const tiny: PositionDrift[] = [
-      {
-        ticker: "TINY",
-        current_weight: 0.001,
-        target_weight: 0.001,
-        drift_abs: 0,
-        drift_rel: 0,
-        breach: false,
-        status: "ok",
-      },
-    ];
-    const opt = buildHcDriftBandsOption(tiny, TEST_COLORS, BAND_ABS, BAND_REL)!;
-    const bands = (opt.yAxis as { plotBands?: Array<{ from: number; to: number }> }).plotBands;
-    // target 0.1pp; min(5, 0.1*0.25=0.025)=0.025 -> floored to 0.5 -> [-0.4, 0.6]
-    expect(bands?.[0]?.from).toBeCloseTo(-0.4, 4);
-    expect(bands?.[0]?.to).toBeCloseTo(0.6, 4);
-  });
-
-  it("formats the value axis labels as integer percent", () => {
+  it("formats the value axis labels as signed integer percent-points", () => {
     const opt = buildHcDriftBandsOption(DRIFTS, TEST_COLORS, BAND_ABS, BAND_REL)!;
     const yAxis = opt.yAxis as { labels?: { formatter?: (this: { value: number }) => string } };
-    expect(yAxis.labels!.formatter!.call({ value: 25 })).toBe("25%");
-    expect(yAxis.labels!.formatter!.call({ value: 12.7 })).toBe("13%");
+    expect(yAxis.labels!.formatter!.call({ value: 5 })).toBe("+5");
+    expect(yAxis.labels!.formatter!.call({ value: -3 })).toBe("−3");
+    expect(yAxis.labels!.formatter!.call({ value: 0 })).toBe("0");
   });
 
-  it("renders a rich pp deviation tooltip with breach styling", () => {
+  it("renders per-bar signed p.p. data labels", () => {
     const opt = buildHcDriftBandsOption(DRIFTS, TEST_COLORS, BAND_ABS, BAND_REL)!;
-    // The REAL Highcharts tooltip context exposes the hovered point as
-    // `this.point` and the category row index as `this.point.index`. The old
-    // test called `.call({ index })`, which matched the buggy `this.index`
-    // read and masked the blank-tooltip bug. Drive it with the true shape.
+    const dl = (opt.plotOptions?.bar?.dataLabels ?? {}) as {
+      enabled?: boolean;
+      formatter?: (this: { y: number }) => string;
+    };
+    expect(dl.enabled).toBe(true);
+    expect(dl.formatter!.call({ y: 7 })).toBe("+7.0 p.p.");
+    expect(dl.formatter!.call({ y: -6 })).toBe("−6.0 p.p.");
+  });
+
+  it("renders a rich tooltip with band-breach styling", () => {
+    const opt = buildHcDriftBandsOption(DRIFTS, TEST_COLORS, BAND_ABS, BAND_REL)!;
     const tooltip = opt.tooltip as {
       formatter?: (this: { point: { index: number } }) => string;
     };
-    // AAA is at row index 2 (order CCC,BBB,AAA); breach=true, dev = .47-.40 = +0.07 = +7.00pp
+    // AAA at row index 2 (order CCC,BBB,AAA); breach, drift +7.00 p.p.
     const out = tooltip!.formatter!.call({ point: { index: 2 } });
     expect(out).toContain("AAA");
-    expect(out).toContain("Out of band");
+    expect(out).toContain("band breach");
     expect(out).toContain(TEST_COLORS.loss);
-    expect(out).toContain("+7.00pp");
+    expect(out).toContain("+7.00 p.p.");
     expect(out).toContain(formatPercent(0.47, 2)); // Current
     expect(out).toContain(formatPercent(0.4, 2)); // Target
 
-    // CCC at row 0 is safe; dev = .19-.25 = -0.06 = -6.00pp ; no breach tag
-    const safe = tooltip!.formatter!.call({ point: { index: 0 } });
-    expect(safe).toContain("CCC");
-    expect(safe).not.toContain("Out of band");
-    expect(safe).toContain("-6.00pp");
+    // BBB at row 1 is within band; drift -1.00 p.p. ; no breach tag
+    const safe = tooltip!.formatter!.call({ point: { index: 1 } });
+    expect(safe).toContain("BBB");
+    expect(safe).not.toContain("band breach");
+    expect(safe).toContain("−1.00 p.p.");
 
-    // Empty-row guard: an out-of-range index resolves to no row -> blank string
-    // (this is the path the `this.index` bug used to hit on EVERY hover).
-    const empty = tooltip!.formatter!.call({ point: { index: 99 } });
-    expect(empty).toBe("");
+    // Out-of-range index -> blank string (empty-row guard).
+    expect(tooltip!.formatter!.call({ point: { index: 99 } })).toBe("");
   });
 });

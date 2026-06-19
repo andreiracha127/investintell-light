@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { PortfolioOverview } from "@/lib/api/client";
 import {
+  countMatchingPositions,
   formatShares,
   positionsGridColumns,
   positionsGridData,
@@ -13,12 +14,12 @@ const OVERVIEW = {
   name: "Main",
   positions: [
     {
-      ticker: "AAA", name: "Alpha Inc", last_close: 10, change: 0.5, change_pct: 0.05,
+      ticker: "AAA", name: "Alpha Inc", instrument_id: null, last_close: 10, change: 0.5, change_pct: 0.05,
       acq_price: 8, quantity: 100, basis: "executed", commission: 1.5, trade_date: "2026-01-02",
       pnl: 200, pnl_pct: 0.25, market_value: 1000,
     },
     {
-      ticker: "BBB", name: null, last_close: 20, change: -1, change_pct: -0.05,
+      ticker: "BBB", name: null, instrument_id: "fund-123", last_close: 20, change: -1, change_pct: -0.05,
       acq_price: null, quantity: 8.5, basis: "reference", commission: null, trade_date: null,
       pnl: null, pnl_pct: null, market_value: 170,
     },
@@ -56,19 +57,71 @@ describe("positionsGridColumns", () => {
     expect(action?.cells?.events?.click).toBeTypeOf("function");
   });
 
-  it("bakes aggregates into the P&L and Mkt Value headers", () => {
+  it("bakes aggregates into the P&L and Market value headers", () => {
     const cols = positionsGridColumns(OVERVIEW.aggregates);
     expect(cols.find((c) => c.id === "pnl")?.header?.format).toContain("+$200");
-    expect(cols.find((c) => c.id === "mktvalue")?.header?.format).toContain("$1,170");
+    const mkt = cols.find((c) => c.id === "mktvalue")?.header?.format;
+    expect(mkt).toContain("Market value");
+    expect(mkt).toContain("$1,170");
   });
 
-  it("ticker formatter links to the stock and shows the name sub-line", () => {
+  it("orders visible columns to match the mockup and gives P&L %/Company their own columns", () => {
+    const cols = positionsGridColumns(OVERVIEW.aggregates);
+    const visible = cols.filter((c) => c.enabled !== false).map((c) => c.id);
+    expect(visible).toEqual([
+      "ticker",
+      "name",
+      "shares",
+      "cost",
+      "last",
+      "mktvalue",
+      "pnl",
+      "pnl_pct",
+      "__remove",
+    ]);
+  });
+
+  it("ticker formatter links to the stock; name moved to its own Company column", () => {
     const cols = positionsGridColumns(OVERVIEW.aggregates);
     const fmt = cols.find((c) => c.id === "ticker")!.cells!.formatter;
-    const out = callFmt(fmt, mkCell("AAA", { name: "Alpha Inc" }));
+    const out = callFmt(fmt, mkCell("AAA", { name: "Alpha Inc", instrument_id: null }));
     expect(out).toContain('href="/stocks/AAA"');
     expect(out).toContain("AAA");
-    expect(out).toContain("Alpha Inc");
+    // Company name is no longer a ticker sub-line.
+    expect(out).not.toContain("Alpha Inc");
+    expect(out).not.toContain("FUND");
+  });
+
+  it("ticker formatter shows a FUND badge for fund/ETF holdings (instrument_id present)", () => {
+    const cols = positionsGridColumns(OVERVIEW.aggregates);
+    const fmt = cols.find((c) => c.id === "ticker")!.cells!.formatter;
+    const out = callFmt(fmt, mkCell("BBB", { name: null, instrument_id: "fund-123" }));
+    expect(out).toContain("FUND");
+  });
+
+  it("Company column formatter renders the name, em-dash when null", () => {
+    const cols = positionsGridColumns(OVERVIEW.aggregates);
+    const fmt = cols.find((c) => c.id === "name")!.cells!.formatter;
+    expect(callFmt(fmt, mkCell("Alpha Inc"))).toContain("Alpha Inc");
+    expect(callFmt(fmt, mkCell(null))).toBe("—");
+  });
+
+  it("P&L % column formatter renders signed percent with tone, em-dash when null", () => {
+    const cols = positionsGridColumns(OVERVIEW.aggregates);
+    const fmt = cols.find((c) => c.id === "pnl_pct")!.cells!.formatter;
+    const gain = callFmt(fmt, mkCell(0.25));
+    expect(gain).toContain("+25.00%");
+    expect(gain).toContain("text-gain");
+    expect(callFmt(fmt, mkCell(null))).toBe("—");
+  });
+
+  it("enables column sorting by default and opts the action column out", () => {
+    const opts = positionsToGridOptions(OVERVIEW, {
+      onEditShares: vi.fn(), onEditCost: vi.fn(), onRemove: vi.fn(),
+    });
+    expect(opts.columnDefaults?.sorting?.enabled).toBe(true);
+    const action = (opts.columns ?? []).find((c) => c.id === "__remove");
+    expect(action?.sorting?.enabled).toBe(false);
   });
 
   it("cost formatter shows EXEC badge + price + commission; REF when not executed", () => {
@@ -91,6 +144,30 @@ describe("positionsGridData", () => {
     expect(data.columns!.cost).toEqual([8, null]);
     expect(data.columns!.basis).toEqual(["executed", "reference"]);
     expect(data.columns!.name).toEqual(["Alpha Inc", null]);
+    expect(data.columns!.instrument_id).toEqual([null, "fund-123"]);
+    expect(data.columns!.change).toEqual([0.5, -1]);
+  });
+
+  it("filters rows by search across symbol and name", () => {
+    const bySym = positionsGridData(OVERVIEW.positions, { search: "bbb" });
+    expect(bySym.columns!.ticker).toEqual(["BBB"]);
+    const byName = positionsGridData(OVERVIEW.positions, { search: "alpha" });
+    expect(byName.columns!.ticker).toEqual(["AAA"]);
+    const none = positionsGridData(OVERVIEW.positions, { search: "zzz" });
+    expect(none.columns!.ticker).toEqual([]);
+  });
+
+  it("caps rows to the load-more limit", () => {
+    const data = positionsGridData(OVERVIEW.positions, { limit: 1 });
+    expect(data.columns!.ticker).toEqual(["AAA"]);
+  });
+});
+
+describe("countMatchingPositions", () => {
+  it("counts all without a search and the matching subset with one", () => {
+    expect(countMatchingPositions(OVERVIEW.positions)).toBe(2);
+    expect(countMatchingPositions(OVERVIEW.positions, "a")).toBe(1); // only AAA/"Alpha"
+    expect(countMatchingPositions(OVERVIEW.positions, "bbb")).toBe(1);
   });
 });
 

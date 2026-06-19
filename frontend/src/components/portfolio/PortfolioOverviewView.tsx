@@ -44,6 +44,7 @@ import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { DataGrid } from "@/components/ui/DataGrid";
 import {
+  countMatchingPositions,
   formatShares,
   positionsToGridOptions,
   POSITION_COLS,
@@ -808,12 +809,21 @@ function NavPanel({
     if (slice.length === 0) return null;
     const fill0 = `${colors.accent}30`;
     const fill1 = `${colors.accent}00`;
+    // Baseline NAV (range start) for the "% from range start" tooltip line.
+    const base0 = slice[0]![1];
     return {
       chart: { type: "areaspline", height: 200 },
       legend: { enabled: false },
-      xAxis: { type: "datetime", crosshair: true, tickPixelInterval: 84 },
+      xAxis: {
+        type: "datetime",
+        crosshair: { color: colors.grid },
+        tickPixelInterval: 84,
+      },
       yAxis: {
-        title: { text: undefined },
+        title: {
+          text: "NAV (USD)",
+          style: { color: colors.textSecondary, fontSize: "10px" },
+        },
         labels: {
           formatter() {
             return `$${formatCompact(this.value as number)}`;
@@ -823,7 +833,12 @@ function NavPanel({
       tooltip: {
         formatter() {
           const ctx = this as unknown as { x: number; y: number };
-          return `${formatTimestampDate(ctx.x)}<br/>NAV: <b>${formatCurrency(ctx.y)}</b>`;
+          const chg = base0 > 0 ? ctx.y / base0 - 1 : 0;
+          const tone = chg >= 0 ? colors.gain : colors.loss;
+          return (
+            `${formatTimestampDate(ctx.x)}<br/>NAV: <b>${formatCurrency(ctx.y)}</b>` +
+            `<br/><span style="color:${tone}">${formatPercent(chg, 2, { signed: true })} from range start</span>`
+          );
         },
       },
       series: [
@@ -984,7 +999,11 @@ function AllocationPanel({
 
   const total = slices.reduce((sum, slice) => sum + slice.value, 0);
   const options = useMemo(
-    () => buildHcAllocationOption(slices, colors),
+    () =>
+      buildHcAllocationOption(slices, colors, {
+        // Tooltip shows the $ market value above the "% of portfolio" line.
+        valueFormatter: (value) => formatCurrency(value),
+      }),
     [slices, colors],
   );
 
@@ -1105,6 +1124,19 @@ function PositionsTable({
     [removeMutate],
   );
 
+  // Search box + Load-more, both presentation-only (slice already-fetched
+  // overview data). PAGE_SIZE rows show first; "Load more" reveals the rest.
+  const PAGE_SIZE = 12;
+  const [search, setSearch] = useState("");
+  const [visible, setVisible] = useState(PAGE_SIZE);
+  const matchCount = countMatchingPositions(positions, search);
+  const shownCount = Math.min(visible, matchCount);
+  const remaining = matchCount - shownCount;
+  // Reset the page window whenever the search term changes.
+  useEffect(() => {
+    setVisible(PAGE_SIZE);
+  }, [search]);
+
   // Position detail side panel (drawer): open on a row click (non-interactive
   // cell). Closes itself when its position is removed (detailPos → null).
   const [detailTicker, setDetailTicker] = useState<string | null>(null);
@@ -1119,13 +1151,12 @@ function PositionsTable({
   // stabilized handler changes — never on an unrelated re-render.
   const gridOptions = useMemo(
     () =>
-      positionsToGridOptions(overview, {
-        onEditShares,
-        onEditCost,
-        onRemove,
-        onOpenDetail,
-      }),
-    [overview, onEditShares, onEditCost, onRemove, onOpenDetail],
+      positionsToGridOptions(
+        overview,
+        { onEditShares, onEditCost, onRemove, onOpenDetail },
+        { search, limit: visible },
+      ),
+    [overview, onEditShares, onEditCost, onRemove, onOpenDetail, search, visible],
   );
 
   // ── Live price ticks (path: targeted DOM flash) ──────────────────────────
@@ -1179,13 +1210,35 @@ function PositionsTable({
 
   return (
     <section className="border border-border bg-surface-2">
-      <div className="px-[var(--ix-pad)] py-3">
-        <h2 className="ix-label m-0">
+      <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-border px-[var(--ix-pad)] py-3">
+        <h2 className="m-0 flex items-baseline gap-2 text-[13px] font-bold">
           Positions
-          <span className="ml-2 font-normal normal-case tracking-normal text-text-secondary">
-            {overview.name}
+          <span className="text-[11px] font-normal text-text-muted">
+            {search
+              ? `${shownCount} of ${matchCount} (filtered)`
+              : `${positions.length} holding${positions.length === 1 ? "" : "s"}`}
           </span>
         </h2>
+        <div className="flex h-[32px] min-w-[240px] items-center gap-2 border border-border-strong bg-field px-2.5">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 16 16"
+            fill="none"
+            aria-hidden
+            className="text-text-muted"
+          >
+            <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.4" />
+            <path d="M11 11l3 3" stroke="currentColor" strokeWidth="1.4" />
+          </svg>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search symbol or company"
+            aria-label="Search positions table"
+            className="flex-1 border-none bg-transparent text-[12.5px] text-text-primary outline-none placeholder:text-text-muted"
+          />
+        </div>
       </div>
 
       <AddPositionRowForm
@@ -1225,6 +1278,33 @@ function PositionsTable({
         </p>
       )}
 
+      {positions.length > 0 && matchCount === 0 && (
+        <div className="flex flex-col items-center gap-2 px-4 py-10 text-center text-text-muted">
+          <p className="text-[13px] text-text-secondary">
+            No positions match “{search}”.
+          </p>
+          <button
+            type="button"
+            onClick={() => setSearch("")}
+            className={BUTTON_CLASS}
+          >
+            Clear search
+          </button>
+        </div>
+      )}
+
+      {remaining > 0 && (
+        <div className="flex justify-center border-t border-border p-2.5">
+          <button
+            type="button"
+            onClick={() => setVisible((v) => v + PAGE_SIZE)}
+            className={BUTTON_CLASS}
+          >
+            Load more ({remaining})
+          </button>
+        </div>
+      )}
+
       {rowError && (
         <p
           role="alert"
@@ -1241,7 +1321,7 @@ function PositionsTable({
             {liveActive ? (
               <span className="text-gain">● LIVE</span>
             ) : (
-              <>EOD · {formatDate(aggregates.as_of!)}</>
+              <>End of day · {formatDate(aggregates.as_of!)}</>
             )}
           </span>
         )}

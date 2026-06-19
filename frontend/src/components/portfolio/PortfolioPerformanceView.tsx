@@ -87,7 +87,12 @@ export function PortfolioPerformanceView({
           { type: "all", text: "All" },
         ],
       },
-      navigator: { enabled: true },
+      navigator: {
+        enabled: true,
+        // Match the main NAV series tone in the navigator preview (accent).
+        maskFill: `${colors.accent}1a`,
+        series: { color: colors.accent, lineWidth: 1, fillOpacity: 0.08 },
+      },
       scrollbar: { enabled: false },
       xAxis: {
         type: "datetime",

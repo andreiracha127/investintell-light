@@ -75,7 +75,9 @@ export function PortfolioLookthroughSection({
 
   const treemapOption = useMemo(() => {
     if (!colors || !query.data || !activeDim) return null;
-    return buildHcExposureTreemapOption(query.data.dimensions[activeDim] ?? [], colors);
+    return buildHcExposureTreemapOption(query.data.dimensions[activeDim] ?? [], colors, {
+      traversable: true,
+    });
   }, [colors, query.data, activeDim]);
 
   if (
@@ -186,7 +188,8 @@ export function PortfolioLookthroughSection({
             Look-through map · {activeDim ? dimLabel(activeDim) : ""} → holdings
           </h3>
           <span className="text-[10.5px] text-text-muted">
-            Tile area = portfolio weight · Direct vs. Via funds
+            Tile area = portfolio weight · click a group to zoom in, click the
+            header to zoom out · groups split into Direct vs. Via funds
           </span>
         </div>
         {treemapOption && (

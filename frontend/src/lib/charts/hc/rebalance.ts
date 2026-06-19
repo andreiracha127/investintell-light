@@ -1,31 +1,30 @@
 /**
- * Pure option builder: rebalance drift bands chart (Highcharts Core).
+ * Pure option builder: rebalance drift chart (Highcharts Core) — Claude Design.
  *
- * Port of the legacy ECharts `buildDriftBandsOption` (src/lib/charts/rebalance.ts).
- * Renders one horizontal row per position showing:
- *   - the tolerance band around the target (accent-wash region) — ECharts
- *     markArea -> Highcharts yAxis.plotBands;
- *   - the target weight (accent scatter tick — one per row, anchored to that
- *     row's category index);
- *   - the current weight (graphite bar; loss-colored when breach === true).
+ * One horizontal bar per position showing the SIGNED drift (current − target)
+ * in percent-points. Per the Claude Design mockup this replaces the older
+ * current-vs-target bars + target ticks:
+ *   - bars are loss-colored when |drift| exceeds the tolerance band, else a
+ *     neutral graphite tone;
+ *   - a single 0 plotLine marks "on target";
+ *   - ONE accent-wash plotBand spans the symmetric tolerance ±band, labeled
+ *     "band ±N p.p.";
+ *   - each bar carries a signed p.p. data label;
+ *   - the value axis is titled "Drift vs. target (p.p.)".
  *
- * Highcharts `bar` is an inverted column: the xAxis carries the categories
- * (rendered vertically) and the yAxis is the horizontal VALUE axis. The
- * tolerance bands span value ranges, so they live on the yAxis as plotBands.
+ * Scale: all PositionDriftOut weight fields are decimal fractions (0.05 = 5
+ * p.p.). `drift_abs` is the signed (current − target) drift; we recompute from
+ * current/target for robustness and convert × 100 for display only. Rows are
+ * sorted by drift descending (largest positive drift at the top).
  *
- * Scale evidence (unchanged from source): all PositionDriftOut weight fields
- * are decimal fractions (0.05 = 5 p.p.). Converted to percent-points (× 100)
- * for chart display only.
- *
- * Band half-width per row mirrors the backend breach condition
- * (evaluator.py:131): a position is safe iff BOTH |drift| ≤ band_abs AND
- * |drift| ≤ target × band_rel, so the safe zone is the intersection:
- *   half_band = min(band_abs, target × band_rel)   [fractions, before ×100]
- * floored at 0.5pp so the region stays visible on tiny targets.
+ * The tolerance band shown is the policy ABSOLUTE band (`bandAbs`), matching the
+ * mockup's single ±band region. `bandRel` is part of the breach test the
+ * backend already evaluated (we read `breach` for per-bar coloring), so it is
+ * accepted for signature stability but not drawn as a second band.
  *
  * The global Graphite theme owns axis grid / tooltip / legend chrome; this
  * builder sets only chart-specific content (series, token colors, value
- * formatting, plotBands).
+ * formatting, plotBand/plotLine).
  *
  * Empty/null drifts → returns null (caller hides the panel).
  */
@@ -35,68 +34,44 @@ import type { PositionDrift } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
 import { formatPercent } from "@/lib/format";
 
+/** Signed p.p. string, e.g. +3.2 / −1.0 (true minus glyph). */
+function ppLabel(pp: number, dp = 1): string {
+  const sign = pp > 0 ? "+" : pp < 0 ? "−" : "";
+  return `${sign}${Math.abs(pp).toFixed(dp)} p.p.`;
+}
+
 /**
- * Build a drift-bands horizontal bar chart.
+ * Build a signed-drift horizontal bar chart.
  *
  * @param drifts   PositionDriftOut[]; weights are decimal fractions.
  * @param colors   Design-token color bag (from chartColors()).
- * @param bandAbs  Policy band_abs (fraction, e.g. 0.05 = 5 p.p.).
- * @param bandRel  Policy band_rel (fraction, e.g. 0.25 = 25% of target).
+ * @param bandAbs  Policy band_abs (fraction, e.g. 0.05 = 5 p.p.) — the ±band.
+ * @param bandRel  Policy band_rel (fraction); accepted for signature stability.
  * @returns Highcharts Options or null when drifts is empty.
  */
 export function buildHcDriftBandsOption(
   drifts: PositionDrift[],
   colors: ChartColors,
   bandAbs: number,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   bandRel: number,
 ): Options | null {
   if (!drifts || drifts.length === 0) return null;
 
-  // Sort by target weight descending; reverse so the value axis puts the
-  // largest weight at the top of the chart (Highcharts bar: first category is
-  // drawn at the top). Net effect: ascending by target_weight.
+  // Sort by signed drift descending (largest positive at the top of the bar
+  // chart — Highcharts bar draws the first category at the top), mirroring the
+  // mockup's `_drifts().sort((a,b)=>b.drift-a.drift)` then bar inversion.
   const rows = [...drifts]
-    .sort((a, b) => b.target_weight - a.target_weight)
-    .reverse();
+    .map((d) => ({ ...d, drift: d.current_weight - d.target_weight }))
+    .sort((a, b) => a.drift - b.drift);
 
   const labels = rows.map((d) => d.ticker);
+  const bandPct = bandAbs * 100;
 
-  // Convert fractions → percent-points for display.
-  const currentPct = rows.map((d) => parseFloat((d.current_weight * 100).toFixed(4)));
-  const targetPct = rows.map((d) => parseFloat((d.target_weight * 100).toFixed(4)));
-
-  // Band half-width per row, floored at 0.5pp (mirrors source).
-  const halfBandPct = rows.map((d) =>
-    Math.max(Math.min(bandAbs, d.target_weight * bandRel) * 100, 0.5),
-  );
-
-  // Tolerance bands: one accent-wash region per row, target ± halfBand. On the
-  // value (y) axis. Highcharts plotBands span the full category axis; we anchor
-  // them conceptually per row (same value math as the ECharts markArea).
-  //
-  // TODO(P1-parity): KNOWN VISUAL DIVERGENCE from the ECharts source. The legacy
-  // markArea clipped each tolerance band to its own category row, so bands never
-  // bled across rows. Highcharts yAxis.plotBands are full-width horizontal
-  // stripes spanning ALL categories, so bands whose [from,to] value ranges
-  // overlap will visually merge across rows (e.g. two positions with similar
-  // targets). Per-row clipping (xAxis.plotBands keyed to a single category, or a
-  // synthetic area series) is out of scope for P1; the value math below is
-  // identical to the source, only the per-row clipping is dropped.
-  const plotBands = rows.map((_, i) => ({
-    from: parseFloat((targetPct[i]! - halfBandPct[i]!).toFixed(4)),
-    to: parseFloat((targetPct[i]! + halfBandPct[i]!).toFixed(4)),
-    color: colors.accentWash,
-    zIndex: 0,
-  }));
-
-  // Per-row target ticks: scatter anchored to [categoryIndex, targetPct],
-  // rendered as a thin vertical mark (square symbol).
-  const targetData = rows.map((_, i) => ({ x: i, y: targetPct[i]! }));
-
-  // Current weight bars; breached rows in loss color.
-  const barData = rows.map((d, i) => ({
-    y: currentPct[i]!,
-    color: d.breach ? colors.loss : colors.bar,
+  // Signed drift (p.p.); breached rows in loss color, others neutral graphite.
+  const barData = rows.map((d) => ({
+    y: parseFloat((d.drift * 100).toFixed(4)),
+    color: Math.abs(d.drift) > bandAbs ? colors.loss : colors.bar,
   }));
 
   return {
@@ -107,64 +82,75 @@ export function buildHcDriftBandsOption(
       tickWidth: 0,
     },
     yAxis: {
-      title: { text: undefined },
+      title: {
+        text: "Drift vs. target (p.p.)",
+        style: { color: colors.textSecondary, fontSize: "10px" },
+      },
       labels: {
         formatter() {
-          return `${Math.round(this.value as number)}%`;
+          const v = this.value as number;
+          return `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(Math.round(v))}`;
         },
       },
-      plotBands,
+      // 0 = "on target".
+      plotLines: [{ value: 0, color: colors.textMuted, width: 1, zIndex: 3 }],
+      // ONE symmetric accent-wash tolerance band ±bandPct.
+      plotBands: [
+        {
+          from: parseFloat((-bandPct).toFixed(4)),
+          to: parseFloat(bandPct.toFixed(4)),
+          color: colors.accentWash,
+          zIndex: 0,
+          label: {
+            text: `band ${ppLabel(bandPct, 0).replace("+", "±")}`,
+            align: "right",
+            x: -4,
+            y: 12,
+            style: { color: colors.textMuted, fontSize: "9px" },
+          },
+        },
+      ],
     },
     tooltip: {
-      // The HC tooltip context has no `this.index`; the hovered point is
-      // `this.point` and the category row index is `this.point.index`
-      // (follows the distribution.ts convention). Reading `this.index` here
-      // is the masked runtime bug: it is undefined on a category axis, so
-      // rows[undefined] tripped the guard and the tooltip rendered blank.
-      // `this` is the HC tooltip context (Point-like); cast narrowly to read
-      // the row index off the hovered point.
+      // HC category-axis tooltip: hovered row index is `this.point.index`.
       formatter() {
         const idx = (this as unknown as { point: { index: number } }).point.index;
         const row = rows[idx];
         if (!row) return "";
-
-        const tgt = row.target_weight;
-        const cur = row.current_weight;
-        const dev = cur - tgt;
-        const devSign = dev >= 0 ? "+" : "";
-        const halfFrac = halfBandPct[idx]! / 100; // back to fraction for formatPercent
-        const breachTag = row.breach
-          ? `<span style="color:${colors.loss};font-weight:bold"> ● Out of band</span>`
+        const breach = Math.abs(row.drift) > bandAbs;
+        const tone = breach ? colors.loss : colors.textSecondary;
+        const breachTag = breach
+          ? `<br/><span style="color:${colors.loss}">band breach</span>`
           : "";
-
         return [
           `<div style="font-size:12px">`,
-          `<b>${row.ticker}</b>${breachTag}`,
-          `<br/>Current: <b>${formatPercent(cur, 2)}</b>`,
-          `<br/>Target: <b>${formatPercent(tgt, 2)}</b>`,
-          `<br/>Band: ${formatPercent(tgt - halfFrac, 2)} – ${formatPercent(tgt + halfFrac, 2)}`,
-          `<br/>Deviation: <b style="color:${row.breach ? colors.loss : colors.textSecondary}">${devSign}${(dev * 100).toFixed(2)}pp</b>`,
+          `<b>${row.ticker}</b>`,
+          `<br/>Current: <b>${formatPercent(row.current_weight, 2)}</b>`,
+          `<br/>Target: <b>${formatPercent(row.target_weight, 2)}</b>`,
+          `<br/>Drift: <b style="color:${tone}">${ppLabel(row.drift * 100, 2)}</b>`,
+          breachTag,
           `</div>`,
         ].join("");
       },
     },
-    series: [
-      {
-        type: "bar",
-        name: "Current weight",
-        data: barData,
-        pointPadding: 0.2,
-        groupPadding: 0,
+    plotOptions: {
+      bar: {
+        borderRadius: 0,
+        pointPadding: 0.12,
+        dataLabels: {
+          enabled: true,
+          formatter() {
+            return ppLabel(this.y as number, 1);
+          },
+          style: {
+            color: colors.textSecondary,
+            fontWeight: "bold",
+            fontSize: "10px",
+            textOutline: "none",
+          },
+        },
       },
-      {
-        type: "scatter",
-        name: "Target weight",
-        data: targetData,
-        color: colors.accent,
-        marker: { symbol: "square", width: 2, height: 18, lineWidth: 0 },
-        enableMouseTracking: false,
-        zIndex: 10,
-      },
-    ],
+    },
+    series: [{ type: "bar", name: "Drift", data: barData }],
   };
 }

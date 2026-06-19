@@ -19,6 +19,8 @@ const COLORS: ChartColors = {
   textOnAccent: "#ffffff",
   bar: "#2b2f36",
   barMute: "#c4c8cf",
+  blue: "#0f62fe",
+  amber: "#9b6a00",
   categories: ["#7a1c24", "#2b2f36", "#565b63"],
 };
 
@@ -41,6 +43,18 @@ describe("buildHcExposureTreemapOption", () => {
     const series = opt.series?.[0] as SeriesTreemapOptions;
     expect(series.type).toBe("treemap");
     expect(series.layoutAlgorithm).toBe("squarified");
+  });
+
+  it("is non-traversable by default", () => {
+    const opt = buildHcExposureTreemapOption(ITEMS, COLORS);
+    const series = opt.series?.[0] as SeriesTreemapOptions;
+    expect(series.allowTraversingTree).toBe(false);
+  });
+
+  it("opts into a zoomable (traversable) tree when configured", () => {
+    const opt = buildHcExposureTreemapOption(ITEMS, COLORS, { traversable: true });
+    const series = opt.series?.[0] as SeriesTreemapOptions;
+    expect(series.allowTraversingTree).toBe(true);
   });
 
   it("drops buckets with zero total", () => {
