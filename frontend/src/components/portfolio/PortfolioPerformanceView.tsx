@@ -1,21 +1,13 @@
 "use client";
 
 /**
- * Portfolio Performance tab — synthetic NAV (reconstructed from the current
- * holdings' real price histories) with a Highstock navigator/range selector,
- * and two breakdowns that follow the selected range: a contribution waterfall
- * and a packed-bubble of return contributors.
- *
- * The frontend computes the reconstruction (no portfolio NAV endpoint exists),
- * but only from backend-provided per-holding closes × current quantities. The
- * navigator's `afterSetExtremes` drives the selected [min,max]; the waterfall
- * and bubble recompute for that window (cash cancels, so the per-holding
- * contributions sum exactly to NAV(max) − NAV(min)).
+ * Portfolio Performance tab — persisted portfolio NAV index with a Highstock
+ * navigator/range selector. The NAV series is materialized by the backend from
+ * the real transaction ledger; the frontend only reads and renders it.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Options } from "highcharts";
 
-import { type PortfolioOverview } from "@/lib/api/client";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { HighchartsStockChart } from "@/components/charts/HighchartsStockChart";
@@ -24,29 +16,27 @@ import { buildHcContributionWaterfallOption } from "@/lib/charts/hc/waterfall";
 import { formatTimestampDate } from "@/lib/charts/hc/dateAxis";
 import { periodContributions, periodTotal } from "@/lib/portfolio/performance";
 import { usePortfolioNav } from "@/components/portfolio/usePortfolioNav";
-import { formatCompact, formatCurrency } from "@/lib/format";
+import { formatCurrency, formatNumber } from "@/lib/format";
 import { InfoDot, valueTone } from "@/components/ui/panels";
 
 const NAV_TIP =
-  "Reconstructed portfolio value over time from the current holdings — illustrative, not a booked track record.";
+  "Persisted daily portfolio NAV index from the real transaction ledger and portfolio inception date.";
 
 export function PortfolioPerformanceView({
-  overview,
+  portfolioId,
 }: {
-  overview: PortfolioOverview;
+  portfolioId: number;
 }) {
-  const positions = overview.positions;
-
   // Design tokens are only readable from the DOM — resolve after mount.
   const [colors, setColors] = useState<ChartColors | null>(null);
   useEffect(() => {
     setColors(chartColors());
   }, []);
 
-  const { holdings, recon, isLoading, isError } = usePortfolioNav(overview);
+  const { holdings, recon, isLoading, isError } = usePortfolioNav(portfolioId);
 
   // Selected window (from the navigator). Null until the chart first reports
-  // extremes; fall back to the full reconstructed path.
+  // extremes; fall back to the full persisted path.
   const [extent, setExtent] = useState<{ min: number; max: number } | null>(null);
   const extentTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onExtremes = useCallback((min: number, max: number) => {
@@ -108,20 +98,20 @@ export function PortfolioPerformanceView({
         title: { text: undefined },
         labels: {
           formatter() {
-            return `$${formatCompact(this.value as number)}`;
+            return formatNumber(this.value as number, 0);
           },
         },
       },
       tooltip: {
         formatter() {
           const ctx = this as unknown as { x: number; y: number };
-          return `${formatTimestampDate(ctx.x)}<br/>NAV: <b>${formatCurrency(ctx.y)}</b>`;
+          return `${formatTimestampDate(ctx.x)}<br/>NAV Index: <b>${formatNumber(ctx.y, 2)}</b>`;
         },
       },
       series: [
         {
           type: "areaspline",
-          name: "NAV",
+          name: "NAV Index",
           data: recon.nav,
           color: colors.accent,
           lineWidth: 1.8,
@@ -159,35 +149,26 @@ export function PortfolioPerformanceView({
     [contribs, colors],
   );
 
-  if (positions.length === 0) {
-    return (
-      <section className="ix-pad border border-border bg-surface-2">
-        <p className="text-center text-[13px] text-text-muted">
-          Add positions to reconstruct this portfolio&apos;s performance.
-        </p>
-      </section>
-    );
-  }
-
   const hasNav = recon.nav.length > 1;
+  const hasAttribution = holdings.length > 0;
 
   return (
     <div className="flex flex-col gap-px">
-      {/* Synthetic NAV with navigator + range selector */}
+      {/* Persisted NAV with navigator + range selector */}
       <section className="ix-pad border border-border bg-surface-2">
         <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="ix-label m-0 flex items-center gap-1.5">
-            Synthetic NAV
+            Portfolio NAV
             <InfoDot tip={NAV_TIP} />
           </h2>
           <span className="text-[10.5px] text-text-muted">
-            Pick a range or drag the navigator — the breakdown below follows your selection
+            Pick a range or drag the navigator
           </span>
         </div>
         {isLoading && !hasNav ? (
           <div
             aria-busy="true"
-            aria-label="Reconstructing NAV"
+            aria-label="Loading NAV"
             className="h-[360px] animate-pulse bg-layer-active"
           />
         ) : navOption ? (
@@ -197,15 +178,15 @@ export function PortfolioPerformanceView({
             isEmpty={!hasNav}
             emptyMessage={
               isError
-                ? "Could not load price history for some holdings."
-                : "Not enough price history to reconstruct a NAV."
+                ? "Could not load materialized portfolio NAV."
+                : "Portfolio NAV has not been materialized yet."
             }
           />
         ) : (
           <div className="flex h-[360px] items-center justify-center px-4 text-center text-[13px] text-text-muted">
             {isError
-              ? "Could not load price history for some holdings."
-              : "Not enough price history to reconstruct a NAV."}
+              ? "Could not load materialized portfolio NAV."
+              : "Portfolio NAV has not been materialized yet."}
           </div>
         )}
       </section>
@@ -215,33 +196,41 @@ export function PortfolioPerformanceView({
         <section className="ix-pad flex flex-col border border-border bg-surface-2">
           <h3 className="ix-label m-0">Contribution to period result</h3>
           <p className="mb-2 mt-0.5 text-[11px] text-text-muted">
-            Per-holding P&amp;L bridging the selected period ·{" "}
-            <span className="font-bold text-gain">contributors</span> /{" "}
-            <span className="font-bold text-loss">detractors</span> · net{" "}
-            <span className={`font-bold tabular-nums ${valueTone(periodResult)}`}>
-              {formatCurrency(periodResult, { signed: true })}
-            </span>
+            {hasAttribution ? (
+              <>
+                Per-holding P&amp;L bridging the selected period ·{" "}
+                <span className="font-bold text-gain">contributors</span> /{" "}
+                <span className="font-bold text-loss">detractors</span> · net{" "}
+                <span className={`font-bold tabular-nums ${valueTone(periodResult)}`}>
+                  {formatCurrency(periodResult, { signed: true })}
+                </span>
+              </>
+            ) : (
+              "Security-level attribution has not been materialized yet."
+            )}
           </p>
           {waterfallOption && (
             <HighchartsChart
               options={waterfallOption}
               className="h-[300px] w-full flex-1"
-              isEmpty={!hasNav}
-              emptyMessage="No contribution in this period."
+              isEmpty={!hasAttribution}
+              emptyMessage="Security-level attribution has not been materialized yet."
             />
           )}
         </section>
         <section className="ix-pad flex flex-col border border-border bg-surface-2">
           <h3 className="ix-label m-0">Return contributors</h3>
           <p className="mb-2 mt-0.5 text-[11px] text-text-muted">
-            Bubble area ∝ contribution to total return · synced to the range above
+            {hasAttribution
+              ? "Bubble area proportional to contribution to total return."
+              : "Security-level attribution has not been materialized yet."}
           </p>
           {bubbleOption && (
             <HighchartsChart
               options={bubbleOption}
               className="h-[300px] w-full flex-1"
-              isEmpty={!hasNav}
-              emptyMessage="No contribution in this period."
+              isEmpty={!hasAttribution}
+              emptyMessage="Security-level attribution has not been materialized yet."
             />
           )}
         </section>

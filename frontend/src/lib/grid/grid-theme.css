@@ -91,6 +91,37 @@
 .hcg-theme-graphite .ix-grid-comm { display: block; font-size: 10px; color: var(--color-text-muted); }
 .hcg-theme-graphite .ix-grid-remove { cursor: pointer; color: var(--color-text-muted); }
 .hcg-theme-graphite .ix-grid-remove:hover { color: var(--color-loss); }
+.hcg-theme-graphite .ix-grid-trade {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-field);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.hcg-theme-graphite .ix-grid-trade:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.hcg-theme-graphite .ix-grid-date,
+.hcg-theme-graphite .ix-grid-value-button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--color-text-primary);
+  font: inherit;
+  text-decoration: underline dotted var(--color-text-muted);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.hcg-theme-graphite .ix-grid-value-button {
+  text-align: inherit;
+}
+.hcg-theme-graphite .ix-grid-date:hover,
+.hcg-theme-graphite .ix-grid-value-button:hover {
+  color: var(--color-accent);
+}
 .hcg-theme-graphite .ix-grid-editable { text-decoration: underline dotted var(--color-text-muted); text-underline-offset: 3px; }
 
 /* Weights / allocation tree (Builder broad output + Portfolio allocation).

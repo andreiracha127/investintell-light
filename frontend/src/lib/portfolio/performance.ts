@@ -20,6 +20,8 @@ export interface HoldingSeries {
   name: string;
   /** Current quantity held (constant across the reconstructed path). */
   quantity: number;
+  /** First date this holding is known to be active; null means portfolio inception. */
+  effectiveFromTs?: number | null;
   /** [tsMs, price] ascending by timestamp. */
   points: Array<[number, number]>;
 }
@@ -27,6 +29,8 @@ export interface HoldingSeries {
 export interface NavReconstruction {
   /** [tsMs, nav] ascending. Empty when no holding has usable history. */
   nav: Array<[number, number]>;
+  /** [tsMs, index] ascending, rebased so the first reconstructed point is 100. */
+  navIndex: Array<[number, number]>;
   /** First timestamp where every holding has at least one price (ms). */
   startTs: number;
   /** Last timestamp on the reconstructed path (ms). */
@@ -42,10 +46,22 @@ export interface PeriodContribution {
   ret: number;
 }
 
-/** Normalize an epoch that may be seconds or milliseconds to milliseconds. */
+/** Normalize a numeric date/epoch variant to milliseconds. */
 export function toMs(t: number): number {
-  // Anything below ~1e12 is seconds (year 2001 in ms ≈ 1e12; in s ≈ 1e9).
-  return t < 1e12 ? Math.round(t * 1000) : Math.round(t);
+  // Some backend/DB adapters expose dates as Unix day ordinals. Treat small
+  // integers as days, otherwise a value like 20_200 renders as a raw x-axis.
+  if (t > 0 && t < 100_000) return Math.round(t * 86_400_000);
+  // Epoch seconds are ~1e9 today. Milliseconds can be ~3e11 for older listings
+  // (AAPL 1980), so don't use the common 1e12 shortcut here.
+  if (t < 10_000_000_000) return Math.round(t * 1000);
+  if (t < 10_000_000_000_000) return Math.round(t);
+  if (t < 10_000_000_000_000_000) return Math.round(t / 1000);
+  return Math.round(t / 1_000_000);
+}
+
+export interface ReconstructNavConfig {
+  /** Portfolio inception timestamp in ms. When set, never synthesize before it. */
+  inceptionTs?: number | null;
 }
 
 /** Extract [tsMs, close] points from an OHLC matrix ([t, o, h, l, c][]). */
@@ -75,21 +91,30 @@ function priceAt(points: Array<[number, number]>, ts: number): number {
 const usableHoldings = (holdings: HoldingSeries[]): HoldingSeries[] =>
   holdings.filter((h) => h.quantity > 0 && h.points.length > 0);
 
+function holdingEffectiveFrom(holding: HoldingSeries, fallbackTs: number): number {
+  return holding.effectiveFromTs ?? fallbackTs;
+}
+
 /**
  * Reconstruct the synthetic NAV path: NAV(t) = Σ qtyᵢ·priceᵢ(t) + cash, where
  * priceᵢ(t) is forward-filled (last close at-or-before t). The path starts at
- * the latest of each holding's first timestamp so every holding is covered.
+ * portfolio inception when provided; otherwise it falls back to the latest
+ * first price across holdings.
  */
 export function reconstructNav(
   holdings: HoldingSeries[],
   cash: number,
+  config: ReconstructNavConfig = {},
 ): NavReconstruction {
   const usable = usableHoldings(holdings);
-  if (usable.length === 0) return { nav: [], startTs: 0, endTs: 0 };
+  if (usable.length === 0) return { nav: [], navIndex: [], startTs: 0, endTs: 0 };
 
-  const startTs = Math.max(...usable.map((h) => h.points[0]![0]));
+  const defaultStartTs = Math.max(...usable.map((h) => h.points[0]![0]));
+  const startTs = config.inceptionTs ?? defaultStartTs;
   const tsSet = new Set<number>([startTs]);
   for (const h of usable) {
+    const effectiveFrom = holdingEffectiveFrom(h, startTs);
+    if (effectiveFrom >= startTs) tsSet.add(effectiveFrom);
     for (const [ts] of h.points) {
       if (ts >= startTs) tsSet.add(ts);
     }
@@ -102,6 +127,7 @@ export function reconstructNav(
   const nav: Array<[number, number]> = allTs.map((ts) => {
     let sum = cash;
     usable.forEach((h, hi) => {
+      if (ts < holdingEffectiveFrom(h, startTs)) return;
       let j = cursor[hi]!;
       while (j + 1 < h.points.length && h.points[j + 1]![0] <= ts) j++;
       cursor[hi] = j;
@@ -109,8 +135,16 @@ export function reconstructNav(
     });
     return [ts, parseFloat(sum.toFixed(2))];
   });
+  const base = nav[0]?.[1] ?? 0;
+  const navIndex =
+    base > 0
+      ? nav.map(
+          ([ts, value]) =>
+            [ts, parseFloat(((value / base) * 100).toFixed(4))] as [number, number],
+        )
+      : [];
 
-  return { nav, startTs, endTs: allTs[allTs.length - 1]! };
+  return { nav, navIndex, startTs, endTs: allTs[allTs.length - 1]! };
 }
 
 /**

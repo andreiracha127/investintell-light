@@ -49,6 +49,9 @@ export function HighchartsStockChart({
       const mod = await import("highcharts/esm/highstock.js");
       // SMA/RSI studies are computed in the builder as plain line series
       // (see priceStock.ts), so the native indicator modules are not loaded.
+      // highcharts-more registers pane/radial hooks globally. Load it before
+      // creating Stock axes so later updates do not see axes without pane state.
+      await import("highcharts/esm/highcharts-more.js");
       await import("highcharts/esm/modules/annotations.js");
       await import("highcharts/esm/modules/stock-tools.js");
       if (disposed || !containerRef.current) return;

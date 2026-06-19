@@ -286,6 +286,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/portfolios/{portfolio_id}/transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Portfolio Transactions
+         * @description List immutable buy/sell ledger events for a portfolio.
+         */
+        get: operations["list_portfolio_transactions_portfolios__portfolio_id__transactions_get"];
+        put?: never;
+        /**
+         * Create Portfolio Transaction
+         * @description Append a real buy/sell event and update the current position snapshot.
+         */
+        post: operations["create_portfolio_transaction_portfolios__portfolio_id__transactions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/portfolios/{portfolio_id}/nav": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Portfolio Nav
+         * @description Persisted transaction-aware NAV index, rebased to 100 at inception.
+         */
+        get: operations["get_portfolio_nav_portfolios__portfolio_id__nav_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/portfolios/{portfolio_id}/overview": {
         parameters: {
             query?: never;
@@ -4068,6 +4112,11 @@ export interface components {
              */
             cash: number;
             /**
+             * Inception Date
+             * @description User-declared portfolio inception date for NAV/performance.
+             */
+            inception_date?: string | null;
+            /**
              * Positions
              * @description Initial positions (at most 50); tickers must be unique.
              */
@@ -4086,6 +4135,8 @@ export interface components {
             cash: number;
             /** Position Count */
             position_count: number;
+            /** Inception Date */
+            inception_date: string | null;
             /**
              * Created At
              * Format: date-time
@@ -4237,6 +4288,45 @@ export interface components {
             degraded_reason: string | null;
         };
         /**
+         * PortfolioNavPoint
+         * @description Transaction-aware NAV index point.
+         *
+         *     ``nav`` is a rebased index value, not raw dollars. ``market_value`` is the
+         *     post-trade value of open holdings on that date.
+         */
+        PortfolioNavPoint: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Nav */
+            nav: number;
+            /** Market Value */
+            market_value: number;
+            /** Cash */
+            cash: number;
+            /** Total Value */
+            total_value: number;
+        };
+        /**
+         * PortfolioNavResponse
+         * @description Transaction-aware portfolio NAV series.
+         */
+        PortfolioNavResponse: {
+            /** Portfolio Id */
+            portfolio_id: number;
+            /** Inception Date */
+            inception_date: string | null;
+            /**
+             * Base Nav
+             * @default 100
+             */
+            base_nav: number;
+            /** Points */
+            points: components["schemas"]["PortfolioNavPoint"][];
+        };
+        /**
          * PortfolioNewsResponse
          * @description Aggregated news across all portfolio tickers, newest first.
          *
@@ -4273,6 +4363,8 @@ export interface components {
             name: string;
             /** Cash */
             cash: number;
+            /** Inception Date */
+            inception_date: string | null;
             /**
              * Created At
              * Format: date-time
@@ -4353,6 +4445,11 @@ export interface components {
              * @description New cash balance, currency units.
              */
             cash?: number | null;
+            /**
+             * Inception Date
+             * @description Portfolio inception date; null clears it.
+             */
+            inception_date?: string | null;
         };
         /**
          * PortfolioPositionIn
@@ -4462,6 +4559,71 @@ export interface components {
             max_drawdown: components["schemas"]["DrawdownOut"];
             best_day: components["schemas"]["DatedValue"];
             worst_day: components["schemas"]["DatedValue"];
+        };
+        /**
+         * PortfolioTransactionCreate
+         * @description One immutable buy/sell event in the portfolio ledger.
+         */
+        PortfolioTransactionCreate: {
+            /**
+             * Ticker
+             * @description Instrument ticker (normalized to uppercase).
+             */
+            ticker: string;
+            /**
+             * Side
+             * @description 'buy' or 'sell'.
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+            /** Quantity */
+            quantity: number;
+            /** Price */
+            price: number;
+            /**
+             * Commission
+             * @default 0
+             */
+            commission: number;
+            /**
+             * Trade Date
+             * Format: date
+             * @description Execution date.
+             */
+            trade_date: string;
+        };
+        /**
+         * PortfolioTransactionOut
+         * @description One persisted ledger transaction.
+         */
+        PortfolioTransactionOut: {
+            /** Id */
+            id: number;
+            /** Portfolio Id */
+            portfolio_id: number;
+            /** Ticker */
+            ticker: string;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+            /** Quantity */
+            quantity: number;
+            /** Price */
+            price: number;
+            /** Commission */
+            commission: number;
+            /**
+             * Trade Date
+             * Format: date
+             */
+            trade_date: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /**
          * PositionBody
@@ -6226,6 +6388,106 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_portfolio_transactions_portfolios__portfolio_id__transactions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioTransactionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_portfolio_transaction_portfolios__portfolio_id__transactions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortfolioTransactionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioTransactionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_portfolio_nav_portfolios__portfolio_id__nav_get: {
+        parameters: {
+            query?: {
+                /** @description Last NAV date. */
+                end_date?: string | null;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioNavResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

@@ -43,6 +43,10 @@ class Portfolio(Base):
         String, nullable=False, server_default="manual"
     )
 
+    # User-declared inception date for performance/NAV presentation. This is
+    # distinct from created_at, which is only the database row creation time.
+    inception_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+
     # Audit timestamps — both tz-aware, server-set.
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -70,6 +74,20 @@ class Portfolio(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by="Position.ticker",
+    )
+    transactions: Mapped[list["PortfolioTransaction"]] = relationship(
+        back_populates="portfolio",
+        lazy="raise",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="PortfolioTransaction.trade_date, PortfolioTransaction.id",
+    )
+    nav_daily: Mapped[list["PortfolioNavDaily"]] = relationship(
+        back_populates="portfolio",
+        lazy="raise",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="PortfolioNavDaily.nav_date",
     )
 
     # The Base naming convention expands "origin" to "ck_portfolios_origin"
@@ -145,4 +163,94 @@ class Position(Base):
         # Child-side FK index: selectinload of a portfolio's positions and the
         # ON DELETE CASCADE both scan by portfolio_id.
         Index("ix_positions_portfolio_id", "portfolio_id"),
+    )
+
+
+class PortfolioTransaction(Base):
+    """Immutable trade ledger entry for a persisted portfolio.
+
+    ``positions`` remains the current snapshot. This table is the auditable
+    source for transaction-aware NAV reconstruction.
+    """
+
+    __tablename__ = "portfolio_transactions"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    portfolio_id: Mapped[int] = mapped_column(
+        ForeignKey("portfolios.id", ondelete="CASCADE"), nullable=False
+    )
+    ticker: Mapped[str] = mapped_column(String, nullable=False)
+    side: Mapped[str] = mapped_column(String, nullable=False)
+    quantity: Mapped[float] = mapped_column(nullable=False)
+    price: Mapped[float] = mapped_column(nullable=False)
+    commission: Mapped[Decimal] = mapped_column(
+        Numeric, nullable=False, server_default="0"
+    )
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    portfolio: Mapped[Portfolio] = relationship(
+        back_populates="transactions", lazy="raise"
+    )
+
+    __table_args__ = (
+        CheckConstraint("side IN ('buy', 'sell')", name="side"),
+        CheckConstraint("quantity > 0", name="quantity_positive"),
+        CheckConstraint("price > 0", name="price_positive"),
+        CheckConstraint("commission >= 0", name="commission_non_negative"),
+        Index(
+            "ix_portfolio_transactions_portfolio_id_trade_date",
+            "portfolio_id",
+            "trade_date",
+        ),
+        Index("ix_portfolio_transactions_ticker_trade_date", "ticker", "trade_date"),
+    )
+
+
+class PortfolioNavDaily(Base):
+    """Materialized daily NAV index for a persisted portfolio.
+
+    The transaction ledger is the source of truth. This table is refreshed by
+    the portfolio NAV worker so request paths can stay DB-first.
+    """
+
+    __tablename__ = "portfolio_nav_daily"
+
+    portfolio_id: Mapped[int] = mapped_column(
+        ForeignKey("portfolios.id", ondelete="CASCADE"), primary_key=True
+    )
+    nav_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    nav: Mapped[float] = mapped_column(nullable=False)
+    market_value: Mapped[float] = mapped_column(nullable=False)
+    cash: Mapped[float] = mapped_column(nullable=False)
+    total_value: Mapped[float] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    portfolio: Mapped[Portfolio] = relationship(
+        back_populates="nav_daily", lazy="raise"
+    )
+
+    __table_args__ = (
+        CheckConstraint("nav > 0", name="nav_positive"),
+        Index("ix_portfolio_nav_daily_nav_date", "nav_date"),
     )

@@ -1,34 +1,43 @@
 /**
  * Pure adapter: PortfolioOverview -> Highcharts Grid Pro Options for the
- * positions table. Editable shares/cost (Pro cell editing) with bespoke
- * read-only renderers (ticker link + name, change/pnl sub-lines, EXEC/REF
- * basis badge + commission), aggregates baked into the P&L / Mkt Value
- * headers, and a × action column. Pure (no React/DOM); the edit/remove
- * callbacks are injected by the component.
+ * positions table. Clickable field renderers (ticker link, buy date, avg cost,
+ * quantity), read-only financial columns, plain value headers, and a Trade
+ * action column. Pure (no React/DOM); the edit/trade callbacks are injected by
+ * the component.
  */
 import type { Options, TableCell } from "@highcharts/grid-pro";
 
 import type { PortfolioOverview } from "@/lib/api/client";
-import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
+import {
+  formatCurrency,
+  formatNumber,
+  formatPercent,
+} from "@/lib/format";
 import { GRAPHITE_THEME } from "./gridOptions";
 
 type GridColumns = NonNullable<Options["columns"]>;
 type CellFormatter = NonNullable<NonNullable<GridColumns[number]["cells"]>["formatter"]>;
 type GridCell = ThisParameterType<CellFormatter>;
-type Aggregates = PortfolioOverview["aggregates"];
 type LocalGridData = Extract<NonNullable<Options["data"]>, { columns?: unknown }>;
 
 export interface PositionsCallbacks {
-  onEditShares: (ticker: string, value: number) => void;
+  onEditShares: (ticker: string, value: number | null) => void;
   onEditCost: (ticker: string, value: number | null) => void;
-  onRemove: (ticker: string) => void;
+  onEditTradeDate: (ticker: string, value: string | null) => void;
+  onTrade: (ticker: string) => void;
   /** Open the position detail side panel (click on a non-interactive cell). */
   onOpenDetail?: (ticker: string) => void;
 }
 
 /** Columns whose click has its own behavior (edit / link / remove) — never
  *  triggers the detail panel. */
-const NON_DETAIL_COLS = new Set(["cost", "shares", "ticker", "__remove"]);
+const NON_DETAIL_COLS = new Set([
+  "cost",
+  "shares",
+  "ticker",
+  "trade_date",
+  "__trade",
+]);
 
 /**
  * Column ids referenced cross-file by the live-tick effect (which reads the
@@ -87,18 +96,30 @@ function lastFormatter(this: GridCell): string {
 
 function costFormatter(this: GridCell): string {
   const price = num(this.value);
-  const basis = String(this.row.getCell("basis")?.value ?? "");
   const commission = num(this.row.getCell("commission")?.value);
-  const exec = basis === "executed";
-  const badge = `<span class="ix-grid-basis ${exec ? "ix-grid-basis-exec" : ""}">${exec ? "EXEC" : "REF"}</span>`;
-  const value = `<span class="ix-grid-editable">${price === null ? "—" : escapeHtml(formatCurrency(price))}</span>`;
+  const value = `<button type="button" class="ix-grid-value-button ix-grid-editable" title="Set average cost">${price === null ? "—" : escapeHtml(formatCurrency(price))}</button>`;
   const comm = commission === null ? "" : `<span class="ix-grid-comm">incl. comm. ${escapeHtml(formatCurrency(commission))}</span>`;
-  return `${badge} ${value}${comm}`;
+  return `${value}${comm}`;
+}
+
+function formatBuyDate(value: unknown): string {
+  const [year, month, day] = String(value ?? "").slice(0, 10).split("-");
+  if (!year || !month || !day) return "Set date";
+  return `${day}/${month}/${year.slice(-2)}`;
+}
+
+function dateFormatter(this: GridCell): string {
+  const value = this.value;
+  return `<button type="button" class="ix-grid-date" title="Set buy date">${
+    value ? escapeHtml(formatBuyDate(value)) : "Set date"
+  }</button>`;
 }
 
 function sharesFormatter(this: GridCell): string {
   const q = num(this.value);
-  return q === null ? "—" : `<span class="ix-grid-editable">${escapeHtml(formatShares(q))}</span>`;
+  return `<button type="button" class="ix-grid-value-button ix-grid-editable" title="Set quantity">${
+    q === null ? "—" : escapeHtml(formatShares(q))
+  }</button>`;
 }
 
 function pnlFormatter(this: GridCell): string {
@@ -112,13 +133,7 @@ function mktValueFormatter(this: GridCell): string {
 }
 
 /* ── column + data builders ───────────────────────────────────────── */
-const PNL_AGG = (a: Aggregates): string => {
-  if (a.total_pnl === null) return "P&L";
-  const pct = a.total_pnl_pct !== null ? ` (${formatPercent(a.total_pnl_pct, 2, { signed: true })})` : "";
-  return `P&L · ${formatCurrency(a.total_pnl, { signed: true })}${pct}`;
-};
-
-export function positionsGridColumns(aggregates: Aggregates, callbacks?: PositionsCallbacks): GridColumns {
+export function positionsGridColumns(callbacks?: PositionsCallbacks): GridColumns {
   // Column order mirrors the Claude Design mockup: Symbol, Company, Qty,
   // Avg cost, Price, Market value, P&L, P&L %, action. The "Change" column the
   // grid used to carry is dropped from the visible set (its data stays as a
@@ -126,23 +141,71 @@ export function positionsGridColumns(aggregates: Aggregates, callbacks?: Positio
   const cols: GridColumns = [
     { id: POSITION_COLS.ticker, header: { format: "Symbol" }, className: "ix-grid-cell-text", cells: { formatter: tickerFormatter } },
     { id: "name", header: { format: "Company" }, className: "ix-grid-cell-text", cells: { formatter: nameFormatter } },
-    { id: "shares", header: { format: "Qty" }, className: "ix-grid-cell-num", dataType: "number", cells: { formatter: sharesFormatter, editMode: { enabled: true } } },
-    { id: "cost", header: { format: "Avg cost" }, className: "ix-grid-cell-num", dataType: "number", cells: { formatter: costFormatter, editMode: { enabled: true } } },
-    { id: POSITION_COLS.last, header: { format: "Price" }, className: "ix-grid-cell-num", cells: { formatter: lastFormatter } },
-    { id: "mktvalue", header: { format: `Market value · ${formatCurrency(aggregates.total_market_value)}` }, className: "ix-grid-cell-num", cells: { formatter: mktValueFormatter } },
-    { id: "pnl", header: { format: PNL_AGG(aggregates) }, className: "ix-grid-cell-num", cells: { formatter: pnlFormatter } },
-    { id: "pnl_pct", header: { format: "P&L %" }, className: "ix-grid-cell-num", cells: { formatter: pnlPctFormatter } },
     {
-      id: "__remove",
-      header: { format: "" },
-      className: "ix-grid-cell-num",
-      sorting: { enabled: false },
+      id: "trade_date",
+      header: { format: "Buy date" },
+      className: "ix-grid-cell-text",
       cells: {
-        formatter() { return `<span class="ix-grid-remove" title="Remove" aria-label="Remove position">×</span>`; },
+        formatter: dateFormatter,
         events: {
           click(this: TableCell) {
             const ticker = this.row.getCell("ticker")?.value;
-            if (ticker != null && callbacks) callbacks.onRemove(String(ticker));
+            if (ticker == null || !callbacks) return;
+            callbacks.onEditTradeDate(
+              String(ticker),
+              this.value == null ? null : String(this.value),
+            );
+          },
+        },
+      },
+    },
+    { id: POSITION_COLS.last, header: { format: "Price" }, className: "ix-grid-cell-num", cells: { formatter: lastFormatter } },
+    {
+      id: "cost",
+      header: { format: "Avg cost" },
+      className: "ix-grid-cell-num",
+      dataType: "number",
+      cells: {
+        formatter: costFormatter,
+        events: {
+          click(this: TableCell) {
+            const ticker = this.row.getCell("ticker")?.value;
+            if (ticker == null || !callbacks) return;
+            callbacks.onEditCost(String(ticker), num(this.value));
+          },
+        },
+      },
+    },
+    {
+      id: "shares",
+      header: { format: "Qty" },
+      className: "ix-grid-cell-num",
+      dataType: "number",
+      cells: {
+        formatter: sharesFormatter,
+        events: {
+          click(this: TableCell) {
+            const ticker = this.row.getCell("ticker")?.value;
+            if (ticker == null || !callbacks) return;
+            callbacks.onEditShares(String(ticker), num(this.value));
+          },
+        },
+      },
+    },
+    { id: "mktvalue", header: { format: "Market value" }, className: "ix-grid-cell-num", cells: { formatter: mktValueFormatter } },
+    { id: "pnl", header: { format: "P&L" }, className: "ix-grid-cell-num", cells: { formatter: pnlFormatter } },
+    { id: "pnl_pct", header: { format: "P&L %" }, className: "ix-grid-cell-num", cells: { formatter: pnlPctFormatter } },
+    {
+      id: "__trade",
+      header: { format: "Trade" },
+      className: "ix-grid-cell-num",
+      sorting: { enabled: false },
+      cells: {
+        formatter() { return `<button type="button" class="ix-grid-trade" title="Register buy or sell">Trade</button>`; },
+        events: {
+          click(this: TableCell) {
+            const ticker = this.row.getCell("ticker")?.value;
+            if (ticker != null && callbacks) callbacks.onTrade(String(ticker));
           },
         },
       },
@@ -180,7 +243,8 @@ export function positionsGridData(
   const map: Record<string, string> = {
     ticker: "ticker", name: "name", instrument_id: "instrument_id",
     last: "last_close", change: "change", change_pct: "change_pct",
-    cost: "acq_price", basis: "basis", commission: "commission", shares: "quantity",
+    cost: "acq_price", basis: "basis", commission: "commission",
+    trade_date: "trade_date", shares: "quantity",
     pnl: "pnl", pnl_pct: "pnl_pct", mktvalue: "market_value",
   };
   let rows = opts.search ? positions.filter((p) => matchesSearch(p, opts.search!)) : positions;
@@ -216,20 +280,9 @@ export function positionsToGridOptions(
       sorting: { enabled: true },
       cells: {
         events: {
-          afterEdit(this: TableCell) {
-            const colId = this.column?.id;
-            const ticker = this.row.getCell("ticker")?.value;
-            if (ticker == null) return;
-            const value = num(this.value);
-            if (colId === "shares") {
-              if (value !== null) callbacks.onEditShares(String(ticker), value);
-            } else if (colId === "cost") {
-              callbacks.onEditCost(String(ticker), value);
-            }
-          },
           click(this: TableCell) {
             // Row → detail panel, except on cells with their own click
-            // (editable cost/shares, the ticker link, the × remove button).
+            // (field buttons, the ticker link, and the Trade action).
             if (!callbacks.onOpenDetail) return;
             const colId = this.column?.id;
             if (colId && NON_DETAIL_COLS.has(colId)) return;
@@ -239,7 +292,7 @@ export function positionsToGridOptions(
         },
       },
     },
-    columns: positionsGridColumns(overview.aggregates, callbacks),
+    columns: positionsGridColumns(callbacks),
     data: positionsGridData(overview.positions, view),
   };
 }

@@ -67,11 +67,13 @@ def _portfolio(
     name: str = "Test",
     cash: float = 0.0,
     positions: list[SimpleNamespace] | None = None,
+    inception_date: dt.date | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         id=pid,
         name=name,
         cash=cash,
+        inception_date=inception_date,
         created_at=_CREATED,
         updated_at=_CREATED,
         positions=positions or [],
@@ -137,6 +139,7 @@ async def test_create_portfolio_201_normalizes_and_ensures(
     assert body["id"] == 1
     assert body["name"] == "Test"
     assert body["cash"] == 0.0
+    assert body["inception_date"] is None
     assert body["positions"] == [
         _position_json("AAPL", 10.0, 200.0),
         _position_json("MSFT", 5.0, None),
@@ -277,8 +280,22 @@ async def test_create_validation_errors_return_422(
 
 async def test_list_portfolios_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     rows = [
-        SimpleNamespace(id=1, name="A", cash=0.0, position_count=2, created_at=_CREATED),
-        SimpleNamespace(id=2, name="B", cash=50.0, position_count=0, created_at=_CREATED),
+        SimpleNamespace(
+            id=1,
+            name="A",
+            cash=0.0,
+            position_count=2,
+            inception_date=dt.date(2026, 1, 1),
+            created_at=_CREATED,
+        ),
+        SimpleNamespace(
+            id=2,
+            name="B",
+            cash=50.0,
+            position_count=0,
+            inception_date=None,
+            created_at=_CREATED,
+        ),
     ]
 
     async def fake_list(session: Any) -> list[SimpleNamespace]:
@@ -291,8 +308,16 @@ async def test_list_portfolios_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.status_code == 200
     body = response.json()
     assert [item["id"] for item in body] == [1, 2]
-    assert set(body[0]) == {"id", "name", "cash", "position_count", "created_at"}
+    assert set(body[0]) == {
+        "id",
+        "name",
+        "cash",
+        "position_count",
+        "inception_date",
+        "created_at",
+    }
     assert body[0]["position_count"] == 2
+    assert body[0]["inception_date"] == "2026-01-01"
 
 
 async def test_get_portfolio_200(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -330,9 +355,14 @@ async def test_patch_portfolio_200(monkeypatch: pytest.MonkeyPatch) -> None:
     received: list[dict[str, Any]] = []
 
     async def fake_update(
-        session: Any, portfolio_id: int, *, name: str | None, cash: float | None
+        session: Any,
+        portfolio_id: int,
+        *,
+        name: str | None,
+        cash: float | None,
+        inception_date: Any = portfolio_crud.UNSET,
     ) -> SimpleNamespace:
-        received.append({"name": name, "cash": cash})
+        received.append({"name": name, "cash": cash, "inception_date": inception_date})
         return _portfolio(pid=portfolio_id, name=name or "Test", cash=cash or 0.0)
 
     monkeypatch.setattr(portfolio_crud, "update_portfolio", fake_update)
@@ -341,7 +371,40 @@ async def test_patch_portfolio_200(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["name"] == "Renamed"
-    assert received == [{"name": "Renamed", "cash": None}]
+    assert received == [
+        {"name": "Renamed", "cash": None, "inception_date": portfolio_crud.UNSET}
+    ]
+
+
+async def test_patch_portfolio_inception_date_200(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    received: list[Any] = []
+
+    async def fake_update(
+        session: Any,
+        portfolio_id: int,
+        *,
+        name: str | None,
+        cash: float | None,
+        inception_date: Any = portfolio_crud.UNSET,
+    ) -> SimpleNamespace:
+        received.append(inception_date)
+        return _portfolio(
+            pid=portfolio_id,
+            inception_date=inception_date,
+        )
+
+    monkeypatch.setattr(portfolio_crud, "update_portfolio", fake_update)
+    async with _client() as ac:
+        response = await ac.patch(
+            "/portfolios/1",
+            json={"inception_date": "2026-01-05"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["inception_date"] == "2026-01-05"
+    assert received == [dt.date(2026, 1, 5)]
 
 
 async def test_patch_portfolio_404(monkeypatch: pytest.MonkeyPatch) -> None:

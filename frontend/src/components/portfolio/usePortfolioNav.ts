@@ -1,92 +1,85 @@
 "use client";
 
 /**
- * Shared hook: reconstruct a portfolio's synthetic NAV from the current
- * holdings' real price histories. One history query per holding (funds by
- * instrument_id → NAV/line series; stocks by ticker → OHLC close), fetched at
- * MAX range and cached under a stable key so the Overview mini-NAV and the
- * Performance tab share the same fetches.
+ * Shared hook over the persisted portfolio NAV series.
  *
- * The arithmetic lives in the pure `lib/portfolio/performance` module; this hook
- * only wires the fetches into it.
+ * The backend worker materializes daily NAV from the real transaction ledger
+ * into `portfolio_nav_daily`; the UI only reads that DB-first series.
  */
-import { useQueries } from "@tanstack/react-query";
 import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import {
-  fetchFundTimeseries,
-  fetchStockTimeseries,
-  type PortfolioOverview,
+  fetchPortfolioNav,
+  type PortfolioNav as PortfolioNavResponse,
 } from "@/lib/api/client";
-import {
-  pricePointsFromLine,
-  pricePointsFromOhlc,
-  reconstructNav,
-  type HoldingSeries,
-  type NavReconstruction,
+import { dateToUtcMs } from "@/lib/charts/hc/dateAxis";
+import type {
+  HoldingSeries,
+  NavReconstruction,
 } from "@/lib/portfolio/performance";
 import { retryPolicy } from "@/components/screener/shared";
 
 export interface PortfolioNav {
   holdings: HoldingSeries[];
   recon: NavReconstruction;
+  response: PortfolioNavResponse | null;
   isLoading: boolean;
   isError: boolean;
   refetch: () => void;
 }
 
-export function usePortfolioNav(overview: PortfolioOverview | null | undefined): PortfolioNav {
-  const positions = overview?.positions ?? [];
-  const cash = overview?.aggregates.cash ?? 0;
+const EMPTY_RECON: NavReconstruction = {
+  nav: [],
+  navIndex: [],
+  startTs: 0,
+  endTs: 0,
+};
 
-  const results = useQueries({
-    queries: positions.map((p) => {
-      const fundId = p.instrument_id;
-      return {
-        queryKey: ["portfolio-perf-history", fundId ? `fund:${fundId}` : `stock:${p.ticker}`],
-        queryFn: ({ signal }: { signal: AbortSignal }) =>
-          fundId
-            ? fetchFundTimeseries(fundId, "MAX", signal)
-            : fetchStockTimeseries(p.ticker, "MAX", signal),
-        staleTime: 5 * 60_000,
-        retry: retryPolicy,
-      };
-    }),
+function reconstructFromPersisted(
+  response: PortfolioNavResponse | undefined,
+): NavReconstruction {
+  const points = response?.points ?? [];
+  if (points.length === 0) return EMPTY_RECON;
+  const navIndex = points.map(
+    (point) => [dateToUtcMs(point.date), point.nav] as [number, number],
+  );
+  return {
+    // The persisted `nav` field is an index rebased to 100, not raw dollars.
+    nav: navIndex,
+    navIndex,
+    startTs: navIndex[0]![0],
+    endTs: navIndex[navIndex.length - 1]![0],
+  };
+}
+
+export function usePortfolioNav(portfolioId: number | null | undefined): PortfolioNav {
+  const query = useQuery({
+    queryKey: ["portfolio-nav", portfolioId],
+    queryFn: ({ signal }) => {
+      if (portfolioId === null || portfolioId === undefined) {
+        throw new Error("Portfolio id is required to load NAV.");
+      }
+      return fetchPortfolioNav(portfolioId, {}, signal);
+    },
+    enabled: portfolioId !== null && portfolioId !== undefined,
+    staleTime: 60_000,
+    retry: retryPolicy,
   });
 
-  const navSig = results.map((r) => r.dataUpdatedAt).join("|");
-  const holdings = useMemo<HoldingSeries[]>(
-    () =>
-      positions.map((p, i) => {
-        const data = results[i]?.data;
-        let points: Array<[number, number]> = [];
-        if (data) {
-          if ("ohlc" in data) points = pricePointsFromOhlc(data.ohlc);
-          else if ("series" in data) points = pricePointsFromLine(data.series);
-        }
-        return {
-          ticker: p.ticker,
-          name: p.name ?? p.ticker,
-          quantity: p.quantity,
-          points,
-        };
-      }),
-    // navSig captures query data changes; positions the holding set.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [navSig, positions],
+  const recon = useMemo(
+    () => reconstructFromPersisted(query.data),
+    [query.data],
   );
 
-  const recon = useMemo(() => reconstructNav(holdings, cash), [holdings, cash]);
-
   return {
-    holdings,
+    holdings: [],
     recon,
-    isLoading: results.some((r) => r.isPending),
-    isError: results.some((r) => r.isError),
+    response: query.data ?? null,
+    isLoading: query.isPending,
+    isError: query.isError,
     refetch: () => {
-      results.forEach((r) => {
-        void r.refetch();
-      });
+      void query.refetch();
     },
   };
 }

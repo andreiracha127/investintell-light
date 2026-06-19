@@ -35,6 +35,10 @@ from app.schemas.portfolios import (
 # Hard cap on GET /portfolios — single-tenant, so no pagination, just a bound.
 LIST_HARD_CAP = 100
 
+# Sentinel for "field absent from a partial update" — None can be a real value
+# for nullable fields, so it cannot double as the default.
+UNSET: Any = object()
+
 
 class DuplicatePortfolioNameError(Exception):
     """Raised when a portfolio name violates the UNIQUE constraint."""
@@ -63,6 +67,7 @@ async def create_portfolio(
     portfolio = Portfolio(
         name=payload.name,
         cash=payload.cash,
+        inception_date=payload.inception_date,
         origin=origin,
         positions=[
             Position(
@@ -103,13 +108,14 @@ async def get_portfolio(session: AsyncSession, portfolio_id: int) -> Portfolio |
 
 
 async def list_portfolios(session: AsyncSession) -> Sequence[Row]:
-    """List rows of (id, name, cash, position_count, created_at), id order, capped."""
+    """List rows of portfolio summary fields, id order, capped."""
     result = await session.execute(
         select(
             Portfolio.id,
             Portfolio.name,
             Portfolio.cash,
             func.count(Position.id).label("position_count"),
+            Portfolio.inception_date,
             Portfolio.created_at,
         )
         .outerjoin(Position)
@@ -126,6 +132,7 @@ async def update_portfolio(
     *,
     name: str | None,
     cash: float | None,
+    inception_date: dt.date | None | Any = UNSET,
 ) -> Portfolio | None:
     """Apply a partial update; return the reloaded portfolio, or None if missing."""
     portfolio = await get_portfolio(session, portfolio_id)
@@ -135,6 +142,8 @@ async def update_portfolio(
         portfolio.name = name
     if cash is not None:
         portfolio.cash = cash
+    if inception_date is not UNSET:
+        portfolio.inception_date = inception_date
     try:
         await session.commit()
     except IntegrityError as exc:
@@ -230,11 +239,6 @@ async def insert_position(
     await session.commit()
     row = result.scalar_one()
     return row
-
-
-# Sentinel for "field absent from the PUT body" — None is a real value
-# (clear the commission / trade_date), so it cannot double as the default.
-UNSET: Any = object()
 
 
 async def update_position(

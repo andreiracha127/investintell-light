@@ -194,7 +194,7 @@ export function MacroRegimeView() {
 
   const canAnalyzePortfolio =
     (portfolioQuery.data?.positions.length ?? 0) >= 2 && asset.symbol.length > 0;
-  const portfolioNav = usePortfolioNav(portfolioQuery.data);
+  const portfolioNav = usePortfolioNav(portfolioId);
 
   const assetQuery = useQuery<FundTimeseries | StockTimeseries>({
     queryKey: ["macro-asset-timeseries", asset.kind, asset.symbol, asset.instrument_id, range],

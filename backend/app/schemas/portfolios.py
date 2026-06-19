@@ -38,6 +38,7 @@ def validate_portfolio_name(value: str) -> str:
 
 
 PositionBasis = Literal["reference", "executed"]
+TransactionSide = Literal["buy", "sell"]
 
 
 class PositionBody(BaseModel):
@@ -94,6 +95,10 @@ class PortfolioCreate(BaseModel):
     cash: float = Field(
         default=0.0, allow_inf_nan=False, description="Uninvested cash, currency units."
     )
+    inception_date: dt.date | None = Field(
+        default=None,
+        description="User-declared portfolio inception date for NAV/performance.",
+    )
     positions: list[PositionCreate] = Field(
         default_factory=list,
         max_length=MAX_POSITIONS,
@@ -126,6 +131,10 @@ class PortfolioPatch(BaseModel):
     cash: float | None = Field(
         default=None, allow_inf_nan=False, description="New cash balance, currency units."
     )
+    inception_date: dt.date | None = Field(
+        default=None,
+        description="Portfolio inception date; null clears it.",
+    )
 
     @field_validator("name")
     @classmethod
@@ -134,8 +143,14 @@ class PortfolioPatch(BaseModel):
 
     @model_validator(mode="after")
     def _check_not_empty(self) -> "PortfolioPatch":
-        if self.name is None and self.cash is None:
-            raise ValueError("PATCH requires at least one of 'name' or 'cash'.")
+        if (
+            self.name is None
+            and self.cash is None
+            and "inception_date" not in self.model_fields_set
+        ):
+            raise ValueError(
+                "PATCH requires at least one of 'name', 'cash' or 'inception_date'."
+            )
         return self
 
 
@@ -165,6 +180,7 @@ class PortfolioOut(BaseModel):
     id: int
     name: str
     cash: float
+    inception_date: dt.date | None
     created_at: dt.datetime
     updated_at: dt.datetime
     positions: list[PositionOut]
@@ -179,7 +195,63 @@ class PortfolioListItem(BaseModel):
     name: str
     cash: float
     position_count: int
+    inception_date: dt.date | None
     created_at: dt.datetime
+
+
+class PortfolioTransactionCreate(BaseModel):
+    """One immutable buy/sell event in the portfolio ledger."""
+
+    ticker: str = Field(description="Instrument ticker (normalized to uppercase).")
+    side: TransactionSide = Field(description="'buy' or 'sell'.")
+    quantity: float = Field(gt=0, allow_inf_nan=False)
+    price: float = Field(gt=0, allow_inf_nan=False)
+    commission: float = Field(default=0.0, ge=0, allow_inf_nan=False)
+    trade_date: dt.date = Field(description="Execution date.")
+
+    @field_validator("ticker")
+    @classmethod
+    def _check_ticker(cls, value: str) -> str:
+        return normalize_ticker(value, "ticker")
+
+
+class PortfolioTransactionOut(BaseModel):
+    """One persisted ledger transaction."""
+
+    model_config = {"from_attributes": True}
+
+    id: int
+    portfolio_id: int
+    ticker: str
+    side: TransactionSide
+    quantity: float
+    price: float
+    commission: float
+    trade_date: dt.date
+    created_at: dt.datetime
+
+
+class PortfolioNavPoint(BaseModel):
+    """Transaction-aware NAV index point.
+
+    ``nav`` is a rebased index value, not raw dollars. ``market_value`` is the
+    post-trade value of open holdings on that date.
+    """
+
+    date: dt.date
+    nav: float
+    market_value: float
+    cash: float
+    total_value: float
+
+
+class PortfolioNavResponse(BaseModel):
+    """Transaction-aware portfolio NAV series."""
+
+    portfolio_id: int
+    inception_date: dt.date | None
+    base_nav: float = 100.0
+    points: list[PortfolioNavPoint]
 
 
 # ---------------------------------------------------------------------------

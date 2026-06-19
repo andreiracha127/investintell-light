@@ -70,10 +70,12 @@ export function formatMetricValue(value: number, dataType: string): string {
 /** Format an ISO date string (YYYY-MM-DD) as "Jun 10, 2026" (UTC-safe). */
 export function formatDate(isoDate: string | null | undefined): string {
   if (!isoDate) return "—";
+  const day = isoDate.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return "—";
   return new Intl.DateTimeFormat("en-US", {
     year: "numeric",
     month: "short",
     day: "numeric",
     timeZone: "UTC",
-  }).format(new Date(`${isoDate}T00:00:00Z`));
+  }).format(new Date(`${day}T00:00:00Z`));
 }

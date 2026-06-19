@@ -47,42 +47,45 @@ describe("formatShares", () => {
 });
 
 describe("positionsGridColumns", () => {
-  it("includes editable shares & cost columns and a clickable action column", () => {
-    const cols = positionsGridColumns(OVERVIEW.aggregates);
+  it("includes clickable shares/cost/date columns and a Trade action column", () => {
+    const cols = positionsGridColumns();
     const shares = cols.find((c) => c.id === "shares");
     const cost = cols.find((c) => c.id === "cost");
-    const action = cols.find((c) => c.id === "__remove");
-    expect(shares?.cells?.editMode?.enabled).toBe(true);
-    expect(cost?.cells?.editMode?.enabled).toBe(true);
+    const date = cols.find((c) => c.id === "trade_date");
+    const action = cols.find((c) => c.id === "__trade");
+    expect(shares?.cells?.events?.click).toBeTypeOf("function");
+    expect(cost?.cells?.events?.click).toBeTypeOf("function");
+    expect(date?.cells?.events?.click).toBeTypeOf("function");
     expect(action?.cells?.events?.click).toBeTypeOf("function");
   });
 
-  it("bakes aggregates into the P&L and Market value headers", () => {
-    const cols = positionsGridColumns(OVERVIEW.aggregates);
-    expect(cols.find((c) => c.id === "pnl")?.header?.format).toContain("+$200");
-    const mkt = cols.find((c) => c.id === "mktvalue")?.header?.format;
-    expect(mkt).toContain("Market value");
-    expect(mkt).toContain("$1,170");
+  it("keeps P&L and Market value headers plain", () => {
+    const cols = positionsGridColumns();
+    expect(cols.find((c) => c.id === "pnl")?.header?.format).toBe("P&L");
+    expect(cols.find((c) => c.id === "mktvalue")?.header?.format).toBe(
+      "Market value",
+    );
   });
 
   it("orders visible columns to match the mockup and gives P&L %/Company their own columns", () => {
-    const cols = positionsGridColumns(OVERVIEW.aggregates);
+    const cols = positionsGridColumns();
     const visible = cols.filter((c) => c.enabled !== false).map((c) => c.id);
     expect(visible).toEqual([
       "ticker",
       "name",
-      "shares",
-      "cost",
+      "trade_date",
       "last",
+      "cost",
+      "shares",
       "mktvalue",
       "pnl",
       "pnl_pct",
-      "__remove",
+      "__trade",
     ]);
   });
 
   it("ticker formatter links to the stock; name moved to its own Company column", () => {
-    const cols = positionsGridColumns(OVERVIEW.aggregates);
+    const cols = positionsGridColumns();
     const fmt = cols.find((c) => c.id === "ticker")!.cells!.formatter;
     const out = callFmt(fmt, mkCell("AAA", { name: "Alpha Inc", instrument_id: null }));
     expect(out).toContain('href="/stocks/AAA"');
@@ -93,21 +96,44 @@ describe("positionsGridColumns", () => {
   });
 
   it("ticker formatter shows a FUND badge for fund/ETF holdings (instrument_id present)", () => {
-    const cols = positionsGridColumns(OVERVIEW.aggregates);
+    const cols = positionsGridColumns();
     const fmt = cols.find((c) => c.id === "ticker")!.cells!.formatter;
     const out = callFmt(fmt, mkCell("BBB", { name: null, instrument_id: "fund-123" }));
     expect(out).toContain("FUND");
   });
 
   it("Company column formatter renders the name, em-dash when null", () => {
-    const cols = positionsGridColumns(OVERVIEW.aggregates);
+    const cols = positionsGridColumns();
     const fmt = cols.find((c) => c.id === "name")!.cells!.formatter;
     expect(callFmt(fmt, mkCell("Alpha Inc"))).toContain("Alpha Inc");
     expect(callFmt(fmt, mkCell(null))).toBe("—");
   });
 
+  it("Buy date formatter renders the position trade date", () => {
+    const cols = positionsGridColumns();
+    const fmt = cols.find((c) => c.id === "trade_date")!.cells!.formatter;
+    expect(callFmt(fmt, mkCell("2026-01-02"))).toContain("02/01/26");
+    expect(callFmt(fmt, mkCell(null))).toContain("Set date");
+  });
+
+  it("Buy date column opens the calendar editor callback", () => {
+    const onEditTradeDate = vi.fn();
+    const cols = positionsGridColumns({
+      onEditShares: vi.fn(),
+      onEditCost: vi.fn(),
+      onEditTradeDate,
+      onTrade: vi.fn(),
+    });
+    const click = cols.find((c) => c.id === "trade_date")!.cells!.events!
+      .click as unknown as (this: CellLike) => void;
+
+    click.call(mkCell("2026-01-02", { ticker: "AAA" }, "trade_date"));
+
+    expect(onEditTradeDate).toHaveBeenCalledWith("AAA", "2026-01-02");
+  });
+
   it("P&L % column formatter renders signed percent with tone, em-dash when null", () => {
-    const cols = positionsGridColumns(OVERVIEW.aggregates);
+    const cols = positionsGridColumns();
     const fmt = cols.find((c) => c.id === "pnl_pct")!.cells!.formatter;
     const gain = callFmt(fmt, mkCell(0.25));
     expect(gain).toContain("+25.00%");
@@ -117,22 +143,45 @@ describe("positionsGridColumns", () => {
 
   it("enables column sorting by default and opts the action column out", () => {
     const opts = positionsToGridOptions(OVERVIEW, {
-      onEditShares: vi.fn(), onEditCost: vi.fn(), onRemove: vi.fn(),
+      onEditShares: vi.fn(), onEditCost: vi.fn(), onEditTradeDate: vi.fn(), onTrade: vi.fn(),
     });
     expect(opts.columnDefaults?.sorting?.enabled).toBe(true);
-    const action = (opts.columns ?? []).find((c) => c.id === "__remove");
+    const action = (opts.columns ?? []).find((c) => c.id === "__trade");
     expect(action?.sorting?.enabled).toBe(false);
   });
 
-  it("cost formatter shows EXEC badge + price + commission; REF when not executed", () => {
-    const cols = positionsGridColumns(OVERVIEW.aggregates);
+  it("cost formatter shows price + commission without REF/EXEC badges", () => {
+    const cols = positionsGridColumns();
     const fmt = cols.find((c) => c.id === "cost")!.cells!.formatter;
     const exec = callFmt(fmt, mkCell(8, { basis: "executed", commission: 1.5 }));
-    expect(exec).toContain("EXEC");
-    expect(exec).toContain("ix-grid-basis-exec");
+    expect(exec).not.toContain("EXEC");
+    expect(exec).not.toContain("REF");
+    expect(exec).toContain("incl. comm.");
     const ref = callFmt(fmt, mkCell(null, { basis: "reference", commission: null }));
-    expect(ref).toContain("REF");
+    expect(ref).not.toContain("REF");
     expect(ref).toContain("—");
+  });
+
+  it("Avg cost and Qty columns open their field editor callbacks", () => {
+    const onEditCost = vi.fn();
+    const onEditShares = vi.fn();
+    const cols = positionsGridColumns({
+      onEditShares,
+      onEditCost,
+      onEditTradeDate: vi.fn(),
+      onTrade: vi.fn(),
+    });
+
+    const costClick = cols.find((c) => c.id === "cost")!.cells!.events!
+      .click as unknown as (this: CellLike) => void;
+    const sharesClick = cols.find((c) => c.id === "shares")!.cells!.events!
+      .click as unknown as (this: CellLike) => void;
+
+    costClick.call(mkCell(8, { ticker: "AAA" }, "cost"));
+    sharesClick.call(mkCell(100, { ticker: "AAA" }, "shares"));
+
+    expect(onEditCost).toHaveBeenCalledWith("AAA", 8);
+    expect(onEditShares).toHaveBeenCalledWith("AAA", 100);
   });
 });
 
@@ -143,6 +192,7 @@ describe("positionsGridData", () => {
     expect(data.columns!.shares).toEqual([100, 8.5]);
     expect(data.columns!.cost).toEqual([8, null]);
     expect(data.columns!.basis).toEqual(["executed", "reference"]);
+    expect(data.columns!.trade_date).toEqual(["2026-01-02", null]);
     expect(data.columns!.name).toEqual(["Alpha Inc", null]);
     expect(data.columns!.instrument_id).toEqual([null, "fund-123"]);
     expect(data.columns!.change).toEqual([0.5, -1]);
@@ -172,16 +222,23 @@ describe("countMatchingPositions", () => {
 });
 
 describe("positionsToGridOptions", () => {
-  it("sets theme and dispatches afterEdit to the right callback", () => {
+  it("sets theme and keeps row-detail clicks off field-action columns", () => {
     const onEditShares = vi.fn();
     const onEditCost = vi.fn();
-    const onRemove = vi.fn();
-    const opts = positionsToGridOptions(OVERVIEW, { onEditShares, onEditCost, onRemove });
+    const onTrade = vi.fn();
+    const onOpenDetail = vi.fn();
+    const opts = positionsToGridOptions(OVERVIEW, {
+      onEditShares,
+      onEditCost,
+      onEditTradeDate: vi.fn(),
+      onTrade,
+      onOpenDetail,
+    });
     expect(opts.rendering?.theme).toBe(GRAPHITE_THEME);
-    const afterEdit = opts.columnDefaults?.cells?.events?.afterEdit as unknown as (this: CellLike) => void;
-    afterEdit.call(mkCell(120, { ticker: "AAA" }, "shares"));
-    expect(onEditShares).toHaveBeenCalledWith("AAA", 120);
-    afterEdit.call(mkCell(9, { ticker: "AAA" }, "cost"));
-    expect(onEditCost).toHaveBeenCalledWith("AAA", 9);
+    const rowClick = opts.columnDefaults?.cells?.events?.click as unknown as (this: CellLike) => void;
+    rowClick.call(mkCell("Alpha Inc", { ticker: "AAA" }, "name"));
+    expect(onOpenDetail).toHaveBeenCalledWith("AAA");
+    rowClick.call(mkCell(100, { ticker: "AAA" }, "shares"));
+    expect(onOpenDetail).toHaveBeenCalledTimes(1);
   });
 });

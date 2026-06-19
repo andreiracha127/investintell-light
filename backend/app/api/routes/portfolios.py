@@ -43,14 +43,18 @@ from app.schemas.news import NewsArticle
 from app.schemas.portfolios import (
     PortfolioCreate,
     PortfolioListItem,
+    PortfolioNavPoint,
+    PortfolioNavResponse,
     PortfolioNewsResponse,
     PortfolioOut,
     PortfolioOverviewResponse,
     PortfolioPatch,
+    PortfolioTransactionCreate,
+    PortfolioTransactionOut,
     PositionBody,
     PositionOut,
 )
-from app.services import lookthrough, portfolio_crud
+from app.services import lookthrough, portfolio_crud, portfolio_ledger
 from app.tiingo.client import TiingoClient
 from app.tiingo.exceptions import TiingoError
 
@@ -78,6 +82,21 @@ def _normalize_ticker_or_422(ticker: str) -> str:
         return normalize_ticker(ticker, "ticker")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+async def _ensure_trade_tickers(
+    session: AsyncSession,
+    client: TiingoClient,
+    tickers: Sequence[str],
+) -> None:
+    if not tickers:
+        return
+    symbols = sorted(set(tickers))
+    fund_tickers = await portfolio_crud.select_fund_tickers(session, symbols)
+    ensure_tickers = [ticker for ticker in symbols if ticker not in fund_tickers]
+    if ensure_tickers:
+        start, end = _ensure_window()
+        await ensure_eod_or_http_error(session, client, ensure_tickers, start, end)
 
 
 # ---------------------------------------------------------------------------
@@ -138,8 +157,17 @@ async def patch_portfolio(
 ) -> PortfolioOut:
     """Partially update name and/or cash."""
     try:
+        provided = payload.model_fields_set
         portfolio = await portfolio_crud.update_portfolio(
-            session, portfolio_id, name=payload.name, cash=payload.cash
+            session,
+            portfolio_id,
+            name=payload.name,
+            cash=payload.cash,
+            inception_date=(
+                payload.inception_date
+                if "inception_date" in provided
+                else portfolio_crud.UNSET
+            ),
         )
     except portfolio_crud.DuplicatePortfolioNameError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -240,6 +268,88 @@ async def delete_position(
             status_code=404,
             detail=f"Position {symbol} not found in portfolio {portfolio_id}.",
         )
+
+
+# ---------------------------------------------------------------------------
+# Transaction ledger + NAV
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{portfolio_id}/transactions",
+    response_model=list[PortfolioTransactionOut],
+)
+async def list_portfolio_transactions(
+    portfolio_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[PortfolioTransactionOut]:
+    """List immutable buy/sell ledger events for a portfolio."""
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id):
+        raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
+    rows = await portfolio_ledger.list_transactions(session, portfolio_id)
+    return [PortfolioTransactionOut.model_validate(row) for row in rows]
+
+
+@router.post(
+    "/{portfolio_id}/transactions",
+    response_model=PortfolioTransactionOut,
+    status_code=201,
+)
+async def create_portfolio_transaction(
+    portfolio_id: int,
+    payload: PortfolioTransactionCreate,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    client: Annotated[TiingoClient, Depends(get_tiingo_client)],
+) -> PortfolioTransactionOut:
+    """Append a real buy/sell event and update the current position snapshot."""
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id):
+        raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
+    await _ensure_trade_tickers(session, client, [payload.ticker])
+    try:
+        row = await portfolio_ledger.create_transaction(session, portfolio_id, payload)
+        await portfolio_ledger.materialize_portfolio_nav(session, portfolio_id)
+        await session.commit()
+    except portfolio_ledger.InsufficientPositionError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except portfolio_ledger.MissingLedgerPriceDataError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except portfolio_ledger.PortfolioNotFoundError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return PortfolioTransactionOut.model_validate(row)
+
+
+@router.get("/{portfolio_id}/nav", response_model=PortfolioNavResponse)
+async def get_portfolio_nav(
+    portfolio_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    end_date: Annotated[dt.date | None, Query(description="Last NAV date.")] = None,
+) -> PortfolioNavResponse:
+    """Persisted transaction-aware NAV index, rebased to 100 at inception."""
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    if portfolio is None:
+        raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
+    rows = await portfolio_ledger.list_materialized_nav(
+        session,
+        portfolio_id,
+        end_date=end_date,
+    )
+    return PortfolioNavResponse(
+        portfolio_id=portfolio_id,
+        inception_date=rows[0].nav_date if rows else portfolio.inception_date,
+        points=[
+            PortfolioNavPoint(
+                date=row.nav_date,
+                nav=row.nav,
+                market_value=row.market_value,
+                cash=row.cash,
+                total_value=row.total_value,
+            )
+            for row in rows
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------

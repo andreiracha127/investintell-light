@@ -767,6 +767,181 @@
         }
       }
     },
+    "/portfolios/{portfolio_id}/transactions": {
+      "get": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "List Portfolio Transactions",
+        "description": "List immutable buy/sell ledger events for a portfolio.",
+        "operationId": "list_portfolio_transactions_portfolios__portfolio_id__transactions_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PortfolioTransactionOut"
+                  },
+                  "title": "Response List Portfolio Transactions Portfolios  Portfolio Id  Transactions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Create Portfolio Transaction",
+        "description": "Append a real buy/sell event and update the current position snapshot.",
+        "operationId": "create_portfolio_transaction_portfolios__portfolio_id__transactions_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioTransactionCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioTransactionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/portfolios/{portfolio_id}/nav": {
+      "get": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Get Portfolio Nav",
+        "description": "Persisted transaction-aware NAV index, rebased to 100 at inception.",
+        "operationId": "get_portfolio_nav_portfolios__portfolio_id__nav_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last NAV date.",
+              "title": "End Date"
+            },
+            "description": "Last NAV date."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioNavResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/portfolios/{portfolio_id}/overview": {
       "get": {
         "tags": [
@@ -10867,6 +11042,19 @@
             "description": "Uninvested cash, currency units.",
             "default": 0.0
           },
+          "inception_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inception Date",
+            "description": "User-declared portfolio inception date for NAV/performance."
+          },
           "positions": {
             "items": {
               "$ref": "#/components/schemas/PositionCreate"
@@ -10902,6 +11090,18 @@
             "type": "integer",
             "title": "Position Count"
           },
+          "inception_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inception Date"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -10914,6 +11114,7 @@
           "name",
           "cash",
           "position_count",
+          "inception_date",
           "created_at"
         ],
         "title": "PortfolioListItem",
@@ -11210,6 +11411,81 @@
         "title": "PortfolioMonteCarloResponse",
         "description": "Render-ready portfolio Monte Carlo payload.\n\nReuses the single-instrument distribution shape (``ConfidenceBar``,\npercentiles, historical rank, degraded flags); only ``params`` differs\n(n_assets instead of ticker/range). Drawdown/return fields are decimal\nfractions (0.05 = 5%); sharpe is unitless."
       },
+      "PortfolioNavPoint": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "nav": {
+            "type": "number",
+            "title": "Nav"
+          },
+          "market_value": {
+            "type": "number",
+            "title": "Market Value"
+          },
+          "cash": {
+            "type": "number",
+            "title": "Cash"
+          },
+          "total_value": {
+            "type": "number",
+            "title": "Total Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "nav",
+          "market_value",
+          "cash",
+          "total_value"
+        ],
+        "title": "PortfolioNavPoint",
+        "description": "Transaction-aware NAV index point.\n\n``nav`` is a rebased index value, not raw dollars. ``market_value`` is the\npost-trade value of open holdings on that date."
+      },
+      "PortfolioNavResponse": {
+        "properties": {
+          "portfolio_id": {
+            "type": "integer",
+            "title": "Portfolio Id"
+          },
+          "inception_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inception Date"
+          },
+          "base_nav": {
+            "type": "number",
+            "title": "Base Nav",
+            "default": 100.0
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/PortfolioNavPoint"
+            },
+            "type": "array",
+            "title": "Points"
+          }
+        },
+        "type": "object",
+        "required": [
+          "portfolio_id",
+          "inception_date",
+          "points"
+        ],
+        "title": "PortfolioNavResponse",
+        "description": "Transaction-aware portfolio NAV series."
+      },
       "PortfolioNewsResponse": {
         "properties": {
           "portfolio_id": {
@@ -11265,6 +11541,18 @@
             "type": "number",
             "title": "Cash"
           },
+          "inception_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inception Date"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -11288,6 +11576,7 @@
           "id",
           "name",
           "cash",
+          "inception_date",
           "created_at",
           "updated_at",
           "positions"
@@ -11408,6 +11697,19 @@
             ],
             "title": "Cash",
             "description": "New cash balance, currency units."
+          },
+          "inception_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inception Date",
+            "description": "Portfolio inception date; null clears it."
           }
         },
         "type": "object",
@@ -11563,6 +11865,116 @@
         ],
         "title": "PortfolioStats",
         "description": "Point statistics over the portfolio's daily returns in the analyzed\nwindow. Beta/correlation are versus the benchmark on the aligned date\ngrid; the diversification ratio is evaluated at the effective initial\nweights (decomposition view)."
+      },
+      "PortfolioTransactionCreate": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker",
+            "description": "Instrument ticker (normalized to uppercase)."
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side",
+            "description": "'buy' or 'sell'."
+          },
+          "quantity": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Quantity"
+          },
+          "price": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Price"
+          },
+          "commission": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Commission",
+            "default": 0.0
+          },
+          "trade_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Trade Date",
+            "description": "Execution date."
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "side",
+          "quantity",
+          "price",
+          "trade_date"
+        ],
+        "title": "PortfolioTransactionCreate",
+        "description": "One immutable buy/sell event in the portfolio ledger."
+      },
+      "PortfolioTransactionOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "portfolio_id": {
+            "type": "integer",
+            "title": "Portfolio Id"
+          },
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side"
+          },
+          "quantity": {
+            "type": "number",
+            "title": "Quantity"
+          },
+          "price": {
+            "type": "number",
+            "title": "Price"
+          },
+          "commission": {
+            "type": "number",
+            "title": "Commission"
+          },
+          "trade_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Trade Date"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "portfolio_id",
+          "ticker",
+          "side",
+          "quantity",
+          "price",
+          "commission",
+          "trade_date",
+          "created_at"
+        ],
+        "title": "PortfolioTransactionOut",
+        "description": "One persisted ledger transaction."
       },
       "PositionBody": {
         "properties": {

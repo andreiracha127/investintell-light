@@ -20,6 +20,7 @@ import type { Grid } from "@highcharts/grid-pro";
 
 import {
   createPortfolio,
+  createPortfolioTransaction,
   deletePortfolio,
   deletePosition,
   fetchPortfolioOverview,
@@ -28,6 +29,7 @@ import {
   putPosition,
   type PortfolioListItem,
   type PortfolioOverview,
+  type PortfolioTransactionBody,
   type PositionBody,
 } from "@/lib/api/client";
 import {
@@ -58,9 +60,8 @@ import { PortfolioLookthroughSection } from "@/components/portfolio/PortfolioLoo
 import { PortfolioRebalanceSection } from "@/components/portfolio/PortfolioRebalanceSection";
 import { PortfolioPerformanceView } from "@/components/portfolio/PortfolioPerformanceView";
 import { usePortfolioNav } from "@/components/portfolio/usePortfolioNav";
-import { formatTimestampDate } from "@/lib/charts/hc/dateAxis";
+import { compactDatetimeXAxis, formatTimestampDate } from "@/lib/charts/hc/dateAxis";
 import {
-  accumulate,
   buildAmountAdd,
   resolveSpot,
   type ExistingHolding,
@@ -171,10 +172,17 @@ export function PortfolioOverviewView() {
               <PortfolioManageBar selected={selected} onSelect={setSelectedId} />
               <PortfolioSectionTabs activeSection={activeSection} />
               {activeSection === "overview" && (
-                <OverviewSection key={selected.id} portfolioId={selected.id} />
+                <OverviewSection
+                  key={selected.id}
+                  portfolioId={selected.id}
+                  inceptionDate={selected.inception_date ?? selected.created_at}
+                />
               )}
               {activeSection === "performance" && (
-                <PerformanceSection key={selected.id} portfolioId={selected.id} />
+                <PerformanceSection
+                  key={selected.id}
+                  portfolioId={selected.id}
+                />
               )}
               {activeSection === "exposure" && (
                 <PortfolioLookthroughSection portfolioId={selected.id} />
@@ -254,82 +262,6 @@ function ErrorPanel({
   );
 }
 
-/**
- * Click-to-edit numeric value: click shows a controlled input; Enter saves,
- * Escape (or blur) cancels. `parse` returns the API value (number or null) or
- * `undefined` when the raw text is invalid — invalid input never saves.
- */
-function EditableValue({
-  display,
-  tone = "text-text-primary",
-  initialText,
-  ariaLabel,
-  parse,
-  onSave,
-  pending = false,
-}: {
-  display: string;
-  tone?: string;
-  initialText: string;
-  ariaLabel: string;
-  parse: (raw: string) => number | null | undefined;
-  onSave: (value: number | null) => void;
-  pending?: boolean;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [text, setText] = useState("");
-  const [invalid, setInvalid] = useState(false);
-
-  if (!editing) {
-    return (
-      <button
-        type="button"
-        onClick={() => {
-          setText(initialText);
-          setInvalid(false);
-          setEditing(true);
-        }}
-        disabled={pending}
-        aria-label={`Edit ${ariaLabel}`}
-        title={`Click to edit ${ariaLabel}`}
-        className={`tabular-nums decoration-dotted decoration-[var(--color-text-muted)] underline-offset-4 hover:underline ${tone} disabled:opacity-50 disabled:cursor-wait`}
-      >
-        {pending ? "…" : display}
-      </button>
-    );
-  }
-
-  return (
-    <input
-      autoFocus
-      value={text}
-      onChange={(e) => {
-        setText(e.target.value);
-        setInvalid(false);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          const parsed = parse(text);
-          if (parsed === undefined) {
-            setInvalid(true);
-            return;
-          }
-          setEditing(false);
-          onSave(parsed);
-        } else if (e.key === "Escape") {
-          setEditing(false);
-        }
-      }}
-      onBlur={() => setEditing(false)}
-      aria-label={ariaLabel}
-      aria-invalid={invalid}
-      className={`w-[90px] text-right tabular-nums ${INPUT_CLASS} ${
-        invalid ? "border-b-2 border-loss focus:border-loss" : ""
-      }`}
-    />
-  );
-}
-
 /** parse() for share counts: required, > 0. */
 const parseShares = (raw: string): number | undefined => {
   const v = parseDecimal(raw);
@@ -349,6 +281,11 @@ const parseCash = (raw: string): number | undefined => {
   return Number.isFinite(v) && v >= 0 ? v : undefined;
 };
 
+const todayIsoDate = (): string => new Date().toISOString().slice(0, 10);
+
+const isoDateOnly = (value: string | null | undefined): string =>
+  value ? value.slice(0, 10) : "";
+
 /* ── Create form + empty state ────────────────────────────────────────────── */
 
 function CreatePortfolioForm({
@@ -360,12 +297,18 @@ function CreatePortfolioForm({
 }) {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
+  const [inceptionDate, setInceptionDate] = useState("");
 
   const mutation = useMutation({
     mutationFn: (portfolioName: string) =>
-      createPortfolio({ name: portfolioName, cash: 0 }),
+      createPortfolio({
+        name: portfolioName,
+        cash: 0,
+        inception_date: inceptionDate || null,
+      }),
     onSuccess: (portfolio) => {
       setName("");
+      setInceptionDate("");
       queryClient.invalidateQueries({ queryKey: ["portfolios"] });
       onCreated(portfolio.id);
     },
@@ -390,6 +333,15 @@ function CreatePortfolioForm({
           aria-label="New portfolio name"
           className={`w-[180px] ${INPUT_CLASS}`}
         />
+        <label className="flex items-center gap-1.5 text-[11px] text-text-secondary">
+          Inception
+          <input
+            type="date"
+            value={inceptionDate}
+            onChange={(e) => setInceptionDate(e.target.value)}
+            className={`w-[136px] ${INPUT_CLASS}`}
+          />
+        </label>
         <button
           type="button"
           onClick={submit}
@@ -543,7 +495,7 @@ function PortfolioSwitcher({
   );
 }
 
-/* ── Manage bar (rename / cash / delete for the selected portfolio) ───────── */
+/* ── Manage bar (selected portfolio actions) ──────────────────────────────── */
 
 function PortfolioManageBar({
   selected,
@@ -553,8 +505,7 @@ function PortfolioManageBar({
   onSelect: (id: number | null) => void;
 }) {
   const queryClient = useQueryClient();
-  const [renaming, setRenaming] = useState(false);
-  const [renameText, setRenameText] = useState("");
+  const [editing, setEditing] = useState(false);
 
   // Shares the overview cache with the section views — only for the EOD as-of.
   const overviewQuery = useQuery({
@@ -570,19 +521,22 @@ function PortfolioManageBar({
     queryClient.invalidateQueries({ queryKey: ["overview", id] });
   };
 
-  const renameMutation = useMutation({
-    mutationFn: ({ id, name }: { id: number; name: string }) =>
-      patchPortfolio(id, { name }),
+  const editPortfolioMutation = useMutation({
+    mutationFn: ({
+      id,
+      name,
+      inceptionDate,
+      cash,
+    }: {
+      id: number;
+      name: string;
+      inceptionDate: string | null;
+      cash: number;
+    }) => patchPortfolio(id, { name, inception_date: inceptionDate, cash }),
     onSuccess: (_, { id }) => {
-      setRenaming(false);
+      setEditing(false);
       invalidatePortfolio(id);
     },
-  });
-
-  const cashMutation = useMutation({
-    mutationFn: ({ id, cash }: { id: number; cash: number }) =>
-      patchPortfolio(id, { cash }),
-    onSuccess: (_, { id }) => invalidatePortfolio(id),
   });
 
   const deleteMutation = useMutation({
@@ -596,60 +550,20 @@ function PortfolioManageBar({
   });
 
   const mutationError =
-    renameMutation.error ?? cashMutation.error ?? deleteMutation.error;
+    editPortfolioMutation.error ??
+    deleteMutation.error;
 
   return (
     <div className="border border-border bg-surface-2 px-[var(--ix-pad)] py-2">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] text-text-secondary">
-        {renaming ? (
-          <input
-            autoFocus
-            value={renameText}
-            onChange={(e) => setRenameText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && renameText.trim().length > 0) {
-                renameMutation.mutate({
-                  id: selected.id,
-                  name: renameText.trim(),
-                });
-              } else if (e.key === "Escape") {
-                setRenaming(false);
-              }
-            }}
-            onBlur={() => setRenaming(false)}
-            aria-label="New name for selected portfolio"
-            className={`w-[180px] ${INPUT_CLASS}`}
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => {
-              setRenameText(selected.name);
-              setRenaming(true);
-            }}
-            disabled={renameMutation.isPending}
-            className={BUTTON_CLASS}
-          >
-            {renameMutation.isPending ? "Renaming…" : "Rename"}
-          </button>
-        )}
-
-        <span className="flex items-center gap-1.5">
-          Cash:
-          <EditableValue
-            display={formatCurrency(selected.cash)}
-            initialText={String(selected.cash)}
-            ariaLabel={`cash for ${selected.name}`}
-            parse={parseCash}
-            onSave={(value) => {
-              // parseCash never yields null; the guard keeps types honest.
-              if (value !== null) {
-                cashMutation.mutate({ id: selected.id, cash: value });
-              }
-            }}
-            pending={cashMutation.isPending}
-          />
-        </span>
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          disabled={editPortfolioMutation.isPending}
+          className={BUTTON_CLASS}
+        >
+          {editPortfolioMutation.isPending ? "Saving…" : "Edit"}
+        </button>
 
         {asOf && (
           <span className="flex items-center gap-1.5 text-text-muted">
@@ -666,19 +580,6 @@ function PortfolioManageBar({
           Optimize in Builder →
         </Link>
 
-        <button
-          type="button"
-          onClick={() => {
-            // Native confirm: deletion is destructive and cascades positions.
-            if (window.confirm(`Delete portfolio "${selected.name}"?`)) {
-              deleteMutation.mutate(selected.id);
-            }
-          }}
-          disabled={deleteMutation.isPending}
-          className={`${BUTTON_CLASS} hover:text-loss hover:border-loss`}
-        >
-          {deleteMutation.isPending ? "Deleting…" : "Delete"}
-        </button>
       </div>
 
       {mutationError && (
@@ -686,13 +587,201 @@ function PortfolioManageBar({
           {mutationError.message}
         </p>
       )}
+
+      {editing && (
+        <PortfolioEditDialog
+          portfolio={selected}
+          pending={editPortfolioMutation.isPending}
+          deletePending={deleteMutation.isPending}
+          error={mutationError?.message ?? null}
+          onClose={() => {
+            editPortfolioMutation.reset();
+            deleteMutation.reset();
+            setEditing(false);
+          }}
+          onSubmit={(payload) => editPortfolioMutation.mutate(payload)}
+          onDelete={() => {
+            // Native confirm: deletion is destructive and cascades positions.
+            if (window.confirm(`Delete portfolio "${selected.name}"?`)) {
+              deleteMutation.mutate(selected.id);
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function PortfolioEditDialog({
+  portfolio,
+  pending,
+  deletePending,
+  error,
+  onClose,
+  onSubmit,
+  onDelete,
+}: {
+  portfolio: PortfolioListItem;
+  pending: boolean;
+  deletePending: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (payload: {
+    id: number;
+    name: string;
+    inceptionDate: string | null;
+    cash: number;
+  }) => void;
+  onDelete: () => void;
+}) {
+  const [name, setName] = useState(portfolio.name);
+  const [inceptionDate, setInceptionDate] = useState(
+    isoDateOnly(portfolio.inception_date ?? portfolio.created_at),
+  );
+  const [cashText, setCashText] = useState(String(portfolio.cash));
+  const [cashInvalid, setCashInvalid] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const canSave = name.trim().length > 0 && !pending && !deletePending;
+  const save = () => {
+    if (!canSave) return;
+    const cash = parseCash(cashText);
+    if (cash === undefined) {
+      setCashInvalid(true);
+      return;
+    }
+    onSubmit({
+      id: portfolio.id,
+      name: name.trim(),
+      inceptionDate: inceptionDate || null,
+      cash,
+    });
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-[rgba(0,0,0,0.32)] p-4"
+    >
+      <div
+        role="dialog"
+        aria-label={`Edit portfolio ${portfolio.name}`}
+        onClick={(e) => e.stopPropagation()}
+        className="w-[420px] max-w-[96vw] border border-border-strong bg-surface-2 shadow-[0_12px_36px_rgba(0,0,0,0.22)]"
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-border px-[var(--ix-pad)] py-3.5">
+          <div>
+            <div className="ix-title text-[18px] text-accent">Edit portfolio</div>
+            <div className="mt-0.5 text-[12px] text-text-secondary">
+              Name, cash, and inception date
+            </div>
+          </div>
+          <button
+            type="button"
+            aria-label="Close edit portfolio"
+            onClick={onClose}
+            className="text-[18px] leading-none text-text-muted hover:text-text-primary"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="grid gap-3 px-[var(--ix-pad)] py-4">
+          <label className="grid gap-1 text-[11px] text-text-muted">
+            Name
+            <input
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") save();
+              }}
+              className={`w-full ${INPUT_CLASS}`}
+            />
+          </label>
+          <label className="grid gap-1 text-[11px] text-text-muted">
+            Inception date
+            <input
+              type="date"
+              value={inceptionDate}
+              onChange={(e) => setInceptionDate(e.target.value)}
+              className={`w-full ${INPUT_CLASS}`}
+            />
+          </label>
+          <label className="grid gap-1 text-[11px] text-text-muted">
+            Cash
+            <input
+              value={cashText}
+              inputMode="decimal"
+              onChange={(e) => {
+                setCashText(e.target.value);
+                setCashInvalid(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") save();
+              }}
+              aria-invalid={cashInvalid}
+              className={`w-full text-right tabular-nums ${INPUT_CLASS} ${
+                cashInvalid ? "border-b-2 border-loss focus:border-loss" : ""
+              }`}
+            />
+          </label>
+          {cashInvalid && (
+            <p role="alert" className="m-0 text-[12px] text-loss">
+              Enter a cash amount greater than or equal to zero.
+            </p>
+          )}
+          {error && (
+            <p role="alert" className="m-0 break-words text-[12px] text-loss">
+              {error}
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-[var(--ix-pad)] py-3">
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={pending || deletePending}
+            className="h-[30px] border border-[var(--color-loss)] bg-[var(--color-loss)] px-4 text-[12px] font-bold text-white transition-[filter] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {deletePending ? "Deleting…" : "Delete"}
+          </button>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={onClose} className={BUTTON_CLASS}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={save}
+              disabled={!canSave}
+              className="h-[30px] border border-accent bg-accent px-4 text-[12px] font-bold text-on-accent disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {pending ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
 /* ── Overview (KPIs + allocation + table) ─────────────────────────────────── */
 
-function OverviewSection({ portfolioId }: { portfolioId: number }) {
+function OverviewSection({
+  portfolioId,
+  inceptionDate,
+}: {
+  portfolioId: number;
+  inceptionDate: string;
+}) {
   // Design tokens are only readable from the DOM — resolve after mount.
   const [colors, setColors] = useState<ChartColors | null>(null);
   useEffect(() => {
@@ -728,11 +817,17 @@ function OverviewSection({ portfolioId }: { portfolioId: number }) {
   const overview = overviewQuery.data;
   return (
     <div className="flex flex-col gap-px">
-      <KpiStrip overview={overview} />
-      {colors && overview.positions.length > 0 && (
+      <KpiStrip
+        portfolioId={portfolioId}
+        overview={overview}
+        inceptionDate={inceptionDate}
+      />
+      {colors && (
         <div className="grid items-stretch gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]">
-          <AllocationPanel overview={overview} colors={colors} />
-          <NavPanel overview={overview} colors={colors} />
+          {(overview.positions.length > 0 || overview.aggregates.cash > 0) && (
+            <AllocationPanel overview={overview} colors={colors} />
+          )}
+          <NavPanel portfolioId={portfolioId} colors={colors} />
         </div>
       )}
       <PositionsTable overview={overview} portfolioId={portfolioId} />
@@ -740,41 +835,17 @@ function OverviewSection({ portfolioId }: { portfolioId: number }) {
   );
 }
 
-/* ── Performance (synthetic NAV + contribution breakdown) ─────────────────── */
+/* ── Performance (persisted NAV + contribution breakdown) ─────────────────── */
 
-function PerformanceSection({ portfolioId }: { portfolioId: number }) {
-  const overviewQuery = useQuery({
-    queryKey: ["overview", portfolioId],
-    queryFn: ({ signal }) => fetchPortfolioOverview(portfolioId, signal),
-    staleTime: 60_000,
-    retry: retryPolicy,
-  });
-
-  if (overviewQuery.isPending) {
-    return (
-      <div
-        aria-busy="true"
-        aria-label="Loading performance"
-        className="flex flex-col gap-px"
-      >
-        <div className="h-[400px] animate-pulse bg-surface-2" />
-        <div className="h-[340px] animate-pulse bg-surface-2" />
-      </div>
-    );
-  }
-  if (overviewQuery.isError) {
-    return (
-      <ErrorPanel
-        title="Failed to load portfolio"
-        message={overviewQuery.error.message}
-        onRetry={() => overviewQuery.refetch()}
-      />
-    );
-  }
-  return <PortfolioPerformanceView overview={overviewQuery.data} />;
+function PerformanceSection({
+  portfolioId,
+}: {
+  portfolioId: number;
+}) {
+  return <PortfolioPerformanceView portfolioId={portfolioId} />;
 }
 
-/* ── Synthetic NAV mini-panel (Overview, beside the allocation donut) ─────── */
+/* ── Portfolio NAV mini-panel (Overview, beside the allocation donut) ─────── */
 
 const NAV_RANGES = [
   { key: "1M", label: "1M", bars: 21 },
@@ -785,48 +856,45 @@ const NAV_RANGES = [
 type NavRangeKey = (typeof NAV_RANGES)[number]["key"];
 
 const SYNTH_NAV_TIP =
-  "Reconstructed portfolio value over time from the current holdings — illustrative, not a booked track record.";
+  "Persisted daily portfolio NAV index from the real transaction ledger and portfolio inception date.";
 
 function NavPanel({
-  overview,
+  portfolioId,
   colors,
 }: {
-  overview: PortfolioOverview;
+  portfolioId: number;
   colors: ChartColors;
 }) {
-  const { recon, isLoading, isError } = usePortfolioNav(overview);
+  const { recon, isLoading, isError } = usePortfolioNav(portfolioId);
   const [range, setRange] = useState<NavRangeKey>("1Y");
 
   const bars = NAV_RANGES.find((r) => r.key === range)!.bars;
   const slice = useMemo(
-    () => (bars === Infinity ? recon.nav : recon.nav.slice(-bars)),
-    [recon.nav, bars],
+    () => (bars === Infinity ? recon.navIndex : recon.navIndex.slice(-bars)),
+    [recon.navIndex, bars],
   );
   const change =
     slice.length > 1 ? slice[slice.length - 1]![1] / slice[0]![1] - 1 : 0;
 
   const option = useMemo<Options | null>(() => {
     if (slice.length === 0) return null;
-    const fill0 = `${colors.accent}30`;
-    const fill1 = `${colors.accent}00`;
     // Baseline NAV (range start) for the "% from range start" tooltip line.
     const base0 = slice[0]![1];
     return {
-      chart: { type: "areaspline", height: 200 },
+      chart: { type: "line", height: 200, zooming: { type: "x" } },
       legend: { enabled: false },
-      xAxis: {
-        type: "datetime",
+      xAxis: compactDatetimeXAxis({
         crosshair: { color: colors.grid },
-        tickPixelInterval: 84,
-      },
+        tickPixelInterval: 92,
+      }),
       yAxis: {
         title: {
-          text: "NAV (USD)",
+          text: "NAV Index",
           style: { color: colors.textSecondary, fontSize: "10px" },
         },
         labels: {
           formatter() {
-            return `$${formatCompact(this.value as number)}`;
+            return formatNumber(this.value as number, 0);
           },
         },
       },
@@ -836,26 +904,19 @@ function NavPanel({
           const chg = base0 > 0 ? ctx.y / base0 - 1 : 0;
           const tone = chg >= 0 ? colors.gain : colors.loss;
           return (
-            `${formatTimestampDate(ctx.x)}<br/>NAV: <b>${formatCurrency(ctx.y)}</b>` +
+            `${formatTimestampDate(ctx.x)}<br/>NAV Index: <b>${formatNumber(ctx.y, 2)}</b>` +
             `<br/><span style="color:${tone}">${formatPercent(chg, 2, { signed: true })} from range start</span>`
           );
         },
       },
       series: [
         {
-          type: "areaspline",
-          name: "NAV",
+          type: "line",
+          name: "NAV Index",
           data: slice,
           color: colors.accent,
-          lineWidth: 1.8,
+          lineWidth: 2,
           marker: { enabled: false },
-          fillColor: {
-            linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
-            stops: [
-              [0, fill0],
-              [1, fill1],
-            ],
-          },
         },
       ],
     };
@@ -865,7 +926,7 @@ function NavPanel({
     <section className="ix-pad flex flex-col border border-border bg-surface-2">
       <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
         <h2 className="ix-label m-0 flex items-center gap-1.5">
-          Synthetic NAV
+          Portfolio NAV
           <InfoDot tip={SYNTH_NAV_TIP} />
         </h2>
         <div className="flex items-center gap-2.5">
@@ -905,8 +966,8 @@ function NavPanel({
       ) : (
         <div className="flex h-[200px] flex-1 items-center justify-center px-4 text-center text-[12px] text-text-muted">
           {isError
-            ? "Could not load price history."
-            : "Not enough price history to reconstruct a NAV."}
+            ? "Could not load materialized portfolio NAV."
+            : "Portfolio NAV has not been materialized yet."}
         </div>
       )}
     </section>
@@ -914,11 +975,24 @@ function NavPanel({
 }
 
 /** Carbon KPI tile strip — 1px-gap grid over the hairline border color. */
-function KpiStrip({ overview }: { overview: PortfolioOverview }) {
+function KpiStrip({
+  portfolioId,
+  overview,
+  inceptionDate,
+}: {
+  portfolioId: number;
+  overview: PortfolioOverview;
+  inceptionDate: string;
+}) {
   const { aggregates, positions } = overview;
+  const { recon, isLoading, isError } = usePortfolioNav(portfolioId);
   // Display-only ratio of two backend-provided values (cash share of total).
   const cashWeight =
     aggregates.total_value > 0 ? aggregates.cash / aggregates.total_value : null;
+  const sinceInception =
+    recon.navIndex.length > 1
+      ? recon.navIndex[recon.navIndex.length - 1]![1] / recon.navIndex[0]![1] - 1
+      : null;
 
   return (
     <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
@@ -969,6 +1043,22 @@ function KpiStrip({ overview }: { overview: PortfolioOverview }) {
           aggregates.as_of ? `EOD ${formatDate(aggregates.as_of)}` : undefined
         }
       />
+      <KpiTile
+        label="Return Since Inception"
+        value={
+          isLoading && sinceInception === null
+            ? "…"
+            : sinceInception !== null && !isError
+              ? formatPercent(sinceInception, 2, { signed: true })
+              : "—"
+        }
+        tone={
+          sinceInception !== null && !isError
+            ? valueTone(sinceInception)
+            : "text-text-muted"
+        }
+        detail={`Inception ${formatDate(inceptionDate)}`}
+      />
     </div>
   );
 }
@@ -987,9 +1077,10 @@ function AllocationPanel({
 }) {
   const { aggregates, positions } = overview;
 
-  const slices = useMemo<AllocationSlice[]>(() => {
+  const slices = useMemo<Array<AllocationSlice & { displayName?: string }>>(() => {
     const positionSlices = positions.map((position) => ({
       name: position.ticker,
+      displayName: position.name ?? undefined,
       value: position.market_value,
     }));
     return aggregates.cash > 0
@@ -1027,8 +1118,15 @@ function AllocationPanel({
                       : colors.categories[i % colors.categories.length],
                 }}
               />
-              <span className="min-w-0 flex-1 truncate font-bold text-text-primary">
-                {slice.name}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-bold leading-4 text-text-primary">
+                  {slice.name}
+                </span>
+                {slice.displayName && slice.displayName !== slice.name && (
+                  <span className="block truncate text-[10.5px] leading-3 text-text-muted">
+                    {slice.displayName}
+                  </span>
+                )}
               </span>
               <span className="shrink-0 text-text-muted">
                 ${formatCompact(slice.value)}
@@ -1059,14 +1157,15 @@ function PositionsTable({
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["overview", portfolioId] });
     queryClient.invalidateQueries({ queryKey: ["portfolios"] }); // position_count
+    queryClient.invalidateQueries({ queryKey: ["portfolio-nav", portfolioId] });
   };
 
   // Two mutations over the same PUT endpoint so the Add row and the inline
   // edits surface their errors independently (an add typo must not look like
   // an edit failure).
   const addMutation = useMutation({
-    mutationFn: ({ ticker, body }: { ticker: string; body: PositionBody }) =>
-      putPosition(portfolioId, ticker, body),
+    mutationFn: (body: PortfolioTransactionBody) =>
+      createPortfolioTransaction(portfolioId, body),
     onSuccess: invalidate,
   });
   const editMutation = useMutation({
@@ -1078,51 +1177,29 @@ function PositionsTable({
     mutationFn: (ticker: string) => deletePosition(portfolioId, ticker),
     onSuccess: invalidate,
   });
+  const tradeMutation = useMutation({
+    mutationFn: (body: PortfolioTransactionBody) =>
+      createPortfolioTransaction(portfolioId, body),
+    onSuccess: invalidate,
+  });
 
   const rowError = editMutation.error ?? removeMutation.error;
 
-  // Stabilize the edit/remove handlers so the gridOptions memo below doesn't
-  // re-run on every render. React Query's `mutate` is referentially stable, so
-  // we depend on `editMutation.mutate` / `removeMutation.mutate` rather than the
-  // whole mutation objects (which are fresh each render). Deps are only the
-  // values these handlers actually read: positions (for the sibling field) and
-  // portfolioId/queryClient (for the revert invalidation).
-  const editMutate = editMutation.mutate;
+  // Stabilize the row actions so gridOptions does not re-run on every render.
+  // Field edits open small dialogs; destructive remove still lives in the
+  // detail drawer, not in the main table action column.
   const removeMutate = removeMutation.mutate;
-  const onEditShares = useCallback(
-    (ticker: string, value: number) => {
-      if (Number.isFinite(value) && value > 0) {
-        const pos = positions.find((p) => p.ticker === ticker);
-        editMutate({
-          ticker,
-          body: { quantity: value, acq_price: pos?.acq_price ?? null },
-        });
-      } else {
-        queryClient.invalidateQueries({ queryKey: ["overview", portfolioId] });
-      }
-    },
-    [positions, portfolioId, queryClient, editMutate],
+  const [tradeTicker, setTradeTicker] = useState<string | null>(null);
+  const [dateTicker, setDateTicker] = useState<string | null>(null);
+  const [sharesTicker, setSharesTicker] = useState<string | null>(null);
+  const [costTicker, setCostTicker] = useState<string | null>(null);
+  const onTrade = useCallback((ticker: string) => setTradeTicker(ticker), []);
+  const onEditTradeDate = useCallback(
+    (ticker: string) => setDateTicker(ticker),
+    [],
   );
-  const onEditCost = useCallback(
-    (ticker: string, value: number | null) => {
-      if (value === null || (Number.isFinite(value) && value > 0)) {
-        const pos = positions.find((p) => p.ticker === ticker);
-        if (pos) {
-          editMutate({
-            ticker,
-            body: { quantity: pos.quantity, acq_price: value },
-          });
-        }
-      } else {
-        queryClient.invalidateQueries({ queryKey: ["overview", portfolioId] });
-      }
-    },
-    [positions, portfolioId, queryClient, editMutate],
-  );
-  const onRemove = useCallback(
-    (ticker: string) => removeMutate(ticker),
-    [removeMutate],
-  );
+  const onEditShares = useCallback((ticker: string) => setSharesTicker(ticker), []);
+  const onEditCost = useCallback((ticker: string) => setCostTicker(ticker), []);
 
   // Search box + Load-more, both presentation-only (slice already-fetched
   // overview data). PAGE_SIZE rows show first; "Load more" reveals the rest.
@@ -1144,6 +1221,18 @@ function PositionsTable({
   const detailPos = detailTicker
     ? (positions.find((p) => p.ticker === detailTicker) ?? null)
     : null;
+  const tradePos = tradeTicker
+    ? (positions.find((p) => p.ticker === tradeTicker) ?? null)
+    : null;
+  const datePos = dateTicker
+    ? (positions.find((p) => p.ticker === dateTicker) ?? null)
+    : null;
+  const sharesPos = sharesTicker
+    ? (positions.find((p) => p.ticker === sharesTicker) ?? null)
+    : null;
+  const costPos = costTicker
+    ? (positions.find((p) => p.ticker === costTicker) ?? null)
+    : null;
 
   // Wire the grid's pure edit/remove callbacks to the mutations. Invalid edits
   // never persist; they re-fetch the overview so the grid reverts the cell to
@@ -1153,10 +1242,19 @@ function PositionsTable({
     () =>
       positionsToGridOptions(
         overview,
-        { onEditShares, onEditCost, onRemove, onOpenDetail },
+        { onEditShares, onEditCost, onEditTradeDate, onTrade, onOpenDetail },
         { search, limit: visible },
       ),
-    [overview, onEditShares, onEditCost, onRemove, onOpenDetail, search, visible],
+    [
+      overview,
+      onEditShares,
+      onEditCost,
+      onEditTradeDate,
+      onTrade,
+      onOpenDetail,
+      search,
+      visible,
+    ],
   );
 
   // ── Live price ticks (path: targeted DOM flash) ──────────────────────────
@@ -1250,9 +1348,10 @@ function PositionsTable({
             ? { quantity: p.quantity, acqPrice: p.acq_price, lastClose: p.last_close }
             : null;
         }}
+        defaultDate={aggregates.as_of ?? todayIsoDate()}
         onAdd={async (ticker, body) => {
           try {
-            await addMutation.mutateAsync({ ticker, body });
+            await addMutation.mutateAsync(body);
             return true;
           } catch {
             // Not a swallow: the failure is surfaced via addMutation.error in
@@ -1343,7 +1442,487 @@ function PositionsTable({
           }}
         />
       )}
+
+      {tradePos && (
+        <TradeTicketDialog
+          position={tradePos}
+          defaultDate={aggregates.as_of ?? todayIsoDate()}
+          pending={tradeMutation.isPending}
+          error={tradeMutation.error?.message ?? null}
+          onClose={() => {
+            tradeMutation.reset();
+            setTradeTicker(null);
+          }}
+          onSubmit={async (body) => {
+            await tradeMutation.mutateAsync(body);
+            tradeMutation.reset();
+            setTradeTicker(null);
+          }}
+        />
+      )}
+
+      {costPos && (
+        <PositionNumberDialog
+          position={costPos}
+          title="Avg cost"
+          fieldLabel="Average cost"
+          initialText={costPos.acq_price != null ? String(costPos.acq_price) : ""}
+          parse={parseCost}
+          pending={editMutation.isPending}
+          error={editMutation.error?.message ?? null}
+          onClose={() => {
+            editMutation.reset();
+            setCostTicker(null);
+          }}
+          onSubmit={async (cost) => {
+            await editMutation.mutateAsync({
+              ticker: costPos.ticker,
+              body: {
+                quantity: costPos.quantity,
+                acq_price: cost,
+                trade_date: costPos.trade_date ?? null,
+              },
+            });
+            editMutation.reset();
+            setCostTicker(null);
+          }}
+        />
+      )}
+
+      {sharesPos && (
+        <PositionNumberDialog
+          position={sharesPos}
+          title="Qty"
+          fieldLabel="Quantity"
+          initialText={String(sharesPos.quantity)}
+          parse={parseShares}
+          pending={editMutation.isPending}
+          error={editMutation.error?.message ?? null}
+          onClose={() => {
+            editMutation.reset();
+            setSharesTicker(null);
+          }}
+          onSubmit={async (quantity) => {
+            if (quantity == null) return;
+            await editMutation.mutateAsync({
+              ticker: sharesPos.ticker,
+              body: {
+                quantity,
+                acq_price: sharesPos.acq_price ?? null,
+                trade_date: sharesPos.trade_date ?? null,
+              },
+            });
+            editMutation.reset();
+            setSharesTicker(null);
+          }}
+        />
+      )}
+
+      {datePos && (
+        <TradeDateDialog
+          position={datePos}
+          pending={editMutation.isPending}
+          error={editMutation.error?.message ?? null}
+          onClose={() => {
+            editMutation.reset();
+            setDateTicker(null);
+          }}
+          onSubmit={async (tradeDate) => {
+            await editMutation.mutateAsync({
+              ticker: datePos.ticker,
+              body: {
+                quantity: datePos.quantity,
+                acq_price: datePos.acq_price ?? null,
+                trade_date: tradeDate,
+              },
+            });
+            editMutation.reset();
+            setDateTicker(null);
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+function PositionNumberDialog({
+  position,
+  title,
+  fieldLabel,
+  initialText,
+  parse,
+  pending,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  position: PortfolioOverview["positions"][number];
+  title: string;
+  fieldLabel: string;
+  initialText: string;
+  parse: (raw: string) => number | null | undefined;
+  pending: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (value: number | null) => Promise<void>;
+}) {
+  const [text, setText] = useState(initialText);
+  const [invalid, setInvalid] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const submit = () => {
+    const parsed = parse(text);
+    if (parsed === undefined) {
+      setInvalid(true);
+      return;
+    }
+    void onSubmit(parsed);
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-[rgba(0,0,0,0.28)] p-4"
+    >
+      <div
+        role="dialog"
+        aria-label={`Set ${fieldLabel.toLowerCase()} for ${position.ticker}`}
+        onClick={(e) => e.stopPropagation()}
+        className="w-[360px] max-w-[96vw] border border-border-strong bg-surface-2 shadow-[0_12px_36px_rgba(0,0,0,0.22)]"
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-border px-[var(--ix-pad)] py-3.5">
+          <div>
+            <div className="ix-title text-[18px] text-accent">{title}</div>
+            <div className="mt-0.5 text-[12px] text-text-secondary">
+              {position.ticker}
+            </div>
+          </div>
+          <button
+            type="button"
+            aria-label={`Close ${fieldLabel.toLowerCase()} editor`}
+            onClick={onClose}
+            className="text-[18px] leading-none text-text-muted hover:text-text-primary"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="grid gap-3 px-[var(--ix-pad)] py-4">
+          <label className="grid gap-1 text-[11px] text-text-muted">
+            {fieldLabel}
+            <input
+              autoFocus
+              value={text}
+              inputMode="decimal"
+              onChange={(e) => {
+                setText(e.target.value);
+                setInvalid(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submit();
+              }}
+              aria-invalid={invalid}
+              className={`w-full text-right tabular-nums ${INPUT_CLASS} ${
+                invalid ? "border-b-2 border-loss focus:border-loss" : ""
+              }`}
+            />
+          </label>
+          {invalid && (
+            <p role="alert" className="m-0 text-[12px] text-loss">
+              Enter a positive number.
+            </p>
+          )}
+          {error && (
+            <p role="alert" className="m-0 break-words text-[12px] text-loss">
+              {error}
+            </p>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-border px-[var(--ix-pad)] py-3">
+          <button type="button" onClick={onClose} className={BUTTON_CLASS}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={pending}
+            className="h-[30px] border border-accent bg-accent px-4 text-[12px] font-bold text-on-accent disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {pending ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TradeDateDialog({
+  position,
+  pending,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  position: PortfolioOverview["positions"][number];
+  pending: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (tradeDate: string | null) => Promise<void>;
+}) {
+  const [date, setDate] = useState(position.trade_date ?? "");
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-[rgba(0,0,0,0.28)] p-4"
+    >
+      <div
+        role="dialog"
+        aria-label={`Set buy date for ${position.ticker}`}
+        onClick={(e) => e.stopPropagation()}
+        className="w-[360px] max-w-[96vw] border border-border-strong bg-surface-2 shadow-[0_12px_36px_rgba(0,0,0,0.22)]"
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-border px-[var(--ix-pad)] py-3.5">
+          <div>
+            <div className="ix-title text-[18px] text-accent">
+              Buy date
+            </div>
+            <div className="mt-0.5 text-[12px] text-text-secondary">
+              {position.ticker}
+            </div>
+          </div>
+          <button
+            type="button"
+            aria-label="Close buy date editor"
+            onClick={onClose}
+            className="text-[18px] leading-none text-text-muted hover:text-text-primary"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="grid gap-3 px-[var(--ix-pad)] py-4">
+          <label className="grid gap-1 text-[11px] text-text-muted">
+            Trade date
+            <input
+              autoFocus
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className={`w-full ${INPUT_CLASS}`}
+            />
+          </label>
+          {error && (
+            <p role="alert" className="m-0 break-words text-[12px] text-loss">
+              {error}
+            </p>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-border px-[var(--ix-pad)] py-3">
+          <button type="button" onClick={onClose} className={BUTTON_CLASS}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void onSubmit(date || null)}
+            disabled={pending}
+            className="h-[30px] border border-accent bg-accent px-4 text-[12px] font-bold text-on-accent disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {pending ? "Saving…" : "Save date"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TradeTicketDialog({
+  position,
+  defaultDate,
+  pending,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  position: PortfolioOverview["positions"][number];
+  defaultDate: string;
+  pending: boolean;
+  error: string | null;
+  onClose: () => void;
+  onSubmit: (body: PortfolioTransactionBody) => Promise<void>;
+}) {
+  const [side, setSide] = useState<"buy" | "sell">("buy");
+  const [quantity, setQuantity] = useState("");
+  const [price, setPrice] = useState(String(position.last_close || ""));
+  const [tradeDate, setTradeDate] = useState(isoDateOnly(defaultDate) || todayIsoDate());
+  const [commission, setCommission] = useState("");
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const q = parseShares(quantity);
+  const px = parseShares(price);
+  const comm = commission.trim() === "" ? 0 : parseCash(commission);
+  const oversell = side === "sell" && q != null && q > position.quantity;
+  const canSubmit =
+    !pending &&
+    q !== undefined &&
+    px !== undefined &&
+    comm !== undefined &&
+    tradeDate.length > 0 &&
+    !oversell;
+
+  const submit = () => {
+    if (!canSubmit) return;
+    void onSubmit({
+      ticker: position.ticker,
+      side,
+      quantity: q,
+      price: px,
+      commission: comm,
+      trade_date: tradeDate,
+    });
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-[rgba(0,0,0,0.32)] p-4"
+    >
+      <div
+        role="dialog"
+        aria-label={`Trade ${position.ticker}`}
+        onClick={(e) => e.stopPropagation()}
+        className="w-[420px] max-w-[96vw] border border-border-strong bg-surface-2 shadow-[0_12px_36px_rgba(0,0,0,0.22)]"
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-border px-[var(--ix-pad)] py-3.5">
+          <div>
+            <div className="ix-title text-[18px] text-accent">
+              Trade {position.ticker}
+            </div>
+            <div className="mt-0.5 text-[12px] text-text-secondary">
+              Current qty {formatShares(position.quantity)} · Last{" "}
+              {formatCurrency(position.last_close)}
+            </div>
+          </div>
+          <button
+            type="button"
+            aria-label="Close trade ticket"
+            onClick={onClose}
+            className="text-[18px] leading-none text-text-muted hover:text-text-primary"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="grid gap-3 px-[var(--ix-pad)] py-4">
+          <div className="inline-flex w-max border border-border-strong bg-field">
+            {(["buy", "sell"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setSide(option)}
+                className={`h-[30px] px-4 text-[12px] font-bold capitalize ${
+                  side === option
+                    ? "bg-accent text-on-accent"
+                    : "text-text-secondary hover:bg-layer-hover"
+                }`}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="grid gap-1 text-[11px] text-text-muted">
+              Quantity
+              <input
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                placeholder="0"
+                inputMode="decimal"
+                className={`w-full text-right ${INPUT_CLASS}`}
+              />
+            </label>
+            <label className="grid gap-1 text-[11px] text-text-muted">
+              Price
+              <input
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+                inputMode="decimal"
+                className={`w-full text-right ${INPUT_CLASS}`}
+              />
+            </label>
+            <label className="grid gap-1 text-[11px] text-text-muted">
+              Trade date
+              <input
+                type="date"
+                value={tradeDate}
+                onChange={(e) => setTradeDate(e.target.value)}
+                className={`w-full ${INPUT_CLASS}`}
+              />
+            </label>
+            <label className="grid gap-1 text-[11px] text-text-muted">
+              Commission
+              <input
+                value={commission}
+                onChange={(e) => setCommission(e.target.value)}
+                placeholder="0"
+                inputMode="decimal"
+                className={`w-full text-right ${INPUT_CLASS}`}
+              />
+            </label>
+          </div>
+
+          {oversell && (
+            <p role="alert" className="m-0 text-[12px] text-loss">
+              Sell quantity cannot exceed current quantity.
+            </p>
+          )}
+          {error && (
+            <p role="alert" className="m-0 break-words text-[12px] text-loss">
+              {error}
+            </p>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-border px-[var(--ix-pad)] py-3">
+          <button type="button" onClick={onClose} className={BUTTON_CLASS}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!canSubmit}
+            className="h-[30px] border border-accent bg-accent px-4 text-[12px] font-bold text-on-accent disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {pending ? "Saving…" : side === "buy" ? "Buy" : "Sell"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1499,13 +2078,13 @@ function PositionDetailPanel({
  * Add-position form. The grid hosts no native editable "add" row, so this lives
  * as a field row above the grid (same panel, 1px rule). Two entry modes:
  *
- *  - Shares: symbol + quantity (+ optional avg cost).
+ *  - Shares: symbol + quantity + price.
  *  - Amount ($): symbol + dollar amount + price → quantity is computed as
  *    amount / price. The price doubles as the acquisition price; for a ticker
  *    already held, an empty price falls back to its latest close (the spot), so
  *    the user just types how much they put in. No mental "amount ÷ price" math.
  *
- * Either way the form submits the same PositionBody { quantity, acq_price }.
+ * Either way the form submits a buy transaction into the ledger.
  */
 function AddPositionRowForm({
   pending,
@@ -1513,14 +2092,16 @@ function AddPositionRowForm({
   onAdd,
   onDirty,
   existingFor,
+  defaultDate,
 }: {
   pending: boolean;
   error: string | null;
   /** Resolves true on success — only then are the inputs cleared. */
-  onAdd: (ticker: string, body: PositionBody) => Promise<boolean>;
+  onAdd: (ticker: string, body: PortfolioTransactionBody) => Promise<boolean>;
   onDirty: () => void;
   /** Existing holding for a ticker (qty/cost/last close); spot + accumulation. */
   existingFor: (ticker: string) => ExistingHolding | null;
+  defaultDate: string;
 }) {
   const [mode, setMode] = useState<"shares" | "amount">("shares");
   const [ticker, setTicker] = useState("");
@@ -1541,17 +2122,14 @@ function AddPositionRowForm({
   const existingSpot = existing?.lastClose ?? null;
   const spot = resolveSpot(explicitPrice, existing);
   const spotOk = spot != null && spot > 0;
-  // Both modes accumulate onto an existing holding (qty summed, cost blended).
-  // Amount: qty = amount / spot. Shares: the typed avg cost is the new lot's
-  // price (empty → keep the prior average cost).
+  // Both modes register a buy lot. The backend ledger updates the position
+  // snapshot; the UI only computes the lot quantity/price for the transaction.
   const amountAdd =
     isAmount && parsedAmount !== undefined && spotOk
       ? buildAmountAdd(parsedAmount, spot, existing)
       : null;
-  const sharesAdd =
-    !isAmount && parsedShares !== undefined
-      ? accumulate(parsedShares, typeof parsedCost === "number" ? parsedCost : null, existing)
-      : null;
+  const shareLotPrice = !isAmount && parsedCost !== undefined ? spot : null;
+  const shareLotQuantity = !isAmount ? parsedShares : undefined;
 
   const canAdd = isAmount
     ? t.length > 0 &&
@@ -1562,6 +2140,8 @@ function AddPositionRowForm({
     : t.length > 0 &&
       parsedShares !== undefined &&
       parsedCost !== undefined &&
+      shareLotPrice != null &&
+      shareLotPrice > 0 &&
       !pending;
 
   const reset = () => {
@@ -1577,9 +2157,17 @@ function AddPositionRowForm({
       setTouched(true);
       return;
     }
-    const add = isAmount ? amountAdd : sharesAdd;
-    if (!add) return;
-    void onAdd(t, { quantity: add.quantity, acq_price: add.acqPrice }).then((ok) => {
+    const lotQuantity = isAmount ? amountAdd?.addedQuantity : shareLotQuantity;
+    const lotPrice = isAmount ? spot : shareLotPrice;
+    if (!lotQuantity || !lotPrice) return;
+    void onAdd(t, {
+      ticker: t,
+      side: "buy",
+      quantity: lotQuantity,
+      price: lotPrice,
+      commission: 0,
+      trade_date: isoDateOnly(defaultDate) || todayIsoDate(),
+    }).then((ok) => {
       if (ok) reset();
     });
   };
@@ -1606,8 +2194,12 @@ function AddPositionRowForm({
         ? `+${formatNumber(amountAdd.addedQuantity, 4)} shares at ${at} · new total ${formatNumber(amountAdd.quantity, 4)}`
         : `≈ ${formatNumber(amountAdd.addedQuantity, 4)} shares at ${at}`;
     }
-  } else if (sharesAdd && existing && parsedShares !== undefined) {
-    computedStr = `+${formatNumber(parsedShares, 4)} shares · new total ${formatNumber(sharesAdd.quantity, 4)}`;
+  } else if (!isAmount && parsedShares !== undefined) {
+    if (!shareLotPrice) {
+      computedStr = "Enter a price — no spot is known for this symbol yet";
+    } else if (existing) {
+      computedStr = `+${formatNumber(parsedShares, 4)} shares at ${formatCurrency(shareLotPrice)} · new total ${formatNumber(existing.quantity + parsedShares, 4)}`;
+    }
   }
 
   const modeBtn = (active: boolean) =>
@@ -1706,7 +2298,7 @@ function AddPositionRowForm({
         )}
 
         <label className="flex flex-col gap-1">
-          <span className="ix-fs text-text-muted">{isAmount ? "Price" : "Avg cost"}</span>
+          <span className="ix-fs text-text-muted">Price</span>
           <input
             value={cost}
             onChange={(e) => {
@@ -1720,9 +2312,11 @@ function AddPositionRowForm({
                 ? existingSpot != null
                   ? `spot ${formatCurrency(existingSpot)}`
                   : "price"
-                : "optional"
+                : existingSpot != null
+                  ? `spot ${formatCurrency(existingSpot)}`
+                  : "required"
             }
-            aria-label="New position price or average cost"
+            aria-label="New position trade price"
             aria-invalid={costInvalid}
             className={fieldClass(costInvalid)}
           />

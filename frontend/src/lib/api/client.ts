@@ -22,6 +22,11 @@ type PortfolioPath = paths["/portfolios/{portfolio_id}"];
 type PositionPath = paths["/portfolios/{portfolio_id}/positions/{ticker}"];
 type OverviewOperation = paths["/portfolios/{portfolio_id}/overview"]["get"];
 type PortfolioNewsOperation = paths["/portfolios/{portfolio_id}/news"]["get"];
+type PortfolioTransactionsOperation =
+  paths["/portfolios/{portfolio_id}/transactions"]["get"];
+type PortfolioTransactionCreateOperation =
+  paths["/portfolios/{portfolio_id}/transactions"]["post"];
+type PortfolioNavOperation = paths["/portfolios/{portfolio_id}/nav"]["get"];
 type ScenarioOperation = paths["/statistics/scenario"]["post"];
 type BetaOperation = paths["/statistics/beta"]["post"];
 type CorrelationOperation = paths["/statistics/correlation"]["post"];
@@ -147,6 +152,16 @@ export type OverviewPosition = PortfolioOverview["positions"][number];
 export type OverviewAggregates = PortfolioOverview["aggregates"];
 export type PortfolioNews =
   PortfolioNewsOperation["responses"]["200"]["content"]["application/json"];
+export type PortfolioTransaction =
+  PortfolioTransactionsOperation["responses"]["200"]["content"]["application/json"][number];
+export type PortfolioTransactionBody =
+  PortfolioTransactionCreateOperation["requestBody"]["content"]["application/json"];
+export type PortfolioNav =
+  PortfolioNavOperation["responses"]["200"]["content"]["application/json"];
+export type PortfolioNavPoint = PortfolioNav["points"][number];
+export type PortfolioNavQuery = NonNullable<
+  PortfolioNavOperation["parameters"]["query"]
+>;
 
 export type ScenarioRequest =
   ScenarioOperation["requestBody"]["content"]["application/json"];
@@ -744,6 +759,42 @@ export function fetchPortfolioOverview(
 ): Promise<PortfolioOverview> {
   return request<PortfolioOverview>(
     `/portfolios/${portfolioId}/overview`,
+    signal,
+  );
+}
+
+export function fetchPortfolioTransactions(
+  portfolioId: number,
+  signal?: AbortSignal,
+): Promise<PortfolioTransaction[]> {
+  return request<PortfolioTransaction[]>(
+    `/portfolios/${portfolioId}/transactions`,
+    signal,
+  );
+}
+
+export function createPortfolioTransaction(
+  portfolioId: number,
+  body: PortfolioTransactionBody,
+  signal?: AbortSignal,
+): Promise<PortfolioTransaction> {
+  return request<PortfolioTransaction>(
+    `/portfolios/${portfolioId}/transactions`,
+    signal,
+    { method: "POST", json: body },
+  );
+}
+
+export function fetchPortfolioNav(
+  portfolioId: number,
+  query: PortfolioNavQuery = {},
+  signal?: AbortSignal,
+): Promise<PortfolioNav> {
+  const params = new URLSearchParams();
+  if (query.end_date !== undefined) params.set("end_date", String(query.end_date));
+  const qs = params.toString();
+  return request<PortfolioNav>(
+    `/portfolios/${portfolioId}/nav${qs ? `?${qs}` : ""}`,
     signal,
   );
 }

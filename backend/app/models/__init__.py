@@ -19,7 +19,12 @@ from app.models.fund import (
 )
 from app.models.instrument import Instrument
 from app.models.news_item import NewsItem
-from app.models.portfolio import Portfolio, Position
+from app.models.portfolio import (
+    Portfolio,
+    PortfolioNavDaily,
+    PortfolioTransaction,
+    Position,
+)
 from app.models.rebalance import RebalancePolicy
 from app.models.screen import Screen, ScreenFilter
 from app.models.screener_metrics import ScreenerMetrics
@@ -38,6 +43,8 @@ __all__ = [
     "Instrument",
     "NewsItem",
     "Portfolio",
+    "PortfolioNavDaily",
+    "PortfolioTransaction",
     "RebalancePolicy",
     "Position",
     "Screen",
