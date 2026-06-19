@@ -238,7 +238,12 @@ def _resolve_class_ticker(
     return wanted
 
 
-async def run_save(session: AsyncSession, payload: SaveRequest) -> SaveResponse:
+async def run_save(
+    session: AsyncSession,
+    payload: SaveRequest,
+    owner_sub: str,
+    org_id: str | None,
+) -> SaveResponse:
     """Resolve reference prices, size positions and persist the portfolio
     (origin='builder'). See the module docstring for the F8.6b semantics."""
     equity_tickers = sorted(
@@ -322,7 +327,7 @@ async def run_save(session: AsyncSession, payload: SaveRequest) -> SaveResponse:
         raise BuilderError(str(exc)) from exc
     try:
         portfolio = await portfolio_crud.create_portfolio(
-            session, create_payload, origin="builder"
+            session, create_payload, owner_sub, org_id, origin="builder"
         )
     except portfolio_crud.DuplicatePortfolioNameError as exc:
         raise BuilderError(str(exc)) from exc

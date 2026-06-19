@@ -69,7 +69,12 @@ def _stub_create(
     origins: list[str] = []
 
     async def fake_create(
-        session: Any, payload: PortfolioCreate, *, origin: str = "manual"
+        session: Any,
+        payload: PortfolioCreate,
+        owner_sub: str,
+        org_id: str | None,
+        *,
+        origin: str = "manual",
     ) -> SimpleNamespace:
         if raise_duplicate:
             raise portfolio_crud.DuplicatePortfolioNameError(
@@ -532,3 +537,30 @@ async def test_save_blank_name_422() -> None:
         response = await client.post("/builder/save", json=payload)
 
     assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Wiring: owner identity forwarded from route to run_save
+# ---------------------------------------------------------------------------
+
+
+async def test_save_forwards_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[tuple[str, str | None]] = []
+
+    async def fake_run_save(session, payload, owner_sub, org_id):
+        captured.append((owner_sub, org_id))
+        from app.schemas.builder import SaveResponse
+
+        return SaveResponse(portfolio_id=1, name="P", notional_usd=1000.0, positions=[])
+
+    monkeypatch.setattr(builder_save, "run_save", fake_run_save)
+    payload = {
+        "name": "Builder min_cvar 2026-06-11",
+        "weights": [
+            {"asset": {"kind": "fund", "id": str(_FUND_ID)}, "weight": 0.6},
+            {"asset": {"kind": "equity", "ticker": "aapl"}, "weight": 0.4},
+        ],
+    }
+    async with _client() as ac:
+        await ac.post("/builder/save", json=payload)
+    assert captured == [("u-1", None)]
