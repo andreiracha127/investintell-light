@@ -21,6 +21,8 @@ const COLORS: ChartColors = {
   textOnAccent: "#ffffff",
   bar: "#2b2f36",
   barMute: "#c4c8cf",
+  blue: "#0f62fe",
+  amber: "#9b6a00",
   categories: ["#7a1c24", "#2b2f36", "#565b63"],
 };
 

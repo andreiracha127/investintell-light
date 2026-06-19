@@ -40,7 +40,13 @@
   --color-accent-muted:  var(--ix-accent-hover);  /* hover / pressed accent */
   --color-accent-strong: var(--ix-accent-hover);
   --color-accent-wash:   var(--ix-accent-wash);   /* faint accent tint */
+  --color-accent-pressed: var(--ix-accent-pressed); /* pressed/active accent */
   --color-on-accent:     var(--ix-text-on-accent);
+
+  /* ── Neutral greys for field underline / placeholder / gradient outer ── */
+  --color-field-underline: var(--ix-grey-field-line); /* rest field underline */
+  --color-placeholder:     var(--ix-grey-placeholder);
+  --color-gradient-outer:  var(--ix-grey-gradient-outer);
 
   /* ── Financial semantics (P&L / return coloring only) ── */
   --color-gain:          var(--ix-pos);
@@ -68,6 +74,8 @@
   --color-chart-grid: var(--ix-grid);
   --color-chart-bar: var(--ix-graphite);
   --color-chart-bar-mute: var(--ix-grey-bar);
+  --color-chart-blue: var(--ix-chart-blue);
+  --color-chart-amber: var(--ix-chart-amber);
 
   /* ── Font stack — serif on titles, sans on data ── */
   --font-sans: Arial, "Arimo", "Helvetica Neue", ui-sans-serif, sans-serif;
@@ -101,6 +109,8 @@
   --ix-graphite: #2b2f36;
   --ix-grey-bar: #c4c8cf;
   --ix-grid: #ececec;
+  --ix-chart-blue: #0f62fe;
+  --ix-chart-amber: #9b6a00;
   --ix-nav: #ffffff;
   --ix-pos: #198038;
   --ix-pos-wash: #e8f3ec;
@@ -111,6 +121,12 @@
   --ix-accent: #7a1c24;
   --ix-accent-hover: #6a181f;
   --ix-accent-wash: #f4eaeb;
+  --ix-accent-pressed: #5d151b;
+
+  /* neutral greys (login field/footer/placeholder + page gradient outer) */
+  --ix-grey-field-line: #8d8d8d;
+  --ix-grey-placeholder: #a8a8a8;
+  --ix-grey-gradient-outer: #ececec;
 
   /* density: compact (default) */
   --ix-pad: 14px;
@@ -148,6 +164,8 @@ html[data-theme="dark"] {
   --ix-graphite: #c6c6c6;
   --ix-grey-bar: #6f6f6f;
   --ix-grid: #333333;
+  --ix-chart-blue: #78a9ff;
+  --ix-chart-amber: #d2a106;
   --ix-nav: #262626;
   --ix-pos: #42be65;
   --ix-pos-wash: #16281b;

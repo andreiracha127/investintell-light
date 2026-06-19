@@ -24,6 +24,10 @@ export interface ChartColors {
   bar: string;
   /** Muted comparison bar / benchmark line (grey). */
   barMute: string;
+  /** Theme-aware blue (RRG credit/improving, diverging-heatmap negative, projection median). */
+  blue: string;
+  /** Theme-aware amber (RRG conditions/weakening). */
+  amber: string;
   /** Categorical palette for multi-asset series. */
   categories: string[];
 }
@@ -63,6 +67,8 @@ export function chartColors(): ChartColors {
     surface: readVar(styles, "--color-surface-3"),
     bar: readVar(styles, "--color-chart-bar"),
     barMute: readVar(styles, "--color-chart-bar-mute"),
+    blue: readVar(styles, "--color-chart-blue"),
+    amber: readVar(styles, "--color-chart-amber"),
     categories: CATEGORY_VARS.map((name) => readVar(styles, name)),
   };
 }

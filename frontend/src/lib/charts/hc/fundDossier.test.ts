@@ -36,6 +36,8 @@ const colors: ChartColors = {
   surface: "#fff",
   bar: "#333",
   barMute: "#999",
+  blue: "#0f62fe",
+  amber: "#9b6a00",
   categories: ["#111", "#222", "#333", "#444"],
 };
 
