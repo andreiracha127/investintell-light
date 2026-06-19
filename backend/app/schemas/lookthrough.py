@@ -60,6 +60,17 @@ class UnexpandedPosition(BaseModel):
     reason: str
 
 
+class ExposureTreeNode(BaseModel):
+    """Parent-linked node for drillable portfolio exposure charts."""
+
+    id: str
+    parent_id: str | None
+    key: str
+    label: str
+    kind: str
+    value_pct: float
+
+
 def build_dimensions(
     rows: Iterable[Any], only: str | None = None
 ) -> dict[str, list[ExposureItem]]:
@@ -101,3 +112,4 @@ class PortfolioLookthroughResponse(BaseModel):
     n_funds_expanded: int
     unexpanded: list[UnexpandedPosition]
     dimensions: dict[DimensionName, list[ExposureItem]]
+    tree: list[ExposureTreeNode] = []

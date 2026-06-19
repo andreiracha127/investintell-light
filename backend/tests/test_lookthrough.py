@@ -65,6 +65,10 @@ def _client() -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
+async def _empty_tree(*args, **kwargs):
+    return []
+
+
 # ---------------------------------------------------------------------------
 # GET /funds/{id}/lookthrough
 # ---------------------------------------------------------------------------
@@ -147,6 +151,94 @@ async def test_fund_lookthrough_single_dimension_param(
 
 
 @pytest.mark.anyio
+async def test_fetch_many_lookthroughs_batches_exposures() -> None:
+    summary_a = SimpleNamespace(
+        series_id="S_A",
+        report_date=dt.date(2026, 1, 31),
+        sum_pct_total=100.0,
+        direct_pct=70.0,
+        indirect_pct=30.0,
+        expanded_fund_pct=30.0,
+        nondecomposable_fund_pct=0.0,
+        derivatives_gross_pct=0.0,
+        derivatives_net_pct=0.0,
+        unidentified_pct=0.0,
+        coverage_pct=99.0,
+        n_holdings=10,
+        n_children_expanded=1,
+        oldest_report_date=dt.date(2025, 12, 31),
+    )
+    summary_b = SimpleNamespace(
+        series_id="S_B",
+        report_date=dt.date(2026, 2, 28),
+        sum_pct_total=100.0,
+        direct_pct=100.0,
+        indirect_pct=0.0,
+        expanded_fund_pct=0.0,
+        nondecomposable_fund_pct=0.0,
+        derivatives_gross_pct=0.0,
+        derivatives_net_pct=0.0,
+        unidentified_pct=0.0,
+        coverage_pct=98.0,
+        n_holdings=8,
+        n_children_expanded=0,
+        oldest_report_date=dt.date(2026, 2, 28),
+    )
+    exposure_a = SimpleNamespace(
+        series_id="S_A",
+        dimension="issuer",
+        key="037833",
+        label="Apple Inc",
+        direct_pct=70.0,
+        indirect_pct=30.0,
+    )
+    exposure_b = SimpleNamespace(
+        series_id="S_B",
+        dimension="sector",
+        key="Tech",
+        label=None,
+        direct_pct=100.0,
+        indirect_pct=0.0,
+    )
+
+    class Result:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def all(self):
+            return self._rows
+
+    class FakeDatalake:
+        def __init__(self):
+            self.calls: list[dict] = []
+
+        async def execute(self, stmt, params):
+            sql = str(stmt)
+            self.calls.append({"sql": sql, "params": params})
+            if "nport_lookthrough_summary" in sql:
+                return Result([summary_a, summary_b])
+            if "nport_lookthrough_exposures" in sql:
+                assert params["series_ids"] == ["S_A", "S_B"]
+                assert params["report_dates"] == [
+                    dt.date(2026, 1, 31),
+                    dt.date(2026, 2, 28),
+                ]
+                return Result([exposure_a, exposure_b])
+            raise AssertionError(f"unexpected SQL: {sql}")
+
+    datalake = FakeDatalake()
+    result = await lt.fetch_many_lookthroughs(datalake, ["S_A", "S_B"])
+
+    exposure_calls = [
+        call for call in datalake.calls if "nport_lookthrough_exposures" in call["sql"]
+    ]
+    assert len(exposure_calls) == 1
+    assert set(result) == {"S_A", "S_B"}
+    assert [row.key for row in result["S_A"].exposures] == ["037833"]
+    assert [row.key for row in result["S_B"].exposures] == ["Tech"]
+
+
+@pytest.mark.anyio
 async def test_fund_lookthrough_unknown_fund_404(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -222,6 +314,89 @@ def test_consolidate_portfolio_empty_is_explicit() -> None:
     assert aggregates.oldest_report_date is None
 
 
+@pytest.mark.anyio
+async def test_build_portfolio_exposure_tree_expands_child_funds() -> None:
+    class Result:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def all(self):
+            return self._rows
+
+    class FakeDatalake:
+        async def execute(self, stmt, params):
+            sql = str(stmt)
+            if "sec_cusip_ticker_map" in sql:
+                return Result([
+                    SimpleNamespace(kind="cusip", ident="111111111", series_id="S_CHILD")
+                ])
+            rows = []
+            for series_id in params["series_ids"]:
+                if series_id == "S_A":
+                    rows.extend([
+                        SimpleNamespace(
+                            series_id="S_A",
+                            report_date=_REPORT,
+                            cusip="037833100",
+                            isin=None,
+                            issuer_name="Apple Inc",
+                            asset_class="EC",
+                            sector="CORP",
+                            currency="USD",
+                            pct_of_nav=50.0,
+                        ),
+                        SimpleNamespace(
+                            series_id="S_A",
+                            report_date=_REPORT,
+                            cusip="111111111",
+                            isin=None,
+                            issuer_name="Child ETF",
+                            asset_class="EC",
+                            sector="CORP",
+                            currency="USD",
+                            pct_of_nav=50.0,
+                        ),
+                    ])
+                elif series_id == "S_CHILD":
+                    rows.extend([
+                        SimpleNamespace(
+                            series_id="S_CHILD",
+                            report_date=_REPORT,
+                            cusip="594918104",
+                            isin=None,
+                            issuer_name="Microsoft",
+                            asset_class="EC",
+                            sector="CORP",
+                            currency="USD",
+                            pct_of_nav=40.0,
+                        ),
+                        SimpleNamespace(
+                            series_id="S_CHILD",
+                            report_date=_REPORT,
+                            cusip="9128285M8",
+                            isin=None,
+                            issuer_name="U.S. Treasury",
+                            asset_class="DBT",
+                            sector="UST",
+                            currency="USD",
+                            pct_of_nav=60.0,
+                        ),
+                    ])
+            return Result(rows)
+
+    nodes = await lt.build_portfolio_exposure_tree(
+        FakeDatalake(),
+        [(0.5, _series_lookthrough("S_A"))],
+    )
+
+    by_id = {node.id: node for node in nodes}
+    assert by_id["asset|EC"].value_pct == pytest.approx(35.0)
+    assert by_id["asset|DBT"].value_pct == pytest.approx(15.0)
+    assert by_id["security|EC|037833|037833100"].value_pct == pytest.approx(25.0)
+    assert by_id["security|EC|594918|594918104"].value_pct == pytest.approx(10.0)
+    assert by_id["security|DBT|912828|9128285M8"].value_pct == pytest.approx(15.0)
+
+
 # ---------------------------------------------------------------------------
 # GET /portfolios/{id}/lookthrough
 # ---------------------------------------------------------------------------
@@ -256,8 +431,9 @@ async def test_portfolio_lookthrough_consolidates_and_reports_unexpanded(
     async def fake_navs(session, tickers):
         return {"FUNDX": [(dt.date(2026, 6, 11), 30.0)]}
 
-    async def fake_fetch_many(dl, series_ids):
+    async def fake_fetch_many(dl, series_ids, dimension=None):
         assert series_ids == ["S_A"]
+        assert dimension is None
         return {"S_A": _series_lookthrough("S_A")}
 
     monkeypatch.setattr(portfolio_crud, "get_portfolio", fake_get_portfolio)
@@ -265,6 +441,7 @@ async def test_portfolio_lookthrough_consolidates_and_reports_unexpanded(
     monkeypatch.setattr(portfolio_crud, "select_last_two_closes", fake_closes)
     monkeypatch.setattr(portfolio_crud, "select_last_two_navs", fake_navs)
     monkeypatch.setattr(lt, "fetch_many_lookthroughs", fake_fetch_many)
+    monkeypatch.setattr(lt, "build_portfolio_exposure_tree", _empty_tree)
 
     async with _client() as client:
         resp = await client.get("/portfolios/7/lookthrough")
@@ -286,6 +463,65 @@ async def test_portfolio_lookthrough_consolidates_and_reports_unexpanded(
     assert issuers["037833"]["total_pct"] == pytest.approx(48.0)
     assert body["oldest_report_date"] == "2025-12-31"
     assert body["n_funds_expanded"] == 1
+    assert body["tree"] == []
+
+
+@pytest.mark.anyio
+async def test_portfolio_lookthrough_tree_can_request_only_asset_class(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    portfolio = SimpleNamespace(
+        id=7, name="P", cash=0.0, positions=[_position("FUNDX", 100.0)],
+    )
+
+    async def fake_get_portfolio(session, portfolio_id):
+        return portfolio
+
+    async def fake_fund_series_by_ticker(session, tickers):
+        return {"FUNDX": "S_A"}
+
+    async def fake_closes(session, tickers):
+        return {}
+
+    async def fake_navs(session, tickers):
+        return {"FUNDX": [(dt.date(2026, 6, 11), 10.0)]}
+
+    async def fake_fetch_many(dl, series_ids, dimension=None):
+        assert series_ids == ["S_A"]
+        assert dimension == "asset_class"
+        return {"S_A": _series_lookthrough("S_A")}
+
+    async def fake_tree(dl, weighted):
+        assert len(weighted) == 1
+        return [
+            lt.ExposureTreeNode(
+                id="asset|EC",
+                parent_id=None,
+                key="EC",
+                label="EC",
+                kind="asset_class",
+                value_pct=60.0,
+            )
+        ]
+
+    monkeypatch.setattr(portfolio_crud, "get_portfolio", fake_get_portfolio)
+    monkeypatch.setattr(lt, "get_fund_series_by_ticker", fake_fund_series_by_ticker)
+    monkeypatch.setattr(portfolio_crud, "select_last_two_closes", fake_closes)
+    monkeypatch.setattr(portfolio_crud, "select_last_two_navs", fake_navs)
+    monkeypatch.setattr(lt, "fetch_many_lookthroughs", fake_fetch_many)
+    monkeypatch.setattr(lt, "build_portfolio_exposure_tree", fake_tree)
+
+    async with _client() as client:
+        resp = await client.get(
+            "/portfolios/7/lookthrough",
+            params={"include_tree": "true", "dimension": "asset_class"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert list(body["dimensions"]) == ["asset_class"]
+    assert body["dimensions"]["asset_class"][0]["key"] == "EC"
+    assert body["tree"][0]["id"] == "asset|EC"
 
 
 @pytest.mark.anyio
@@ -321,7 +557,7 @@ async def test_portfolio_lookthrough_fund_without_materialization_is_unexpanded(
     async def fake_closes(session, tickers):
         return {}
 
-    async def fake_fetch_many(dl, series_ids):
+    async def fake_fetch_many(dl, series_ids, dimension=None):
         return {}  # nada materializado
 
     monkeypatch.setattr(portfolio_crud, "get_portfolio", fake_get_portfolio)
@@ -329,6 +565,7 @@ async def test_portfolio_lookthrough_fund_without_materialization_is_unexpanded(
     monkeypatch.setattr(portfolio_crud, "select_last_two_closes", fake_closes)
     monkeypatch.setattr(portfolio_crud, "select_last_two_navs", fake_navs)
     monkeypatch.setattr(lt, "fetch_many_lookthroughs", fake_fetch_many)
+    monkeypatch.setattr(lt, "build_portfolio_exposure_tree", _empty_tree)
 
     async with _client() as client:
         resp = await client.get("/portfolios/7/lookthrough")

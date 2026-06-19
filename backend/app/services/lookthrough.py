@@ -3,8 +3,10 @@
 The recursive look-through is computed by the ``nport_lookthrough`` worker in
 the datalake repo and materialized in the TimescaleDB Cloud
 (``nport_lookthrough_exposures`` + ``nport_lookthrough_summary``). This module
-only READS those tables and does portfolio-level weighted consolidation —
-pure arithmetic over materialized rows, never expansion.
+READS those tables and does portfolio-level weighted consolidation for the
+official totals. Portfolio chart drilldown can additionally build a bounded
+asset-class → issuer → security tree from raw N-PORT rows; that path is capped
+and lazy-loaded by the frontend so it does not block the main exposure payload.
 
 Semantics inherited from the worker (do not reinterpret here):
 - pct values are percentage points of the SERIES NAV, sign preserved;
@@ -25,6 +27,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.fund import Fund
 
 DIMENSIONS = ("issuer", "asset_class", "sector", "currency")
+SYNTHETIC_PREFIXES = ("IS:", "LE:", "H:", "CIK:")
+UNIDENTIFIED_PREFIXES = ("LE:", "H:", "CIK:")
+MAX_TREE_DEPTH = 2
+MAX_TREE_LEAVES = 180
+MAX_TREE_HOLDINGS_PER_SERIES = 40
 
 
 @dataclass(frozen=True)
@@ -73,6 +80,18 @@ class PortfolioAggregates:
     oldest_report_date: dt.date | None
 
 
+@dataclass(frozen=True)
+class ExposureTreeNode:
+    """Flat parent-linked hierarchy for portfolio look-through drilldown."""
+
+    id: str
+    parent_id: str | None
+    key: str
+    label: str
+    kind: str
+    value_pct: float
+
+
 # ---------------------------------------------------------------------------
 # Local-DB lookups (funds table)
 # ---------------------------------------------------------------------------
@@ -113,13 +132,93 @@ _SUMMARY_SQL = text("""
     ORDER BY series_id, report_date DESC
 """)
 
-_EXPOSURES_SQL = text("""
-    SELECT series_id, dimension, key, label, direct_pct, indirect_pct
-    FROM nport_lookthrough_exposures
-    WHERE series_id = ANY(:series_ids)
-      AND report_date = :report_date
-      -- CAST: asyncpg cannot infer the type of a bare "$n IS NULL" parameter
-      AND (CAST(:dimension AS text) IS NULL OR dimension = CAST(:dimension AS text))
+_EXPOSURES_BATCH_SQL = text("""
+    WITH requested AS (
+        SELECT *
+        FROM unnest(
+            CAST(:series_ids AS text[]),
+            CAST(:report_dates AS date[])
+        ) AS t(series_id, report_date)
+    )
+    SELECT e.series_id, e.dimension, e.key, e.label, e.direct_pct, e.indirect_pct
+    FROM nport_lookthrough_exposures e
+    JOIN requested r
+      ON r.series_id = e.series_id
+     AND r.report_date = e.report_date
+    WHERE (CAST(:dimension AS text) IS NULL OR e.dimension = CAST(:dimension AS text))
+""")
+
+_HOLDINGS_TREE_BATCH_SQL = text("""
+    WITH requested AS (
+        SELECT *
+        FROM unnest(
+            CAST(:series_ids AS text[]),
+            CAST(:as_of_dates AS date[])
+        ) AS t(series_id, as_of_date)
+    )
+    SELECT h.series_id, h.report_date, h.cusip, h.isin, h.issuer_name,
+           h.asset_class, h.sector, h.currency, h.pct_of_nav
+    FROM requested r
+    JOIN LATERAL (
+        SELECT report_date
+        FROM sec_nport_holdings
+        WHERE series_id = r.series_id
+          AND report_date <= r.as_of_date
+        ORDER BY report_date DESC
+        LIMIT 1
+    ) latest ON TRUE
+    JOIN LATERAL (
+        SELECT series_id, report_date, cusip, isin, issuer_name, asset_class,
+               sector, currency, pct_of_nav
+        FROM sec_nport_holdings
+        WHERE series_id = r.series_id
+          AND report_date = latest.report_date
+          AND pct_of_nav IS NOT NULL
+        ORDER BY abs(pct_of_nav) DESC NULLS LAST
+        LIMIT CAST(:limit_rows AS integer)
+    ) h ON TRUE
+""")
+
+_CHILD_SERIES_MAP_SQL = text("""
+    WITH t2s AS (
+        SELECT upper(ticker) AS ticker, series_id
+        FROM sec_fund_classes
+        WHERE ticker IS NOT NULL AND series_id IS NOT NULL
+        UNION
+        SELECT upper(ticker), series_id
+        FROM sec_etfs
+        WHERE ticker IS NOT NULL AND series_id IS NOT NULL
+    ),
+    raw AS (
+        SELECT 'cusip' AS kind, m.cusip AS ident, t.series_id
+        FROM sec_cusip_ticker_map m
+        JOIN t2s t ON upper(m.ticker) = t.ticker
+        WHERE m.cusip = ANY(CAST(:cusips AS text[]))
+        UNION ALL
+        SELECT 'cusip', cusip_9, sec_series_id
+        FROM instrument_identity
+        WHERE cusip_9 = ANY(CAST(:cusips AS text[]))
+          AND sec_series_id IS NOT NULL
+        UNION ALL
+        SELECT 'isin', isin, sec_series_id
+        FROM instrument_identity
+        WHERE isin = ANY(CAST(:isins AS text[]))
+          AND sec_series_id IS NOT NULL
+        UNION ALL
+        SELECT 'isin', isin, series_id
+        FROM sec_etfs
+        WHERE isin = ANY(CAST(:isins AS text[]))
+          AND series_id IS NOT NULL
+        UNION ALL
+        SELECT 'isin', isin, attributes->>'series_id'
+        FROM instruments_universe
+        WHERE isin = ANY(CAST(:isins AS text[]))
+          AND attributes->>'series_id' IS NOT NULL
+    )
+    SELECT kind, ident, min(series_id) AS series_id
+    FROM raw
+    WHERE ident IS NOT NULL AND series_id IS NOT NULL
+    GROUP BY kind, ident
 """)
 
 
@@ -143,6 +242,72 @@ def _summary_from_row(row: Any) -> LookthroughSummary:
     )
 
 
+def _embedded_cusip9(isin: str | None) -> str | None:
+    """US ISINs embed the 9-char CUSIP at positions 3..11."""
+    if isin and len(isin) == 12 and isin.startswith("US"):
+        return isin[2:11]
+    return None
+
+
+def _issuer_key(cusip: str | None, isin: str | None) -> str:
+    cusip = (cusip or "").strip().upper()
+    isin = (isin or "").strip().upper() or None
+    if cusip and not cusip.startswith(SYNTHETIC_PREFIXES):
+        return cusip[:6]
+    if cusip.startswith("IS:"):
+        embedded = _embedded_cusip9(cusip[3:])
+        return embedded[:6] if embedded else cusip
+    if cusip:
+        return cusip
+    if isin:
+        embedded = _embedded_cusip9(isin)
+        return embedded[:6] if embedded else f"IS:{isin}"
+    return "UNKNOWN"
+
+
+def _security_key(cusip: str | None, isin: str | None) -> str:
+    cusip = (cusip or "").strip().upper()
+    isin = (isin or "").strip().upper()
+    if cusip:
+        return cusip
+    if isin:
+        return f"IS:{isin}"
+    return "UNKNOWN"
+
+
+def _child_lookup_key(row: Any) -> tuple[str | None, str | None]:
+    """Return possible CUSIP-9 / ISIN identifiers for child-fund matching."""
+    cusip = (getattr(row, "cusip", None) or "").strip().upper()
+    isin = (getattr(row, "isin", None) or "").strip().upper()
+    if cusip.startswith(UNIDENTIFIED_PREFIXES):
+        return None, None
+    if cusip.startswith("IS:"):
+        isin = isin or cusip[3:]
+        cusip = ""
+    embedded = _embedded_cusip9(isin) if isin else None
+    return (cusip or embedded), (isin or None)
+
+
+def _match_child_series(
+    row: Any, child_by_cusip: dict[str, str], child_by_isin: dict[str, str]
+) -> str | None:
+    cusip, isin = _child_lookup_key(row)
+    if cusip and (series_id := child_by_cusip.get(cusip)):
+        return series_id
+    if isin and (series_id := child_by_isin.get(isin)):
+        return series_id
+    return None
+
+
+def _node_id(kind: str, *parts: str) -> str:
+    cleaned = [
+        part.strip().replace("|", "/")
+        for part in parts
+        if part is not None and part.strip()
+    ]
+    return "|".join([kind, *cleaned])
+
+
 async def fetch_series_lookthrough(
     datalake: AsyncSession, series_id: str, dimension: str | None = None
 ) -> SeriesLookthrough | None:
@@ -162,18 +327,26 @@ async def fetch_many_lookthroughs(
     summaries = (
         await datalake.execute(_SUMMARY_SQL, {"series_ids": series_ids})
     ).all()
+    if not summaries:
+        return {}
+
+    exposures = (
+        await datalake.execute(
+            _EXPOSURES_BATCH_SQL,
+            {
+                "series_ids": [row.series_id for row in summaries],
+                "report_dates": [row.report_date for row in summaries],
+                "dimension": dimension,
+            },
+        )
+    ).all()
+    exposures_by_series: dict[str, list[Any]] = {}
+    for row in exposures:
+        exposures_by_series.setdefault(row.series_id, []).append(row)
+
     out: dict[str, SeriesLookthrough] = {}
     for row in summaries:
-        exposures = (
-            await datalake.execute(
-                _EXPOSURES_SQL,
-                {
-                    "series_ids": [row.series_id],
-                    "report_date": row.report_date,
-                    "dimension": dimension,
-                },
-            )
-        ).all()
+        series_exposures = exposures_by_series.get(row.series_id, [])
         out[row.series_id] = SeriesLookthrough(
             series_id=row.series_id,
             report_date=row.report_date,
@@ -185,11 +358,249 @@ async def fetch_many_lookthroughs(
                     direct_pct=float(e.direct_pct),
                     indirect_pct=float(e.indirect_pct),
                 )
-                for e in exposures
+                for e in series_exposures
             ],
             summary=_summary_from_row(row),
         )
     return out
+
+
+async def _fetch_tree_holdings(
+    datalake: AsyncSession,
+    requests: list[tuple[str, dt.date]],
+    *,
+    limit_rows: int = MAX_TREE_HOLDINGS_PER_SERIES,
+) -> dict[tuple[str, dt.date], list[Any]]:
+    if not requests:
+        return {}
+    unique = sorted(set(requests))
+    rows = (
+        await datalake.execute(
+            _HOLDINGS_TREE_BATCH_SQL,
+            {
+                "series_ids": [series_id for series_id, _ in unique],
+                "as_of_dates": [as_of_date for _, as_of_date in unique],
+                "limit_rows": limit_rows,
+            },
+        )
+    ).all()
+    out: dict[tuple[str, dt.date], list[Any]] = {key: [] for key in unique}
+    requested_by_series = {series_id: as_of_date for series_id, as_of_date in unique}
+    for row in rows:
+        as_of = requested_by_series.get(row.series_id)
+        if as_of is not None:
+            out.setdefault((row.series_id, as_of), []).append(row)
+    return out
+
+
+async def _resolve_child_series(
+    datalake: AsyncSession, rows: list[Any]
+) -> tuple[dict[str, str], dict[str, str]]:
+    cusips: set[str] = set()
+    isins: set[str] = set()
+    for row in rows:
+        cusip, isin = _child_lookup_key(row)
+        if cusip:
+            cusips.add(cusip)
+        if isin:
+            isins.add(isin)
+    if not cusips and not isins:
+        return {}, {}
+    result = (
+        await datalake.execute(
+            _CHILD_SERIES_MAP_SQL,
+            {"cusips": sorted(cusips), "isins": sorted(isins)},
+        )
+    ).all()
+    child_by_cusip: dict[str, str] = {}
+    child_by_isin: dict[str, str] = {}
+    for row in result:
+        if row.kind == "cusip":
+            child_by_cusip[row.ident] = row.series_id
+        elif row.kind == "isin":
+            child_by_isin[row.ident] = row.series_id
+    return child_by_cusip, child_by_isin
+
+
+def _build_tree_nodes(
+    leaf_totals: dict[tuple[str, str, str], dict[str, Any]],
+    *,
+    max_leaves: int,
+) -> list[ExposureTreeNode]:
+    visible = sorted(
+        (
+            data
+            for data in leaf_totals.values()
+            if float(data["value_pct"]) > 0.0
+        ),
+        key=lambda item: -float(item["value_pct"]),
+    )
+    visible_leaves = visible[:max_leaves]
+    omitted = visible[max_leaves:]
+    if omitted:
+        other_by_asset: dict[str, dict[str, Any]] = {}
+        for data in omitted:
+            asset_key = data["asset_key"]
+            other = other_by_asset.setdefault(
+                asset_key,
+                {
+                    "asset_key": asset_key,
+                    "asset_label": data["asset_label"],
+                    "issuer_key": "__OTHER__",
+                    "issuer_label": "Other holdings",
+                    "security_key": "__OTHER__",
+                    "security_label": "Other holdings",
+                    "value_pct": 0.0,
+                },
+            )
+            other["value_pct"] += float(data["value_pct"])
+        visible_leaves.extend(other_by_asset.values())
+
+    asset_totals: dict[str, float] = {}
+    issuer_totals: dict[tuple[str, str], float] = {}
+    for data in visible_leaves:
+        value = float(data["value_pct"])
+        asset_key = str(data["asset_key"])
+        issuer_key = str(data["issuer_key"])
+        asset_totals[asset_key] = asset_totals.get(asset_key, 0.0) + value
+        issuer_total_key = (asset_key, issuer_key)
+        issuer_totals[issuer_total_key] = (
+            issuer_totals.get(issuer_total_key, 0.0) + value
+        )
+
+    nodes: list[ExposureTreeNode] = []
+    asset_labels = {
+        data["asset_key"]: data["asset_label"] for data in visible_leaves
+    }
+    for asset_key, value in sorted(asset_totals.items(), key=lambda item: -item[1]):
+        nodes.append(
+            ExposureTreeNode(
+                id=_node_id("asset", asset_key),
+                parent_id=None,
+                key=asset_key,
+                label=asset_labels.get(asset_key) or asset_key,
+                kind="asset_class",
+                value_pct=value,
+            )
+        )
+
+    issuer_labels = {
+        (data["asset_key"], data["issuer_key"]): data["issuer_label"]
+        for data in visible_leaves
+    }
+    for (asset_key, issuer_key), value in sorted(
+        issuer_totals.items(), key=lambda item: (item[0][0], -item[1])
+    ):
+        nodes.append(
+            ExposureTreeNode(
+                id=_node_id("issuer", asset_key, issuer_key),
+                parent_id=_node_id("asset", asset_key),
+                key=issuer_key,
+                label=issuer_labels.get((asset_key, issuer_key)) or issuer_key,
+                kind="issuer",
+                value_pct=value,
+            )
+        )
+
+    for data in sorted(
+        visible_leaves,
+        key=lambda item: (item["asset_key"], item["issuer_key"], -float(item["value_pct"])),
+    ):
+        nodes.append(
+            ExposureTreeNode(
+                id=_node_id(
+                    "security",
+                    data["asset_key"],
+                    data["issuer_key"],
+                    data["security_key"],
+                ),
+                parent_id=_node_id("issuer", data["asset_key"], data["issuer_key"]),
+                key=data["security_key"],
+                label=data["security_label"] or data["security_key"],
+                kind="security",
+                value_pct=float(data["value_pct"]),
+            )
+        )
+    return nodes
+
+
+async def build_portfolio_exposure_tree(
+    datalake: AsyncSession,
+    weighted: list[tuple[float, SeriesLookthrough]],
+    *,
+    max_depth: int = MAX_TREE_DEPTH,
+    max_leaves: int = MAX_TREE_LEAVES,
+    holdings_per_series: int = MAX_TREE_HOLDINGS_PER_SERIES,
+) -> list[ExposureTreeNode]:
+    """Build asset-class → issuer → security nodes for portfolio drilldown.
+
+    Official totals still come from ``nport_lookthrough_exposures``. This tree
+    is a bounded visualization aid: it uses raw N-PORT rows in batches, follows
+    fund-of-fund edges when identifiable, and caps the security tail.
+    """
+    states: list[tuple[str, dt.date, float, frozenset[str]]] = [
+        (data.series_id, data.report_date, weight, frozenset({data.series_id}))
+        for weight, data in weighted
+        if weight > 0
+    ]
+    leaf_totals: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    for depth in range(max_depth + 1):
+        if not states:
+            break
+        holdings_by_series = await _fetch_tree_holdings(
+            datalake,
+            [(series_id, as_of) for series_id, as_of, _, _ in states],
+            limit_rows=holdings_per_series,
+        )
+        current_rows = [
+            row
+            for rows in holdings_by_series.values()
+            for row in rows
+        ]
+        child_by_cusip, child_by_isin = await _resolve_child_series(
+            datalake, current_rows
+        )
+        next_states: list[tuple[str, dt.date, float, frozenset[str]]] = []
+        for series_id, as_of, weight, ancestors in states:
+            for row in holdings_by_series.get((series_id, as_of), []):
+                raw_pct = float(row.pct_of_nav) if row.pct_of_nav is not None else 0.0
+                contribution = weight * raw_pct
+                child = _match_child_series(row, child_by_cusip, child_by_isin)
+                if child and child not in ancestors and depth < max_depth:
+                    next_states.append(
+                        (
+                            child,
+                            row.report_date,
+                            weight * raw_pct / 100.0,
+                            ancestors | {child},
+                        )
+                    )
+                    continue
+
+                asset_key = (row.asset_class or "UNKNOWN").strip().upper()
+                issuer_key = _issuer_key(row.cusip, row.isin)
+                security_key = _security_key(row.cusip, row.isin)
+                key = (asset_key, issuer_key, security_key)
+                entry = leaf_totals.setdefault(
+                    key,
+                    {
+                        "asset_key": asset_key,
+                        "asset_label": asset_key,
+                        "issuer_key": issuer_key,
+                        "issuer_label": row.issuer_name or issuer_key,
+                        "security_key": security_key,
+                        "security_label": row.issuer_name or security_key,
+                        "value_pct": 0.0,
+                    },
+                )
+                entry["value_pct"] += contribution
+                if row.issuer_name and entry["issuer_label"] == issuer_key:
+                    entry["issuer_label"] = row.issuer_name
+                    entry["security_label"] = row.issuer_name
+        states = next_states
+
+    return _build_tree_nodes(leaf_totals, max_leaves=max_leaves)
 
 
 # ---------------------------------------------------------------------------

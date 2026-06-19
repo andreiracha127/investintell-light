@@ -35,6 +35,7 @@ from app.ingestion.news import ensure_news
 from app.models.news_item import NewsItem
 from app.schemas._tickers import normalize_ticker
 from app.schemas.lookthrough import (
+    ExposureTreeNode as ExposureTreeNodeOut,
     PortfolioLookthroughResponse,
     UnexpandedPosition,
     build_dimensions,
@@ -502,6 +503,14 @@ async def get_portfolio_lookthrough(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
     datalake: Annotated[AsyncSession, Depends(get_datalake_session)],
+    dimension: str | None = Query(
+        default=None,
+        description="Optional exposure dimension filter.",
+    ),
+    include_tree: bool = Query(
+        default=False,
+        description="Include bounded asset-class/issuer/security drilldown nodes.",
+    ),
 ) -> PortfolioLookthroughResponse:
     """Exposição consolidada do portfólio atravessando os fundos (Frente C).
 
@@ -515,6 +524,11 @@ async def get_portfolio_lookthrough(
     if portfolio is None:
         raise HTTPException(
             status_code=404, detail=f"Portfolio {portfolio_id} not found."
+        )
+    if dimension is not None and dimension not in lookthrough.DIMENSIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported dimension {dimension!r}.",
         )
 
     positions = list(portfolio.positions)
@@ -551,7 +565,7 @@ async def get_portfolio_lookthrough(
         {series_by_ticker[t] for t in series_by_ticker}
     )
     lookthroughs = await lookthrough.fetch_many_lookthroughs(
-        datalake, series_ids
+        datalake, series_ids, dimension=dimension
     )
 
     weighted: list[tuple[float, lookthrough.SeriesLookthrough]] = []
@@ -581,6 +595,11 @@ async def get_portfolio_lookthrough(
             weighted.append((weight, lookthroughs[series_id]))
 
     rows, aggregates = lookthrough.consolidate_portfolio(weighted)
+    tree = (
+        await lookthrough.build_portfolio_exposure_tree(datalake, weighted)
+        if include_tree
+        else []
+    )
     return PortfolioLookthroughResponse(
         portfolio_id=portfolio.id,
         total_value=total_value,
@@ -590,5 +609,16 @@ async def get_portfolio_lookthrough(
         oldest_report_date=aggregates.oldest_report_date,
         n_funds_expanded=len(weighted),
         unexpanded=unexpanded,
-        dimensions=build_dimensions(rows),
+        dimensions=build_dimensions(rows, only=dimension),
+        tree=[
+            ExposureTreeNodeOut(
+                id=node.id,
+                parent_id=node.parent_id,
+                key=node.key,
+                label=node.label,
+                kind=node.kind,
+                value_pct=node.value_pct,
+            )
+            for node in tree
+        ],
     )

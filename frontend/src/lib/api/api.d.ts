@@ -2121,6 +2121,24 @@ export interface components {
             total_pct: number;
         };
         /**
+         * ExposureTreeNode
+         * @description Parent-linked node for drillable portfolio exposure charts.
+         */
+        ExposureTreeNode: {
+            /** Id */
+            id: string;
+            /** Parent Id */
+            parent_id: string | null;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Kind */
+            kind: string;
+            /** Value Pct */
+            value_pct: number;
+        };
+        /**
          * FilterBody
          * @description Bounds for PUT /screener/screens/{id}/filters/{metric_code}.
          *
@@ -4165,6 +4183,11 @@ export interface components {
             dimensions: {
                 [key: string]: components["schemas"]["ExposureItem"][];
             };
+            /**
+             * Tree
+             * @default []
+             */
+            tree: components["schemas"]["ExposureTreeNode"][];
         };
         /**
          * PortfolioMonteCarloParams
@@ -6567,7 +6590,12 @@ export interface operations {
     };
     get_portfolio_lookthrough_portfolios__portfolio_id__lookthrough_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Optional exposure dimension filter. */
+                dimension?: string | null;
+                /** @description Include bounded asset-class/issuer/security drilldown nodes. */
+                include_tree?: boolean;
+            };
             header?: never;
             path: {
                 portfolio_id: number;

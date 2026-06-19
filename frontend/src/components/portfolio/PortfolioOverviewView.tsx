@@ -32,13 +32,7 @@ import {
   type PortfolioTransactionBody,
   type PositionBody,
 } from "@/lib/api/client";
-import {
-  formatCompact,
-  formatCurrency,
-  formatDate,
-  formatNumber,
-  formatPercent,
-} from "@/lib/format";
+import { formatCurrency, formatDate, formatNumber, formatPercent } from "@/lib/format";
 import { parseDecimal } from "@/lib/parse";
 import { type AllocationSlice } from "@/lib/charts/types";
 import { buildHcAllocationOption } from "@/lib/charts/hc/allocation";
@@ -169,7 +163,11 @@ export function PortfolioOverviewView() {
         <div className="flex flex-col gap-px">
           {selected && (
             <>
-              <PortfolioManageBar selected={selected} onSelect={setSelectedId} />
+              <PortfolioManageBar
+                selected={selected}
+                activeSection={activeSection}
+                onSelect={setSelectedId}
+              />
               <PortfolioSectionTabs activeSection={activeSection} />
               {activeSection === "overview" && (
                 <OverviewSection
@@ -499,22 +497,26 @@ function PortfolioSwitcher({
 
 function PortfolioManageBar({
   selected,
+  activeSection,
   onSelect,
 }: {
   selected: PortfolioListItem;
+  activeSection: PortfolioSectionId;
   onSelect: (id: number | null) => void;
 }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
+  const showAsOf = activeSection === "overview";
 
   // Shares the overview cache with the section views — only for the EOD as-of.
   const overviewQuery = useQuery({
     queryKey: ["overview", selected.id],
     queryFn: ({ signal }) => fetchPortfolioOverview(selected.id, signal),
+    enabled: showAsOf,
     staleTime: 60_000,
     retry: retryPolicy,
   });
-  const asOf = overviewQuery.data?.aggregates.as_of ?? null;
+  const asOf = showAsOf ? (overviewQuery.data?.aggregates.as_of ?? null) : null;
 
   const invalidatePortfolio = (id: number) => {
     queryClient.invalidateQueries({ queryKey: ["portfolios"] });
@@ -1064,9 +1066,9 @@ function KpiStrip({
 }
 
 /**
- * Allocation donut + square-swatch legend. Slice values are the backend's
- * per-position market values (plus cash); percentages shown are the slices'
- * shares of the donut total — chart proportions, not finance.
+ * Allocation donut. Slice values are the backend's per-position market values
+ * (plus cash); percentages shown are the slices' shares of the donut total —
+ * chart proportions, not finance.
  */
 function AllocationPanel({
   overview,
@@ -1079,16 +1081,16 @@ function AllocationPanel({
 
   const slices = useMemo<Array<AllocationSlice & { displayName?: string }>>(() => {
     const positionSlices = positions.map((position) => ({
+      assetClass: position.asset_class ?? "equity",
       name: position.ticker,
       displayName: position.name ?? undefined,
       value: position.market_value,
     }));
     return aggregates.cash > 0
-      ? [...positionSlices, { name: "Cash", value: aggregates.cash }]
+      ? [...positionSlices, { assetClass: "cash", name: "Cash", value: aggregates.cash }]
       : positionSlices;
   }, [positions, aggregates.cash]);
 
-  const total = slices.reduce((sum, slice) => sum + slice.value, 0);
   const options = useMemo(
     () =>
       buildHcAllocationOption(slices, colors, {
@@ -1100,44 +1102,7 @@ function AllocationPanel({
 
   return (
     <Card title="Allocation" subtitle="· share by market value">
-      <div className="flex flex-col gap-3">
-        <HighchartsChart options={options} className="h-[190px] w-full" />
-        <div className="ix-thin-scroll flex max-h-[128px] flex-col overflow-y-auto tabular-nums">
-          {slices.map((slice, i) => (
-            <div
-              key={slice.name}
-              className="flex items-center gap-[9px] border-b border-border py-[3px] text-[12px] last:border-b-0"
-            >
-              <span
-                aria-hidden
-                className="h-2.5 w-2.5 shrink-0"
-                style={{
-                  background:
-                    slice.name === "Cash"
-                      ? colors.barMute
-                      : colors.categories[i % colors.categories.length],
-                }}
-              />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-bold leading-4 text-text-primary">
-                  {slice.name}
-                </span>
-                {slice.displayName && slice.displayName !== slice.name && (
-                  <span className="block truncate text-[10.5px] leading-3 text-text-muted">
-                    {slice.displayName}
-                  </span>
-                )}
-              </span>
-              <span className="shrink-0 text-text-muted">
-                ${formatCompact(slice.value)}
-              </span>
-              <span className="w-12 shrink-0 text-right font-bold text-text-primary">
-                {total > 0 ? formatPercent(slice.value / total, 1) : "—"}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
+      <HighchartsChart options={options} className="h-[360px] w-full" />
     </Card>
   );
 }

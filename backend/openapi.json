@@ -1074,6 +1074,36 @@
               "type": "integer",
               "title": "Portfolio Id"
             }
+          },
+          {
+            "name": "dimension",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional exposure dimension filter.",
+              "title": "Dimension"
+            },
+            "description": "Optional exposure dimension filter."
+          },
+          {
+            "name": "include_tree",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Include bounded asset-class/issuer/security drilldown nodes.",
+              "default": false,
+              "title": "Include Tree"
+            },
+            "description": "Include bounded asset-class/issuer/security drilldown nodes."
           }
         ],
         "responses": {
@@ -5452,6 +5482,52 @@
           "total_pct"
         ],
         "title": "ExposureItem"
+      },
+      "ExposureTreeNode": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "value_pct": {
+            "type": "number",
+            "title": "Value Pct"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "parent_id",
+          "key",
+          "label",
+          "kind",
+          "value_pct"
+        ],
+        "title": "ExposureTreeNode",
+        "description": "Parent-linked node for drillable portfolio exposure charts."
       },
       "FilterBody": {
         "properties": {
@@ -11174,6 +11250,14 @@
             },
             "type": "object",
             "title": "Dimensions"
+          },
+          "tree": {
+            "items": {
+              "$ref": "#/components/schemas/ExposureTreeNode"
+            },
+            "type": "array",
+            "title": "Tree",
+            "default": []
           }
         },
         "type": "object",

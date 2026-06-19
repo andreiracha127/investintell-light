@@ -4,36 +4,51 @@
  *
  * One parent tile per exposure bucket (asset class / sector / currency /
  * issuer), sized by its total portfolio weight and colored from the categorical
- * palette (Cash → muted grey). Each bucket splits into up to two leaf tiles —
- * "Direct" and "Via funds" — sized by the direct/indirect split the backend
- * look-through provides, brightened from the parent color. Tile area therefore
- * equals portfolio weight, matching the bars it replaces.
- *
- * NOTE: the backend look-through aggregates by bucket (ExposureItem with
- * direct/indirect/total), so leaves are the direct-vs-fund split, not the
- * individual underlying holdings. Per-holding drill-down would need a
- * holding×bucket matrix the API does not expose.
+ * palette (Cash → muted grey). Tile area is total exposure; direct/indirect is
+ * intentionally not split here because the portfolio view is about final
+ * look-through exposure.
  *
  * Chrome (tooltip styling) is owned by the global Graphite theme; the builder
  * sets only the series, token colors, and percent formatting.
  */
 import type { Options, PointOptionsObject } from "highcharts";
 
-import type { ExposureItem } from "@/lib/api/client";
+import type { ExposureItem, PortfolioLookthrough } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
 import { formatNumber } from "@/lib/format";
 
 const isCash = (label: string) => label.trim().toLowerCase() === "cash";
 const round2 = (v: number) => parseFloat(v.toFixed(4));
 
+const ASSET_CLASS_LABELS: Record<string, string> = {
+  ABS: "Asset-backed securities",
+  "ABS-MBS": "ABS / MBS",
+  C: "Cash and equivalents",
+  CE: "Cash and equivalents",
+  CMBS: "Commercial MBS",
+  CORP: "Corporate bonds",
+  DBT: "Debt",
+  EC: "Equity",
+  EP: "Preferred equity",
+  MBS: "Mortgage-backed securities",
+  RA: "Real assets",
+  RE: "Real estate",
+  STIV: "Short-term investments",
+  UST: "U.S. Treasuries",
+};
+
 export interface ExposureTreemapConfig {
-  /**
-   * Opt-in zoomable look-through: click a bucket to zoom into its leaves, click
-   * the header breadcrumb to zoom back out (`allowTraversingTree` + a level-1
-   * traverse-up button). Off by default so existing callers keep the flat,
-   * non-traversable two-level map.
-   */
-  traversable?: boolean;
+  dimension?: string | null;
+  tree?: PortfolioLookthrough["tree"];
+}
+
+export function exposureBucketLabel(item: ExposureItem, dimension?: string | null): string {
+  const raw = item.label ?? item.key;
+  if (dimension === "asset_class") {
+    const key = item.key.trim().toUpperCase();
+    return ASSET_CLASS_LABELS[key] ?? raw;
+  }
+  return raw;
 }
 
 /**
@@ -48,36 +63,27 @@ export function buildHcExposureTreemapOption(
   colors: ChartColors,
   config: ExposureTreemapConfig = {},
 ): Options {
+  if (config.dimension === "asset_class" && config.tree && config.tree.length > 0) {
+    return buildTreeExposureTreemapOption(config.tree, colors);
+  }
+
   const sorted = [...items]
     .filter((item) => item.total_pct > 0)
     .sort((a, b) => b.total_pct - a.total_pct);
 
   const data: PointOptionsObject[] = [];
   sorted.forEach((item, i) => {
-    const label = item.label ?? item.key;
-    const parentId = `bucket-${i}`;
+    const label = exposureBucketLabel(item, config.dimension);
     const color = isCash(label)
       ? colors.barMute
       : colors.categories[i % colors.categories.length];
-    data.push({ id: parentId, name: label, color });
-
-    const direct = round2(item.direct_pct);
-    const indirect = round2(item.indirect_pct);
-    if (direct > 0) {
-      data.push({ name: "Direct", parent: parentId, value: direct, custom: { bucket: label } });
-    }
-    if (indirect > 0) {
-      data.push({ name: "Via funds", parent: parentId, value: indirect, custom: { bucket: label } });
-    }
-    // Bucket with a positive total but no direct/indirect split: one full leaf.
-    if (direct <= 0 && indirect <= 0) {
-      data.push({
-        name: label,
-        parent: parentId,
-        value: round2(item.total_pct),
-        custom: { bucket: label },
-      });
-    }
+    data.push({
+      id: `bucket-${i}`,
+      name: label,
+      value: round2(item.total_pct),
+      color,
+      custom: { rawKey: item.key },
+    });
   });
 
   return {
@@ -91,14 +97,14 @@ export function buildHcExposureTreemapOption(
             point: {
               name: string;
               value?: number;
-              options: { custom?: { bucket?: string } };
+              options: { custom?: { rawKey?: string } };
             };
           }
         ).point;
-        const bucket = point.options.custom?.bucket;
+        const rawKey = point.options.custom?.rawKey;
         const value = point.value ?? 0;
-        if (bucket && bucket !== point.name) {
-          return `<div style="font-size:12px"><b>${bucket}</b> · ${point.name}<br/>${formatNumber(
+        if (rawKey && rawKey !== point.name) {
+          return `<div style="font-size:12px"><b>${point.name}</b> <span style="opacity:.65">(${rawKey})</span><br/>${formatNumber(
             value,
             2,
           )}% of portfolio</div>`;
@@ -114,7 +120,7 @@ export function buildHcExposureTreemapOption(
         type: "treemap",
         name: "Exposure",
         layoutAlgorithm: "squarified",
-        allowTraversingTree: config.traversable === true,
+        allowTraversingTree: false,
         animationLimit: 1000,
         // Header breadcrumb on the bucket level so zoom-out is one click. Only
         // meaningful when traversal is on; Highcharts ignores it otherwise.
@@ -137,16 +143,134 @@ export function buildHcExposureTreemapOption(
               },
             },
           },
+        ],
+        data,
+      },
+    ],
+  };
+}
+
+function treeNodeLabel(node: PortfolioLookthrough["tree"][number]): string {
+  if (node.kind === "asset_class") {
+    const key = node.key.trim().toUpperCase();
+    return ASSET_CLASS_LABELS[key] ?? node.label;
+  }
+  return node.label;
+}
+
+function buildTreeExposureTreemapOption(
+  tree: PortfolioLookthrough["tree"],
+  colors: ChartColors,
+): Options {
+  const parentIds = new Set(
+    tree
+      .map((node) => node.parent_id)
+      .filter((id): id is string => Boolean(id)),
+  );
+  const topLevel = tree.filter((node) => !node.parent_id);
+  const colorByTopId = new Map(
+    topLevel.map((node, i) => [
+      node.id,
+      isCash(treeNodeLabel(node))
+        ? colors.barMute
+        : colors.categories[i % colors.categories.length],
+    ]),
+  );
+
+  const topAncestorColor = (node: PortfolioLookthrough["tree"][number]) => {
+    if (!node.parent_id) return colorByTopId.get(node.id);
+    const parent = tree.find((candidate) => candidate.id === node.parent_id);
+    if (!parent) return undefined;
+    if (!parent.parent_id) return colorByTopId.get(parent.id);
+    const grandparent = tree.find((candidate) => candidate.id === parent.parent_id);
+    return grandparent ? colorByTopId.get(grandparent.id) : undefined;
+  };
+
+  const data: PointOptionsObject[] = tree.map((node) => {
+    const hasChildren = parentIds.has(node.id);
+    return {
+      id: node.id,
+      parent: node.parent_id ?? undefined,
+      name: treeNodeLabel(node),
+      value: hasChildren ? undefined : round2(node.value_pct),
+      color: topAncestorColor(node),
+      custom: { rawKey: node.key, valuePct: node.value_pct, kind: node.kind },
+    };
+  });
+
+  return {
+    chart: { type: "treemap" },
+    legend: { enabled: false },
+    tooltip: {
+      useHTML: true,
+      formatter() {
+        const point = (
+          this as unknown as {
+            point: {
+              name: string;
+              options: {
+                custom?: { rawKey?: string; valuePct?: number; kind?: string };
+              };
+            };
+          }
+        ).point;
+        const rawKey = point.options.custom?.rawKey;
+        const value = point.options.custom?.valuePct ?? 0;
+        const suffix = rawKey && rawKey !== point.name ? ` <span style="opacity:.65">(${rawKey})</span>` : "";
+        return `<div style="font-size:12px"><b>${point.name}</b>${suffix}<br/>${formatNumber(
+          value,
+          2,
+        )}% of portfolio</div>`;
+      },
+    },
+    series: [
+      {
+        type: "treemap",
+        name: "Exposure",
+        layoutAlgorithm: "squarified",
+        allowTraversingTree: true,
+        animationLimit: 1000,
+        traverseUpButton: { position: { align: "left", x: 0, y: 0 } },
+        levels: [
+          {
+            level: 1,
+            borderWidth: 3,
+            borderColor: colors.surface,
+            layoutAlgorithm: "squarified",
+            dataLabels: {
+              enabled: true,
+              align: "left",
+              verticalAlign: "top",
+              style: {
+                color: colors.textOnAccent,
+                fontWeight: "bold",
+                fontSize: "11px",
+                textOutline: "none",
+              },
+            },
+          },
           {
             level: 2,
-            borderWidth: 1,
+            borderWidth: 2,
             borderColor: colors.surface,
-            colorVariation: { key: "brightness", to: 0.45 },
             dataLabels: {
               enabled: true,
               style: {
-                color: colors.text,
-                fontWeight: "normal",
+                color: colors.textOnAccent,
+                fontWeight: "bold",
+                fontSize: "10.5px",
+                textOutline: "none",
+              },
+            },
+          },
+          {
+            level: 3,
+            borderWidth: 1,
+            borderColor: colors.surface,
+            dataLabels: {
+              enabled: true,
+              style: {
+                color: colors.textOnAccent,
                 fontSize: "10px",
                 textOutline: "none",
               },

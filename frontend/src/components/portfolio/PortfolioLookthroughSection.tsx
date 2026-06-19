@@ -3,10 +3,8 @@
 /**
  * Consolidated exposure (look-through) for the portfolio page — Claude Design.
  *
- * Fetches portfolio look-through data and renders the design's exposure view:
- * a KPI strip, a dimension tab bar (asset class / sector / currency / issuer —
- * whatever the backend returns), and a look-through TREEMAP whose tile area is
- * each bucket's portfolio weight, split into Direct / Via funds leaves.
+ * Fetches one portfolio look-through hierarchy and renders the exposure view:
+ * a KPI strip plus one Sunburst replacing the old four heavy dimension tabs.
  *
  * The shared `LookthroughPanel` (bar variant) stays in use by the fund pages;
  * this view is portfolio-specific so the funds UI is untouched. 404 → renders
@@ -15,34 +13,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { ApiError, fetchPortfolioLookthrough } from "@/lib/api/client";
+import {
+  ApiError,
+  fetchPortfolioLookthroughTree,
+} from "@/lib/api/client";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
-import { buildHcExposureTreemapOption } from "@/lib/charts/hc/treemap";
+import { buildHcExposureSunburstOption } from "@/lib/charts/hc/sunburst";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { InfoDot, KpiTile } from "@/components/ui/panels";
 import { formatDate, formatNumber } from "@/lib/format";
 
 const LOOKTHROUGH_TIP =
   "“Look-through”: sees through each fund/ETF in the portfolio down to its final underlying holdings, aggregating true exposure by asset class, sector, currency and issuer.";
-
-const DIM_LABELS: Record<string, string> = {
-  asset_class: "Asset class",
-  sector: "Sector",
-  currency: "Currency",
-  issuer: "Issuer",
-  country: "Country",
-  region: "Region",
-};
-
-function dimLabel(key: string): string {
-  return (
-    DIM_LABELS[key] ??
-    key
-      .replace(/_/g, " ")
-      .replace(/\b\w/g, (c) => c.toUpperCase())
-  );
-}
 
 export function PortfolioLookthroughSection({
   portfolioId,
@@ -55,11 +38,9 @@ export function PortfolioLookthroughSection({
     setColors(chartColors());
   }, []);
 
-  const [dim, setDim] = useState<string | null>(null);
-
   const query = useQuery({
-    queryKey: ["portfolio-lookthrough", portfolioId],
-    queryFn: ({ signal }) => fetchPortfolioLookthrough(portfolioId, signal),
+    queryKey: ["portfolio-lookthrough-sunburst", portfolioId],
+    queryFn: ({ signal }) => fetchPortfolioLookthroughTree(portfolioId, signal),
     staleTime: 60_000,
     retry: (failureCount, err) => {
       if (err instanceof ApiError && err.status === 404) return false;
@@ -67,18 +48,12 @@ export function PortfolioLookthroughSection({
     },
   });
 
-  const dims = useMemo(
-    () => (query.data ? Object.keys(query.data.dimensions) : []),
-    [query.data],
-  );
-  const activeDim = dim && dims.includes(dim) ? dim : (dims[0] ?? null);
-
-  const treemapOption = useMemo(() => {
-    if (!colors || !query.data || !activeDim) return null;
-    return buildHcExposureTreemapOption(query.data.dimensions[activeDim] ?? [], colors, {
-      traversable: true,
-    });
-  }, [colors, query.data, activeDim]);
+  const assetItems = query.data?.dimensions.asset_class ?? [];
+  const tree = query.data?.tree ?? [];
+  const sunburstOption = useMemo(() => {
+    if (!colors || !query.data) return null;
+    return buildHcExposureSunburstOption(tree, assetItems, colors);
+  }, [colors, query.data, tree, assetItems]);
 
   if (
     query.isError &&
@@ -107,17 +82,11 @@ export function PortfolioLookthroughSection({
   }
 
   const data = query.data;
-  if (dims.length === 0) return null;
+  if (tree.length === 0 && assetItems.length === 0) return null;
 
   // ── KPIs (computed defensively from the dimensions that exist) ──────────
-  const currencyItems = data.dimensions.currency ?? [];
-  const nonUsd = currencyItems
-    .filter((i) => (i.label ?? i.key).toUpperCase() !== "USD")
-    .reduce((sum, i) => sum + i.total_pct, 0);
-  const assetItems = data.dimensions.asset_class ?? [];
-  const intl = assetItems
-    .filter((i) => /intl|international/i.test(i.label ?? i.key))
-    .reduce((sum, i) => sum + i.total_pct, 0);
+  const securityCount = tree.filter((node) => node.kind === "security").length;
+  const assetClassCount = tree.filter((node) => node.kind === "asset_class").length;
 
   return (
     <div className="flex flex-col gap-px">
@@ -144,60 +113,32 @@ export function PortfolioLookthroughSection({
           tip="Funds/ETFs whose final holdings were looked through."
         />
         <KpiTile label="Cash weight" value={`${formatNumber(data.cash_weight_pct, 1)}%`} />
-        {currencyItems.length > 0 && (
-          <KpiTile
-            label="Non-USD exposure"
-            value={`${formatNumber(nonUsd, 1)}%`}
-            tip="Sum of weights in currencies other than the US dollar."
-          />
-        )}
-        {intl > 0 && (
-          <KpiTile label="International equity" value={`${formatNumber(intl, 1)}%`} />
-        )}
+        <KpiTile
+          label="Asset classes"
+          value={formatNumber(assetClassCount || assetItems.length, 0)}
+        />
+        <KpiTile
+          label="Final holdings"
+          value={formatNumber(securityCount, 0)}
+          tip="Visible final holdings in the bounded drilldown tree."
+        />
       </div>
 
-      <div
-        role="tablist"
-        aria-label="Exposure dimension"
-        className="flex flex-wrap gap-px border border-border bg-border"
-      >
-        {dims.map((key) => {
-          const active = key === activeDim;
-          return (
-            <button
-              key={key}
-              role="tab"
-              type="button"
-              aria-selected={active}
-              onClick={() => setDim(key)}
-              className={`h-[34px] min-w-[120px] flex-1 border-b-2 px-3.5 text-[11px] font-bold uppercase tracking-[0.06em] ${
-                active
-                  ? "border-accent bg-[var(--color-accent-wash)] text-accent"
-                  : "border-transparent bg-surface-2 text-text-secondary hover:bg-layer-hover"
-              }`}
-            >
-              {dimLabel(key)}
-            </button>
-          );
-        })}
-      </div>
-
-      <section className="ix-pad border border-t-0 border-border bg-surface-2">
+      <section className="ix-pad border border-border bg-surface-2">
         <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
           <h3 className="ix-label m-0">
-            Look-through map · {activeDim ? dimLabel(activeDim) : ""} → holdings
+            Look-through sunburst
           </h3>
           <span className="text-[10.5px] text-text-muted">
-            Tile area = portfolio weight · click a group to zoom in, click the
-            header to zoom out · groups split into Direct vs. Via funds
+            Asset class → issuer → holding
           </span>
         </div>
-        {treemapOption && (
+        {sunburstOption && (
           <HighchartsChart
-            options={treemapOption}
-            className="h-[480px] w-full"
-            isEmpty={(data.dimensions[activeDim ?? ""] ?? []).length === 0}
-            emptyMessage="No exposure to map for this dimension."
+            options={sunburstOption}
+            className="h-[340px] w-full md:h-[380px]"
+            isEmpty={tree.length === 0}
+            emptyMessage="No exposure hierarchy available."
           />
         )}
       </section>

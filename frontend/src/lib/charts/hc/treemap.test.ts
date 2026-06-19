@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { SeriesTreemapOptions } from "highcharts";
 
-import { buildHcExposureTreemapOption } from "@/lib/charts/hc/treemap";
-import type { ExposureItem } from "@/lib/api/client";
+import {
+  buildHcExposureTreemapOption,
+  exposureBucketLabel,
+} from "@/lib/charts/hc/treemap";
+import type { ExposureItem, PortfolioLookthrough } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
 
 const COLORS: ChartColors = {
@@ -45,16 +48,54 @@ describe("buildHcExposureTreemapOption", () => {
     expect(series.layoutAlgorithm).toBe("squarified");
   });
 
-  it("is non-traversable by default", () => {
+  it("keeps the flat fallback non-traversable", () => {
     const opt = buildHcExposureTreemapOption(ITEMS, COLORS);
     const series = opt.series?.[0] as SeriesTreemapOptions;
     expect(series.allowTraversingTree).toBe(false);
   });
 
-  it("opts into a zoomable (traversable) tree when configured", () => {
-    const opt = buildHcExposureTreemapOption(ITEMS, COLORS, { traversable: true });
+  it("uses the asset-class hierarchy when tree nodes are available", () => {
+    const tree: PortfolioLookthrough["tree"] = [
+      {
+        id: "asset|EC",
+        parent_id: null,
+        key: "EC",
+        label: "EC",
+        kind: "asset_class",
+        value_pct: 60,
+      },
+      {
+        id: "issuer|EC|037833",
+        parent_id: "asset|EC",
+        key: "037833",
+        label: "Apple Inc",
+        kind: "issuer",
+        value_pct: 60,
+      },
+      {
+        id: "security|EC|037833|037833100",
+        parent_id: "issuer|EC|037833",
+        key: "037833100",
+        label: "Apple Inc",
+        kind: "security",
+        value_pct: 60,
+      },
+    ];
+    const opt = buildHcExposureTreemapOption(ITEMS, COLORS, {
+      dimension: "asset_class",
+      tree,
+    });
     const series = opt.series?.[0] as SeriesTreemapOptions;
+    const data = series.data as Array<{
+      id?: string;
+      name: string;
+      parent?: string;
+      value?: number;
+    }>;
     expect(series.allowTraversingTree).toBe(true);
+    expect(data.find((d) => d.id === "asset|EC")?.name).toBe("Equity");
+    expect(data.find((d) => d.id === "asset|EC")?.value).toBeUndefined();
+    expect(data.find((d) => d.id === "security|EC|037833|037833100")?.value).toBe(60);
   });
 
   it("drops buckets with zero total", () => {
@@ -64,7 +105,7 @@ describe("buildHcExposureTreemapOption", () => {
     expect(names).not.toContain("Empty");
   });
 
-  it("emits a parent tile plus direct/indirect leaves per bucket", () => {
+  it("emits one tile per bucket sized by total exposure", () => {
     const opt = buildHcExposureTreemapOption(ITEMS, COLORS);
     const series = opt.series?.[0] as SeriesTreemapOptions;
     const data = series.data as Array<{
@@ -73,30 +114,28 @@ describe("buildHcExposureTreemapOption", () => {
       parent?: string;
       value?: number;
     }>;
-    // US Equity: parent + Direct(40) + Via funds(10).
-    const usParent = data.find((d) => d.id === "bucket-0");
-    expect(usParent?.name).toBe("US Equity");
-    const usLeaves = data.filter((d) => d.parent === "bucket-0");
-    expect(usLeaves.map((l) => l.name)).toEqual(["Direct", "Via funds"]);
-    expect(usLeaves.map((l) => l.value)).toEqual([40, 10]);
+    const usTile = data.find((d) => d.id === "bucket-0");
+    expect(usTile?.name).toBe("US Equity");
+    expect(usTile?.value).toBe(50);
+    expect(data.some((d) => d.parent)).toBe(false);
   });
 
-  it("emits a single Via funds leaf when there is no direct exposure", () => {
+  it("uses total exposure even when there is no direct exposure", () => {
     const opt = buildHcExposureTreemapOption(ITEMS, COLORS);
     const series = opt.series?.[0] as SeriesTreemapOptions;
-    const data = series.data as Array<{ name: string; parent?: string; value?: number }>;
-    const fiLeaves = data.filter((d) => d.parent === "bucket-1");
-    expect(fiLeaves.map((l) => l.name)).toEqual(["Via funds"]);
-    expect(fiLeaves[0]?.value).toBe(30);
+    const data = series.data as Array<{ id?: string; name: string; value?: number }>;
+    const fiTile = data.find((d) => d.id === "bucket-1");
+    expect(fiTile?.name).toBe("Fixed Income");
+    expect(fiTile?.value).toBe(30);
   });
 
-  it("falls back to a single full leaf for a bucket with total but no split (Cash)", () => {
+  it("keeps a bucket with total but no direct/indirect split", () => {
     const opt = buildHcExposureTreemapOption(ITEMS, COLORS);
     const series = opt.series?.[0] as SeriesTreemapOptions;
-    const data = series.data as Array<{ name: string; parent?: string; value?: number }>;
-    const cashLeaves = data.filter((d) => d.parent === "bucket-2");
-    expect(cashLeaves).toHaveLength(1);
-    expect(cashLeaves[0]?.value).toBe(20);
+    const data = series.data as Array<{ id?: string; name: string; value?: number }>;
+    const cashTile = data.find((d) => d.id === "bucket-2");
+    expect(cashTile?.name).toBe("Cash");
+    expect(cashTile?.value).toBe(20);
   });
 
   it("colors the Cash bucket with the muted grey", () => {
@@ -109,5 +148,26 @@ describe("buildHcExposureTreemapOption", () => {
     const input = [...ITEMS];
     buildHcExposureTreemapOption(input, COLORS);
     expect(input).toEqual(ITEMS);
+  });
+
+  it("sanitizes N-PORT asset class codes", () => {
+    expect(
+      exposureBucketLabel(
+        { key: "EC", label: null, direct_pct: 100, indirect_pct: 0, total_pct: 100 },
+        "asset_class",
+      ),
+    ).toBe("Equity");
+    expect(
+      exposureBucketLabel(
+        { key: "DBT", label: null, direct_pct: 20, indirect_pct: 0, total_pct: 20 },
+        "asset_class",
+      ),
+    ).toBe("Debt");
+    expect(
+      exposureBucketLabel(
+        { key: "RA", label: null, direct_pct: 10, indirect_pct: 0, total_pct: 10 },
+        "asset_class",
+      ),
+    ).toBe("Real assets");
   });
 });

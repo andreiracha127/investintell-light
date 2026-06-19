@@ -1270,6 +1270,17 @@ export function fetchPortfolioLookthrough(
   );
 }
 
+/** Fetch the bounded drilldown tree for portfolio look-through charts. */
+export function fetchPortfolioLookthroughTree(
+  portfolioId: number,
+  signal?: AbortSignal,
+): Promise<PortfolioLookthrough> {
+  return request<PortfolioLookthrough>(
+    `/portfolios/${portfolioId}/lookthrough?include_tree=true&dimension=asset_class`,
+    signal,
+  );
+}
+
 /** Fetch the current macro regime signals and recent regime flips. */
 export function fetchMacroRegime(signal?: AbortSignal): Promise<MacroRegime> {
   return requestPublic<MacroRegime>("/macro/regime", signal);

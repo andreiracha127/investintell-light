@@ -48,6 +48,10 @@ const COLUMNS: {
 const NUMERIC_KEYS = new Set<SortKey>(["last", "change", "change_pct", "volume"]);
 const PAGE = 20;
 
+function formatCompanyName(name: string | null | undefined): string {
+  return (name ?? "").toLowerCase().replace(/\b([\p{L}\p{N}])/gu, (char) => char.toUpperCase());
+}
+
 function compareRows(a: LeaderRow, b: LeaderRow, key: SortKey, dir: "asc" | "desc"): number {
   let result: number;
   if (key === "ticker") result = a.ticker.localeCompare(b.ticker);
@@ -231,7 +235,9 @@ export function LeadersTable({ overview }: { overview: MarketOverview }) {
                       }`}
                     >
                       <td className="px-3 py-1.5 font-bold text-accent">{r.ticker}</td>
-                      <td className="max-w-[240px] truncate px-3 py-1.5 text-text-secondary">{r.name}</td>
+                      <td className="max-w-[240px] truncate px-3 py-1.5 text-text-secondary">
+                        {formatCompanyName(r.name)}
+                      </td>
                       <td className={`px-3 py-1.5 text-right font-bold text-text-primary ${flash}`}>
                         {formatCurrency(last)}
                       </td>
