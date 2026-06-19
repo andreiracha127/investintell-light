@@ -20,8 +20,11 @@ class Screen(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
-    # Display name — unique across the (single-tenant) installation.
-    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    # Display name — unique per owner (composite unique with owner_sub).
+    name: Mapped[str] = mapped_column(String, nullable=False)
+
+    owner_sub: Mapped[str] = mapped_column(String, nullable=False)
+    org_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Audit timestamps — both tz-aware, server-set (same conventions and
     # Core-update caveat as Portfolio).
@@ -48,6 +51,8 @@ class Screen(Base):
         passive_deletes=True,
         order_by="ScreenFilter.position, ScreenFilter.id",
     )
+
+    __table_args__ = (UniqueConstraint("owner_sub", "name"),)
 
 
 class ScreenFilter(Base):

@@ -31,8 +31,13 @@ class Portfolio(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
-    # Display name — unique across the (single-tenant) installation.
-    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    # Display name — unique per owner (composite unique with owner_sub).
+    name: Mapped[str] = mapped_column(String, nullable=False)
+
+    # Dono (JWT sub) — escopo de isolamento. org_id (JWT org_id) é gravado mas
+    # não filtrado ainda (preparação para compartilhamento por organização).
+    owner_sub: Mapped[str] = mapped_column(String, nullable=False)
+    org_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Uninvested cash balance, in currency units.
     cash: Mapped[float] = mapped_column(nullable=False, server_default="0")
@@ -73,9 +78,10 @@ class Portfolio(Base):
     )
 
     # The Base naming convention expands "origin" to "ck_portfolios_origin"
-    # (matches migration 0007).
+    # (matches migration 0007). The UniqueConstraint covers lookups by owner_sub.
     __table_args__ = (
         CheckConstraint("origin IN ('manual', 'builder')", name="origin"),
+        UniqueConstraint("owner_sub", "name"),
     )
 
 

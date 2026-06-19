@@ -135,12 +135,13 @@ def test_news_items_published_at_index_exists() -> None:
 # ---------------------------------------------------------------------------
 
 def test_portfolios_name_is_unique() -> None:
-    name_constraints = {
-        c.name
-        for c in _table("portfolios").constraints
-        if isinstance(c, UniqueConstraint)
+    # Task 2 (migration 0013): uniqueness is now per-owner (composite), not global.
+    uniques = {
+        tuple(sorted(c.name for c in con.columns))
+        for con in _table("portfolios").constraints
+        if isinstance(con, UniqueConstraint)
     }
-    assert "uq_portfolios_name" in name_constraints
+    assert ("name", "owner_sub") in uniques
 
 
 def test_portfolios_cash_has_server_default() -> None:
@@ -365,7 +366,13 @@ def test_screens_tables_registered() -> None:
 def test_screens_name_unique_and_audit_columns() -> None:
     name = _col("screens", "name")
     assert name.nullable is False
-    assert name.unique is True
+    # Task 2 (migration 0013): uniqueness is now per-owner composite, not global.
+    uniques = {
+        tuple(sorted(c.name for c in con.columns))
+        for con in _table("screens").constraints
+        if isinstance(con, UniqueConstraint)
+    }
+    assert ("name", "owner_sub") in uniques
     for col_name in ("created_at", "updated_at"):
         col = _col("screens", col_name)
         assert col.nullable is False
@@ -538,3 +545,35 @@ def test_fund_holdings_composite_pk_and_no_truncation_flag() -> None:
     ]
     # Frente C: o flag is_top50_truncated foi aposentado (migration 0008).
     assert "is_top50_truncated" not in table.c
+
+
+# ---------------------------------------------------------------------------
+# Per-owner isolation (Task 2 — migration 0013)
+# ---------------------------------------------------------------------------
+
+def test_portfolio_has_owner_columns_and_composite_unique() -> None:
+    from app.models.portfolio import Portfolio
+
+    cols = Portfolio.__table__.c
+    assert "owner_sub" in cols and not cols["owner_sub"].nullable
+    assert "org_id" in cols and cols["org_id"].nullable
+    uniques = {
+        tuple(sorted(c.name for c in con.columns))
+        for con in Portfolio.__table__.constraints
+        if con.__class__.__name__ == "UniqueConstraint"
+    }
+    assert ("name", "owner_sub") in uniques
+
+
+def test_screen_has_owner_columns_and_composite_unique() -> None:
+    from app.models.screen import Screen
+
+    cols = Screen.__table__.c
+    assert "owner_sub" in cols and not cols["owner_sub"].nullable
+    assert "org_id" in cols and cols["org_id"].nullable
+    uniques = {
+        tuple(sorted(c.name for c in con.columns))
+        for con in Screen.__table__.constraints
+        if con.__class__.__name__ == "UniqueConstraint"
+    }
+    assert ("name", "owner_sub") in uniques
