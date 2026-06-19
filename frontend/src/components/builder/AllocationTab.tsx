@@ -8,7 +8,7 @@
  */
 import { useMutation, useQueries } from "@tanstack/react-query";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   fetchFundProfile,
@@ -25,14 +25,13 @@ import { formatNumber, formatPercent } from "@/lib/format";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { Card, KpiTile, valueTone } from "@/components/ui/panels";
 import {
-  BUTTON_CLASS,
   BUTTON_PRIMARY_CLASS,
   ErrorPanel,
   FIELD_LABEL_CLASS,
   INPUT_CLASS,
 } from "@/components/screener/shared";
 
-import { METRIC_COPY } from "./BuilderCopy";
+import { METRIC_COPY, OBJECTIVE_COPY } from "./BuilderCopy";
 import { assetKey, assetName, assetTicker, type UniverseAsset } from "./assets";
 import { SelectionDiagnostics } from "./SelectionDiagnostics";
 import { DataGrid } from "@/components/ui/DataGrid";
@@ -93,6 +92,13 @@ function lastNav(profile: FundProfile | undefined): number | null {
   return null;
 }
 
+/** Actions the Allocation tab surfaces so the results header can host them. */
+export interface AllocationActions {
+  exportCsv: () => void;
+  toggleSave: () => void;
+  saveOpen: boolean;
+}
+
 export function AllocationTab({
   result,
   objective,
@@ -101,6 +107,7 @@ export function AllocationTab({
   colors,
   grouped,
   cvarLimitPct,
+  onRegisterActions,
 }: {
   result: OptimizeResponse;
   objective: BuilderObjective;
@@ -109,6 +116,8 @@ export function AllocationTab({
   colors: ChartColors | null;
   grouped: boolean;
   cvarLimitPct: string | null;
+  /** Lift Export/Save controls into the results header (Builder.dc.html). */
+  onRegisterActions?: (actions: AllocationActions | null) => void;
 }) {
   const { weights, expected, diagnostics } = result;
   const requestedCvar =
@@ -147,7 +156,7 @@ export function AllocationTab({
   /* ── Save as portfolio (with the optional execution step, F8.6b) ───── */
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveName, setSaveName] = useState(
-    () => `Builder ${objective} ${new Date().toISOString().slice(0, 10)}`,
+    () => `Builder · ${OBJECTIVE_COPY[objective].label}`,
   );
   const [notionalText, setNotionalText] = useState("1000000");
   const [execution, setExecution] = useState<Record<string, ExecutionInputs>>({});
@@ -332,6 +341,7 @@ export function AllocationTab({
         ? buildHcAllocationOption(
             rows.map((r) => ({ name: r.ticker, value: r.weight })),
             colors,
+            { dataLabels: true },
           )
         : null,
     [rows, colors],
@@ -345,6 +355,7 @@ export function AllocationTab({
               value: weight,
             })),
             colors,
+            { dataLabels: true },
           )
         : null,
     [base, colors],
@@ -368,6 +379,21 @@ export function AllocationTab({
     anchor.remove();
     URL.revokeObjectURL(url);
   };
+
+  // Surface Export / Save to the results header (Builder.dc.html). The header
+  // owns the buttons; this tab keeps the export + save-panel logic.
+  useEffect(() => {
+    if (!onRegisterActions) return;
+    onRegisterActions({
+      exportCsv,
+      toggleSave: () => setSaveOpen((v) => !v),
+      saveOpen,
+    });
+    return () => onRegisterActions(null);
+    // exportCsv is stable enough for this purpose; re-register on saveOpen change
+    // so the header reflects the toggle state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onRegisterActions, saveOpen]);
 
   return (
     <div className="flex flex-col gap-px">
@@ -424,28 +450,6 @@ export function AllocationTab({
       <Card
         title="Proposed weights"
         subtitle={base ? `vs. ${base.name}` : undefined}
-        actions={
-          <span className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={exportCsv}
-              className={`${BUTTON_CLASS} inline-flex items-center gap-[7px] text-[12px]`}
-            >
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M8 1v9M4.5 7L8 10.5 11.5 7M2 14h12" stroke="currentColor" strokeWidth="1.3" />
-              </svg>
-              Export CSV
-            </button>
-            <button
-              type="button"
-              onClick={() => setSaveOpen((v) => !v)}
-              aria-expanded={saveOpen}
-              className={BUTTON_CLASS}
-            >
-              Save as portfolio
-            </button>
-          </span>
-        }
       >
         {saveOpen && (
           <div className="mb-3 border border-border bg-surface-2 p-3">
@@ -460,15 +464,18 @@ export function AllocationTab({
                   className={INPUT_CLASS}
                 />
               </label>
-              <label className="flex w-[160px] flex-col gap-1">
-                <span className={FIELD_LABEL_CLASS}>Notional USD</span>
-                <input
-                  value={notionalText}
-                  onChange={(e) => setNotionalText(e.target.value)}
-                  inputMode="decimal"
-                  aria-label="Notional USD"
-                  className={`${INPUT_CLASS} tabular-nums`}
-                />
+              <label className="flex w-[180px] flex-col gap-1">
+                <span className={FIELD_LABEL_CLASS}>Amount to invest</span>
+                <div className="flex h-9 items-center border border-border-strong bg-field">
+                  <span className="px-2 text-[12px] text-text-muted">$</span>
+                  <input
+                    value={notionalText}
+                    onChange={(e) => setNotionalText(e.target.value)}
+                    inputMode="decimal"
+                    aria-label="Amount to invest"
+                    className="h-full min-w-0 flex-1 border-none bg-transparent pr-2.5 text-right text-[14px] tabular-nums text-text-primary outline-none"
+                  />
+                </div>
               </label>
               <button
                 type="button"

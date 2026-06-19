@@ -140,7 +140,7 @@ function BacktestBody({
   const oosOption = useMemo(() => {
     if (!colors) return null;
 
-    const base = buildHcNavOption(oosCurve, colors);
+    const base = buildHcNavOption(oosCurve, colors, { growthOf100: true });
     const plotLines = foldBoundaries.map((date) => ({
       value: dateToUtcMs(date),
       color: colors.barMute,
@@ -227,10 +227,8 @@ function BacktestBody({
         <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[640px] border-collapse ix-fs tabular-nums lining-nums">
             <thead>
-              <tr className="bg-field">
+              <tr className="bg-zebra">
                 <Th align="left">Period</Th>
-                <Th align="right">Train</Th>
-                <Th align="right">Obs</Th>
                 <Th align="right">Sharpe</Th>
                 <Th align="right">Worst-case loss</Th>
                 <Th align="right">Max drawdown</Th>
@@ -247,13 +245,7 @@ function BacktestBody({
                   }`}
                 >
                   <td className="ix-cell px-2.5 first:pl-[var(--ix-pad)] font-bold text-accent">
-                    F{fold.fold}
-                  </td>
-                  <td className="ix-cell px-2.5 text-right text-text-secondary">
-                    {formatNumber(fold.train_size, 0)}
-                  </td>
-                  <td className="ix-cell px-2.5 text-right text-text-secondary">
-                    {formatNumber(fold.n_obs, 0)}
+                    Period {fold.fold}
                   </td>
                   <td className="ix-cell px-2.5 text-right">
                     {formatNumber(fold.sharpe)}

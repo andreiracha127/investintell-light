@@ -14,7 +14,7 @@ import {
   type WeightOut,
 } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
-import { buildHcRiskContributionsOption } from "@/lib/charts/hc/contributions";
+import { buildHcRiskBubbleOption } from "@/lib/charts/hc/bubble";
 import { buildHcCumulativeOption } from "@/lib/charts/hc/cumulative";
 import { buildHcHeatmapOption } from "@/lib/charts/hc/heatmap";
 import { formatNumber, formatPercent } from "@/lib/format";
@@ -136,10 +136,15 @@ function RiskBody({
 }) {
   const { stats } = data;
   const contributionsOption = colors
-    ? buildHcRiskContributionsOption(data.risk_contributions, colors)
+    ? buildHcRiskBubbleOption(data.risk_contributions, colors)
     : null;
   const heatmapOption = colors
-    ? buildHcHeatmapOption(data.correlation_matrix, colors)
+    ? buildHcHeatmapOption(data.correlation_matrix, colors, {
+        diverging: true,
+        // Diverging scale: blue at -1, surface at 0, accent at +1 (mockup).
+        negativeColor: colors.blue,
+        zeroColor: colors.surface,
+      })
     : null;
   const cumulativeOption = colors
     ? buildHcCumulativeOption(
@@ -148,8 +153,9 @@ function RiskBody({
           benchmark: data.benchmark_comparison.benchmark,
         },
         "Portfolio",
-        "SPY",
+        "S&P 500",
         colors,
+        { growthOf100: true },
       )
     : null;
 
@@ -205,12 +211,12 @@ function RiskBody({
       <ChartCard
         title="Where the risk comes from"
         subtitle="each holding's share of total portfolio risk"
-        tip="Each holding's share of total portfolio risk — not the same as its weight. A small, volatile holding can carry outsized risk."
+        tip="Each bubble is a holding's share of total portfolio risk — not the same as its weight. A small, volatile holding can carry outsized risk."
       >
         {contributionsOption ? (
           <HighchartsChart
             options={contributionsOption}
-            className="h-[320px] w-full"
+            className="h-[440px] w-full"
             isEmpty={data.risk_contributions.length === 0}
             emptyMessage="No risk contributions returned."
           />
@@ -226,12 +232,27 @@ function RiskBody({
         tip="Correlation from −1 (move opposite) to +1 (move together). Lower correlations mean more diversification."
       >
         {heatmapOption ? (
-          <HighchartsChart
-            options={heatmapOption}
-            className="h-[360px] w-full"
-            isEmpty={data.correlation_matrix.tickers.length === 0}
-            emptyMessage="No correlation matrix returned."
-          />
+          <>
+            <HighchartsChart
+              options={heatmapOption}
+              className="h-[360px] w-full"
+              isEmpty={data.correlation_matrix.tickers.length === 0}
+              emptyMessage="No correlation matrix returned."
+            />
+            {/* Diverging −1 → 0 → +1 gradient legend (tokens only): grey-blue
+                negative end, surface zero, accent positive. */}
+            <div className="mt-3 flex items-center justify-center gap-2 text-[10px] text-text-muted">
+              <span>−1.0</span>
+              <span
+                className="h-2 w-[160px]"
+                style={{
+                  background:
+                    "linear-gradient(90deg, var(--color-chart-blue), var(--color-surface-3), var(--color-accent))",
+                }}
+              />
+              <span>+1.0</span>
+            </div>
+          </>
         ) : (
           <p className="py-8 text-center text-[13px] text-text-muted">
             Preparing chart

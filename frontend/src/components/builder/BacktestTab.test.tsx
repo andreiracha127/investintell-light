@@ -178,8 +178,8 @@ describe("BacktestTab", () => {
     expect(screen.getByText("Consistency")).toBeInTheDocument();
     expect(screen.getByText("2 / 2")).toBeInTheDocument();
     expect(screen.getByText("Average turnover")).toBeInTheDocument();
-    expect(screen.getAllByText("F1").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("F2").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Period 1").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Period 2").length).toBeGreaterThan(0);
     expect(screen.getAllByTestId("highcharts-chart")).toHaveLength(2);
   });
 

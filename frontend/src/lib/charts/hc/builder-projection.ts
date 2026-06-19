@@ -39,6 +39,10 @@ export function buildHcBuilderProjectionOption(
   const categories = bars.map((bar) => bar.horizon);
   const isFraction = unit === "fraction";
 
+  // Median rendered in a distinct hue from the accent-family bands (mockup uses
+  // Carbon blue) — the themed --color-chart-blue token.
+  const medianColor = colors.blue;
+
   const formatValue = (value: number) =>
     isFraction
       ? formatPercent(value, 1, { signed: true })
@@ -59,7 +63,7 @@ export function buildHcBuilderProjectionOption(
       crosshair: true,
       tickWidth: 0,
       title: {
-        text: "Horizon",
+        text: "Months · history → forecast",
       },
     },
     yAxis: {
@@ -116,7 +120,7 @@ export function buildHcBuilderProjectionOption(
           `<b>${header}</b>`,
           row("95th", bar.pct_95),
           row("75th", bar.pct_75),
-          `<span style="color:${colors.accent}">●</span> ${row("Median", bar.pct_50, true)}`,
+          `<span style="color:${medianColor}">●</span> ${row("Median", bar.pct_50, true)}`,
           row("25th", bar.pct_25),
           row("5th", bar.pct_5),
         ].join("<br/>");
@@ -157,9 +161,9 @@ export function buildHcBuilderProjectionOption(
         type: "line",
         name: "Median",
         data: bars.map((bar) => bar.pct_50),
-        color: colors.accent,
+        color: medianColor,
         lineWidth: 2.4,
-        marker: { enabled: true, radius: 3 },
+        marker: { enabled: true, radius: 3, fillColor: medianColor },
         zIndex: 3,
       },
     ],

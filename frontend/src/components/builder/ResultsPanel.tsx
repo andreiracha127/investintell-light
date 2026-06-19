@@ -10,9 +10,11 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { BuilderObjective, OptimizeResponse } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
 
+import { BUTTON_CLASS, BUTTON_PRIMARY_CLASS } from "@/components/screener/shared";
+
 import type { UniverseAsset } from "./assets";
 import { OBJECTIVE_COPY } from "./BuilderCopy";
-import { AllocationTab } from "./AllocationTab";
+import { AllocationTab, type AllocationActions } from "./AllocationTab";
 import { BacktestTab } from "./BacktestTab";
 import { ProjectionTab } from "./ProjectionTab";
 import { RiskTab } from "./RiskTab";
@@ -87,6 +89,10 @@ export function ResultsPanel({
   const [tabState, setTabState] = useState<TabState>(() =>
     initialTabState(version),
   );
+  // Export / Save controls live in the header (Builder.dc.html) but their logic
+  // stays in AllocationTab, which registers them here while it is mounted.
+  const [allocationActions, setAllocationActions] =
+    useState<AllocationActions | null>(null);
   const effectiveTabState =
     tabState.version === version ? tabState : initialTabState(version);
   const { activeTab, visitedTabs } = effectiveTabState;
@@ -127,6 +133,38 @@ export function ResultsPanel({
               {metaParts.join(" · ")}
             </div>
           </div>
+          {activeTab === "allocation" && allocationActions && (
+            <span className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={allocationActions.exportCsv}
+                className={`${BUTTON_CLASS} inline-flex items-center gap-[7px] text-[12px]`}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M8 1v9M4.5 7L8 10.5 11.5 7M2 14h12"
+                    stroke="currentColor"
+                    strokeWidth="1.3"
+                  />
+                </svg>
+                Export CSV
+              </button>
+              <button
+                type="button"
+                onClick={allocationActions.toggleSave}
+                aria-expanded={allocationActions.saveOpen}
+                className={BUTTON_PRIMARY_CLASS}
+              >
+                Save as portfolio
+              </button>
+            </span>
+          )}
         </div>
         <div
           className="mt-3.5 flex flex-wrap gap-0"
@@ -165,6 +203,7 @@ export function ResultsPanel({
           colors={colors}
           grouped={grouped}
           cvarLimitPct={cvarLimitPct}
+          onRegisterActions={setAllocationActions}
         />
       </TabPanel>
       {visitedTabs.has("risk") && (

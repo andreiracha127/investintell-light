@@ -105,6 +105,20 @@ describe("buildHcBuilderProjectionOption", () => {
     );
   });
 
+  it("titles the x-axis 'Months · history → forecast'", () => {
+    const option = buildHcBuilderProjectionOption(BARS, "fraction", TEST_COLORS);
+    expect((option.xAxis as { title?: { text?: string } }).title?.text).toBe(
+      "Months · history → forecast",
+    );
+  });
+
+  it("draws the median in the distinct blue token (not the accent)", () => {
+    const option = buildHcBuilderProjectionOption(BARS, "fraction", TEST_COLORS);
+    const median = option.series?.[3] as { color?: string };
+    expect(median.color).toBe(TEST_COLORS.blue);
+    expect(median.color).not.toBe(TEST_COLORS.accent);
+  });
+
   it("number-formats the y-axis for unitless units", () => {
     const option = buildHcBuilderProjectionOption(BARS, "unitless", TEST_COLORS);
     const labels = (

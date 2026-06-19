@@ -53,4 +53,51 @@ describe("buildHcNavOption", () => {
     expect(out).toContain(formatDate("2024-01-02"));
     expect(out).toContain(formatCurrency(101.5));
   });
+
+  describe("growthOf100 mode", () => {
+    it("rebases the series so the first value maps to 100", () => {
+      const opt = buildHcNavOption(NAV, TEST_COLORS, { growthOf100: true });
+      const series = opt.series?.[0] as { data?: Array<[number, number]> };
+      expect(series.data).toEqual([
+        [dateToUtcMs("2024-01-01"), 100],
+        [dateToUtcMs("2024-01-02"), (101.5 / 100) * 100],
+      ]);
+    });
+
+    it("renders an accent-gradient areaspline", () => {
+      const opt = buildHcNavOption(NAV, TEST_COLORS, { growthOf100: true });
+      expect(opt.chart?.type).toBe("areaspline");
+      const series = opt.series?.[0] as {
+        type?: string;
+        color?: string;
+        fillColor?: { stops?: Array<[number, string]> };
+      };
+      expect(series.type).toBe("areaspline");
+      expect(series.color).toBe(TEST_COLORS.accent);
+      expect(series.fillColor?.stops?.[0]?.[1]).toBe(TEST_COLORS.accentWash);
+    });
+
+    it("titles the y-axis 'Growth of $100' and $-formats ticks and tooltip", () => {
+      const opt = buildHcNavOption(NAV, TEST_COLORS, { growthOf100: true });
+      const yAxis = opt.yAxis as {
+        title?: { text?: string };
+        labels?: { formatter?: (this: { value: number }) => string };
+      };
+      expect(yAxis.title?.text).toBe("Growth of $100");
+      expect(yAxis.labels!.formatter!.call({ value: 110.5 })).toBe("$110.50");
+      const tooltip = opt.tooltip as {
+        formatter?: (this: { x: number; y: number }) => string;
+      };
+      const out = tooltip.formatter!.call({ x: dateToUtcMs("2024-01-02"), y: 110.5 });
+      expect(out).toContain("$110.50");
+    });
+
+    it("keeps the currency NAV line by default (Portfolio)", () => {
+      const opt = buildHcNavOption(NAV, TEST_COLORS);
+      expect(opt.chart?.type).toBe("line");
+      const series = opt.series?.[0] as { type?: string; name?: string };
+      expect(series.type).toBe("line");
+      expect(series.name).toBe("NAV");
+    });
+  });
 });

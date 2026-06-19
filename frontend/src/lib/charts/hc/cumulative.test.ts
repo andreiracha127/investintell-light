@@ -127,4 +127,80 @@ describe("buildHcCumulativeOption", () => {
     const opt = buildHcCumulativeOption(CUMULATIVE, "AAPL", "SPY", TEST_COLORS);
     expect((opt.tooltip as { shared?: boolean }).shared).toBe(true);
   });
+
+  describe("growthOf100 mode", () => {
+    it("rebases each series to a $100 start (value = 100·(1+ret))", () => {
+      const opt = buildHcCumulativeOption(CUMULATIVE, "Portfolio", "S&P 500", TEST_COLORS, {
+        growthOf100: true,
+      });
+      const bench = opt.series![0] as { data?: Array<[number, number]> };
+      const asset = opt.series![1] as { data?: Array<[number, number]> };
+      expect(bench.data).toEqual([
+        [dateToUtcMs("2024-01-01"), 100],
+        [dateToUtcMs("2024-01-02"), 102],
+        [dateToUtcMs("2024-01-03"), 101],
+      ]);
+      expect(asset.data).toEqual([
+        [dateToUtcMs("2024-01-01"), 100],
+        [dateToUtcMs("2024-01-02"), 105],
+        [dateToUtcMs("2024-01-03"), 98],
+      ]);
+    });
+
+    it("titles the y-axis 'Growth of $100' and $-formats ticks", () => {
+      const opt = buildHcCumulativeOption(CUMULATIVE, "Portfolio", "S&P 500", TEST_COLORS, {
+        growthOf100: true,
+      });
+      const yAxis = opt.yAxis as {
+        title?: { text?: string };
+        labels?: { formatter?: (this: { value: number }) => string };
+      };
+      expect(yAxis.title?.text).toBe("Growth of $100");
+      expect(yAxis.labels!.formatter!.call({ value: 123.456 })).toBe("$123.46");
+    });
+
+    it("$-formats the shared tooltip", () => {
+      const opt = buildHcCumulativeOption(CUMULATIVE, "Portfolio", "S&P 500", TEST_COLORS, {
+        growthOf100: true,
+      });
+      const tooltip = opt.tooltip as {
+        formatter?: (this: {
+          x: number;
+          points?: Array<{ series: { name: string; color: string }; y: number }>;
+        }) => string;
+      };
+      const out = tooltip.formatter!.call({
+        x: dateToUtcMs("2024-01-02"),
+        points: [{ series: { name: "Portfolio", color: "#000" }, y: 105 }],
+      });
+      expect(out).toContain("$105.00");
+      expect(out).not.toContain("%");
+    });
+
+    it("dashes the benchmark line and adds an x crosshair", () => {
+      const opt = buildHcCumulativeOption(CUMULATIVE, "Portfolio", "S&P 500", TEST_COLORS, {
+        growthOf100: true,
+      });
+      const bench = opt.series![0] as { dashStyle?: string };
+      expect(bench.dashStyle).toBe("ShortDash");
+      expect((opt.xAxis as { crosshair?: unknown }).crosshair).toBeTruthy();
+    });
+
+    it("leaves percent presentation untouched by default (Portfolio)", () => {
+      const opt = buildHcCumulativeOption(CUMULATIVE, "Portfolio", "S&P 500", TEST_COLORS);
+      const yAxis = opt.yAxis as {
+        title?: { text?: string };
+        labels?: { formatter?: (this: { value: number }) => string };
+      };
+      expect(yAxis.title?.text).toBeUndefined();
+      expect(yAxis.labels!.formatter!.call({ value: 0.05 })).toBe(formatPercent(0.05, 0));
+      const bench = opt.series![0] as { dashStyle?: string; data?: Array<[number, number]> };
+      expect(bench.dashStyle).toBeUndefined();
+      expect(bench.data).toEqual([
+        [dateToUtcMs("2024-01-01"), 0.0],
+        [dateToUtcMs("2024-01-02"), 0.02],
+        [dateToUtcMs("2024-01-03"), 0.01],
+      ]);
+    });
+  });
 });
