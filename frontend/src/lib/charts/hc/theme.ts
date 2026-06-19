@@ -50,7 +50,7 @@ export function highchartsTheme(colors: ChartColors): Options {
     tooltip: {
       backgroundColor: colors.surface,
       borderColor: colors.grid,
-      borderRadius: 4,
+      borderRadius: 2,
       padding: 10,
       shadow: false,
       style: { color: colors.text, fontSize: "12px" },
@@ -58,12 +58,13 @@ export function highchartsTheme(colors: ChartColors): Options {
     plotOptions: {
       series: {
         animation: { duration: 350 },
-        borderRadius: 2,
+        // Flat squares — Carbon language (the .dc.html mockups use radius 0).
+        borderRadius: 0,
         states: { hover: { lineWidthPlus: 1 } },
         marker: { enabledThreshold: 3, radius: 2 },
       } as PlotSeriesOptions,
-      column: { borderRadius: 2, groupPadding: 0.12, pointPadding: 0.04 },
-      bar: { borderRadius: 2, groupPadding: 0.12, pointPadding: 0.04 },
+      column: { borderRadius: 0, groupPadding: 0.12, pointPadding: 0.04 },
+      bar: { borderRadius: 0, groupPadding: 0.12, pointPadding: 0.04 },
       candlestick: {
         color: colors.loss,
         upColor: colors.gain,

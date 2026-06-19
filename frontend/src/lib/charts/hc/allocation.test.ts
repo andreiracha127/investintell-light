@@ -52,10 +52,33 @@ describe("buildHcAllocationOption", () => {
     );
   });
 
-  it("sets innerSize to 65% (donut hole)", () => {
+  it("sets innerSize to 62% (donut hole) by default and honors an override", () => {
     const opt = buildHcAllocationOption(SLICES, TEST_COLORS);
-    const series = opt.series?.[0] as { innerSize?: string };
-    expect(series.innerSize).toBe("65%");
+    expect((opt.series?.[0] as { innerSize?: string }).innerSize).toBe("62%");
+    const opt70 = buildHcAllocationOption(SLICES, TEST_COLORS, { innerSize: "70%" });
+    expect((opt70.series?.[0] as { innerSize?: string }).innerSize).toBe("70%");
+  });
+
+  it("enables leader data labels (name + rounded %) when config.dataLabels is set", () => {
+    const opt = buildHcAllocationOption(SLICES, TEST_COLORS, { dataLabels: true });
+    const series = opt.series?.[0] as {
+      dataLabels?: { enabled?: boolean; formatter?: (this: { key: string; percentage?: number }) => string };
+    };
+    const dl = Array.isArray(series.dataLabels) ? series.dataLabels[0] : series.dataLabels;
+    expect(dl?.enabled).toBe(true);
+    expect(dl?.formatter?.call({ key: "Equity", percentage: 60 })).toBe("Equity 60%");
+  });
+
+  it("adds a formatted value line to the tooltip when config.valueFormatter is set", () => {
+    const opt = buildHcAllocationOption(SLICES, TEST_COLORS, {
+      valueFormatter: (v) => `$${v}`,
+    });
+    const tooltip = opt.tooltip as {
+      pointFormatter?: (this: { key: string; percentage?: number; y?: number }) => string;
+    };
+    const out = tooltip.pointFormatter!.call({ key: "Equity", percentage: 60, y: 1234 });
+    expect(out).toContain("$1234");
+    expect(out).toContain("60.0% of portfolio");
   });
 
   it("disables data labels (legend is external HTML)", () => {

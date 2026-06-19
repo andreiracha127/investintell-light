@@ -143,4 +143,45 @@ describe("buildHcHeatmapOption", () => {
     const opt = buildHcHeatmapOption(empty, TEST_COLORS);
     expect(cells(opt)).toEqual([]);
   });
+
+  describe("diverging mode", () => {
+    it("configures a signed -1..+1 colorAxis (negative -> zero -> accent)", () => {
+      const opt = buildHcHeatmapOption(CORR, TEST_COLORS, {
+        diverging: true,
+        negativeColor: "#0f62fe",
+        zeroColor: "#e8e8e8",
+      });
+      const colorAxis = opt.colorAxis as {
+        min?: number;
+        max?: number;
+        stops?: [number, string][];
+        visible?: boolean;
+      };
+      expect(colorAxis.min).toBe(-1);
+      expect(colorAxis.max).toBe(1);
+      expect(colorAxis.visible).toBe(false);
+      expect(colorAxis.stops).toEqual([
+        [0, "#0f62fe"],
+        [0.5, "#e8e8e8"],
+        [1, TEST_COLORS.accent],
+      ]);
+    });
+
+    it("defaults the negative/zero hues to loss/surface", () => {
+      const opt = buildHcHeatmapOption(CORR, TEST_COLORS, { diverging: true });
+      const colorAxis = opt.colorAxis as { stops?: [number, string][] };
+      expect(colorAxis.stops?.[0]).toEqual([0, TEST_COLORS.loss]);
+      expect(colorAxis.stops?.[1]).toEqual([0.5, TEST_COLORS.surface]);
+    });
+
+    it("flips the cell label by |value| so strong negatives also read light", () => {
+      const corr: CorrelationMatrix = { tickers: ["X", "Y"], matrix: [[1, -0.9], [-0.9, 1]] };
+      const opt = buildHcHeatmapOption(corr, TEST_COLORS, { diverging: true });
+      const data = cells(opt);
+      // value -0.9 -> |0.9| > 0.55 -> on-accent (light) text.
+      expect((data[1] as { dataLabels?: { color?: string } }).dataLabels?.color).toBe(
+        TEST_COLORS.textOnAccent,
+      );
+    });
+  });
 });

@@ -6,18 +6,25 @@
  */
 
 /**
- * Inline "i" help dot with a native tooltip. Square-system circle, hairline
- * border, muted glyph — hover/focus reveals `tip`. Accessible via title + label.
+ * Inline "i" help dot with a styled hover/focus popover. Square-system circle,
+ * hairline border, muted glyph; hover or keyboard focus reveals `tip` in a
+ * token-styled popover above the dot (matching the .dc.html `.ix-pop`).
+ * Accessible via aria-label + a focusable, role=tooltip popover.
  */
 export function InfoDot({ tip }: { tip: string }) {
   return (
     <span
-      title={tip}
       aria-label={tip}
       tabIndex={0}
-      className="inline-flex h-[13px] w-[13px] flex-none cursor-help items-center justify-center rounded-full border border-border-strong text-[8px] font-bold leading-none text-text-muted"
+      className="group/info relative inline-flex h-[13px] w-[13px] flex-none cursor-help items-center justify-center rounded-full border border-border-strong text-[8px] font-bold leading-none text-text-muted"
     >
       i
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 hidden w-[230px] -translate-x-1/2 whitespace-normal border border-border-strong bg-surface-2 p-2 text-left text-[11.5px] font-normal normal-case leading-[1.45] tracking-normal text-text-secondary shadow-lg group-hover/info:block group-focus/info:block"
+      >
+        {tip}
+      </span>
     </span>
   );
 }
@@ -105,7 +112,7 @@ export function KpiTile({
         <span>{label}</span>
         {tip && <InfoDot tip={tip} />}
       </div>
-      <div className={`mt-1.5 text-[19px] font-bold tabular-nums ${tone}`}>{value}</div>
+      <div className={`mt-1.5 text-[20px] font-bold tabular-nums ${tone}`}>{value}</div>
       {detail && <div className={`text-[11px] tabular-nums ${detailTone}`}>{detail}</div>}
     </div>
   );
