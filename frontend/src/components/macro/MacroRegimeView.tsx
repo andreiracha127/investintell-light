@@ -340,34 +340,20 @@ export function MacroRegimeView() {
       {/* ── KPI tiles ── */}
       <div className="grid gap-px border border-t-0 border-border bg-border [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
         <KpiTile
-          label="Credit appetite"
+          label="Composite"
+          value={`${data.vote_count} / 3`}
+          tone={data.vote_count >= 2 ? "text-loss" : "text-gain"}
+          detail={isOff ? "risk-off votes active" : "risk-on composite"}
+          tip={RULE_TIP}
+        />
+        <KpiTile
+          label="Credit"
           value={num(signal.ratio, 3)}
           detail="HYG / IEF ratio"
           tip="The price of a high-yield bond ETF (HYG) divided by safe Treasuries (IEF). A falling ratio signals investors are pulling back from risk."
         />
         <KpiTile
-          label="Risk-off trigger"
-          value={num(signal.p20_5y, 3)}
-          detail="5-year 20th percentile"
-          tip="The level the credit-appetite ratio sits below only 20% of the time over the last 5 years. Dropping under it switches the credit vote on."
-        />
-        <KpiTile
-          label="Distance to trigger"
-          value={formatPp(signal.distance_pct, 2)}
-          tone={
-            signal.distance_pct !== null && signal.distance_pct !== undefined
-              ? valueTone(signal.distance_pct)
-              : "text-text-primary"
-          }
-          detail={
-            signal.distance_pct !== null && signal.distance_pct !== undefined && signal.distance_pct < 0
-              ? "below trigger"
-              : "above trigger"
-          }
-          tip="How far today's ratio sits above (or below) the risk-off trigger, in percentage points. Negative means the credit vote is already active."
-        />
-        <KpiTile
-          label="Financial conditions"
+          label="Financial Conditions"
           value={num(signal.nfci, 2)}
           tone={
             signal.nfci !== null && signal.nfci !== undefined
@@ -393,6 +379,27 @@ export function MacroRegimeView() {
           }
           detail={trendVal !== null && trendVal < -0.8 ? "below average" : "above average"}
           tip="Price trend of the credit-appetite ratio versus its medium-term moving average. Below average (negative) means momentum is rolling over, and the Trend vote turns on."
+        />
+        <KpiTile
+          label="Risk-Off Trigger"
+          value={num(signal.p20_5y, 3)}
+          detail="5-year 20th percentile"
+          tip="The level the credit-appetite ratio sits below only 20% of the time over the last 5 years. Dropping under it switches the credit vote on."
+        />
+        <KpiTile
+          label="Distance to Trigger"
+          value={formatPp(signal.distance_pct, 2)}
+          tone={
+            signal.distance_pct !== null && signal.distance_pct !== undefined
+              ? valueTone(signal.distance_pct)
+              : "text-text-primary"
+          }
+          detail={
+            signal.distance_pct !== null && signal.distance_pct !== undefined && signal.distance_pct < 0
+              ? "below trigger"
+              : "above trigger"
+          }
+          tip="How far today's ratio sits above (or below) the risk-off trigger, in percentage points. Negative means the credit vote is already active."
         />
       </div>
 

@@ -328,6 +328,11 @@ export function isRangePreset(value: unknown): value is RangePreset {
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+function backendRequestUrl(path: string): string {
+  if (typeof window !== "undefined") return `/api/backend${path}`;
+  return `${BASE_URL}${path}`;
+}
+
 type AuthFetchDeps = {
   getToken: () => string | null;
   refresh: () => Promise<boolean>;
@@ -446,7 +451,7 @@ async function request<T>(
 
   let res: Response;
   try {
-    res = await fetcher(`${BASE_URL}${path}`, {
+    res = await fetcher(backendRequestUrl(path), {
       signal: combinedSignal,
       ...(init && {
         method: init.method,
@@ -940,7 +945,7 @@ export async function fetchScreenResultsCsv(
 ): Promise<Blob> {
   const qs = resultsParams(query);
   const res = await fetchWithAuth(
-    `${BASE_URL}/screener/screens/${screenId}/results.csv${qs ? `?${qs}` : ""}`,
+    backendRequestUrl(`/screener/screens/${screenId}/results.csv${qs ? `?${qs}` : ""}`),
     { signal: signal ?? AbortSignal.timeout(30_000) },
   );
   if (!res.ok) {
@@ -1113,7 +1118,7 @@ export async function fetchFundsCsv(
   signal?: AbortSignal,
 ): Promise<Blob> {
   const qs = fundsParams(query);
-  const res = await fetch(`${BASE_URL}/funds.csv${qs ? `?${qs}` : ""}`, {
+  const res = await fetch(backendRequestUrl(`/funds.csv${qs ? `?${qs}` : ""}`), {
     signal: signal ?? AbortSignal.timeout(30_000),
   });
   if (!res.ok) {

@@ -40,11 +40,13 @@ import { formatDate } from "@/lib/format";
 
 type RegimeHistoryPoint = MacroRegime["history"][number];
 
-// ── Axis envelope (mirrors the prototype's clamp window) ─────────────────────
+// ── Axis envelope (mirrors the prototype's quadrant convention) ──────────────
 const AXIS_MIN = 96;
 const AXIS_MAX = 104;
 const CLAMP_LO = 96.2;
 const CLAMP_HI = 103.8;
+const TARGET_TAIL_RADIUS = 3.15;
+const MAX_TAIL_SCALE = 8;
 
 /** Number of tail vertices drawn per signal. */
 const TAIL = 11;
@@ -112,6 +114,26 @@ function buildTail(
     out.push({ x, y, date: dates[idx] ?? dates[last] ?? "" });
   }
   return out;
+}
+
+function fitTailsToEnvelope(tails: TailVertex[][]): TailVertex[][] {
+  const maxDistance = Math.max(
+    0,
+    ...tails.flatMap((tail) =>
+      tail.flatMap((point) => [Math.abs(point.x - 100), Math.abs(point.y - 100)]),
+    ),
+  );
+  const scale =
+    maxDistance > 0 ? Math.min(MAX_TAIL_SCALE, TARGET_TAIL_RADIUS / maxDistance) : 1;
+  if (scale <= 1.01) return tails;
+
+  return tails.map((tail) =>
+    tail.map((point) => ({
+      ...point,
+      x: clamp(100 + (point.x - 100) * scale, CLAMP_LO, CLAMP_HI),
+      y: clamp(100 + (point.y - 100) * scale, CLAMP_LO, CLAMP_HI),
+    })),
+  );
 }
 
 /** Quadrant labels (corner anchors), matching the prototype. */
@@ -257,8 +279,9 @@ export function buildHcMacroRrgOption(
   const rawTrend = ratio.map((r, i) => (trailMean[i] ? (r / trailMean[i] - 1) * 100 : 0));
   const rawConditions = history.map((p) => -(p.signal.nfci ?? 0));
 
-  // Standardise then smooth, scaling the z-score into the ±3.8 axis envelope.
-  const SCALE = 0.85;
+  // Standardise then smooth; a second pass below fits quiet periods into the
+  // quadrant envelope so long ranges do not collapse into an unreadable centre.
+  const SCALE = 1.15;
   const zc = smooth(zscore(rawCredit), window).map((z) => z * SCALE);
   const zt = smooth(zscore(rawTrend), window).map((z) => z * SCALE);
   const zn = smooth(zscore(rawConditions), window).map((z) => z * SCALE);
@@ -282,8 +305,10 @@ export function buildHcMacroRrgOption(
     { name: "Conditions", strength: zn, color: rc.conditions, lineWidth: 2, dashStyle: "Dot" },
   ];
 
-  const tailSeries: Highcharts.SeriesOptionsType[] = defs.map((def) => {
-    const verts = tailFor(def.strength);
+  const fittedTails = fitTailsToEnvelope(defs.map((def) => tailFor(def.strength)));
+
+  const tailSeries: Highcharts.SeriesOptionsType[] = defs.map((def, defIndex) => {
+    const verts = fittedTails[defIndex] ?? [];
     const data = verts.map((v, i) => ({
       x: v.x,
       y: v.y,
@@ -292,12 +317,17 @@ export function buildHcMacroRrgOption(
         i === verts.length - 1
           ? {
               symbol: "circle",
-              radius: 5,
+              radius: def.name === "Composite" ? 7 : 6,
               fillColor: def.color,
               lineColor: colors.surface,
-              lineWidth: 1.5,
+              lineWidth: 1.75,
             }
-          : { symbol: "circle", radius: 2.4, fillColor: def.color, lineWidth: 0 },
+          : {
+              symbol: "circle",
+              radius: def.name === "Composite" ? 3.4 : 3,
+              fillColor: def.color,
+              lineWidth: 0,
+            },
     }));
     return {
       type: "spline",

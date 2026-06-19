@@ -25,6 +25,7 @@ describe("public catalog fetches", () => {
   });
 
   it("fetches the funds list without Authorization and supports page_size=30", async () => {
+    vi.stubGlobal("window", {});
     const fetchImpl = vi.fn().mockResolvedValue(
       jsonResponse({
         items: [],
@@ -49,6 +50,7 @@ describe("public catalog fetches", () => {
   });
 
   it("fetches public catalog endpoints without Authorization", async () => {
+    vi.stubGlobal("window", {});
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ gainers: [], losers: [], indices: [], sectors: [] }))
@@ -65,5 +67,6 @@ describe("public catalog fetches", () => {
     for (const [, init] of fetchImpl.mock.calls as [string, RequestInit][]) {
       expect(hasAuthorizationHeader(init)).toBe(false);
     }
+    expect(fetchImpl.mock.calls[1][0]).toBe("/api/backend/macro/regime");
   });
 });

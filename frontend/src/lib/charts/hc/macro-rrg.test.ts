@@ -34,7 +34,12 @@ function makeHistory(n: number): HistoryPoint[] {
 type SplineSeries = {
   type?: string;
   name?: string;
-  data?: Array<{ x?: number; y?: number; custom?: { date?: string; signal?: string } }>;
+  data?: Array<{
+    x?: number;
+    y?: number;
+    custom?: { date?: string; signal?: string };
+    marker?: { radius?: number };
+  }>;
   dashStyle?: string;
   zIndex?: number;
 };
@@ -115,9 +120,22 @@ describe("buildHcMacroRrgOption", () => {
     const opt = buildHcMacroRrgOption(makeHistory(120), TEST_COLORS)!;
     for (const series of splineSeries(opt)) {
       const data = series.data ?? [];
-      const last = data[data.length - 1] as { marker?: { radius?: number } };
-      expect(last.marker?.radius).toBe(5);
+      const last = data[data.length - 1];
+      expect(last.marker?.radius).toBe(series.name === "Composite" ? 7 : 6);
     }
+  });
+
+  it("fits long-period tails into the visible quadrant envelope", () => {
+    const opt = buildHcMacroRrgOption(makeHistory(1260), TEST_COLORS, { step: 16 })!;
+    const maxDistance = Math.max(
+      ...splineSeries(opt).flatMap((series) =>
+        (series.data ?? []).flatMap((point) => [
+          Math.abs((point.x ?? 100) - 100),
+          Math.abs((point.y ?? 100) - 100),
+        ]),
+      ),
+    );
+    expect(maxDistance).toBeGreaterThanOrEqual(2.7);
   });
 
   it("registers a render hook so the quadrant background paints on every draw", () => {
