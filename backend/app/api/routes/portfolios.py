@@ -26,7 +26,7 @@ from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._shared import ensure_eod_or_http_error, raise_news_fetch_error
-from app.core.auth import get_current_user
+from app.core.auth import CurrentUser, get_current_user
 from app.core.config import get_settings
 from app.core.datalake import get_datalake_session
 from app.core.db import get_session
@@ -90,6 +90,7 @@ async def create_portfolio(
     payload: PortfolioCreate,
     session: Annotated[AsyncSession, Depends(get_session)],
     client: Annotated[TiingoClient, Depends(get_tiingo_client)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PortfolioOut:
     """Create a portfolio with optional initial positions.
 
@@ -103,7 +104,9 @@ async def create_portfolio(
             session, client, [p.ticker for p in payload.positions], start, end
         )
     try:
-        portfolio = await portfolio_crud.create_portfolio(session, payload)
+        portfolio = await portfolio_crud.create_portfolio(
+            session, payload, user.sub, user.org_id
+        )
     except portfolio_crud.DuplicatePortfolioNameError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return PortfolioOut.model_validate(portfolio)
@@ -112,9 +115,10 @@ async def create_portfolio(
 @router.get("", response_model=list[PortfolioListItem])
 async def list_portfolios(
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> list[PortfolioListItem]:
     """List portfolios (id order), hard-capped at the service's LIST_HARD_CAP."""
-    rows = await portfolio_crud.list_portfolios(session)
+    rows = await portfolio_crud.list_portfolios(session, user.sub)
     return [PortfolioListItem.model_validate(row) for row in rows]
 
 
@@ -122,9 +126,10 @@ async def list_portfolios(
 async def get_portfolio(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PortfolioOut:
     """One portfolio with its positions (sorted by ticker)."""
-    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, user.sub)
     if portfolio is None:
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
     return PortfolioOut.model_validate(portfolio)
@@ -135,11 +140,12 @@ async def patch_portfolio(
     portfolio_id: int,
     payload: PortfolioPatch,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PortfolioOut:
     """Partially update name and/or cash."""
     try:
         portfolio = await portfolio_crud.update_portfolio(
-            session, portfolio_id, name=payload.name, cash=payload.cash
+            session, portfolio_id, user.sub, name=payload.name, cash=payload.cash
         )
     except portfolio_crud.DuplicatePortfolioNameError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -152,9 +158,10 @@ async def patch_portfolio(
 async def delete_portfolio(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> None:
     """Delete a portfolio; its positions cascade away at the DB level."""
-    deleted = await portfolio_crud.delete_portfolio(session, portfolio_id)
+    deleted = await portfolio_crud.delete_portfolio(session, portfolio_id, user.sub)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
 
@@ -171,6 +178,7 @@ async def put_position(
     payload: PositionBody,
     session: Annotated[AsyncSession, Depends(get_session)],
     client: Annotated[TiingoClient, Depends(get_tiingo_client)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PositionOut:
     """Upsert one position.
 
@@ -183,7 +191,7 @@ async def put_position(
     on UPDATE; on INSERT basis defaults to 'reference'.
     """
     symbol = _normalize_ticker_or_422(ticker)
-    if not await portfolio_crud.portfolio_exists(session, portfolio_id):
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id, user.sub):
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
     provided = payload.model_fields_set
     position = await portfolio_crud.get_position(session, portfolio_id, symbol)
@@ -231,10 +239,11 @@ async def delete_position(
     portfolio_id: int,
     ticker: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> None:
     """Delete one position; 404 covers both a missing portfolio and a missing ticker."""
     symbol = _normalize_ticker_or_422(ticker)
-    deleted = await portfolio_crud.delete_position(session, portfolio_id, symbol)
+    deleted = await portfolio_crud.delete_position(session, portfolio_id, symbol, user.sub)
     if not deleted:
         raise HTTPException(
             status_code=404,
@@ -252,6 +261,7 @@ async def get_portfolio_overview(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
     client: Annotated[TiingoClient, Depends(get_tiingo_client)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PortfolioOverviewResponse:
     """Render-ready position table with P&L and column-header aggregates (D6).
 
@@ -259,7 +269,7 @@ async def get_portfolio_overview(
     the EOD ensure runs first so stale tickers are refreshed.  An empty
     portfolio is a legitimate 200 with zeroed/null aggregates.
     """
-    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, user.sub)
     if portfolio is None:
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
 
@@ -332,6 +342,7 @@ async def get_portfolio_news(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
     client: Annotated[TiingoClient, Depends(get_tiingo_client)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     limit: Annotated[int, Query(ge=1, le=50, description="Max articles returned.")] = 20,
 ) -> PortfolioNewsResponse:
     """Aggregated news across all portfolio tickers, newest first.
@@ -341,7 +352,7 @@ async def get_portfolio_news(
     GET /stocks/{ticker}/news exactly: refresh failure with cached articles
     serves them with ``stale=true``; with an empty cache it fails loud.
     """
-    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, user.sub)
     if portfolio is None:
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
 
@@ -392,6 +403,7 @@ async def get_portfolio_lookthrough(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
     datalake: Annotated[AsyncSession, Depends(get_datalake_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PortfolioLookthroughResponse:
     """Exposição consolidada do portfólio atravessando os fundos (Frente C).
 
@@ -401,7 +413,7 @@ async def get_portfolio_lookthrough(
     data-lake. Posições não atravessadas (ações, fundos sem materialização)
     ficam EXPLÍCITAS em ``unexpanded`` — nunca somem silenciosamente.
     """
-    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, user.sub)
     if portfolio is None:
         raise HTTPException(
             status_code=404, detail=f"Portfolio {portfolio_id} not found."

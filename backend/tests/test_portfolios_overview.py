@@ -83,7 +83,7 @@ def _install_stubs(
         ensure_calls.append(list(tickers))
         return EnsureReport()
 
-    async def fake_get(session: Any, portfolio_id: int) -> SimpleNamespace | None:
+    async def fake_get(session: Any, portfolio_id: int, owner_sub: str) -> SimpleNamespace | None:
         return portfolio
 
     async def fake_closes(session: Any, tickers: Any) -> ClosesMap:

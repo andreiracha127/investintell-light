@@ -68,7 +68,7 @@ def _install_stubs(
 ) -> dict[str, list[Any]]:
     calls: dict[str, list[Any]] = {"ensure": [], "select": []}
 
-    async def fake_get(session: Any, portfolio_id: int) -> SimpleNamespace | None:
+    async def fake_get(session: Any, portfolio_id: int, owner_sub: str) -> SimpleNamespace | None:
         return portfolio
 
     async def fake_ensure(

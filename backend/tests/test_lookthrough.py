@@ -243,7 +243,7 @@ async def test_portfolio_lookthrough_consolidates_and_reports_unexpanded(
         positions=[_position("FUNDX", 100.0), _position("AAPL", 100.0)],
     )
 
-    async def fake_get_portfolio(session, portfolio_id):
+    async def fake_get_portfolio(session, portfolio_id, owner_sub=None):
         assert portfolio_id == 7
         return portfolio
 
@@ -292,7 +292,7 @@ async def test_portfolio_lookthrough_consolidates_and_reports_unexpanded(
 async def test_portfolio_lookthrough_unknown_portfolio_404(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_get_portfolio(session, portfolio_id):
+    async def fake_get_portfolio(session, portfolio_id, owner_sub=None):
         return None
 
     monkeypatch.setattr(portfolio_crud, "get_portfolio", fake_get_portfolio)
@@ -309,7 +309,7 @@ async def test_portfolio_lookthrough_fund_without_materialization_is_unexpanded(
         id=7, name="P", cash=0.0, positions=[_position("FUNDX", 100.0)],
     )
 
-    async def fake_get_portfolio(session, portfolio_id):
+    async def fake_get_portfolio(session, portfolio_id, owner_sub=None):
         return portfolio
 
     async def fake_fund_series_by_ticker(session, tickers):
@@ -348,7 +348,7 @@ async def test_portfolio_lookthrough_missing_price_is_loud(
         id=7, name="P", cash=0.0, positions=[_position("GHOST", 1.0)],
     )
 
-    async def fake_get_portfolio(session, portfolio_id):
+    async def fake_get_portfolio(session, portfolio_id, owner_sub=None):
         return portfolio
 
     async def fake_fund_series_by_ticker(session, tickers):
