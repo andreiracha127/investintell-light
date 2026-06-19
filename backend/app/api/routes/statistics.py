@@ -26,6 +26,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import CurrentUser, get_current_user
 from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
@@ -43,7 +44,11 @@ from app.services import statistics as statistics_service
 from app.services.stock_analysis import StockAnalysisError
 from app.tiingo.client import TiingoClient
 
-router = APIRouter(prefix="/statistics", tags=["statistics"])
+router = APIRouter(
+    prefix="/statistics",
+    tags=["statistics"],
+    dependencies=[Depends(get_current_user)],
+)
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 ClientDep = Annotated[TiingoClient, Depends(get_tiingo_client)]
@@ -51,7 +56,10 @@ ClientDep = Annotated[TiingoClient, Depends(get_tiingo_client)]
 
 @router.post("/scenario", response_model=ScenarioResponse)
 async def scenario(
-    payload: ScenarioRequest, session: SessionDep, client: ClientDep
+    payload: ScenarioRequest,
+    session: SessionDep,
+    client: ClientDep,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> ScenarioResponse:
     """Historical replay of a persisted portfolio over an explicit window.
 
@@ -65,6 +73,7 @@ async def scenario(
             client,
             payload,
             max_points=get_settings().price_series_max_points,
+            owner_sub=user.sub,
         )
     except StockAnalysisError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -72,7 +81,10 @@ async def scenario(
 
 @router.post("/beta", response_model=BetaResponse)
 async def beta_scatter(
-    payload: BetaRequest, session: SessionDep, client: ClientDep
+    payload: BetaRequest,
+    session: SessionDep,
+    client: ClientDep,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> BetaResponse:
     """Daily-return scatter + OLS regression of two pseudo-assets (y on x)."""
     try:
@@ -81,6 +93,7 @@ async def beta_scatter(
             client,
             payload,
             max_points=get_settings().price_series_max_points,
+            owner_sub=user.sub,
         )
     except StockAnalysisError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -88,7 +101,10 @@ async def beta_scatter(
 
 @router.post("/correlation", response_model=CorrelationResponse)
 async def rolling_correlation(
-    payload: CorrelationRequest, session: SessionDep, client: ClientDep
+    payload: CorrelationRequest,
+    session: SessionDep,
+    client: ClientDep,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> CorrelationResponse:
     """Rolling correlation of two pseudo-assets, warm from the window start."""
     try:
@@ -97,6 +113,7 @@ async def rolling_correlation(
             client,
             payload,
             max_points=get_settings().price_series_max_points,
+            owner_sub=user.sub,
         )
     except StockAnalysisError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -104,10 +121,18 @@ async def rolling_correlation(
 
 @router.post("/stock-correlation", response_model=StockCorrelationResponse)
 async def stock_correlation(
-    payload: StockCorrelationRequest, session: SessionDep, client: ClientDep
+    payload: StockCorrelationRequest,
+    session: SessionDep,
+    client: ClientDep,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> StockCorrelationResponse:
     """Pairwise correlation matrix of a portfolio's holdings (trailing window)."""
     try:
-        return await statistics_service.run_stock_correlation(session, client, payload)
+        return await statistics_service.run_stock_correlation(
+            session,
+            client,
+            payload,
+            owner_sub=user.sub,
+        )
     except StockAnalysisError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

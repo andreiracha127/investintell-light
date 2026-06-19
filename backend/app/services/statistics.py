@@ -165,9 +165,9 @@ async def _load_series_map(
 
 
 async def _load_portfolio_or_404(
-    session: AsyncSession, portfolio_id: int
+    session: AsyncSession, portfolio_id: int, owner_sub: str
 ) -> Portfolio:
-    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, owner_sub)
     if portfolio is None:
         raise HTTPException(
             status_code=404, detail=f"Portfolio {portfolio_id} not found."
@@ -191,6 +191,7 @@ async def _load_portfolio_prices(
     portfolio_id: int,
     start: dt.date,
     end: dt.date,
+    owner_sub: str,
 ) -> tuple[Portfolio, dict[str, float], dict[str, pd.Series]]:
     """Load, validate and read prices for a portfolio in one call.
 
@@ -203,12 +204,12 @@ async def _load_portfolio_prices(
         series_by_ticker: per-ticker adjusted-close series over [start, end].
 
     Raises:
-        HTTPException 404: unknown portfolio_id.
+        HTTPException 404: unknown portfolio_id or not owned by owner_sub.
         HTTPException 4xx: provider failure / unknown ticker (from ensure).
         InsufficientDataError: portfolio has no positions, or holds fund
             positions (NAV-priced — not supported by the EOD analyses yet).
     """
-    portfolio = await _load_portfolio_or_404(session, portfolio_id)
+    portfolio = await _load_portfolio_or_404(session, portfolio_id, owner_sub)
     quantities = _require_positions(portfolio)
     tickers = list(quantities)
     # Fund positions (F8.5 saved proposals) are NAV-priced and have no EOD
@@ -236,20 +237,21 @@ async def resolve_asset_returns(
     ref: AssetRef,
     start: dt.date,
     end: dt.date,
+    owner_sub: str,
 ) -> tuple[str, pd.Series]:
     """Resolve a pseudo-asset reference into ``(label, daily return series)``.
 
     - ``kind='ticker'``: EOD-ensure the ticker, then simple returns of its
       adjusted closes over [start, end]; label = the ticker.
-    - ``kind='portfolio'``: load the persisted portfolio (404 when unknown),
-      replay its CURRENT quantities (inner-join of its holdings' adjusted
-      closes, engine ``portfolio_returns``); label = the portfolio name.
-      Uninvested cash is NOT included — it is constant and would only dilute
-      beta/correlation against the invested positions.
+    - ``kind='portfolio'``: load the persisted portfolio (404 when unknown or
+      not owned by owner_sub), replay its CURRENT quantities (inner-join of its
+      holdings' adjusted closes, engine ``portfolio_returns``); label = the
+      portfolio name.  Uninvested cash is NOT included — it is constant and
+      would only dilute beta/correlation against the invested positions.
 
     Raises:
-        HTTPException: 404 for an unknown portfolio; whatever the shared EOD
-            ensure raises for unknown tickers / provider failures.
+        HTTPException: 404 for an unknown/unowned portfolio; whatever the
+            shared EOD ensure raises for unknown tickers / provider failures.
         InsufficientDataError: empty portfolio, or too few common trading days
             in the window (the shortest-history ticker is named).
     """
@@ -265,7 +267,7 @@ async def resolve_asset_returns(
         return ref.ticker, simple_returns(series)
 
     portfolio, quantities, series_by_ticker = await _load_portfolio_prices(
-        session, client, ref.id, start, end
+        session, client, ref.id, start, end, owner_sub
     )
     prices = _join_prices(series_by_ticker)
     _require_common_rows(
@@ -437,10 +439,12 @@ async def run_scenario(
     payload: ScenarioRequest,
     *,
     max_points: int,
+    owner_sub: str,
 ) -> ScenarioResponse:
     """Orchestrate the scenario: load portfolio, ensure EOD, read, assemble."""
     portfolio, quantities, series_by_ticker = await _load_portfolio_prices(
-        session, client, payload.portfolio_id, payload.start_date, payload.end_date
+        session, client, payload.portfolio_id, payload.start_date, payload.end_date,
+        owner_sub,
     )
     return assemble_scenario(
         series_by_ticker,
@@ -515,13 +519,16 @@ async def run_beta(
     payload: BetaRequest,
     *,
     max_points: int,
+    owner_sub: str,
 ) -> BetaResponse:
     """Orchestrate the beta scatter: resolve both pseudo-assets, assemble."""
     label_x, returns_x = await resolve_asset_returns(
-        session, client, payload.asset_x, payload.start_date, payload.end_date
+        session, client, payload.asset_x, payload.start_date, payload.end_date,
+        owner_sub,
     )
     label_y, returns_y = await resolve_asset_returns(
-        session, client, payload.asset_y, payload.start_date, payload.end_date
+        session, client, payload.asset_y, payload.start_date, payload.end_date,
+        owner_sub,
     )
     return assemble_beta(
         label_x, returns_x, label_y, returns_y, max_points=max_points
@@ -584,6 +591,7 @@ async def run_rolling_correlation(
     payload: CorrelationRequest,
     *,
     max_points: int,
+    owner_sub: str,
 ) -> CorrelationResponse:
     """Orchestrate rolling correlation: resolve with a lookback pad, assemble.
 
@@ -594,10 +602,10 @@ async def run_rolling_correlation(
         days=lookback_pad_days(payload.window)
     )
     label_x, returns_x = await resolve_asset_returns(
-        session, client, payload.asset_x, pad_start, payload.end_date
+        session, client, payload.asset_x, pad_start, payload.end_date, owner_sub,
     )
     label_y, returns_y = await resolve_asset_returns(
-        session, client, payload.asset_y, pad_start, payload.end_date
+        session, client, payload.asset_y, pad_start, payload.end_date, owner_sub,
     )
     return assemble_rolling_correlation(
         label_x,
@@ -652,6 +660,8 @@ async def run_stock_correlation(
     session: AsyncSession,
     client: TiingoClient,
     payload: StockCorrelationRequest,
+    *,
+    owner_sub: str,
 ) -> StockCorrelationResponse:
     """Orchestrate the holdings correlation matrix over a trailing window.
 
@@ -663,6 +673,6 @@ async def run_stock_correlation(
     end = payload.end_date or dt.date.today()
     pad_start = end - dt.timedelta(days=lookback_pad_days(payload.window + 1))
     _, _, series_by_ticker = await _load_portfolio_prices(
-        session, client, payload.portfolio_id, pad_start, end
+        session, client, payload.portfolio_id, pad_start, end, owner_sub,
     )
     return assemble_stock_correlation(series_by_ticker, window=payload.window)

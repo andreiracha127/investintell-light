@@ -17,6 +17,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from app.api import _shared as api_shared
+from app.core.auth import CurrentUser, get_current_user
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
 from app.ingestion.service import EnsureReport
@@ -27,6 +28,9 @@ from app.tiingo.exceptions import TiingoNotFoundError
 N_DAYS = 420
 
 AdjCloseRow = tuple[dt.date, float]
+
+FAKE_USER = CurrentUser(sub="user-abc", org_id=None, claims={})
+OTHER_USER_SUB = "user-xyz-other"
 
 
 def _synthetic_rows(seed: int, n_days: int = N_DAYS) -> list[AdjCloseRow]:
@@ -60,6 +64,15 @@ def _app_with_overrides() -> FastAPI:
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
     app.dependency_overrides[get_tiingo_client] = lambda: object()
+    app.dependency_overrides[get_current_user] = lambda: FAKE_USER
+    return app
+
+
+def _app_no_auth() -> FastAPI:
+    """App WITHOUT auth override — auth stays fully enforced."""
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: None
+    app.dependency_overrides[get_tiingo_client] = lambda: object()
     return app
 
 
@@ -67,6 +80,7 @@ def _install_stubs(
     monkeypatch: pytest.MonkeyPatch,
     rows_by_ticker: dict[str, list[AdjCloseRow]] | None = None,
     portfolio: Any | None = PORTFOLIO,
+    owner_sub: str = FAKE_USER.sub,
 ) -> None:
     rows_map = ROWS_BY_TICKER if rows_by_ticker is None else rows_by_ticker
 
@@ -78,8 +92,10 @@ def _install_stubs(
     ) -> list[AdjCloseRow]:
         return [r for r in rows_map.get(ticker, []) if start <= r[0] <= end]
 
-    async def fake_get_portfolio(session: Any, portfolio_id: int) -> Any | None:
-        if portfolio is not None and portfolio_id == portfolio.id:
+    async def fake_get_portfolio(
+        session: Any, portfolio_id: int, sub: str
+    ) -> Any | None:
+        if portfolio is not None and portfolio_id == portfolio.id and sub == owner_sub:
             return portfolio
         return None
 
@@ -104,6 +120,67 @@ async def stub_client(
     transport = ASGITransport(app=_app_with_overrides())
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+
+
+# ---------------------------------------------------------------------------
+# Auth enforcement
+# ---------------------------------------------------------------------------
+
+
+async def test_statistics_no_auth_returns_401() -> None:
+    """All /statistics endpoints must return 401 when no token is supplied."""
+    transport = ASGITransport(app=_app_no_auth())
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        response = await ac.post(
+            "/statistics/scenario",
+            json={"portfolio_id": 7, "start_date": START, "end_date": END},
+        )
+    assert response.status_code == 401
+
+
+async def test_statistics_cross_user_portfolio_returns_404(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Requesting a portfolio owned by a DIFFERENT user must return 404."""
+    # Stubs are set up so only FAKE_USER.sub ("user-abc") can see portfolio 7.
+    # The app is configured to authenticate as FAKE_USER, but we stub
+    # get_portfolio to ONLY return the portfolio for owner_sub=FAKE_USER.sub.
+    # We simulate a cross-user attack by installing stubs with OTHER_USER_SUB as
+    # the effective owner, while the authenticated user remains FAKE_USER.
+    _install_stubs(monkeypatch, owner_sub=OTHER_USER_SUB)
+    transport = ASGITransport(app=_app_with_overrides())
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        response = await ac.post(
+            "/statistics/scenario",
+            json={"portfolio_id": 7, "start_date": START, "end_date": END},
+        )
+    assert response.status_code == 404
+
+
+async def test_statistics_owner_sub_forwarded_to_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """owner_sub extracted from the JWT must be forwarded to run_scenario."""
+    captured: list[str] = []
+
+    async def spy_run_scenario(*args: Any, **kwargs: Any) -> Any:
+        captured.append(kwargs.get("owner_sub", ""))
+        # Raise StockAnalysisError so the route maps it to 422 (clean exit).
+        from app.services.stock_analysis import InsufficientDataError
+
+        raise InsufficientDataError("spy sentinel")
+
+    _install_stubs(monkeypatch)
+    monkeypatch.setattr(statistics_service, "run_scenario", spy_run_scenario)
+    transport = ASGITransport(app=_app_with_overrides())
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        response = await ac.post(
+            "/statistics/scenario",
+            json={"portfolio_id": 7, "start_date": START, "end_date": END},
+        )
+    # The route must have received the call (422 from the sentinel).
+    assert response.status_code == 422
+    assert captured == [FAKE_USER.sub]
 
 
 # ---------------------------------------------------------------------------

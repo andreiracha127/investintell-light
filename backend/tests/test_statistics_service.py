@@ -217,7 +217,9 @@ def _install_resolver_stubs(
         sliced = series[(series.index.date >= start) & (series.index.date <= end)]
         return [(ts.date(), float(v)) for ts, v in sliced.items()]
 
-    async def fake_get_portfolio(session: Any, portfolio_id: int) -> Any | None:
+    async def fake_get_portfolio(
+        session: Any, portfolio_id: int, owner_sub: str
+    ) -> Any | None:
         return portfolio if portfolio is not None and portfolio.id == portfolio_id else None
 
     async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
@@ -251,7 +253,7 @@ async def test_resolve_ticker_ref(monkeypatch: pytest.MonkeyPatch) -> None:
     end = rows_map["SPY"].index[-1].date()
 
     label, returns = await resolve_asset_returns(
-        None, object(), TickerRef(kind="ticker", ticker="SPY"), start, end
+        None, object(), TickerRef(kind="ticker", ticker="SPY"), start, end, "test-sub"
     )
     assert label == "SPY"
     # check_index_type=False: the DB round-trip (Timestamp -> date -> Timestamp)
@@ -275,7 +277,7 @@ async def test_resolve_portfolio_ref_equals_portfolio_returns(
     end = rows_map["AAPL"].index[-1].date()
 
     label, returns = await resolve_asset_returns(
-        None, object(), PortfolioRef(kind="portfolio", id=7), start, end
+        None, object(), PortfolioRef(kind="portfolio", id=7), start, end, "test-sub"
     )
     assert label == "Temp F5"
     prices = join_prices(rows_map)
@@ -296,6 +298,7 @@ async def test_resolve_unknown_portfolio_raises_404(
             PortfolioRef(kind="portfolio", id=99),
             dt.date(2025, 1, 1),
             dt.date(2026, 1, 1),
+            "test-sub",
         )
     assert excinfo.value.status_code == 404
 
@@ -311,6 +314,7 @@ async def test_resolve_empty_portfolio_raises_insufficient(
             PortfolioRef(kind="portfolio", id=7),
             dt.date(2025, 1, 1),
             dt.date(2026, 1, 1),
+            "test-sub",
         )
 
 
@@ -325,6 +329,7 @@ async def test_resolve_ticker_with_short_history_raises_insufficient(
             TickerRef(kind="ticker", ticker="SPY"),
             dt.date(2000, 1, 1),
             dt.date.today(),
+            "test-sub",
         )
 
 
