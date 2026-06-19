@@ -317,6 +317,14 @@ export function InteractiveChart({
         <div role="group" aria-label="Scale" className={group}>
           <button
             type="button"
+            aria-pressed={!scale.log && !scale.pct}
+            className={btn(!scale.log && !scale.pct)}
+            onClick={() => setScale({ log: false, pct: false })}
+          >
+            Linear
+          </button>
+          <button
+            type="button"
             aria-pressed={scale.log}
             className={btn(scale.log)}
             onClick={() => setScale((current) => ({ ...current, log: !current.log, pct: false }))}

@@ -36,7 +36,7 @@ const COLUMNS: {
   cls?: string;
 }[] = [
   { key: "ticker", label: "Symbol", align: "left", sortable: true },
-  { key: "name", label: "Name", align: "left", sortable: true },
+  { key: "name", label: "Company", align: "left", sortable: true },
   { key: "last", label: "Last", align: "right", sortable: true },
   { key: "change", label: "Chg", align: "right", sortable: true },
   { key: "change_pct", label: "%Chg", align: "right", sortable: true },
@@ -46,7 +46,7 @@ const COLUMNS: {
 ];
 
 const NUMERIC_KEYS = new Set<SortKey>(["last", "change", "change_pct", "volume"]);
-const PAGE = 12;
+const PAGE = 20;
 
 function compareRows(a: LeaderRow, b: LeaderRow, key: SortKey, dir: "asc" | "desc"): number {
   let result: number;
@@ -166,13 +166,19 @@ export function LeadersTable({ overview }: { overview: MarketOverview }) {
                 <tr>
                   {COLUMNS.map((col) => {
                     const active = col.key === sortKey;
-                    const arrow = active ? (sortDir === "asc" ? "↑" : "↓") : "";
+                    const arrow = active ? (sortDir === "asc" ? "▲" : "▼") : "";
                     return (
                       <th
                         key={col.key}
                         scope="col"
                         aria-sort={
-                          active ? (sortDir === "asc" ? "ascending" : "descending") : "none"
+                          col.sortable
+                            ? active
+                              ? sortDir === "asc"
+                                ? "ascending"
+                                : "descending"
+                              : "none"
+                            : undefined
                         }
                         aria-label={col.key === "actions" ? "Actions" : undefined}
                         tabIndex={col.sortable ? 0 : undefined}
@@ -265,7 +271,7 @@ export function LeadersTable({ overview }: { overview: MarketOverview }) {
                 onClick={() => setVisible((v) => v + PAGE)}
                 className="border border-border-strong bg-field px-[18px] py-[7px] text-[12px] font-semibold text-text-primary hover:bg-layer-hover transition-colors"
               >
-                Load more ({remaining})
+                Load more ({Math.min(PAGE, remaining)})
               </button>
             </div>
           )}

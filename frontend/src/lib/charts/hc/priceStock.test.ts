@@ -13,6 +13,7 @@ import {
   rangePresetFromExtremes,
   removeCompareSelection,
   resampleBars,
+  priceStockTooltipFormatter,
   rsiValues,
   smaValues,
   toMainSeriesData,
@@ -91,6 +92,69 @@ describe("priceStock option builder", () => {
     // Taylor-made SMA: a computed line series on the price axis (not the native
     // Highstock `sma` indicator, which failed to register under ESM).
     expect(series.some((s) => s.name === "SMA20" && s.type === "line" && s.yAxis === "price-axis")).toBe(true);
+  });
+
+  it("titles the price y-axis 'Price (USD)' and the volume pane 'Volume'", () => {
+    const opt = buildHcPriceStockOption({
+      symbol: "AAPL",
+      bars: BARS,
+      mode: "ohlcv",
+      type: "candles",
+      period: "D",
+      range: "1Y",
+      overlays: { sma20: false, sma50: false },
+      panes: { volume: true, rsi: false },
+      scale: { log: false, pct: false },
+      compares: [],
+      compareData: {},
+      colors: TEST_COLORS,
+      onVisibleRangeChange: vi.fn(),
+    });
+    const axes = opt.yAxis as Array<{ id?: string; title?: { text?: string } }>;
+    expect(axes.find((a) => a.id === "price-axis")?.title?.text).toBe("Price (USD)");
+    expect(axes.find((a) => a.id === "volume-axis")?.title?.text).toBe("Volume");
+  });
+
+  it("titles the price y-axis 'Change' under the percent scale", () => {
+    const opt = buildHcPriceStockOption({
+      symbol: "AAPL",
+      bars: BARS,
+      mode: "ohlcv",
+      type: "line",
+      period: "D",
+      range: "1Y",
+      overlays: { sma20: false, sma50: false },
+      panes: { volume: false, rsi: false },
+      scale: { log: false, pct: true },
+      compares: [],
+      compareData: {},
+      colors: TEST_COLORS,
+      onVisibleRangeChange: vi.fn(),
+    });
+    const axes = opt.yAxis as Array<{ id?: string; title?: { text?: string } }>;
+    expect(axes.find((a) => a.id === "price-axis")?.title?.text).toBe("Change");
+  });
+
+  it("installs a shared OHLC tooltip formatter", () => {
+    const opt = buildHcPriceStockOption({
+      symbol: "AAPL",
+      bars: BARS,
+      mode: "ohlcv",
+      type: "candles",
+      period: "D",
+      range: "1Y",
+      overlays: { sma20: false, sma50: false },
+      panes: { volume: true, rsi: false },
+      scale: { log: false, pct: false },
+      compares: [],
+      compareData: {},
+      colors: TEST_COLORS,
+      onVisibleRangeChange: vi.fn(),
+    });
+    const tooltip = opt.tooltip as { shared?: boolean; useHTML?: boolean; formatter?: unknown };
+    expect(tooltip.shared).toBe(true);
+    expect(tooltip.useHTML).toBe(true);
+    expect(typeof tooltip.formatter).toBe("function");
   });
 
   it("omits volume and OHLC-only series for NAV mode", () => {
@@ -358,6 +422,45 @@ describe("priceCore option builder", () => {
     // Percent: the labels object is still emitted for the % tick format.
     const percent = buildHcPriceCoreOption({ ...base, scale: { log: false, pct: true } });
     expect((percent.yAxis as { labels?: unknown }).labels).toEqual({ format: "{value}%" });
+  });
+});
+
+describe("priceStockTooltipFormatter", () => {
+  const colSeries = (name: string) => ({ series: { name, options: { type: "column" } } });
+  const lineSeries = (name: string) => ({ series: { name, options: { type: "line" } } });
+
+  it("renders an O/H/L/C row with a bold close, SMA values, and compact volume", () => {
+    const ctx = {
+      x: Date.UTC(2024, 0, 2),
+      points: [
+        { ...lineSeries("AAPL"), open: 100, high: 110, low: 95, close: 108, y: 108, color: "#000" },
+        { ...lineSeries("SMA20"), y: 105.25, color: "#abc" },
+        { ...colSeries("Volume"), y: 1_500_000, color: "#999" },
+      ],
+    };
+    const html = priceStockTooltipFormatter.call(ctx as never, false, "#777");
+    expect(html).toContain("O 100.00 · H 110.00 · L 95.00");
+    expect(html).toContain("C <b>108.00</b>");
+    expect(html).toContain("SMA20: 105.25");
+    expect(html).toContain("Vol: 1.5M");
+  });
+
+  it("renders a single Price row for line series without OHLC fields", () => {
+    const ctx = {
+      x: Date.UTC(2024, 0, 2),
+      points: [{ ...lineSeries("AAPL"), point: {}, y: 108, color: "#000" }],
+    };
+    const html = priceStockTooltipFormatter.call(ctx as never, false, "#777");
+    expect(html).toContain("Price: <b>108.00</b>");
+  });
+
+  it("labels the value row 'Change' with a percent suffix under the percent scale", () => {
+    const ctx = {
+      x: Date.UTC(2024, 0, 2),
+      points: [{ ...lineSeries("AAPL"), point: {}, y: 3.5, color: "#000" }],
+    };
+    const html = priceStockTooltipFormatter.call(ctx as never, true, "#777");
+    expect(html).toContain("Change: <b>3.50%</b>");
   });
 });
 

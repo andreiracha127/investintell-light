@@ -1,7 +1,12 @@
-import type { DataGroupingOptionsObject, Options, SeriesOptionsType } from "highcharts";
+import type {
+  DataGroupingOptionsObject,
+  Options,
+  SeriesOptionsType,
+} from "highcharts";
 
 import type { RangePreset, SymbolSearchResult } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
+import { formatCompact, formatNumber } from "@/lib/format";
 
 export type PriceChartType = "candles" | "ohlc" | "line" | "area";
 export type PricePeriod = "D" | "W" | "M";
@@ -366,6 +371,73 @@ export function buildHcPriceCoreOption(input: PriceStockOptionsInput): Options {
   };
 }
 
+/**
+ * Shared OHLC tooltip (Stocks.dc.html): a date header, then either an
+ * O/H/L/C row (bold close) for candle/OHLC series or a single Price/Change
+ * row for line/area, followed by each SMA value and a compact Volume line.
+ */
+/** Minimal structural shape of the shared-tooltip context we read (HC does not
+ * re-export TooltipFormatterContextObject from the package root under ESM). */
+interface PriceTooltipPoint {
+  series: { name: string; options: { type?: string } };
+  y?: number | null;
+  color?: string | object;
+  open?: number;
+  high?: number;
+  low?: number;
+  close?: number;
+}
+interface PriceTooltipContext {
+  x?: number | string;
+  points?: PriceTooltipPoint[];
+}
+
+export function priceStockTooltipFormatter(
+  this: PriceTooltipContext,
+  percent: boolean,
+  textMuted: string,
+): string {
+  const points = this.points ?? [];
+  const dateMs = typeof this.x === "number" ? this.x : Number(this.x);
+  const header = `<div style="font-weight:700;margin-bottom:3px">${new Date(
+    dateMs,
+  ).toLocaleDateString()}</div>`;
+  let html = header;
+
+  const main = points.find((p) => p.series.options.type !== "column");
+  if (main) {
+    if (main.open != null) {
+      html += `<div>O ${formatNumber(main.open)} · H ${formatNumber(
+        main.high ?? 0,
+      )} · L ${formatNumber(main.low ?? 0)} · C <b>${formatNumber(
+        main.close ?? 0,
+      )}</b></div>`;
+    } else {
+      const y = main.y ?? 0;
+      const label = percent ? "Change" : "Price";
+      const value = percent ? `${formatNumber(y)}%` : formatNumber(y);
+      html += `<div>${label}: <b>${value}</b></div>`;
+    }
+  }
+
+  points
+    .filter((p) => /SMA/.test(p.series.name))
+    .forEach((p) => {
+      html += `<div style="color:${String(p.color ?? "")}">${p.series.name}: ${formatNumber(
+        p.y ?? 0,
+      )}</div>`;
+    });
+
+  const volume = points.find((p) => p.series.options.type === "column");
+  if (volume) {
+    html += `<div style="color:${textMuted}">Vol: ${formatCompact(
+      volume.y ?? 0,
+    )}</div>`;
+  }
+
+  return html;
+}
+
 export function buildHcPriceStockOption(input: PriceStockOptionsInput): Options {
   const {
     symbol,
@@ -402,7 +474,8 @@ export function buildHcPriceStockOption(input: PriceStockOptionsInput): Options 
       // "right"` pushed them inside, overlapping the latest candles.
       opposite: true,
       labels: { align: "left", x: 4 },
-      title: { text: undefined },
+      // % scale shows relative change; otherwise the price axis is in USD.
+      title: { text: scale.pct ? "Change" : "Price (USD)" },
       resize: { enabled: true },
     },
   ];
@@ -415,7 +488,7 @@ export function buildHcPriceStockOption(input: PriceStockOptionsInput): Options 
       offset: 0,
       opposite: true,
       labels: { align: "left", x: 4 },
-      title: { text: undefined },
+      title: { text: "Volume" },
     });
   }
 
@@ -579,7 +652,11 @@ export function buildHcPriceStockOption(input: PriceStockOptionsInput): Options 
     tooltip: {
       split: false,
       shared: true,
+      useHTML: true,
       valueDecimals: scale.pct ? 2 : undefined,
+      formatter(this: PriceTooltipContext) {
+        return priceStockTooltipFormatter.call(this, scale.pct, colors.textMuted);
+      },
     },
     plotOptions: {
       series: {

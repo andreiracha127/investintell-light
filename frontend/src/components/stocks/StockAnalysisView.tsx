@@ -19,7 +19,7 @@ import {
   type RangePreset,
   type StockAnalysis,
 } from "@/lib/api/client";
-import { buildHcHistogramOption } from "@/lib/charts/hc/histogram";
+import { buildHcBellCurveOption } from "@/lib/charts/hc/stats-bellcurve";
 import { buildHcRollingOption } from "@/lib/charts/hc/rolling";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import {
@@ -162,24 +162,31 @@ function AnalysisContent({
     () =>
       buildHcRollingOption(data.rolling_volatility, "Volatility", colors, {
         yPercent: true,
+        yTitle: "Annualized",
       }),
     [data.rolling_volatility, colors],
   );
   const betaOption = useMemo(
-    () => buildHcRollingOption(data.rolling_beta, "Beta", colors),
-    [data.rolling_beta, colors],
+    () =>
+      buildHcRollingOption(data.rolling_beta, "Beta", colors, {
+        yTitle: `vs ${params.benchmark}`,
+      }),
+    [data.rolling_beta, colors, params.benchmark],
   );
   const correlationOption = useMemo(
     () =>
       buildHcRollingOption(data.rolling_correlation, "Correlation", colors, {
         yMin: -1,
         yMax: 1,
+        yTitle: `vs ${params.benchmark}`,
       }),
-    [data.rolling_correlation, colors],
+    [data.rolling_correlation, colors, params.benchmark],
   );
-  const histogramOption = useMemo(
-    () => buildHcHistogramOption(data.histogram, colors),
-    [data.histogram, colors],
+  // Fitted-normal bell curve of the daily-return distribution (mean/σ derived
+  // from the histogram by the shared builder), matching Stocks.dc.html.
+  const distributionOption = useMemo(
+    () => buildHcBellCurveOption(data.histogram, stats.var_95, colors),
+    [data.histogram, stats.var_95, colors],
   );
 
   const { ticks, status: feedStatus } = useLiveTicks([header.ticker]);
@@ -297,7 +304,7 @@ function AnalysisContent({
       {/* ── Distribution + statistics ── */}
       <div className="grid grid-cols-1 gap-px bg-border lg:grid-cols-2">
         <Card title="Daily Return Distribution">
-          <HighchartsChart options={histogramOption} className="h-[280px] w-full" />
+          <HighchartsChart options={distributionOption} className="h-[280px] w-full" />
         </Card>
 
         <Card title="Statistics">
