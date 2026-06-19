@@ -1,8 +1,10 @@
 /**
  * Pure transform: portfolio holdings -> ordered tree rows for the Grid Pro
- * parent-id tree (Asset Class -> Strategy -> Holding) with a top-level Cash
- * node. Reuses the builder's `WeightTreeRow` output contract so the grid
- * adapter (`weightsTreeGridOptions`) renders it unchanged.
+ * parent-id tree. Two levels only — Asset class (group) -> Holding (leaf) — plus
+ * a top-level Cash node, mirroring the Funds universe table layout (Ticker +
+ * name in the tree column, Strategy in its own column, Weight last). Reuses the
+ * builder's `WeightTreeRow` output contract so the grid adapter
+ * (`weightsTreeGridOptions`) renders it unchanged.
  */
 import type { WeightTreeRow } from "@/lib/builder/weightsTree";
 
@@ -26,18 +28,11 @@ const ASSET_CLASS_LABEL: Record<string, string> = {
   alternatives: "Alternatives",
 };
 
-interface Strat {
+interface Group {
+  code: string;
   label: string;
   weight: number;
-  funds: { input: AllocationInput; weight: number }[];
-}
-
-interface Root {
-  id: string;
-  label: string;
-  weight: number;
-  /** Asset-class groups have strategies; the cash node has none. */
-  strategies: Map<string, Strat> | null;
+  holdings: { input: AllocationInput; weight: number }[];
 }
 
 export function buildAllocationTree(
@@ -47,7 +42,7 @@ export function buildAllocationTree(
 ): WeightTreeRow[] {
   if (totalValue <= 0) return [];
 
-  const groups = new Map<string, Root & { code: string }>();
+  const groups = new Map<string, Group>();
   for (const hld of holdings) {
     const weight = hld.marketValue / totalValue;
     if (weight <= WEIGHT_FLOOR) continue;
@@ -55,77 +50,73 @@ export function buildAllocationTree(
     const acLabel = hld.assetClass
       ? (ASSET_CLASS_LABEL[hld.assetClass] ?? hld.assetClass)
       : "Other";
-    const stratLabel =
-      hld.strategyLabel ?? (hld.instrumentId ? "Unclassified" : "Direct equity");
     let g = groups.get(code);
     if (!g) {
-      g = {
-        id: `ac:${code}`,
-        code,
-        label: acLabel,
-        weight: 0,
-        strategies: new Map(),
-      };
+      g = { code, label: acLabel, weight: 0, holdings: [] };
       groups.set(code, g);
     }
     g.weight += weight;
-    const strategies = g.strategies as Map<string, Strat>;
-    let s = strategies.get(stratLabel);
-    if (!s) {
-      s = { label: stratLabel, weight: 0, funds: [] };
-      strategies.set(stratLabel, s);
-    }
-    s.weight += weight;
-    s.funds.push({ input: hld, weight });
+    g.holdings.push({ input: hld, weight });
   }
 
-  const roots: Root[] = [...groups.values()];
+  // Merge cash into the root ordering so it sorts by weight alongside the
+  // asset-class groups (cash renders as a childless top-level leaf).
+  type Root =
+    | { kind: "group"; weight: number; group: Group }
+    | { kind: "cash"; weight: number };
+  const roots: Root[] = [...groups.values()].map((group) => ({
+    kind: "group" as const,
+    weight: group.weight,
+    group,
+  }));
   if (cashValue > WEIGHT_FLOOR * totalValue) {
-    roots.push({
-      id: CASH_ID,
-      label: "Cash",
-      weight: cashValue / totalValue,
-      strategies: null,
-    });
+    roots.push({ kind: "cash", weight: cashValue / totalValue });
   }
+  roots.sort((a, b) => b.weight - a.weight);
 
   const byWeightDesc = <T extends { weight: number }>(a: T, b: T) =>
     b.weight - a.weight;
 
   const rows: WeightTreeRow[] = [];
   let leafSeq = 0;
-  for (const root of roots.sort(byWeightDesc)) {
-    rows.push({
-      id: root.id,
-      parentId: null,
-      label: root.label,
-      weight: root.weight,
-      instrumentId: null,
-      name: null,
-    });
-    if (root.strategies === null) continue;
-    const code = root.id.slice("ac:".length);
-    for (const s of [...root.strategies.values()].sort(byWeightDesc)) {
-      const stId = `st:${code}/${s.label}`;
+  for (const root of roots) {
+    if (root.kind === "cash") {
       rows.push({
-        id: stId,
-        parentId: root.id,
-        label: s.label,
-        weight: s.weight,
+        id: CASH_ID,
+        parentId: null,
+        label: "Cash",
+        weight: root.weight,
         instrumentId: null,
         name: null,
+        strategy: null,
+        isGroup: false,
       });
-      for (const f of [...s.funds].sort(byWeightDesc)) {
-        rows.push({
-          id: `leaf:${f.input.instrumentId ?? f.input.ticker ?? `seq${leafSeq}`}`,
-          parentId: stId,
-          label: f.input.ticker ?? f.input.name ?? "-",
-          weight: f.weight,
-          instrumentId: f.input.instrumentId,
-          name: f.input.name,
-        });
-        leafSeq += 1;
-      }
+      continue;
+    }
+    const g = root.group;
+    const acId = `ac:${g.code}`;
+    rows.push({
+      id: acId,
+      parentId: null,
+      label: g.label,
+      weight: g.weight,
+      instrumentId: null,
+      name: null,
+      strategy: null,
+      isGroup: true,
+    });
+    for (const f of [...g.holdings].sort(byWeightDesc)) {
+      rows.push({
+        id: `leaf:${f.input.instrumentId ?? f.input.ticker ?? `seq${leafSeq}`}`,
+        parentId: acId,
+        label: f.input.ticker ?? f.input.name ?? "—",
+        weight: f.weight,
+        instrumentId: f.input.instrumentId,
+        name: f.input.name,
+        strategy: f.input.strategyLabel,
+        isGroup: false,
+      });
+      leafSeq += 1;
     }
   }
   return rows;

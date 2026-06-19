@@ -21,43 +21,51 @@ describe("buildWeightsTree", () => {
       w({ instrumentId: "a", ticker: "A", weight: 0.6 }),
       w({ instrumentId: "b", ticker: "B", weight: 0 }),
     ]);
-    const leaves = rows.filter((r) => r.instrumentId !== null);
+    const leaves = rows.filter((r) => !r.isGroup);
     expect(leaves.map((l) => l.label)).toEqual(["A"]);
   });
 
-  it("builds 3 levels and aggregates parent weights", () => {
+  it("builds 2 levels (asset class -> leaf) and aggregates the group weight", () => {
     const rows = buildWeightsTree([
       w({ instrumentId: "a", ticker: "A", weight: 0.2, strategyLabel: "Growth" }),
-      w({ instrumentId: "b", ticker: "B", weight: 0.3, strategyLabel: "Growth" }),
+      w({ instrumentId: "b", ticker: "B", weight: 0.3, strategyLabel: "Value" }),
       w({ instrumentId: "c", ticker: "C", weight: 0.5, assetClass: "fixed_income", strategyLabel: "Core" }),
     ]);
     const byId = new Map(rows.map((r) => [r.id, r]));
-    // Asset-class parents carry the aggregated weight.
+    // No strategy grouping level remains.
+    expect(rows.some((r) => r.id.startsWith("st:"))).toBe(false);
+    // Asset-class group rows carry the aggregated weight and are flagged isGroup.
     expect(byId.get("ac:equity")?.weight).toBeCloseTo(0.5, 9);
+    expect(byId.get("ac:equity")?.isGroup).toBe(true);
     expect(byId.get("ac:fixed_income")?.weight).toBeCloseTo(0.5, 9);
-    // Strategy parent aggregates its funds.
-    expect(byId.get("st:equity/Growth")?.weight).toBeCloseTo(0.5, 9);
-    // Leaf chain: fund -> strategy -> asset class.
+    // Leaves parent directly onto the asset class and carry strategy + identity.
     const leafA = rows.find((r) => r.label === "A");
-    expect(leafA?.parentId).toBe("st:equity/Growth");
-    expect(byId.get("st:equity/Growth")?.parentId).toBe("ac:equity");
-    expect(byId.get("ac:equity")?.parentId).toBeNull();
-    // Parents carry no instrumentId; leaves do.
-    expect(byId.get("ac:equity")?.instrumentId).toBeNull();
+    expect(leafA?.parentId).toBe("ac:equity");
+    expect(leafA?.isGroup).toBe(false);
     expect(leafA?.instrumentId).toBe("a");
-    // Leaves carry the fund name; parents do not.
     expect(leafA?.name).toBe("Fund A");
+    expect(leafA?.strategy).toBe("Growth");
+    // Group rows carry no identity, name or strategy.
+    expect(byId.get("ac:equity")?.instrumentId).toBeNull();
     expect(byId.get("ac:equity")?.name).toBeNull();
-    expect(byId.get("st:equity/Growth")?.name).toBeNull();
+    expect(byId.get("ac:equity")?.strategy).toBeNull();
   });
 
-  it("orders asset classes and funds by descending weight", () => {
+  it("direct equities (kind=equity) drop the dossier link but keep their strategy", () => {
+    const rows = buildWeightsTree([
+      w({ kind: "equity", instrumentId: null, ticker: "AAPL", weight: 0.5, strategyLabel: null }),
+    ]);
+    const leaf = rows.find((r) => r.label === "AAPL");
+    expect(leaf?.instrumentId).toBeNull();
+    expect(leaf?.strategy).toBeNull();
+  });
+
+  it("orders asset classes and leaves by descending weight", () => {
     const rows = buildWeightsTree([
       w({ instrumentId: "a", ticker: "A", weight: 0.1, assetClass: "equity", strategyLabel: "G" }),
       w({ instrumentId: "c", ticker: "C", weight: 0.9, assetClass: "fixed_income", strategyLabel: "Core" }),
     ]);
-    // Fixed income (0.9) precedes equity (0.1) in the flat pre-order array.
-    const acOrder = rows.filter((r) => r.id.startsWith("ac:")).map((r) => r.id);
+    const acOrder = rows.filter((r) => r.isGroup).map((r) => r.id);
     expect(acOrder).toEqual(["ac:fixed_income", "ac:equity"]);
   });
 
@@ -65,7 +73,7 @@ describe("buildWeightsTree", () => {
     const rows = buildWeightsTree([
       w({ instrumentId: "a", ticker: "A", weight: 0.5, assetClass: null, strategyLabel: null }),
     ]);
-    const ac = rows.find((r) => r.id.startsWith("ac:"));
+    const ac = rows.find((r) => r.isGroup);
     expect(ac?.label).toBe("Other");
   });
 });

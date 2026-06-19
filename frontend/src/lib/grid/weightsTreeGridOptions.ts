@@ -1,9 +1,10 @@
 /**
  * Pure adapter: weight tree rows → Highcharts Grid Pro Options for the grouped
- * results view (Asset Class → Strategy → Fund). Uses the Grid Pro TreeView
- * parent-id input; the `label` column is the tree column (expand/collapse) and
- * links fund leaves to their dossier. Mirrors the column/formatter pattern of
- * `fundsGridOptions.ts` (local provider `data` block, theme in `rendering`).
+ * results view (Asset class → Fund/Stock). Two-level parent-id TreeView, COLLAPSED
+ * by default; the `label` column is the tree column (expand/collapse) and renders
+ * the leaf as ticker (dossier link) over name, mirroring the Funds universe table.
+ * Strategy and Weight are their own columns. Group rows show the asset-class label
+ * and the aggregated weight in bold.
  */
 import type { Options } from "@highcharts/grid-pro";
 
@@ -37,26 +38,47 @@ function escapeHtml(value: unknown): string {
     .replace(/"/g, "&quot;");
 }
 
-/** Tree column: leaf labels link to `/funds/<instrumentId>`; parents are plain. */
+function isGroupRow(cell: GridCell): boolean {
+  return cell.row.getCell("isGroup")?.value === true;
+}
+
+/**
+ * Tree column: group rows show the asset-class label in bold; leaves show the
+ * ticker (linked to the fund dossier when there's an instrumentId) over the
+ * display name — the Funds-universe "ticker over name" treatment.
+ */
 export function weightLabelFormatter(this: GridCell): string {
   const label = escapeHtml(this.value ?? "—");
+  if (isGroupRow(this)) {
+    return `<span class="ix-grid-group">${label}</span>`;
+  }
   const id = this.row.getCell("instrumentId")?.value;
-  return id === null || id === undefined || id === ""
-    ? label
-    : `<a class="ix-grid-link" href="/funds/${encodeURIComponent(String(id))}">${label}</a>`;
+  const ticker =
+    id === null || id === undefined || id === ""
+      ? `<span class="ix-grid-sub">${label}</span>`
+      : `<a class="ix-grid-link" href="/funds/${encodeURIComponent(String(id))}">${label}</a>`;
+  const name = this.row.getCell("name")?.value;
+  const nameLine =
+    name === null || name === undefined || name === ""
+      ? ""
+      : `<span class="ix-grid-name">${escapeHtml(name)}</span>`;
+  return `${ticker}${nameLine}`;
 }
 
-function weightFormatter(this: GridCell): string {
-  const v = this.value;
-  return v === null || v === undefined || v === "" ? "—" : formatPercent(Number(v));
-}
-
-/** Fund name column: leaf names; blank for parent (asset-class/strategy) rows. */
-function nameFormatter(this: GridCell): string {
+/** Strategy column: leaf strategy label; blank for group rows / strategy-less holdings. */
+function strategyFormatter(this: GridCell): string {
   const v = this.value;
   return v === null || v === undefined || v === ""
     ? ""
     : `<span class="ix-grid-trunc">${escapeHtml(v)}</span>`;
+}
+
+/** Weight column: percent for all rows; bold for group (subtotal) rows. */
+function weightFormatter(this: GridCell): string {
+  const v = this.value;
+  if (v === null || v === undefined || v === "") return "—";
+  const text = formatPercent(Number(v));
+  return isGroupRow(this) ? `<span class="ix-grid-group">${text}</span>` : text;
 }
 
 export function weightsTreeGridOptions(rows: WeightTreeRow[]): Options {
@@ -73,43 +95,52 @@ export function weightsTreeGridOptions(rows: WeightTreeRow[]): Options {
       parentId: rows.map((r) => r.parentId ?? null),
       label: rows.map((r) => r.label),
       name: rows.map((r) => r.name ?? ""),
+      strategy: rows.map((r) => r.strategy ?? ""),
       weight: rows.map((r) => r.weight),
       instrumentId: rows.map((r) => r.instrumentId ?? ""),
+      isGroup: rows.map((r) => r.isGroup),
     },
-    // Grid Pro TreeView (parent-id input): `label` is the expand/collapse
-    // column; parentId references the `id` column. treeView lives on the local
-    // data-provider options (TreeViewTypes.d.ts / grid-pro/tree-view/parent-id).
+    // Grid Pro TreeView (parent-id input): `label` is the expand/collapse column;
+    // parentId references the `id` column. COLLAPSED by default — only the
+    // top-level asset-class rows show until the user expands a node.
     treeView: {
       enabled: true,
       input: { type: "parentId", parentIdColumn: "parentId" },
       treeColumn: "label",
-      expandedRowIds: "all",
+      expandedRowIds: [],
     },
   };
   const columns: GridColumns = [
     {
       id: "label",
-      header: { format: "Asset class / strategy / fund" },
+      header: { format: "Holding" },
+      className: "ix-grid-cell-text",
       cells: { formatter: weightLabelFormatter },
     },
     {
-      id: "name",
-      header: { format: "Name" },
-      cells: { formatter: nameFormatter },
+      id: "strategy",
+      header: { format: "Strategy" },
+      className: "ix-grid-cell-text",
+      cells: { formatter: strategyFormatter },
     },
     {
       id: "weight",
       header: { format: "Weight" },
+      className: "ix-grid-cell-num",
       cells: { formatter: weightFormatter },
     },
     { id: "id", enabled: false },
     { id: "parentId", enabled: false },
+    { id: "name", enabled: false },
     { id: "instrumentId", enabled: false },
+    { id: "isGroup", enabled: false },
   ];
   return {
     rendering: {
       theme: GRAPHITE_THEME,
-      rows: { strictHeights: true },
+      // Leaves render ticker over name (two lines): let rows auto-size, matching
+      // the positions grid, so the second line is not clipped.
+      rows: { strictHeights: false },
     },
     columns,
     data,

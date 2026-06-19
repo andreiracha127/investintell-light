@@ -93,6 +93,39 @@
 .hcg-theme-graphite .ix-grid-remove:hover { color: var(--color-loss); }
 .hcg-theme-graphite .ix-grid-editable { text-decoration: underline dotted var(--color-text-muted); text-underline-offset: 3px; }
 
+/* Weights / allocation tree (Builder broad output + Portfolio allocation).
+   Two-level Asset class -> Holding tree: collapsed by default, +/- expander,
+   bold group rows with a subtle tint, ticker-over-name leaves. */
+.hcg-theme-graphite .ix-grid-group {
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+/* Replace the native rotating chevron with a +/- box keyed off aria-expanded. */
+.hcg-theme-graphite .hcg-tree-toggle button > svg { display: none; }
+.hcg-theme-graphite .hcg-tree-toggle button::before {
+  content: "+";
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--color-border-strong);
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+}
+.hcg-theme-graphite .hcg-tree-toggle button[aria-expanded="true"]::before { content: "\2212"; }
+.hcg-theme-graphite .hcg-tree-toggle button:hover::before {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+/* Group (asset-class) rows: a faint header tint so the hierarchy reads. A row is
+   a group iff its tree cell carries an expandable toggle button. */
+.hcg-theme-graphite tbody tr:has(.hcg-tree-toggle button) > td {
+  background: var(--color-field);
+}
+
 /* Universe-preview include checkbox column: centered toggle. */
 .hcg-theme-graphite .ix-grid-cell-check { text-align: center; }
 .hcg-theme-graphite .ix-grid-cell-check input[type="checkbox"] { accent-color: var(--color-accent); cursor: pointer; }
