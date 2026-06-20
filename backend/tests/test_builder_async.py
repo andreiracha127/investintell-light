@@ -302,6 +302,102 @@ async def test_broad_universe_error_path_marks_failed_verbatim(
     assert "universe selection matched 1" in body["error"]
 
 
+class _FakeDatalakeSession:
+    """Minimal async-context session stand-in for the data-lake; the optimizer
+    look-through loaders are stubbed in these tests, so it needs no real I/O."""
+
+    async def __aenter__(self) -> _FakeDatalakeSession:
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        return None
+
+
+async def test_broad_universe_job_passes_datalake_when_configured(
+    monkeypatch: pytest.MonkeyPatch, job_store: dict[Any, OptimizeJob]
+) -> None:
+    """When DATALAKE_DB_URL is configured, the background job opens a real
+    data-lake session and forwards it to run_optimize (NOT None) — this is what
+    makes overlap_cap / the regime read work in broad-universe mode."""
+    _stub_broad(monkeypatch, n_funds=12)
+
+    # Pretend the DSN is configured (get_settings is lru_cached; patch the name
+    # the route resolved).
+    class _Settings:
+        datalake_db_url = "postgresql://configured"
+
+    monkeypatch.setattr(builder_route, "get_settings", lambda: _Settings())
+
+    captured: dict[str, Any] = {}
+    real_run_optimize = builder_route.portfolio_builder.run_optimize
+
+    async def capturing_run_optimize(session: Any, payload: Any, *, datalake: Any):
+        captured["datalake"] = datalake
+        return await real_run_optimize(session, payload, datalake=datalake)
+
+    monkeypatch.setattr(
+        builder_route.portfolio_builder, "run_optimize", capturing_run_optimize
+    )
+
+    fake_dl = _FakeDatalakeSession()
+    monkeypatch.setattr(
+        builder_route.datalake_module,
+        "_get_sessionmaker",
+        lambda: (lambda: fake_dl),
+    )
+
+    payload = {
+        "universe": {"fund_type": "etf", "broad_universe": True, "max_positions": 3},
+        "objective": "min_cvar",
+    }
+    async with _client(job_store) as client:
+        accepted = await client.post("/builder/optimize", json=payload)
+        assert accepted.status_code == 202, accepted.text
+        job_id = accepted.json()["job_id"]
+        body = await _poll_until_terminal(client, job_id)
+
+    assert body["status"] == "succeeded", body
+    assert "datalake" in captured
+    assert captured["datalake"] is fake_dl
+
+
+async def test_broad_universe_job_passes_none_when_dsn_unset(
+    monkeypatch: pytest.MonkeyPatch, job_store: dict[Any, OptimizeJob]
+) -> None:
+    """With no DATALAKE_DB_URL the background job degrades to datalake=None and
+    still succeeds (existing behavior preserved)."""
+    _stub_broad(monkeypatch, n_funds=12)
+
+    class _Settings:
+        datalake_db_url = None
+
+    monkeypatch.setattr(builder_route, "get_settings", lambda: _Settings())
+
+    captured: dict[str, Any] = {}
+    real_run_optimize = builder_route.portfolio_builder.run_optimize
+
+    async def capturing_run_optimize(session: Any, payload: Any, *, datalake: Any):
+        captured["datalake"] = datalake
+        return await real_run_optimize(session, payload, datalake=datalake)
+
+    monkeypatch.setattr(
+        builder_route.portfolio_builder, "run_optimize", capturing_run_optimize
+    )
+
+    payload = {
+        "universe": {"fund_type": "etf", "broad_universe": True, "max_positions": 3},
+        "objective": "min_cvar",
+    }
+    async with _client(job_store) as client:
+        accepted = await client.post("/builder/optimize", json=payload)
+        assert accepted.status_code == 202, accepted.text
+        job_id = accepted.json()["job_id"]
+        body = await _poll_until_terminal(client, job_id)
+
+    assert body["status"] == "succeeded", body
+    assert captured["datalake"] is None
+
+
 async def test_get_unknown_job_id_returns_404(
     job_store: dict[Any, OptimizeJob],
 ) -> None:

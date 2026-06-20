@@ -19,7 +19,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import datalake as datalake_module
 from app.core.auth import get_current_user
+from app.core.config import get_settings
 from app.core.datalake import get_optional_datalake_session
 from app.core.db import AsyncSessionLocal, get_session
 from app.schemas.builder import (
@@ -43,31 +45,53 @@ async def _run_optimize_job(job_id: uuid.UUID, payload: OptimizeRequest) -> None
     """Background runner for a broad-universe optimize job.
 
     Opens its OWN AsyncSession (the request's session is already closed by the
-    time this runs) and drives the job through running -> succeeded|failed,
-    committing after each state change so a poller sees progress and a crash
-    never leaves the job stuck in ``running``. Regime read degrades to None
-    (datalake unavailable off the request path).
+    time this runs) and ALSO opens an optional read-only data-lake session —
+    mirroring ``get_optional_datalake_session``: a session when
+    ``DATALAKE_DB_URL`` is configured, else None. The data-lake backs the
+    look-through holdings used by the ``overlap_cap`` constraint and the regime
+    read, so passing it (rather than None) is what makes those features work in
+    broad-universe mode. A missing DSN still degrades gracefully (datalake=None).
+
+    Drives the job through running -> succeeded|failed, committing after each
+    state change so a poller sees progress and a crash never leaves the job
+    stuck in ``running``.
     """
     async with AsyncSessionLocal() as session:
-        await optimize_jobs.mark_running(session, job_id)
-        await session.commit()
-        try:
-            result = await portfolio_builder.run_optimize(
-                session, payload, datalake=None
-            )
-        except BuilderError as exc:
-            await optimize_jobs.mark_failed(
-                session, job_id, portfolio_builder.humanize_error(str(exc))
-            )
-            await session.commit()
-        except Exception as exc:  # noqa: BLE001 — never leave a job hung in 'running'
-            await optimize_jobs.mark_failed(session, job_id, str(exc))
-            await session.commit()
+        if get_settings().datalake_db_url:
+            async with datalake_module._get_sessionmaker()() as datalake_session:
+                await _drive_optimize_job(session, job_id, payload, datalake_session)
         else:
-            await optimize_jobs.mark_succeeded(
-                session, job_id, result.model_dump(mode="json")
-            )
-            await session.commit()
+            await _drive_optimize_job(session, job_id, payload, None)
+
+
+async def _drive_optimize_job(
+    session: AsyncSession,
+    job_id: uuid.UUID,
+    payload: OptimizeRequest,
+    datalake: AsyncSession | None,
+) -> None:
+    """Mark running, run the optimizer with the (optional) data-lake session,
+    and persist the terminal state. Split out so the data-lake session can be
+    opened (or skipped) once and reused for the whole job lifecycle."""
+    await optimize_jobs.mark_running(session, job_id)
+    await session.commit()
+    try:
+        result = await portfolio_builder.run_optimize(
+            session, payload, datalake=datalake
+        )
+    except BuilderError as exc:
+        await optimize_jobs.mark_failed(
+            session, job_id, portfolio_builder.humanize_error(str(exc))
+        )
+        await session.commit()
+    except Exception as exc:  # noqa: BLE001 — never leave a job hung in 'running'
+        await optimize_jobs.mark_failed(session, job_id, str(exc))
+        await session.commit()
+    else:
+        await optimize_jobs.mark_succeeded(
+            session, job_id, result.model_dump(mode="json")
+        )
+        await session.commit()
 
 
 @router.post("/optimize")
