@@ -98,7 +98,9 @@ def test_optimize_jobs_pk_is_uuid_named_by_convention() -> None:
 def test_optimize_jobs_columns_and_nullability() -> None:
     table = Base.metadata.tables["optimize_jobs"]
     assert isinstance(table.c["organization_id"].type, Uuid)
-    assert table.c["organization_id"].nullable is False
+    # Nullable: /builder/optimize is public + single-tenant, so async jobs are
+    # created with organization_id=None (Task 4).
+    assert table.c["organization_id"].nullable is True
     assert table.c["status"].nullable is False
     assert isinstance(table.c["request"].type, JSON)
     assert table.c["request"].nullable is False

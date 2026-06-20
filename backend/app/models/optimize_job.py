@@ -8,9 +8,10 @@ memory — so polling works across pods.
 
 Tenancy: rows are scoped by ``organization_id`` (the org-scoped/RLS direction
 the publish target uses), unlike the single-tenant portfolio tables. The
-column is NOT NULL; the caller (the route) supplies the org from the verified
-identity. The (organization_id, created_at DESC) index serves the per-org
-"my recent jobs" listing.
+column is NULLABLE for now: ``POST /builder/optimize`` is public and the app is
+single-tenant today, so jobs are created with ``organization_id=None`` until
+org-scoped auth reaches this route. The (organization_id, created_at DESC)
+index serves the per-org "my recent jobs" listing.
 """
 
 from __future__ import annotations
@@ -39,8 +40,10 @@ class OptimizeJob(Base):
         Uuid, primary_key=True, default=uuid.uuid4
     )
 
-    # Owning organization — org-scoped tenancy (NOT NULL, route-supplied).
-    organization_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    # Owning organization — org-scoped tenancy. NULLABLE: POST /builder/optimize
+    # is public and the app is single-tenant today, so the async path creates
+    # jobs with organization_id=None until org-scoped auth reaches this route.
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
 
     # Job lifecycle state; CHECK-constrained to JOB_STATUSES. New jobs start
     # 'pending' (server default matches create_job's explicit set).

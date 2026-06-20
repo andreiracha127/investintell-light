@@ -306,6 +306,29 @@ class OptimizeResponse(BaseModel):
     diagnostics: DiagnosticsOut
 
 
+# ── Async broad-universe job (Sprint A, Task 4) ──────────────────────────────
+
+
+class OptimizeJobAccepted(BaseModel):
+    """202 body for a broad-universe optimize accepted as a background job.
+
+    The client polls ``GET /builder/optimize/{job_id}`` for the outcome."""
+
+    job_id: str
+
+
+class OptimizeJobStatus(BaseModel):
+    """Polling view of a background optimize job.
+
+    ``status`` ∈ {pending, running, succeeded, failed}. ``result`` is the full
+    OptimizeResponse on success (else null); ``error`` is the verbatim failure
+    message on failure (else null)."""
+
+    status: str
+    result: OptimizeResponse | None = None
+    error: str | None = None
+
+
 # ── Save as portfolio (F8.5) ─────────────────────────────────────────────────
 
 

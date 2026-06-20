@@ -26,9 +26,13 @@ from app.models.optimize_job import OptimizeJob
 
 
 async def create_job(
-    session: AsyncSession, org_id: uuid.UUID, request: dict
+    session: AsyncSession, org_id: uuid.UUID | None, request: dict
 ) -> OptimizeJob:
-    """Insert a new ``pending`` job for ``org_id`` and return it (id populated)."""
+    """Insert a new ``pending`` job for ``org_id`` and return it (id populated).
+
+    ``org_id`` is nullable: ``POST /builder/optimize`` is public and the app is
+    single-tenant today, so the async path creates jobs with ``org_id=None``.
+    """
     job = OptimizeJob(
         organization_id=org_id,
         status="pending",

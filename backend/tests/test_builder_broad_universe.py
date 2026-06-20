@@ -2,8 +2,17 @@
 
 Data-loading is stubbed at app.optimizer.data; the selection + engine math runs
 LIVE so the happy path exercises the real two-stage pipeline.
+
+Since Task 4, broad-universe requests run ASYNCHRONOUSLY: the route returns
+202 + a job_id and a background task drives the optimize. These tests therefore
+post the request, then poll ``GET /builder/optimize/{job_id}`` until terminal and
+assert against the job's ``result``/``error`` — the SAME pipeline output, just
+delivered through the job. An in-memory fake session (shared store) backs both
+the request session and the background task's own ``AsyncSessionLocal`` session.
 """
 
+import asyncio
+import datetime as dt
 import uuid
 from typing import Any
 
@@ -12,15 +21,91 @@ import pandas as pd
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.api.routes import builder as builder_route
 from app.core.db import get_session
 from app.main import create_app
+from app.models.optimize_job import OptimizeJob
 from app.optimizer import data as optimizer_data
 
 
-def _client() -> AsyncClient:
+class _FakeAsyncSession:
+    """Dict-backed async session over a SHARED store (job persistence only)."""
+
+    def __init__(self, store: dict[Any, OptimizeJob]) -> None:
+        self.store = store
+
+    def add(self, obj: OptimizeJob) -> None:
+        if obj.id is None:
+            default = OptimizeJob.id.default
+            obj.id = default.arg(None) if default is not None else uuid.uuid4()
+        if obj.status is None:
+            obj.status = "pending"
+        now = dt.datetime.now(dt.UTC)
+        if obj.created_at is None:
+            obj.created_at = now
+        if obj.updated_at is None:
+            obj.updated_at = now
+        self.store[obj.id] = obj
+
+    async def flush(self) -> None:
+        return None
+
+    async def commit(self) -> None:
+        return None
+
+    async def get(self, model: type[OptimizeJob], pk: Any) -> OptimizeJob | None:
+        if isinstance(pk, str):
+            pk = uuid.UUID(pk)
+        return self.store.get(pk)
+
+    async def __aenter__(self) -> "_FakeAsyncSession":
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        return None
+
+
+@pytest.fixture
+def job_store() -> dict[Any, OptimizeJob]:
+    return {}
+
+
+@pytest.fixture(autouse=True)
+def _patch_background_sessionmaker(
+    monkeypatch: pytest.MonkeyPatch, job_store: dict[Any, OptimizeJob]
+) -> None:
+    monkeypatch.setattr(
+        builder_route, "AsyncSessionLocal", lambda: _FakeAsyncSession(job_store)
+    )
+
+
+def _client(job_store: dict[Any, OptimizeJob]) -> AsyncClient:
     app = create_app()
-    app.dependency_overrides[get_session] = lambda: None
+    app.dependency_overrides[get_session] = lambda: _FakeAsyncSession(job_store)
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+async def _run_broad(
+    client: AsyncClient, payload: dict[str, Any], *, tries: int = 50
+) -> tuple[int, dict[str, Any]]:
+    """POST a broad request, poll the job to a terminal state.
+
+    Returns ``(http_status, body)`` where, on a 202, ``body`` is the job's
+    terminal status doc (status/result/error) — so a succeeded job's ``result``
+    stands in for the old synchronous 200 OptimizeResponse, and a failed job's
+    ``error`` (with status 422 synthesized) stands in for the old 422 detail."""
+    accepted = await client.post("/builder/optimize", json=payload)
+    if accepted.status_code != 202:
+        return accepted.status_code, accepted.json()
+    job_id = accepted.json()["job_id"]
+    for _ in range(tries):
+        resp = await client.get(f"/builder/optimize/{job_id}")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        if body["status"] in ("succeeded", "failed"):
+            return (200 if body["status"] == "succeeded" else 422), body
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"job {job_id} never reached a terminal state")
 
 
 def _ids(n: int) -> list[uuid.UUID]:
@@ -174,7 +259,7 @@ def _stub_broad_bl(
 
 
 async def test_bl_utility_broad_end_to_end(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, job_store: dict[Any, OptimizeJob]
 ) -> None:
     """bl_utility over a broad universe (NO views) runs end-to-end on the
     equilibrium prior and returns valid weights with mu_equilibrium present.
@@ -190,11 +275,12 @@ async def test_bl_utility_broad_end_to_end(
         "universe": {"broad_universe": True, "max_positions": 4},
         "objective": "bl_utility",
     }
-    async with _client() as client:
-        response = await client.post("/builder/optimize", json=payload)
+    async with _client(job_store) as client:
+        status, doc = await _run_broad(client, payload)
 
-    assert response.status_code == 200, response.text
-    body = response.json()
+    assert status == 200, doc
+    assert doc["status"] == "succeeded", doc
+    body = doc["result"]
 
     weights = [w["weight"] for w in body["weights"]]
     assert len(weights) == 4  # one representative per planted cluster
@@ -216,17 +302,18 @@ async def test_bl_utility_broad_end_to_end(
 
 
 async def test_broad_universe_returns_lean_portfolio_with_diagnostics(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, job_store: dict[Any, OptimizeJob]
 ) -> None:
     _stub_broad(monkeypatch, n_funds=12)
     payload = {
         "universe": {"broad_universe": True, "max_positions": 3, "rank_by": "sharpe_1y"},
         "objective": "min_cvar",
     }
-    async with _client() as client:
-        response = await client.post("/builder/optimize", json=payload)
-    assert response.status_code == 200, response.text
-    body = response.json()
+    async with _client(job_store) as client:
+        status, doc = await _run_broad(client, payload)
+    assert status == 200, doc
+    assert doc["status"] == "succeeded", doc
+    body = doc["result"]
     # Lean portfolio: exactly the K selected representatives (one per cluster).
     assert len(body["weights"]) == 3
     weights = [w["weight"] for w in body["weights"]]
@@ -241,24 +328,25 @@ async def test_broad_universe_returns_lean_portfolio_with_diagnostics(
 
 
 async def test_broad_universe_too_small_fails_loud(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, job_store: dict[Any, OptimizeJob]
 ) -> None:
-    """A universe resolving to <2 funds is a 422 (fail-loud)."""
+    """A universe resolving to <2 funds fails loud → the job ends 'failed'."""
 
     async def fake_select(session: Any, filters: Any, **kw: Any) -> list[Any]:
         return [optimizer_data.UniverseFund(id=uuid.UUID(int=1), ticker="F", name="F")]
 
     monkeypatch.setattr(optimizer_data, "select_universe_funds", fake_select)
     payload = {"universe": {"broad_universe": True}, "objective": "min_cvar"}
-    async with _client() as client:
-        response = await client.post("/builder/optimize", json=payload)
-    assert response.status_code == 422
+    async with _client(job_store) as client:
+        status, doc = await _run_broad(client, payload)
+    assert status == 422
+    assert doc["status"] == "failed", doc
 
 
 async def test_broad_universe_explicit_infeasible_cap_fails_loud(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, job_store: dict[Any, OptimizeJob]
 ) -> None:
-    """An EXPLICIT cap that can't fill a K-position broad portfolio is a 422.
+    """An EXPLICIT cap that can't fill a K-position broad portfolio fails loud.
 
     K=3 with cap=0.2 → 3×0.2=0.6 < 1, so the lean portfolio cannot be fully
     invested. We refuse to silently raise the user's chosen cap.
@@ -269,15 +357,17 @@ async def test_broad_universe_explicit_infeasible_cap_fails_loud(
         "objective": "min_cvar",
         "constraints": {"cap": 0.2},
     }
-    async with _client() as client:
-        response = await client.post("/builder/optimize", json=payload)
-    assert response.status_code == 422, response.text
-    assert "cap" in response.text or "infeasible" in response.text
-    assert "increase max_positions" in response.text
+    async with _client(job_store) as client:
+        status, doc = await _run_broad(client, payload)
+    assert status == 422, doc
+    assert doc["status"] == "failed", doc
+    error = doc["error"]
+    assert "cap" in error or "infeasible" in error
+    assert "increase max_positions" in error
 
 
 async def test_broad_universe_explicit_feasible_cap_is_respected(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, job_store: dict[Any, OptimizeJob]
 ) -> None:
     """An EXPLICIT feasible cap is honored, never overridden.
 
@@ -289,19 +379,19 @@ async def test_broad_universe_explicit_feasible_cap_is_respected(
         "objective": "min_cvar",
         "constraints": {"cap": 0.5},
     }
-    async with _client() as client:
-        response = await client.post("/builder/optimize", json=payload)
-    assert response.status_code == 200, response.text
-    body = response.json()
+    async with _client(job_store) as client:
+        status, doc = await _run_broad(client, payload)
+    assert status == 200, doc
+    body = doc["result"]
     assert all(w["weight"] <= 0.5 + 1e-6 for w in body["weights"])
 
 
-async def test_broad_universe_over_ceiling_is_422_not_500(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_broad_universe_over_ceiling_fails_loud(
+    monkeypatch: pytest.MonkeyPatch, job_store: dict[Any, OptimizeJob]
 ) -> None:
-    """A universe exceeding MAX_UNIVERSE_CANDIDATES is a fail-loud 422, not a raw
-    500 (a 500 also strips the CORS headers, surfacing as a misleading CORS error
-    in the browser)."""
+    """A universe exceeding MAX_UNIVERSE_CANDIDATES fails loud (the job ends
+    'failed' with the verbatim message) rather than hanging or crashing the
+    background task silently."""
 
     async def fake_select(session: Any, filters: Any, **kw: Any) -> list[Any]:
         raise ValueError(
@@ -310,7 +400,8 @@ async def test_broad_universe_over_ceiling_is_422_not_500(
 
     monkeypatch.setattr(optimizer_data, "select_universe_funds", fake_select)
     payload = {"universe": {"broad_universe": True}, "objective": "min_cvar"}
-    async with _client() as client:
-        response = await client.post("/builder/optimize", json=payload)
-    assert response.status_code == 422, response.text
-    assert "more than 2000" in response.text
+    async with _client(job_store) as client:
+        status, doc = await _run_broad(client, payload)
+    assert status == 422, doc
+    assert doc["status"] == "failed", doc
+    assert "more than 2000" in doc["error"]

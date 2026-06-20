@@ -4,8 +4,10 @@
 -- persisted here, a background task advances it through
 -- pending -> running -> succeeded|failed, and a polling endpoint reads it back.
 -- State lives in this table (never in process memory) so polling works across
--- pods. Rows are org-scoped (organization_id NOT NULL); the (organization_id,
--- created_at DESC) index serves the per-org "my recent jobs" listing.
+-- pods. Rows are org-scoped (organization_id NULLABLE: POST /builder/optimize
+-- is public + single-tenant today, so async jobs are created with a NULL org
+-- until org-scoped auth reaches this route); the (organization_id, created_at
+-- DESC) index serves the per-org "my recent jobs" listing.
 --
 -- Constraint/index names match the SQLAlchemy naming convention (app/models/base.py)
 -- so the ORM model and this DDL stay in lockstep:
@@ -14,7 +16,7 @@
 
 CREATE TABLE IF NOT EXISTS optimize_jobs (
     id              uuid        NOT NULL DEFAULT gen_random_uuid(),
-    organization_id uuid        NOT NULL,
+    organization_id uuid,
     status          text        NOT NULL DEFAULT 'pending',
     request         jsonb       NOT NULL,
     result          jsonb,

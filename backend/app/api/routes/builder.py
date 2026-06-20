@@ -12,21 +12,25 @@ Error mapping (fail loud, never silently empty):
 - solver not 'optimal' / infeasible constraints        -> 422
 """
 
+import asyncio
+import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import get_current_user
-from app.core.db import get_session
 from app.core.datalake import get_optional_datalake_session
+from app.core.db import AsyncSessionLocal, get_session
 from app.schemas.builder import (
+    OptimizeJobAccepted,
+    OptimizeJobStatus,
     OptimizeRequest,
     OptimizeResponse,
     SaveRequest,
     SaveResponse,
 )
-from app.services import builder_save, portfolio_builder
+from app.services import builder_save, optimize_jobs, portfolio_builder
 from app.services.portfolio_builder import BuilderError
 
 router = APIRouter(prefix="/builder", tags=["builder"])
@@ -35,10 +39,44 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 DatalakeDep = Annotated[AsyncSession | None, Depends(get_optional_datalake_session)]
 
 
-@router.post("/optimize", response_model=OptimizeResponse)
+async def _run_optimize_job(job_id: uuid.UUID, payload: OptimizeRequest) -> None:
+    """Background runner for a broad-universe optimize job.
+
+    Opens its OWN AsyncSession (the request's session is already closed by the
+    time this runs) and drives the job through running -> succeeded|failed,
+    committing after each state change so a poller sees progress and a crash
+    never leaves the job stuck in ``running``. Regime read degrades to None
+    (datalake unavailable off the request path).
+    """
+    async with AsyncSessionLocal() as session:
+        await optimize_jobs.mark_running(session, job_id)
+        await session.commit()
+        try:
+            result = await portfolio_builder.run_optimize(
+                session, payload, datalake=None
+            )
+        except BuilderError as exc:
+            await optimize_jobs.mark_failed(
+                session, job_id, portfolio_builder.humanize_error(str(exc))
+            )
+            await session.commit()
+        except Exception as exc:  # noqa: BLE001 — never leave a job hung in 'running'
+            await optimize_jobs.mark_failed(session, job_id, str(exc))
+            await session.commit()
+        else:
+            await optimize_jobs.mark_succeeded(
+                session, job_id, result.model_dump(mode="json")
+            )
+            await session.commit()
+
+
+@router.post("/optimize")
 async def optimize(
-    payload: OptimizeRequest, session: SessionDep, datalake: DatalakeDep
-) -> OptimizeResponse:
+    payload: OptimizeRequest,
+    session: SessionDep,
+    datalake: DatalakeDep,
+    response: Response,
+) -> OptimizeResponse | OptimizeJobAccepted:
     """Optimize weights over a mixed fund/equity universe.
 
     Default objective is ``min_cvar`` (Rockafellar–Uryasev, α=0.95) on raw
@@ -48,13 +86,48 @@ async def optimize(
     ``max_return_cvar`` maximizes BL-posterior return under a CVaR cap, which
     is tightened in a risk_off credit regime when the data-lake is configured.
     All fractional fields are decimal fractions (0.05 = 5%).
+
+    Broad-universe requests (``universe.broad_universe``) run ASYNCHRONOUSLY:
+    the request is persisted as a job, a background task advances it, and the
+    response is 202 + ``{job_id}`` to poll via ``GET /optimize/{job_id}``.
+    Every other request shape stays synchronous (200 + OptimizeResponse).
     """
+    if payload.universe is not None and payload.universe.broad_universe:
+        # org-scoped column is nullable while /optimize is public + single-tenant.
+        job = await optimize_jobs.create_job(
+            session, None, payload.model_dump(mode="json")
+        )
+        await session.commit()
+        # Fire-and-forget: the task opens its own session (see _run_optimize_job).
+        asyncio.create_task(_run_optimize_job(job.id, payload))
+        response.status_code = status.HTTP_202_ACCEPTED
+        return OptimizeJobAccepted(job_id=str(job.id))
+
     try:
         return await portfolio_builder.run_optimize(session, payload, datalake=datalake)
     except BuilderError as exc:
         raise HTTPException(
             status_code=422, detail=portfolio_builder.humanize_error(str(exc))
         ) from exc
+
+
+@router.get("/optimize/{job_id}", response_model=OptimizeJobStatus)
+async def optimize_job_status(
+    job_id: uuid.UUID, session: SessionDep
+) -> OptimizeJobStatus:
+    """Poll a broad-universe optimize job; 404 if the id is unknown.
+
+    Returns the lifecycle ``status`` and, when terminal, the full
+    ``result`` (succeeded) or the verbatim ``error`` message (failed).
+    """
+    job = await optimize_jobs.get_job(session, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="optimize job not found")
+    return OptimizeJobStatus(
+        status=job.status,
+        result=job.result,
+        error=job.error,
+    )
 
 
 @router.post(
