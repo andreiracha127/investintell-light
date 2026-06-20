@@ -46,6 +46,7 @@ async def test_max_return_cvar_without_views_uses_equilibrium(
         bounds=None,
         alpha=0.95,
         cvar_tol=1e-4,
+        **_kwargs,
     ):
         captured["mu"] = mu
         w = np.full(scenarios.shape[1], 1.0 / scenarios.shape[1])

@@ -61,7 +61,7 @@ async def test_run_optimize_risk_off_halves_the_cvar_limit(
     captured: dict[str, float] = {}
 
     def fake_solver(scenarios, *, mu, cvar_limit, cap=None, min_weight=None,
-                    bounds=None, alpha=0.95, cvar_tol=1e-4):
+                    bounds=None, alpha=0.95, cvar_tol=1e-4, **_kwargs):
         captured["cvar_limit"] = cvar_limit
         w = np.full(scenarios.shape[1], 1.0 / scenarios.shape[1])
         return w, "optimal"
@@ -138,6 +138,7 @@ async def test_run_optimize_exposes_effective_cvar_and_regime(
         bounds=None,
         alpha=0.95,
         cvar_tol=1e-4,
+        **_kwargs,
     ):
         w = np.full(scenarios.shape[1], 1.0 / scenarios.shape[1])
         return w, "optimal"
