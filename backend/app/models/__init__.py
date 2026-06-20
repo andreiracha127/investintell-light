@@ -26,6 +26,10 @@ from app.models.portfolio import (
     PortfolioTransaction,
     Position,
 )
+from app.models.portfolio_constraint import (
+    PortfolioClassLimit,
+    PortfolioConstraintSet,
+)
 from app.models.rebalance import RebalancePolicy
 from app.models.screen import Screen, ScreenFilter
 from app.models.screener_metrics import ScreenerMetrics
@@ -45,6 +49,8 @@ __all__ = [
     "NewsItem",
     "OptimizeJob",
     "Portfolio",
+    "PortfolioClassLimit",
+    "PortfolioConstraintSet",
     "PortfolioNavDaily",
     "PortfolioTransaction",
     "RebalancePolicy",
