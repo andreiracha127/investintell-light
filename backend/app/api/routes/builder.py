@@ -125,7 +125,7 @@ async def optimize_job_status(
         raise HTTPException(status_code=404, detail="optimize job not found")
     return OptimizeJobStatus(
         status=job.status,
-        result=job.result,
+        result=OptimizeResponse(**job.result) if job.result is not None else None,
         error=job.error,
     )
 
