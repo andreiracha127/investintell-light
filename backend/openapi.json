@@ -3436,7 +3436,7 @@
           "builder"
         ],
         "summary": "Optimize",
-        "description": "Optimize weights over a mixed fund/equity universe.\n\nDefault objective is ``min_cvar`` (Rockafellar\u2013Uryasev, \u03b1=0.95) on raw\nhistorical scenarios. With Black-Litterman ``views``, scenarios are\nre-centered on the posterior \u03bc_BL and floored at the equilibrium return;\n``bl_utility`` selects the explicit max-utility objective instead;\n``max_return_cvar`` maximizes BL-posterior return under a CVaR cap, which\nis tightened in a risk_off credit regime when the data-lake is configured.\nAll fractional fields are decimal fractions (0.05 = 5%).",
+        "description": "Optimize weights over a mixed fund/equity universe.\n\nDefault objective is ``min_cvar`` (Rockafellar\u2013Uryasev, \u03b1=0.95) on raw\nhistorical scenarios. With Black-Litterman ``views``, scenarios are\nre-centered on the posterior \u03bc_BL and floored at the equilibrium return;\n``bl_utility`` selects the explicit max-utility objective instead;\n``max_return_cvar`` maximizes BL-posterior return under a CVaR cap, which\nis tightened in a risk_off credit regime when the data-lake is configured.\nAll fractional fields are decimal fractions (0.05 = 5%).\n\nBroad-universe requests (``universe.broad_universe``) run ASYNCHRONOUSLY:\nthe request is persisted as a job, a background task advances it, and the\nresponse is 202 + ``{job_id}`` to poll via ``GET /optimize/{job_id}``.\nEvery other request shape stays synchronous (200 + OptimizeResponse).",
         "operationId": "optimize_builder_optimize_post",
         "requestBody": {
           "content": {
@@ -3454,7 +3454,59 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OptimizeResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OptimizeResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/OptimizeJobAccepted"
+                    }
+                  ],
+                  "title": "Response Optimize Builder Optimize Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/builder/optimize/{job_id}": {
+      "get": {
+        "tags": [
+          "builder"
+        ],
+        "summary": "Optimize Job Status",
+        "description": "Poll a broad-universe optimize job; 404 if the id is unknown.\n\nReturns the lifecycle ``status`` and, when terminal, the full\n``result`` (succeeded) or the verbatim ``error`` message (failed).",
+        "operationId": "optimize_job_status_builder_optimize__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizeJobStatus"
                 }
               }
             }
@@ -10682,6 +10734,55 @@
         ],
         "title": "OhlcSeriesResponse",
         "description": "OHLC + volume series for Highcharts Stock."
+      },
+      "OptimizeJobAccepted": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id"
+        ],
+        "title": "OptimizeJobAccepted",
+        "description": "202 body for a broad-universe optimize accepted as a background job.\n\nThe client polls ``GET /builder/optimize/{job_id}`` for the outcome."
+      },
+      "OptimizeJobStatus": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OptimizeResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "OptimizeJobStatus",
+        "description": "Polling view of a background optimize job.\n\n``status`` \u2208 {pending, running, succeeded, failed}. ``result`` is the full\nOptimizeResponse on success (else null); ``error`` is the verbatim failure\nmessage on failure (else null)."
       },
       "OptimizeRequest": {
         "properties": {

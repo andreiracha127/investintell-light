@@ -1119,8 +1119,36 @@ export interface paths {
          *     ``max_return_cvar`` maximizes BL-posterior return under a CVaR cap, which
          *     is tightened in a risk_off credit regime when the data-lake is configured.
          *     All fractional fields are decimal fractions (0.05 = 5%).
+         *
+         *     Broad-universe requests (``universe.broad_universe``) run ASYNCHRONOUSLY:
+         *     the request is persisted as a job, a background task advances it, and the
+         *     response is 202 + ``{job_id}`` to poll via ``GET /optimize/{job_id}``.
+         *     Every other request shape stays synchronous (200 + OptimizeResponse).
          */
         post: operations["optimize_builder_optimize_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/builder/optimize/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Optimize Job Status
+         * @description Poll a broad-universe optimize job; 404 if the id is unknown.
+         *
+         *     Returns the lifecycle ``status`` and, when terminal, the full
+         *     ``result`` (succeeded) or the verbatim ``error`` message (failed).
+         */
+        get: operations["optimize_job_status_builder_optimize__job_id__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3940,6 +3968,31 @@ export interface components {
             ohlc: number[][];
             /** Volume */
             volume: number[][];
+        };
+        /**
+         * OptimizeJobAccepted
+         * @description 202 body for a broad-universe optimize accepted as a background job.
+         *
+         *     The client polls ``GET /builder/optimize/{job_id}`` for the outcome.
+         */
+        OptimizeJobAccepted: {
+            /** Job Id */
+            job_id: string;
+        };
+        /**
+         * OptimizeJobStatus
+         * @description Polling view of a background optimize job.
+         *
+         *     ``status`` ∈ {pending, running, succeeded, failed}. ``result`` is the full
+         *     OptimizeResponse on success (else null); ``error`` is the verbatim failure
+         *     message on failure (else null).
+         */
+        OptimizeJobStatus: {
+            /** Status */
+            status: string;
+            result?: components["schemas"]["OptimizeResponse"] | null;
+            /** Error */
+            error?: string | null;
         };
         /**
          * OptimizeRequest
@@ -7831,7 +7884,38 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OptimizeResponse"];
+                    "application/json": components["schemas"]["OptimizeResponse"] | components["schemas"]["OptimizeJobAccepted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    optimize_job_status_builder_optimize__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptimizeJobStatus"];
                 };
             };
             /** @description Validation Error */

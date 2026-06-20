@@ -19,10 +19,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   fetchPortfolioOverview,
+  getBuilderOptimizeJob,
   postBuilderOptimize,
+  postBuilderOptimizeAsync,
   type BuilderObjective,
   type BuilderViewIn,
+  type OptimizeJobState,
   type OptimizeRequest,
+  type OptimizeResponse,
   type PortfolioOverview,
 } from "@/lib/api/client";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
@@ -80,6 +84,11 @@ const MANDATES: { value: Mandate; label: string }[] = [
 const DEFAULT_MANDATE: Mandate = "moderate";
 
 const AS_OF = "Jun 18, 2026";
+
+/** A broad-universe job is done once it reaches a terminal lifecycle state. */
+function isTerminalJob(status: OptimizeJobState | undefined): boolean {
+  return status === "succeeded" || status === "failed";
+}
 
 /** Parse a non-empty numeric input; invalid/blank -> null. */
 function parseNum(text: string): number | null {
@@ -211,14 +220,39 @@ export function BuilderView() {
   }, [deepLinkQuery.data, seedPortfolio]);
 
   /* ── Run ───────────────────────────────────────────────────────────── */
+  // Ranked/explicit: synchronous 200 + OptimizeResponse.
   const mutation = useMutation({
     mutationFn: (body: OptimizeRequest) => postBuilderOptimize(body),
   });
 
+  // Broad-universe: dispatch a background job, then poll until terminal. The
+  // dispatch mutation only carries the job_id; the poll query owns the result.
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobRequest, setJobRequest] = useState<OptimizeRequest | null>(null);
+  const dispatch = useMutation({
+    mutationFn: (body: OptimizeRequest) => postBuilderOptimizeAsync(body),
+    onSuccess: (accepted) => setJobId(accepted.job_id),
+  });
+  const jobQuery = useQuery({
+    queryKey: ["optimizeJob", jobId],
+    queryFn: () => getBuilderOptimizeJob(jobId as string),
+    enabled: jobId !== null,
+    // Poll every 1.5s until the job reaches a terminal state, then stop.
+    refetchInterval: (query) =>
+      isTerminalJob(query.state.data?.status) ? false : 1500,
+  });
+
+  const resetRuns = () => {
+    mutation.reset();
+    dispatch.reset();
+    setJobId(null);
+    setJobRequest(null);
+  };
+
   const switchMode = (next: BuilderMode) => {
     if (next === mode) return;
     setMode(next);
-    mutation.reset();
+    resetRuns();
   };
 
   const cap = parseNum(capPct);
@@ -250,8 +284,10 @@ export function BuilderView() {
       ? assets.length >= 2 && viewsValid
       : universeOk);
 
+  const runPending = mutation.isPending || dispatch.isPending;
+
   const onRun = () => {
-    if (!canRun || mutation.isPending) return;
+    if (!canRun || runPending) return;
     const constraints = {
       cap: cap !== null ? cap / 100 : null,
       min_weight: minWeight !== null ? minWeight / 100 : null,
@@ -276,10 +312,19 @@ export function BuilderView() {
         : {}),
     };
     if (mode === "universe") {
-      mutation.mutate({
+      const universeBody: OptimizeRequest = {
         ...common,
         universe: universeDraftToSpec(universeDraft, universeKeptIds),
-      });
+      };
+      // Broad universe runs ASYNC (backend answers 202 + job_id, then polled);
+      // a narrow ranked universe stays on the synchronous mutation.
+      if (universeDraft.broadUniverse) {
+        resetRuns();
+        setJobRequest(universeBody);
+        dispatch.mutate(universeBody);
+      } else {
+        mutation.mutate(universeBody);
+      }
       return;
     }
     const completed = apiViews.filter((v): v is BuilderViewIn => v !== null);
@@ -300,7 +345,9 @@ export function BuilderView() {
     setObjective((o) => resolveObjectiveForBroad(o, broadUniverse));
   }, [broadUniverse]);
 
-  const submittedRequest = mutation.variables;
+  // The run that produced the visible result: the sync mutation's variables, or
+  // the dispatched broad-universe request held in jobRequest.
+  const submittedRequest = mutation.variables ?? jobRequest ?? undefined;
   const resultObjective = submittedRequest?.objective ?? objective;
   const resultConstraints = {
     cap: submittedRequest
@@ -333,6 +380,35 @@ export function BuilderView() {
           : null
         : cvarLimitPct
       : null;
+
+  /* ── Unified run state across the sync and broad-async paths ─────────── */
+  const jobStatus = jobQuery.data?.status;
+  // "Optimizing…" while dispatching, before the first poll, or while the job is
+  // pending/running on the backend.
+  const jobOptimizing =
+    jobId !== null &&
+    (dispatch.isPending ||
+      jobStatus === undefined ||
+      jobStatus === "pending" ||
+      jobStatus === "running");
+  const jobResult: OptimizeResponse | null =
+    jobStatus === "succeeded" && jobQuery.data?.result
+      ? (jobQuery.data.result as OptimizeResponse)
+      : null;
+  // Surface backend job failures (verbatim error) and dispatch/poll transport
+  // errors through the same error panel as the sync path.
+  const jobErrorMessage =
+    jobStatus === "failed"
+      ? (jobQuery.data?.error ?? "Optimization failed")
+      : dispatch.isError
+        ? dispatch.error.message
+        : jobQuery.isError
+          ? jobQuery.error.message
+          : null;
+
+  const showOptimizing = mutation.isPending || jobOptimizing;
+  const resultData = mutation.data ?? jobResult;
+  const errorMessage = mutation.isError ? mutation.error.message : jobErrorMessage;
 
   const runHint = !canRun
     ? mode === "simulate" && assets.length < 2
@@ -547,12 +623,12 @@ export function BuilderView() {
           <button
             type="button"
             onClick={onRun}
-            disabled={!canRun || mutation.isPending}
+            disabled={!canRun || showOptimizing}
             className={`h-[38px] border border-accent bg-accent px-[22px] text-[13px] font-bold text-on-accent transition-colors hover:bg-accent-muted disabled:cursor-not-allowed disabled:opacity-40 ${
-              mutation.isPending ? "opacity-70" : ""
+              showOptimizing ? "opacity-70" : ""
             }`}
           >
-            {mutation.isPending ? "Optimizing…" : "Suggest weights"}
+            {showOptimizing ? "Optimizing…" : "Suggest weights"}
           </button>
           <span className="ix-fs text-text-muted">{runHint}</span>
           {!cvarLimitOk && (
@@ -580,18 +656,18 @@ export function BuilderView() {
         </div>
 
         {/* ── Result area ─────────────────────────────────────────────── */}
-        {mutation.isPending ? (
+        {showOptimizing ? (
           <ResultsSkeleton />
-        ) : mutation.isError ? (
+        ) : errorMessage ? (
           <ErrorPanel
             title="Optimization failed"
-            message={mutation.error.message}
+            message={errorMessage}
             onRetry={onRun}
           />
-        ) : mutation.data ? (
+        ) : resultData ? (
           <ResultsPanel
-            key={mutation.submittedAt}
-            result={mutation.data}
+            key={mutation.data ? mutation.submittedAt : (jobId ?? "job")}
+            result={resultData}
             objective={resultObjective}
             constraints={resultConstraints}
             windowDays={resultWindowDays}

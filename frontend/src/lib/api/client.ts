@@ -44,6 +44,7 @@ type ScreenResultsCsvOperation =
   paths["/screener/screens/{screen_id}/results.csv"]["get"];
 type FundsOperation = paths["/funds"]["get"];
 type BuilderOptimizeOperation = paths["/builder/optimize"]["post"];
+type BuilderOptimizeJobOperation = paths["/builder/optimize/{job_id}"]["get"];
 type BacktestWalkForwardOperation = paths["/backtest/walk-forward"]["post"];
 type PortfolioMonteCarloOperation = paths["/monte-carlo/portfolio"]["post"];
 type BuilderSaveOperation = paths["/builder/save"]["post"];
@@ -296,8 +297,15 @@ export type Proposal = components["schemas"]["ProposalOut"];
 
 export type OptimizeRequest =
   BuilderOptimizeOperation["requestBody"]["content"]["application/json"];
-export type OptimizeResponse =
-  BuilderOptimizeOperation["responses"]["200"]["content"]["application/json"];
+// The /builder/optimize 200 body is a union (sync result | 202-style accepted);
+// the synchronous OptimizeResponse is the variant carrying `weights`.
+export type OptimizeResponse = components["schemas"]["OptimizeResponse"];
+/** 202 body for a broad-universe optimize accepted as a background job. */
+export type OptimizeJobAccepted = components["schemas"]["OptimizeJobAccepted"];
+/** Polling view of a background optimize job (pending|running|succeeded|failed). */
+export type OptimizeJobStatus =
+  BuilderOptimizeJobOperation["responses"]["200"]["content"]["application/json"];
+export type OptimizeJobState = OptimizeJobStatus["status"];
 export type WalkForwardRequest =
   BacktestWalkForwardOperation["requestBody"]["content"]["application/json"];
 export type WalkForwardResponse =
@@ -1195,6 +1203,34 @@ export function postBuilderOptimize(
     method: "POST",
     json: body,
   });
+}
+
+/**
+ * Dispatch a broad-universe optimize as a background job.
+ *
+ * The backend answers 202 with ``{ job_id }`` (NOT a synchronous result); poll
+ * its outcome with {@link getBuilderOptimizeJob}. Ranked/explicit requests must
+ * use {@link postBuilderOptimize} instead (those return 200 + OptimizeResponse).
+ */
+export function postBuilderOptimizeAsync(
+  body: OptimizeRequest,
+  signal?: AbortSignal,
+): Promise<OptimizeJobAccepted> {
+  return request<OptimizeJobAccepted>("/builder/optimize", signal, {
+    method: "POST",
+    json: body,
+  });
+}
+
+/** Poll a broad-universe optimize job for its lifecycle status and outcome. */
+export function getBuilderOptimizeJob(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<OptimizeJobStatus> {
+  return request<OptimizeJobStatus>(
+    `/builder/optimize/${encodeURIComponent(jobId)}`,
+    signal,
+  );
 }
 
 export function postBacktestWalkForward(
