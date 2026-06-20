@@ -44,6 +44,8 @@ from app.schemas.lookthrough import (
 )
 from app.schemas.news import NewsArticle
 from app.schemas.portfolios import (
+    AlertsView,
+    BreachesView,
     ClassLimitItem,
     ConstraintsPut,
     ConstraintsView,
@@ -64,6 +66,7 @@ from app.services import (
     lookthrough,
     portfolio_constraints,
     portfolio_crud,
+    portfolio_drift,
     portfolio_ledger,
 )
 from app.tiingo.client import TiingoClient
@@ -270,6 +273,34 @@ async def put_portfolio_constraints(
         min_weight=payload.min_weight,
         overlap_cap=payload.overlap_cap,
         class_limits=payload.class_limits,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Drift alerts (Sprint C)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{portfolio_id}/alerts", response_model=AlertsView)
+async def get_portfolio_alerts(
+    portfolio_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AlertsView:
+    """Return the latest persisted drift status for a portfolio.
+
+    404 only when the PORTFOLIO is missing. A portfolio that exists but has
+    never been evaluated renders as ``worst_status="ok"``, ``evaluated_at=null``
+    and empty breach lists (a legitimate 200), not a 404.
+    """
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id):
+        raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
+    status = await portfolio_drift.get_drift_status(session, portfolio_id)
+    if status is None:
+        return AlertsView()
+    return AlertsView(
+        evaluated_at=status.evaluated_at,
+        worst_status=status.worst_status,
+        breaches=BreachesView.model_validate(status.breaches),
     )
 
 

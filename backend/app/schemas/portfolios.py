@@ -453,3 +453,36 @@ class ConstraintsView(ConstraintsPut):
     """
 
     portfolio_id: int
+
+
+# ---------------------------------------------------------------------------
+# Drift alerts (Sprint C) — the latest persisted drift evaluation
+# ---------------------------------------------------------------------------
+
+
+class BreachesView(BaseModel):
+    """The breach payload of the latest drift evaluation.
+
+    The three breach families are typed loosely as lists of objects (the
+    drift/evaluation service owns the exact item shapes); ``overlap_report_date``
+    is the N-PORT report date the overlap breaches were computed at (ISO string
+    or null when no look-through has run).
+    """
+
+    position_drifts: list[dict] = Field(default_factory=list)
+    class_breaches: list[dict] = Field(default_factory=list)
+    overlap_breaches: list[dict] = Field(default_factory=list)
+    overlap_report_date: str | None = None
+
+
+class AlertsView(BaseModel):
+    """Response for GET /portfolios/{id}/alerts — the latest drift status.
+
+    A portfolio that exists but has never been evaluated renders as
+    ``worst_status="ok"``, ``evaluated_at=null`` and empty breach lists (a
+    legitimate 200), not a 404.
+    """
+
+    evaluated_at: dt.datetime | None = None
+    worst_status: str = "ok"
+    breaches: BreachesView = Field(default_factory=BreachesView)
