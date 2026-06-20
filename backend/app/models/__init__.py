@@ -19,6 +19,7 @@ from app.models.fund import (
 )
 from app.models.instrument import Instrument
 from app.models.news_item import NewsItem
+from app.models.optimize_job import OptimizeJob
 from app.models.portfolio import (
     Portfolio,
     PortfolioNavDaily,
@@ -42,6 +43,7 @@ __all__ = [
     "FundamentalsSnapshot",
     "Instrument",
     "NewsItem",
+    "OptimizeJob",
     "Portfolio",
     "PortfolioNavDaily",
     "PortfolioTransaction",
