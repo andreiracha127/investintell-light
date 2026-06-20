@@ -53,6 +53,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.portfolio import Portfolio, PortfolioTransaction
 from app.models.portfolio_drift_status import PortfolioDriftStatus
 from app.models.rebalance import RebalancePolicy
+from app.rebalance import evaluator
 from app.rebalance.evaluator import (
     DEFAULT_BAND_ABS,
     DEFAULT_BAND_REL,
@@ -61,7 +62,6 @@ from app.rebalance.evaluator import (
     default_urgent_band,
     fund_instrument_ids_by_ticker,
 )
-from app.rebalance import evaluator
 from app.services import portfolio_crud
 from app.services.lookthrough import get_fund_series
 from app.services.lookthrough_exposure import fund_equity_exposure

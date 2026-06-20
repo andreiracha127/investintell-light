@@ -83,7 +83,7 @@ class FakeAsyncSession:
         return None
 
     # --- async-context-manager protocol ---
-    async def __aenter__(self) -> "FakeAsyncSession":
+    async def __aenter__(self) -> FakeAsyncSession:
         return self
 
     async def __aexit__(self, *_exc: Any) -> None:
