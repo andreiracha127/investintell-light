@@ -287,6 +287,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/portfolios/{portfolio_id}/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Portfolio Alerts
+         * @description Return the latest persisted drift status for a portfolio.
+         *
+         *     404 only when the PORTFOLIO is missing. A portfolio that exists but has
+         *     never been evaluated renders as ``worst_status="ok"``, ``evaluated_at=null``
+         *     and empty breach lists (a legitimate 200), not a 404.
+         */
+        get: operations["get_portfolio_alerts_portfolios__portfolio_id__alerts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/portfolios/{portfolio_id}/positions/{ticker}": {
         parameters: {
             query?: never;
@@ -1464,6 +1488,24 @@ export interface components {
             confidence: number;
         };
         /**
+         * AlertsView
+         * @description Response for GET /portfolios/{id}/alerts — the latest drift status.
+         *
+         *     A portfolio that exists but has never been evaluated renders as
+         *     ``worst_status="ok"``, ``evaluated_at=null`` and empty breach lists (a
+         *     legitimate 200), not a 404.
+         */
+        AlertsView: {
+            /** Evaluated At */
+            evaluated_at?: string | null;
+            /**
+             * Worst Status
+             * @default ok
+             */
+            worst_status: string;
+            breaches?: components["schemas"]["BreachesView"];
+        };
+        /**
          * AllocationOut
          * @description Resolved allocation at the first analyzed date (the replay strike point).
          */
@@ -1740,6 +1782,31 @@ export interface components {
              * @default 1
              */
             hi: number;
+        };
+        /**
+         * BreachesView
+         * @description The breach payload of the latest drift evaluation.
+         *
+         *     The three breach families are typed loosely as lists of objects (the
+         *     drift/evaluation service owns the exact item shapes); ``overlap_report_date``
+         *     is the N-PORT report date the overlap breaches were computed at (ISO string
+         *     or null when no look-through has run).
+         */
+        BreachesView: {
+            /** Position Drifts */
+            position_drifts?: {
+                [key: string]: unknown;
+            }[];
+            /** Class Breaches */
+            class_breaches?: {
+                [key: string]: unknown;
+            }[];
+            /** Overlap Breaches */
+            overlap_breaches?: {
+                [key: string]: unknown;
+            }[];
+            /** Overlap Report Date */
+            overlap_report_date?: string | null;
         };
         /**
          * BuildAllResponse
@@ -6588,6 +6655,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConstraintsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_portfolio_alerts_portfolios__portfolio_id__alerts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertsView"];
                 };
             };
             /** @description Validation Error */

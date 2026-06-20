@@ -756,6 +756,54 @@
         }
       }
     },
+    "/portfolios/{portfolio_id}/alerts": {
+      "get": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Get Portfolio Alerts",
+        "description": "Return the latest persisted drift status for a portfolio.\n\n404 only when the PORTFOLIO is missing. A portfolio that exists but has\nnever been evaluated renders as ``worst_status=\"ok\"``, ``evaluated_at=null``\nand empty breach lists (a legitimate 200), not a 404.",
+        "operationId": "get_portfolio_alerts_portfolios__portfolio_id__alerts_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertsView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/portfolios/{portfolio_id}/positions/{ticker}": {
       "put": {
         "tags": [
@@ -4192,6 +4240,33 @@
         "title": "AbsoluteViewIn",
         "description": "'Asset returns q per year' (e.g. q=0.12 \u2192 12% a.a.)."
       },
+      "AlertsView": {
+        "properties": {
+          "evaluated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluated At"
+          },
+          "worst_status": {
+            "type": "string",
+            "title": "Worst Status",
+            "default": "ok"
+          },
+          "breaches": {
+            "$ref": "#/components/schemas/BreachesView"
+          }
+        },
+        "type": "object",
+        "title": "AlertsView",
+        "description": "Response for GET /portfolios/{id}/alerts \u2014 the latest drift status.\n\nA portfolio that exists but has never been evaluated renders as\n``worst_status=\"ok\"``, ``evaluated_at=null`` and empty breach lists (a\nlegitimate 200), not a 404."
+      },
       "AllocationOut": {
         "properties": {
           "positions": {
@@ -4650,6 +4725,48 @@
         ],
         "title": "BlockBudgetIn",
         "description": "\u03a3 of weights in an asset-class block must lie in [lo, hi] (decimal\nfractions). ``asset_class`` matches ``Fund.asset_class``."
+      },
+      "BreachesView": {
+        "properties": {
+          "position_drifts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Position Drifts"
+          },
+          "class_breaches": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Class Breaches"
+          },
+          "overlap_breaches": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Overlap Breaches"
+          },
+          "overlap_report_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Report Date"
+          }
+        },
+        "type": "object",
+        "title": "BreachesView",
+        "description": "The breach payload of the latest drift evaluation.\n\nThe three breach families are typed loosely as lists of objects (the\ndrift/evaluation service owns the exact item shapes); ``overlap_report_date``\nis the N-PORT report date the overlap breaches were computed at (ISO string\nor null when no look-through has run)."
       },
       "BuildAllResponse": {
         "properties": {

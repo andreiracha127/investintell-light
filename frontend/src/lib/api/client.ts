@@ -78,6 +78,8 @@ type RebalancePolicyOperation =
 type RebalancePreviewOperation =
   paths["/portfolios/{portfolio_id}/rebalance/preview"]["get"];
 type PortfolioConstraintsPath = paths["/portfolios/{portfolio_id}/constraints"];
+type PortfolioAlertsOperation =
+  paths["/portfolios/{portfolio_id}/alerts"]["get"];
 
 type MarketOverviewOperation = paths["/stocks/overview"]["get"];
 export type MarketOverview =
@@ -306,6 +308,9 @@ export type PortfolioConstraintsPut =
 export type ClassLimit = NonNullable<PortfolioConstraintsPut["class_limits"]>[number];
 /** Asset-class vocabulary shared by block budgets and class limits. */
 export type ConstraintAssetClass = ClassLimit["asset_class"];
+
+export type PortfolioAlerts =
+  PortfolioAlertsOperation["responses"]["200"]["content"]["application/json"];
 /** Per-asset-class Σ-weight budget sent in the optimize/save `constraints`. */
 export type BlockBudget = NonNullable<
   NonNullable<OptimizeRequest["constraints"]>["block_budgets"]
@@ -622,6 +627,37 @@ export function fetchStockTimeseries(
 ): Promise<StockTimeseries> {
   return request<StockTimeseries>(
     `/stocks/${encodeURIComponent(ticker)}/timeseries?range=${range}`,
+    signal,
+  );
+}
+
+/** One 13F institutional holder of a stock (Stocks → Holders tab). */
+export interface StockHolder {
+  cik: string;
+  manager_name: string;
+  shares: number | null;
+  market_value: number | null;
+  /** Decimal fraction; null until prior-period history is ingested. */
+  position_return: number | null;
+}
+
+export interface StockHolders {
+  ticker: string;
+  cusip: string | null;
+  security_name: string | null;
+  period: string | null;
+  holder_count: number;
+  total_market_value: number | null;
+  holders: StockHolder[];
+  empty_state: { reason: string; source: string | null } | null;
+}
+
+export function fetchStockHolders(
+  ticker: string,
+  signal?: AbortSignal,
+): Promise<StockHolders> {
+  return request<StockHolders>(
+    `/stocks/${encodeURIComponent(ticker)}/holders`,
     signal,
   );
 }
@@ -1384,5 +1420,19 @@ export function putPortfolioConstraints(
     `/portfolios/${portfolioId}/constraints`,
     signal,
     { method: "PUT", json: body },
+  );
+}
+
+/* ── Drift alerts (Sprint C) ───────────────────────────────────────────────── */
+
+/** Load the latest persisted drift status for a portfolio. A portfolio that
+ *  exists but was never evaluated returns worst_status="ok" with empty lists. */
+export function getPortfolioAlerts(
+  portfolioId: number,
+  signal?: AbortSignal,
+): Promise<PortfolioAlerts> {
+  return request<PortfolioAlerts>(
+    `/portfolios/${portfolioId}/alerts`,
+    signal,
   );
 }
