@@ -61,6 +61,8 @@ from app.rebalance.evaluator import (
     default_urgent_band,
     fund_instrument_ids_by_ticker,
 )
+from app.rebalance import evaluator
+from app.services import portfolio_crud
 from app.services.lookthrough import get_fund_series
 from app.services.lookthrough_exposure import fund_equity_exposure
 from app.services.portfolio_constraints import ConstraintSet, get_constraints
@@ -82,6 +84,7 @@ __all__ = [
     "compute_class_breaches",
     "compute_overlap_breaches",
     "evaluate_portfolio_drift",
+    "materialize_all_portfolio_drifts",
     "upsert_drift_status",
     "get_drift_status",
 ]
@@ -456,3 +459,67 @@ async def evaluate_portfolio_drift(
         "overlap_report_date": report_date_iso,
     }
     return worst_status, breaches
+
+
+# ---------------------------------------------------------------------------
+# Batch materialization (Task 3) — the worker's per-portfolio loop.
+# ---------------------------------------------------------------------------
+
+
+async def _all_portfolio_ids(session: AsyncSession) -> list[int]:
+    """Every portfolio id, ascending — the default batch when none are given."""
+    result = await session.execute(select(Portfolio.id).order_by(Portfolio.id))
+    return [int(pid) for pid in result.scalars().all()]
+
+
+async def materialize_all_portfolio_drifts(
+    session: AsyncSession,
+    datalake: AsyncSession | None,
+    *,
+    portfolio_ids: list[int] | None = None,
+    as_of: dt.date | None = None,
+) -> dict:
+    """Evaluate + persist the drift status for a batch of portfolios.
+
+    Iterates the target portfolios (all of them, or the given ``portfolio_ids``).
+    For each: loads the portfolio (with positions), its ``RebalancePolicy`` (or
+    None → documented defaults), and its ``previous`` drift status (so overlap is
+    reused unless the N-PORT report advanced), then ``evaluate_portfolio_drift``
+    + ``upsert_drift_status`` (one row per portfolio, never a duplicate).
+
+    Does NOT commit — the caller (worker / route) owns the transaction boundary.
+    Portfolios that vanished between enumeration and load are skipped. Returns
+    ``{"portfolios": [{"id", "worst_status"}, ...]}`` in id order.
+    """
+    as_of = as_of or dt.date.today()
+    ids = (
+        [int(pid) for pid in portfolio_ids]
+        if portfolio_ids is not None
+        else await _all_portfolio_ids(session)
+    )
+
+    summary: list[dict] = []
+    for portfolio_id in ids:
+        portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+        if portfolio is None:
+            continue
+        policy = await evaluator.get_policy(session, portfolio_id)
+        previous = await get_drift_status(session, portfolio_id)
+        worst_status, breaches = await evaluate_portfolio_drift(
+            session,
+            datalake,
+            portfolio,
+            policy=policy,
+            previous=previous,
+            as_of=as_of,
+        )
+        await upsert_drift_status(
+            session,
+            portfolio_id,
+            evaluated_at=dt.datetime.now(dt.UTC),
+            worst_status=worst_status,
+            breaches=breaches,
+        )
+        summary.append({"id": portfolio_id, "worst_status": worst_status})
+
+    return {"portfolios": summary}
