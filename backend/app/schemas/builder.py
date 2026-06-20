@@ -229,32 +229,8 @@ class OptimizeRequest(BaseModel):
                 "turnover_lambda requires current_weights (a label -> fraction map "
                 "of the existing allocation)"
             )
-        if self.objective == "max_return_cvar":
-            if self.cvar_limit is None:
-                raise ValueError("max_return_cvar requires a cvar_limit (tail-loss cap)")
-            if self.universe is not None and self.universe.broad_universe:
-                raise ValueError(
-                    "max_return_cvar cannot run in broad_universe mode — it needs "
-                    "Black-Litterman market weights on an explicit 'assets' list; "
-                    "broad_universe is risk-structure-only (gate G5)"
-                )
-            if self.universe is not None:
-                raise ValueError(
-                    "max_return_cvar needs Black-Litterman market weights on an "
-                    "explicit 'assets' list — it cannot run over a 'universe'"
-                )
-        if (
-            self.objective == "bl_utility"
-            and self.universe is not None
-            and self.universe.broad_universe
-        ):
-            raise ValueError(
-                "bl_utility cannot run in broad_universe mode — it needs "
-                "Black-Litterman equilibrium returns (market-cap/AUM weights for the "
-                "selected funds), which broad_universe selection does not guarantee; "
-                "broad_universe is risk-structure-only (gate G5). Use the ranked "
-                "universe mode or an explicit 'assets' list for bl_utility."
-            )
+        if self.objective == "max_return_cvar" and self.cvar_limit is None:
+            raise ValueError("max_return_cvar requires a cvar_limit (tail-loss cap)")
         return self
 
 

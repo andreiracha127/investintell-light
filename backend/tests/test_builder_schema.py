@@ -87,12 +87,12 @@ def test_max_return_cvar_requires_cvar_limit() -> None:
         )
 
 
-def test_max_return_cvar_with_universe_is_rejected() -> None:
-    """Schema validator blocks max_return_cvar + universe at the Pydantic level."""
+def test_views_with_universe_is_rejected() -> None:
+    """Views reference specific assets; a universe selects them — incompatible."""
     import pytest
     from pydantic import ValidationError
 
-    with pytest.raises(ValidationError, match="universe"):
+    with pytest.raises(ValidationError, match="views cannot be combined"):
         OptimizeRequest(
             universe={},
             objective="max_return_cvar",
@@ -126,19 +126,31 @@ def test_diagnostics_out_view_consistency_defaults_to_none() -> None:
     assert diag.view_consistency is None
 
 
-def test_broad_universe_incompatible_with_max_return_cvar() -> None:
+def test_max_return_cvar_allowed_in_broad_universe() -> None:
+    """BL over the broad-universe path is now permitted (equilibrium prior)."""
+    from app.schemas.builder import OptimizeRequest
+
+    req = OptimizeRequest.model_validate(
+        {
+            "universe": {"broad_universe": True, "max_positions": 20},
+            "objective": "max_return_cvar",
+            "cvar_limit": 0.02,
+        }
+    )
+    assert req.objective == "max_return_cvar"
+    assert req.cvar_limit == 0.02
+
+
+def test_max_return_cvar_still_requires_cvar_limit_in_broad_universe() -> None:
+    """Dropping the broad-universe block must NOT drop the cvar_limit guard."""
     import pytest
     from pydantic import ValidationError
 
     from app.schemas.builder import OptimizeRequest
 
-    with pytest.raises(ValidationError, match="broad_universe"):
+    with pytest.raises(ValidationError, match="cvar_limit"):
         OptimizeRequest.model_validate(
-            {
-                "universe": {"broad_universe": True},
-                "objective": "max_return_cvar",
-                "cvar_limit": 0.02,
-            }
+            {"universe": {"broad_universe": True}, "objective": "max_return_cvar"}
         )
 
 
@@ -154,15 +166,34 @@ def test_broad_universe_accepts_min_cvar_default() -> None:
     assert req.objective == "min_cvar"
 
 
-def test_broad_universe_incompatible_with_bl_utility() -> None:
+def test_bl_utility_allowed_in_broad_universe() -> None:
+    """bl_utility over the broad-universe path is now permitted (no views)."""
+    from app.schemas.builder import OptimizeRequest
+
+    req = OptimizeRequest.model_validate(
+        {"universe": {"broad_universe": True, "max_positions": 20}, "objective": "bl_utility"}
+    )
+    assert req.objective == "bl_utility"
+    assert req.universe is not None
+    assert req.universe.broad_universe is True
+
+
+def test_views_still_rejected_with_broad_universe() -> None:
+    """views + universe stays rejected even for BL objectives in broad mode."""
     import pytest
     from pydantic import ValidationError
 
     from app.schemas.builder import OptimizeRequest
 
-    with pytest.raises(ValidationError, match="bl_utility"):
+    with pytest.raises(ValidationError, match="views cannot be combined"):
         OptimizeRequest.model_validate(
-            {"universe": {"broad_universe": True}, "objective": "bl_utility"}
+            {
+                "universe": {"broad_universe": True},
+                "objective": "bl_utility",
+                "views": [
+                    {"type": "absolute", "asset": {"kind": "fund", "id": _A}, "q": 0.1}
+                ],
+            }
         )
 
 
