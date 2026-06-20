@@ -492,6 +492,19 @@ async def test_resolve_child_series_skips_identifiers_with_multiple_series() -> 
     assert child_by_isin == {}
 
 
+def test_child_series_map_consults_company_tickers_mf() -> None:
+    """The fund-of-fund resolver must consult the SEC company_tickers_mf
+    crosswalk (ticker -> series_id).
+
+    Held ETFs that are present in N-PORT but absent from the N-CEN-derived
+    ``sec_etfs`` slice (e.g. WisdomTree DTD/DEM/DXJ inside a fund-of-funds)
+    only resolve to a child series through this authoritative ticker map; the
+    CUSIP-to-ticker edge already exists in ``sec_cusip_ticker_map``.
+    """
+    sql = str(lt._CHILD_SERIES_MAP_SQL)  # noqa: SLF001
+    assert "sec_company_tickers_mf" in sql
+
+
 @pytest.mark.asyncio
 async def test_portfolio_exposure_tree_keeps_ambiguous_trust_as_final_holding() -> None:
     class Result:

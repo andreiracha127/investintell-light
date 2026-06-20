@@ -280,6 +280,14 @@ _CHILD_SERIES_MAP_SQL = text("""
         SELECT upper(ticker), series_id
         FROM sec_etfs
         WHERE ticker IS NOT NULL AND series_id IS NOT NULL
+        UNION
+        -- SEC company_tickers_mf: authoritative ticker -> series_id for funds/
+        -- ETFs absent from the N-CEN sec_etfs slice (e.g. WisdomTree DTD/DEM/DXJ
+        -- held inside a fund-of-funds). The CUSIP -> ticker edge already lives
+        -- in sec_cusip_ticker_map; this closes CUSIP -> ticker -> series.
+        SELECT upper(ticker), series_id
+        FROM sec_company_tickers_mf
+        WHERE ticker IS NOT NULL AND series_id IS NOT NULL
     ),
     raw AS (
         SELECT 'cusip' AS kind, m.cusip AS ident, t.series_id
