@@ -11,6 +11,7 @@ from app.models.base import Base
 from app.models.eod_price import EodPrice
 from app.models.fund import (
     Fund,
+    FundBenchmarkCandidate,
     FundClass,
     FundHolding,
     FundListRow,
@@ -34,6 +35,7 @@ __all__ = [
     "Base",
     "EodPrice",
     "Fund",
+    "FundBenchmarkCandidate",
     "FundClass",
     "FundHolding",
     "FundListRow",

@@ -157,6 +157,19 @@ class FundRiskOut(BaseModel):
     crisis_alpha_score: float | None = None
 
 
+class FundBenchmarkOut(BaseModel):
+    """Benchmark candidate resolved from SEC metadata plus canonical ETF proxy map."""
+
+    name: str | None
+    proxy_ticker: str | None
+    proxy_fit_quality_score: float | None
+    proxy_asset_class: str | None
+    resolution_method: str | None
+    resolution_conflict: bool
+    proxy_candidates: list[str] = []
+    canonical_name_matches: list[str] = []
+
+
 class FundClassOut(BaseModel):
     """One share class of the fund's series (F8.6b).
 
@@ -231,6 +244,7 @@ class FundProfileResponse(BaseModel):
     expense_ratio: float | None
     aum_usd: float | None
     primary_benchmark: str | None
+    benchmark: FundBenchmarkOut | None = None
     inception_date: dt.date | None
     domicile: str | None
     currency: str | None

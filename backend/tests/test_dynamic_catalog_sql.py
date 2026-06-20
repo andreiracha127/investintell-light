@@ -6,6 +6,12 @@ DDL_PATH = (
     / "ddl"
     / "2026-06-13_dynamic_catalog.sql"
 )
+BENCHMARK_DDL_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "db"
+    / "ddl"
+    / "2026-06-20_fund_benchmark_candidates.sql"
+)
 
 
 def test_stage_labels_sql_prefers_manual_overrides() -> None:
@@ -53,3 +59,24 @@ def test_funds_v_name_prefers_series_name_for_trusts() -> None:
     # the trust name would still win.
     after_case = name_expr[name_expr.index("END") :]
     assert "NULLIF(btrim(rf.fund_name)" in after_case, after_case
+
+
+def test_fund_benchmark_candidates_sql_uses_all_resolution_paths() -> None:
+    sql = BENCHMARK_DDL_PATH.read_text(encoding="utf-8")
+
+    assert "CREATE OR REPLACE VIEW fund_benchmark_candidates_v" in sql
+    assert "'direct_series'::text" in sql
+    assert "'class_name_exact'::text" in sql
+    assert "'universe_name_exact'::text" in sql
+    assert "sec_fund_classes" in sql
+    assert "instruments_universe" in sql
+    assert "benchmark_etf_canonical_map" in sql
+
+
+def test_fund_benchmark_candidates_sql_marks_proxy_conflicts() -> None:
+    sql = BENCHMARK_DDL_PATH.read_text(encoding="utf-8")
+
+    assert "count(DISTINCT proxy_etf_ticker)" in sql
+    assert "CASE WHEN proxy_count = 1 THEN proxy_etf_ticker END" in sql
+    assert "(benchmark_name_count > 1 OR proxy_count > 1)" in sql
+    assert "benchmark_proxy_candidates" in sql

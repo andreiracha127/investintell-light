@@ -24,7 +24,14 @@ from sqlalchemy import ColumnElement, Select, column, func, or_, select, table, 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
-from app.models.fund import Fund, FundClass, FundHolding, FundListRow, FundRiskLatest
+from app.models.fund import (
+    Fund,
+    FundBenchmarkCandidate,
+    FundClass,
+    FundHolding,
+    FundListRow,
+    FundRiskLatest,
+)
 
 # Canonical strategy label for funds the mother-DB cascade could not classify.
 # (Was sourced from the now-retired app.sync.funds; this service is its sole
@@ -288,7 +295,9 @@ def _list_filter_conditions(filters: FundFilters) -> list[ColumnElement[bool]]:
 # Item columns served on every list row (funds identity + headline metrics).
 # `manager_name` is a correlated subquery (not a stored MV column) — see
 # `_build_manager_name_expr` above.
-_ITEM_COLUMNS: tuple[tuple[str, ColumnElement[Any]], ...] = (
+_ITEM_COLUMNS: tuple[
+    tuple[str, ColumnElement[Any] | InstrumentedAttribute[Any]], ...
+] = (
     ("instrument_id", FundListRow.instrument_id),
     ("series_id", FundListRow.series_id),
     ("ticker", FundListRow.ticker),
@@ -539,6 +548,7 @@ class FundProfile:
     """Everything the profile endpoint needs, fetched in one service call."""
 
     fund: Fund
+    benchmark: FundBenchmarkCandidate | None
     risk: FundRiskLatest | None
     nav: list[tuple[dt.date, float | None]]
     holdings: list[FundHolding]
@@ -562,6 +572,7 @@ async def fetch_fund_profile(
     fund = await session.get(Fund, instrument_id)
     if fund is None:
         return None
+    benchmark = await session.get(FundBenchmarkCandidate, fund.series_id)
     risk = await session.get(FundRiskLatest, instrument_id)
 
     max_nav_date = cast(
@@ -633,6 +644,7 @@ async def fetch_fund_profile(
 
     return FundProfile(
         fund=fund,
+        benchmark=benchmark,
         risk=risk,
         nav=nav,
         holdings=holdings,

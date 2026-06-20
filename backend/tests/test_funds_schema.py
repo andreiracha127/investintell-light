@@ -6,7 +6,7 @@ import uuid
 
 import pytest
 
-from app.schemas.funds import FundListItem, format_company_name
+from app.schemas.funds import FundBenchmarkOut, FundListItem, format_company_name
 
 
 @pytest.mark.parametrize(
@@ -71,3 +71,20 @@ def test_list_item_title_cases_manager_name() -> None:
 
 def test_list_item_manager_name_none_stays_none() -> None:
     assert _item(None).manager_name is None
+
+
+def test_benchmark_out_can_represent_proxy_conflict() -> None:
+    out = FundBenchmarkOut(
+        name="Russell 2500 Growth Index",
+        proxy_ticker=None,
+        proxy_fit_quality_score=None,
+        proxy_asset_class=None,
+        resolution_method="class_name_exact",
+        resolution_conflict=True,
+        proxy_candidates=["IJT", "SMLG"],
+        canonical_name_matches=["Russell 2500 Growth", "Russell 2500 Growth Index"],
+    )
+
+    assert out.resolution_conflict is True
+    assert out.proxy_ticker is None
+    assert out.proxy_candidates == ["IJT", "SMLG"]

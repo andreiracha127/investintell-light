@@ -440,11 +440,12 @@ def test_portfolios_origin_column() -> None:
 
 def test_fund_tables_registered() -> None:
     # funds_v / fund_risk_latest_mv / fund_holdings_v / fund_classes_v are now
-    # dynamic VIEWs/MVs (Tasks 2.2-2.5); FundNav is repointed to the live
+    # dynamic VIEWs/MVs (Tasks 2.2-2.5); fund_benchmark_candidates_v is the
+    # read-only benchmark resolution view; FundNav is repointed to the live
     # nav_timeseries hypertable (Task 4.3) — the fund_nav snapshot is retired.
     for name in (
         "funds_v", "fund_risk_latest_mv", "nav_timeseries",
-        "fund_holdings_v", "fund_classes_v",
+        "fund_holdings_v", "fund_classes_v", "fund_benchmark_candidates_v",
     ):
         assert name in Base.metadata.tables
 
@@ -468,6 +469,22 @@ def test_funds_filter_columns_are_indexed() -> None:
     # ignores them, but the ORM contract is preserved for consistency).
     indexed = {c.name for idx in _table("funds_v").indexes for c in idx.columns}
     assert {"series_id", "fund_type", "strategy_label"} <= indexed
+
+
+def test_fund_benchmark_candidates_columns() -> None:
+    table = _table("fund_benchmark_candidates_v")
+    assert [c.name for c in table.primary_key.columns] == ["series_id"]
+    for col in (
+        "benchmark_name",
+        "benchmark_proxy_ticker",
+        "benchmark_proxy_fit_quality_score",
+        "benchmark_proxy_asset_class",
+        "benchmark_resolution_method",
+    ):
+        assert table.c[col].nullable is True, col
+    assert table.c["benchmark_resolution_conflict"].nullable is False
+    assert table.c["benchmark_proxy_candidates"].nullable is False
+    assert table.c["benchmark_canonical_name_matches"].nullable is False
 
 
 def test_fund_classes_pk_fk_and_columns() -> None:

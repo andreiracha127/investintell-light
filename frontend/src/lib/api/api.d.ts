@@ -2412,6 +2412,34 @@ export interface components {
             worst_day: components["schemas"]["DatedValue"];
         };
         /**
+         * FundBenchmarkOut
+         * @description Benchmark candidate resolved from SEC metadata plus canonical ETF proxy map.
+         */
+        FundBenchmarkOut: {
+            /** Name */
+            name: string | null;
+            /** Proxy Ticker */
+            proxy_ticker: string | null;
+            /** Proxy Fit Quality Score */
+            proxy_fit_quality_score: number | null;
+            /** Proxy Asset Class */
+            proxy_asset_class: string | null;
+            /** Resolution Method */
+            resolution_method: string | null;
+            /** Resolution Conflict */
+            resolution_conflict: boolean;
+            /**
+             * Proxy Candidates
+             * @default []
+             */
+            proxy_candidates: string[];
+            /**
+             * Canonical Name Matches
+             * @default []
+             */
+            canonical_name_matches: string[];
+        };
+        /**
          * FundCaptureRatios
          * @description Monthly up/down capture versus the requested benchmark.
          */
@@ -2828,6 +2856,7 @@ export interface components {
             aum_usd: number | null;
             /** Primary Benchmark */
             primary_benchmark: string | null;
+            benchmark?: components["schemas"]["FundBenchmarkOut"] | null;
             /** Inception Date */
             inception_date: string | null;
             /** Domicile */

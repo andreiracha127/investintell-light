@@ -45,13 +45,14 @@ from app.schemas.fund_analysis import (
     FundFactorsResponse,
     FundHoldingsTopResponse,
     FundInstitutionalRevealResponse,
-    HoldingReverseLookupResponse,
     FundPeersResponse,
     FundRiskTimeseriesResponse,
     FundScatterResponse,
     FundStyleDriftResponse,
+    HoldingReverseLookupResponse,
 )
 from app.schemas.funds import (
+    FundBenchmarkOut,
     FundClassOut,
     FundHoldingItem,
     FundHoldingsOut,
@@ -484,6 +485,12 @@ async def get_fund_profile(
             status_code=404, detail=f"Fund {instrument_id} not found."
         )
     fund = profile.fund
+    benchmark = profile.benchmark
+    benchmark_name = (
+        benchmark.benchmark_name
+        if benchmark is not None and benchmark.benchmark_name
+        else fund.primary_benchmark
+    )
     return FundProfileResponse(
         instrument_id=fund.instrument_id,
         series_id=fund.series_id,
@@ -498,7 +505,25 @@ async def get_fund_profile(
         is_index=fund.is_index,
         expense_ratio=to_decimal_fraction(fund.expense_ratio),
         aum_usd=float(fund.aum_usd) if fund.aum_usd is not None else None,
-        primary_benchmark=fund.primary_benchmark,
+        primary_benchmark=benchmark_name,
+        benchmark=(
+            FundBenchmarkOut(
+                name=benchmark.benchmark_name,
+                proxy_ticker=benchmark.benchmark_proxy_ticker,
+                proxy_fit_quality_score=(
+                    float(benchmark.benchmark_proxy_fit_quality_score)
+                    if benchmark.benchmark_proxy_fit_quality_score is not None
+                    else None
+                ),
+                proxy_asset_class=benchmark.benchmark_proxy_asset_class,
+                resolution_method=benchmark.benchmark_resolution_method,
+                resolution_conflict=benchmark.benchmark_resolution_conflict,
+                proxy_candidates=benchmark.benchmark_proxy_candidates,
+                canonical_name_matches=benchmark.benchmark_canonical_name_matches,
+            )
+            if benchmark is not None
+            else None
+        ),
         inception_date=fund.inception_date,
         domicile=fund.domicile,
         currency=fund.currency,

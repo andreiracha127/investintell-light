@@ -6112,6 +6112,96 @@
         "title": "FundAnalysisStats",
         "description": "Point statistics over in-range daily NAV returns only."
       },
+      "FundBenchmarkOut": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "proxy_ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proxy Ticker"
+          },
+          "proxy_fit_quality_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proxy Fit Quality Score"
+          },
+          "proxy_asset_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proxy Asset Class"
+          },
+          "resolution_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Method"
+          },
+          "resolution_conflict": {
+            "type": "boolean",
+            "title": "Resolution Conflict"
+          },
+          "proxy_candidates": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Proxy Candidates",
+            "default": []
+          },
+          "canonical_name_matches": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Canonical Name Matches",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "proxy_ticker",
+          "proxy_fit_quality_score",
+          "proxy_asset_class",
+          "resolution_method",
+          "resolution_conflict"
+        ],
+        "title": "FundBenchmarkOut",
+        "description": "Benchmark candidate resolved from SEC metadata plus canonical ETF proxy map."
+      },
       "FundCaptureRatios": {
         "properties": {
           "up_capture": {
@@ -7376,6 +7466,16 @@
               }
             ],
             "title": "Primary Benchmark"
+          },
+          "benchmark": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FundBenchmarkOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "inception_date": {
             "anyOf": [

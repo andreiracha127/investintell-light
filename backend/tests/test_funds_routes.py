@@ -310,8 +310,19 @@ def _profile() -> catalog.FundProfile:
     fund_class_no_fee = SimpleNamespace(
         class_id="C000002", class_name=None, ticker="VTSAX", expense_ratio=None
     )
+    benchmark = SimpleNamespace(
+        benchmark_name="CRSP US Total Market",
+        benchmark_proxy_ticker="VTI",
+        benchmark_proxy_fit_quality_score=0.92,
+        benchmark_proxy_asset_class="equity_us_large",
+        benchmark_resolution_method="class_name_exact",
+        benchmark_resolution_conflict=False,
+        benchmark_proxy_candidates=["VTI"],
+        benchmark_canonical_name_matches=["CRSP US Total Market"],
+    )
     return catalog.FundProfile(
         fund=fund,  # type: ignore[arg-type]
+        benchmark=benchmark,  # type: ignore[arg-type]
         risk=risk,  # type: ignore[arg-type]
         nav=[(dt.date(2026, 6, 4), 305.1), (dt.date(2026, 6, 5), 306.2)],
         holdings=[holding],  # type: ignore[list-item]
@@ -334,6 +345,17 @@ async def test_fund_profile_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     assert resp.status_code == 200
     body = resp.json()
     assert body["ticker"] == "VTI"
+    assert body["primary_benchmark"] == "CRSP US Total Market"
+    assert body["benchmark"] == {
+        "name": "CRSP US Total Market",
+        "proxy_ticker": "VTI",
+        "proxy_fit_quality_score": 0.92,
+        "proxy_asset_class": "equity_us_large",
+        "resolution_method": "class_name_exact",
+        "resolution_conflict": False,
+        "proxy_candidates": ["VTI"],
+        "canonical_name_matches": ["CRSP US Total Market"],
+    }
     assert body["risk"]["sharpe_1y"] == 1.1
     assert body["risk"]["cvar_95_12m"] == -0.21
     assert body["risk"]["peer_count"] == 412

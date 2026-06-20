@@ -33,6 +33,7 @@ from sqlalchemy import (
     String,
     Uuid,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -93,6 +94,39 @@ class Fund(Base):
     inception_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     domicile: Mapped[str | None] = mapped_column(String, nullable=True)
     currency: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class FundBenchmarkCandidate(Base):
+    """Resolved benchmark candidate for a fund series.
+
+    Backed by ``fund_benchmark_candidates_v``. The view explains how a benchmark
+    name was recovered from SEC registered-fund metadata and, when unambiguous,
+    which canonical ETF proxy should be used for return/NAV comparisons.
+    """
+
+    __tablename__ = "fund_benchmark_candidates_v"
+
+    series_id: Mapped[str] = mapped_column(String, primary_key=True)
+    benchmark_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    benchmark_proxy_ticker: Mapped[str | None] = mapped_column(String, nullable=True)
+    benchmark_proxy_fit_quality_score: Mapped[Decimal | None] = mapped_column(
+        Numeric, nullable=True
+    )
+    benchmark_proxy_asset_class: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )
+    benchmark_resolution_method: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )
+    benchmark_resolution_conflict: Mapped[bool] = mapped_column(
+        Boolean, nullable=False
+    )
+    benchmark_proxy_candidates: Mapped[list[str]] = mapped_column(
+        ARRAY(String), nullable=False
+    )
+    benchmark_canonical_name_matches: Mapped[list[str]] = mapped_column(
+        ARRAY(String), nullable=False
+    )
 
 
 class FundClass(Base):
