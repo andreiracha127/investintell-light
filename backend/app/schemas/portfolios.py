@@ -15,8 +15,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.models.portfolio_constraint import ASSET_CLASSES
 from app.schemas._tickers import normalize_ticker
 from app.schemas.news import NewsArticle
+
+AssetClass = Literal["equity", "fixed_income", "cash", "alternatives", "multi_asset"]
 
 MAX_POSITIONS = 50
 MAX_NAME_LENGTH = 80
@@ -375,3 +378,78 @@ class PortfolioNewsResponse(BaseModel):
     count: int
     stale: bool = False
     items: list[NewsArticle]
+
+
+# ---------------------------------------------------------------------------
+# Construction constraints (Sprint B) — header limits + per-class bounds
+# ---------------------------------------------------------------------------
+
+
+class ClassLimitItem(BaseModel):
+    """One per-asset-class min/max weight bound.
+
+    Both bounds are decimal fractions in [0, 1] and nullable (absent = no
+    bound of that side). When both are present ``min_weight <= max_weight``.
+    """
+
+    asset_class: AssetClass = Field(
+        description=f"One of: {', '.join(ASSET_CLASSES)}."
+    )
+    min_weight: float | None = Field(
+        default=None, ge=0.0, le=1.0, allow_inf_nan=False,
+        description="Lower weight bound, decimal fraction in [0, 1]; null = none.",
+    )
+    max_weight: float | None = Field(
+        default=None, ge=0.0, le=1.0, allow_inf_nan=False,
+        description="Upper weight bound, decimal fraction in [0, 1]; null = none.",
+    )
+
+    @model_validator(mode="after")
+    def _check_min_le_max(self) -> "ClassLimitItem":
+        if (
+            self.min_weight is not None
+            and self.max_weight is not None
+            and self.min_weight > self.max_weight
+        ):
+            raise ValueError(
+                f"class limit for {self.asset_class!r}: min_weight "
+                f"({self.min_weight}) must be <= max_weight ({self.max_weight})."
+            )
+        return self
+
+
+class ConstraintsPut(BaseModel):
+    """Body for PUT /portfolios/{id}/constraints.
+
+    Header limits are each nullable (absent/null = no limit of that kind):
+    ``cap`` and ``overlap_cap`` are in (0, 1]; ``min_weight`` is in [0, 1].
+    ``class_limits`` is a (possibly empty) list of per-asset-class bounds; the
+    whole set is replaced wholesale on upsert.
+    """
+
+    cap: float | None = Field(
+        default=None, gt=0.0, le=1.0, allow_inf_nan=False,
+        description="Max per-position weight, decimal fraction in (0, 1]; null = none.",
+    )
+    min_weight: float | None = Field(
+        default=None, ge=0.0, le=1.0, allow_inf_nan=False,
+        description="Min per-position weight, decimal fraction in [0, 1]; null = none.",
+    )
+    overlap_cap: float | None = Field(
+        default=None, gt=0.0, le=1.0, allow_inf_nan=False,
+        description="Max pairwise overlap, decimal fraction in (0, 1]; null = none.",
+    )
+    class_limits: list[ClassLimitItem] = Field(
+        default_factory=list,
+        description="Per-asset-class min/max weight bounds (replaced wholesale).",
+    )
+
+
+class ConstraintsView(ConstraintsPut):
+    """Response for GET /portfolios/{id}/constraints — the persisted set.
+
+    Same shape as the PUT body plus the owning ``portfolio_id``. A portfolio
+    with no persisted constraints renders as nulls + an empty ``class_limits``.
+    """
+
+    portfolio_id: int

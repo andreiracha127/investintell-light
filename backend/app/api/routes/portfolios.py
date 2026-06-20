@@ -44,6 +44,9 @@ from app.schemas.lookthrough import (
 )
 from app.schemas.news import NewsArticle
 from app.schemas.portfolios import (
+    ClassLimitItem,
+    ConstraintsPut,
+    ConstraintsView,
     PortfolioCreate,
     PortfolioListItem,
     PortfolioNavPoint,
@@ -57,7 +60,12 @@ from app.schemas.portfolios import (
     PositionBody,
     PositionOut,
 )
-from app.services import lookthrough, portfolio_crud, portfolio_ledger
+from app.services import (
+    lookthrough,
+    portfolio_constraints,
+    portfolio_crud,
+    portfolio_ledger,
+)
 from app.tiingo.client import TiingoClient
 from app.tiingo.exceptions import TiingoError
 
@@ -188,6 +196,81 @@ async def delete_portfolio(
     deleted = await portfolio_crud.delete_portfolio(session, portfolio_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
+
+
+# ---------------------------------------------------------------------------
+# Construction constraints (Sprint B)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{portfolio_id}/constraints", response_model=ConstraintsView)
+async def get_portfolio_constraints(
+    portfolio_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ConstraintsView:
+    """Return the persisted construction constraints for a portfolio.
+
+    404 only when the PORTFOLIO is missing. A portfolio that exists but was
+    never saved with constraints renders as nulls + an empty class-limit list
+    (a legitimate 200), not a 404.
+    """
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id):
+        raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
+    constraints = await portfolio_constraints.get_constraints(session, portfolio_id)
+    if constraints is None:
+        return ConstraintsView(portfolio_id=portfolio_id)
+    return ConstraintsView(
+        portfolio_id=portfolio_id,
+        cap=constraints.cap,
+        min_weight=constraints.min_weight,
+        overlap_cap=constraints.overlap_cap,
+        class_limits=[
+            ClassLimitItem.model_validate(
+                {
+                    "asset_class": limit.asset_class,
+                    "min_weight": limit.min_weight,
+                    "max_weight": limit.max_weight,
+                }
+            )
+            for limit in constraints.class_limits
+        ],
+    )
+
+
+@router.put("/{portfolio_id}/constraints", response_model=ConstraintsView)
+async def put_portfolio_constraints(
+    portfolio_id: int,
+    payload: ConstraintsPut,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ConstraintsView:
+    """Validate and upsert the construction constraints for a portfolio.
+
+    Bound validation (``0 < cap <= 1``, ``0 < overlap_cap <= 1``,
+    ``0 <= min_weight <= 1``, per-class ``0 <= min <= max <= 1``) is enforced
+    by the request schema and surfaces as 422. 404 when the portfolio is
+    missing. The persisted class-limit set is replaced wholesale.
+    """
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id):
+        raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
+    await portfolio_constraints.upsert_constraints(
+        session,
+        portfolio_id,
+        cap=payload.cap,
+        min_weight=payload.min_weight,
+        overlap_cap=payload.overlap_cap,
+        class_limits=[
+            (limit.asset_class, limit.min_weight, limit.max_weight)
+            for limit in payload.class_limits
+        ],
+    )
+    await session.commit()
+    return ConstraintsView(
+        portfolio_id=portfolio_id,
+        cap=payload.cap,
+        min_weight=payload.min_weight,
+        overlap_cap=payload.overlap_cap,
+        class_limits=payload.class_limits,
+    )
 
 
 # ---------------------------------------------------------------------------
