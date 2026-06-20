@@ -25,7 +25,7 @@ import { InfoDot, KpiTile } from "@/components/ui/panels";
 import { formatDate, formatNumber } from "@/lib/format";
 
 const LOOKTHROUGH_TIP =
-  "“Look-through”: sees through each fund/ETF in the portfolio down to its final underlying holdings, aggregating true exposure by asset class, strategy, fund series and CUSIP.";
+  "“Look-through”: sees through each fund/ETF in the portfolio down to its final underlying holdings, aggregating true exposure by asset class, fund series and CUSIP.";
 
 export function PortfolioLookthroughSection({
   portfolioId,
@@ -85,10 +85,19 @@ export function PortfolioLookthroughSection({
   if (tree.length === 0 && assetItems.length === 0) return null;
 
   // ── KPIs (computed defensively from the dimensions that exist) ──────────
-  const securityCount = tree.filter(
-    (node) => node.kind === "cusip" || node.kind === "security",
-  ).length;
+  const parentIds = new Set(
+    tree
+      .map((node) => node.parent_id)
+      .filter((id): id is string => Boolean(id)),
+  );
+  const securityCount = tree.filter((node) => !parentIds.has(node.id)).length;
   const assetClassCount = tree.filter((node) => node.kind === "asset_class").length;
+  const residualPositionPct = data.unexpanded
+    .reduce((sum, position) => sum + position.weight_pct, 0);
+  const decomposedPct = Math.min(
+    100,
+    Math.max(0, data.expanded_weight_pct + residualPositionPct + data.cash_weight_pct),
+  );
 
   return (
     <div className="flex flex-col gap-px">
@@ -106,7 +115,7 @@ export function PortfolioLookthroughSection({
       <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(140px,1fr))]">
         <KpiTile
           label="Decomposed"
-          value={`${formatNumber(data.sum_pct_total, 1)}%`}
+          value={`${formatNumber(decomposedPct, 1)}%`}
           tip="Share of portfolio value mapped down to its final holdings."
         />
         <KpiTile
@@ -132,7 +141,7 @@ export function PortfolioLookthroughSection({
             Look-through sunburst
           </h3>
           <span className="text-[10.5px] text-text-muted">
-            Asset class → strategy → fund (series) → final holding
+            Asset class → fund (series) → final holding
           </span>
         </div>
         {sunburstOption && (

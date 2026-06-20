@@ -37,24 +37,16 @@ const TREE: PortfolioLookthrough["tree"] = [
     value_pct: 60,
   },
   {
-    id: "strategy|equity|Large Blend",
+    id: "series|equity|S_A",
     parent_id: "asset|equity",
-    key: "Large Blend",
-    label: "Large Blend",
-    kind: "strategy",
-    value_pct: 60,
-  },
-  {
-    id: "series|equity|Large Blend|S_A",
-    parent_id: "strategy|equity|Large Blend",
     key: "S_A",
     label: "Parent ETF",
     kind: "series",
     value_pct: 60,
   },
   {
-    id: "cusip|equity|Large Blend|S_A|037833100",
-    parent_id: "series|equity|Large Blend|S_A",
+    id: "cusip|equity|S_A|037833100",
+    parent_id: "series|equity|S_A",
     key: "037833100",
     label: "Apple Inc",
     kind: "cusip",
@@ -82,9 +74,8 @@ describe("buildHcExposureSunburstOption", () => {
     expect(data.find((point) => point.id === "portfolio-root")?.parent).toBe("");
     expect(data.find((point) => point.id === "asset|equity")?.parent).toBe("portfolio-root");
     expect(data.find((point) => point.id === "asset|equity")?.name).toBe("Equity");
-    expect(data.find((point) => point.id === "strategy|equity|Large Blend")?.name).toBe("Large Blend");
-    expect(data.find((point) => point.id === "series|equity|Large Blend|S_A")?.name).toBe("Parent ETF");
-    expect(data.find((point) => point.id === "cusip|equity|Large Blend|S_A|037833100")?.name).toBe("Apple Inc");
+    expect(data.find((point) => point.id === "series|equity|S_A")?.name).toBe("Parent ETF");
+    expect(data.find((point) => point.id === "cusip|equity|S_A|037833100")?.name).toBe("Apple Inc");
   });
 
   it("assigns values only to leaf holdings", () => {
@@ -92,9 +83,8 @@ describe("buildHcExposureSunburstOption", () => {
     const series = opt.series?.[0] as SeriesSunburstOptions;
     const data = series.data as Array<{ id?: string; value?: number }>;
     expect(data.find((point) => point.id === "asset|equity")?.value).toBeUndefined();
-    expect(data.find((point) => point.id === "strategy|equity|Large Blend")?.value).toBeUndefined();
-    expect(data.find((point) => point.id === "series|equity|Large Blend|S_A")?.value).toBeUndefined();
-    expect(data.find((point) => point.id === "cusip|equity|Large Blend|S_A|037833100")?.value).toBe(60);
+    expect(data.find((point) => point.id === "series|equity|S_A")?.value).toBeUndefined();
+    expect(data.find((point) => point.id === "cusip|equity|S_A|037833100")?.value).toBe(60);
   });
 
   it("sanitizes N-PORT asset class codes", () => {

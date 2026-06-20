@@ -1,9 +1,9 @@
 /**
  * Pure option builder: portfolio exposure sunburst.
  *
- * The API supplies a parent-linked tree: asset class -> strategy -> fund series
- * -> final holding. Direct stocks can skip the fund series level and appear as
- * final holding leaves under strategy.
+ * The API supplies a parent-linked tree: asset class -> fund series -> final
+ * holding. Direct stocks can skip the fund series level and appear as final
+ * holding leaves under asset class.
  */
 import type { Options, PointOptionsObject } from "highcharts";
 

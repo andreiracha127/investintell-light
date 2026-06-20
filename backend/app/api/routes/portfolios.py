@@ -562,6 +562,7 @@ async def get_portfolio_lookthrough(
     }
     cash = float(portfolio.cash)
     total_value = sum(market_values.values()) + cash
+    cash_weight_pct = 100.0 * cash / total_value if total_value else 0.0
 
     series_ids = sorted(
         {series_by_ticker[t] for t in series_by_ticker}
@@ -573,6 +574,7 @@ async def get_portfolio_lookthrough(
     weighted: list[tuple[float, lookthrough.SeriesLookthrough]] = []
     unexpanded: list[UnexpandedPosition] = []
     direct_position_weights: list[tuple[str, float]] = []
+    unexpanded_fund_weights: list[tuple[str, str, float]] = []
     for position in positions:
         weight = (
             market_values[position.ticker] / total_value if total_value else 0.0
@@ -588,6 +590,7 @@ async def get_portfolio_lookthrough(
                 )
             )
         elif series_id not in lookthroughs:
+            unexpanded_fund_weights.append((position.ticker, series_id, weight))
             unexpanded.append(
                 UnexpandedPosition(
                     ticker=position.ticker,
@@ -599,6 +602,11 @@ async def get_portfolio_lookthrough(
             weighted.append((weight, lookthroughs[series_id]))
 
     rows, aggregates = lookthrough.consolidate_portfolio(weighted)
+    series_taxonomy = (
+        await lookthrough.get_fund_taxonomy_by_series(session, series_ids)
+        if include_tree
+        else {}
+    )
     direct_holdings: list[lookthrough.DirectHolding] = []
     if include_tree and direct_position_weights:
         direct_tickers = [ticker for ticker, _ in direct_position_weights]
@@ -627,13 +635,46 @@ async def get_portfolio_lookthrough(
                 for ticker, weight in direct_position_weights
             ],
         )
+    if include_tree and unexpanded_fund_weights:
+        direct_holdings.extend(
+            lookthrough.DirectHolding(
+                key=series_id,
+                label=(
+                    series_taxonomy[series_id].label
+                    if series_id in series_taxonomy
+                    else ticker
+                ),
+                value_pct=100.0 * weight,
+                asset_class=(
+                    series_taxonomy[series_id].asset_class
+                    if series_id in series_taxonomy
+                    else None
+                ),
+                strategy_label=(
+                    series_taxonomy[series_id].strategy_label
+                    if series_id in series_taxonomy
+                    else None
+                ),
+                leaf_kind="fund",
+            )
+            for ticker, series_id, weight in unexpanded_fund_weights
+        )
+    if include_tree and cash_weight_pct > 0.0:
+        direct_holdings.append(
+            lookthrough.DirectHolding(
+                key="CASH",
+                label="Cash",
+                value_pct=cash_weight_pct,
+                asset_class="cash",
+                strategy_label=None,
+                leaf_kind="cash",
+            )
+        )
     tree = (
         await lookthrough.build_portfolio_exposure_tree(
             datalake,
             weighted,
-            series_taxonomy=await lookthrough.get_fund_taxonomy_by_series(
-                session, series_ids
-            ),
+            series_taxonomy=series_taxonomy,
             taxonomy_loader=lambda child_series_ids: (
                 lookthrough.get_fund_taxonomy_by_series(session, child_series_ids)
             ),
@@ -642,12 +683,25 @@ async def get_portfolio_lookthrough(
         if include_tree
         else []
     )
+    residual_position_weight_pct = 100.0 * (
+        sum(weight for _, weight in direct_position_weights)
+        + sum(weight for _, _, weight in unexpanded_fund_weights)
+    )
+    decomposed_weight_pct = min(
+        100.0,
+        max(
+            0.0,
+            aggregates.expanded_weight_pct
+            + residual_position_weight_pct
+            + cash_weight_pct,
+        ),
+    )
     return PortfolioLookthroughResponse(
         portfolio_id=portfolio.id,
         total_value=total_value,
-        cash_weight_pct=100.0 * cash / total_value if total_value else 0.0,
+        cash_weight_pct=cash_weight_pct,
         expanded_weight_pct=aggregates.expanded_weight_pct,
-        sum_pct_total=aggregates.sum_pct_total,
+        sum_pct_total=decomposed_weight_pct,
         oldest_report_date=aggregates.oldest_report_date,
         n_funds_expanded=len(weighted),
         unexpanded=unexpanded,

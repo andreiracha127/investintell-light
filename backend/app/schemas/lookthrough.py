@@ -104,9 +104,9 @@ class PortfolioLookthroughResponse(BaseModel):
     total_value: float
     cash_weight_pct: float
     expanded_weight_pct: float
-    # Σ ponderado dos sum_pct_total dos fundos expandidos (pontos do valor
-    # total do portfólio) — pode passar de expanded_weight_pct quando há
-    # alavancagem nos fundos; nunca renormalizado.
+    # Percentual do portfólio efetivamente mapeado para holdings finais no
+    # contexto do portfólio. Para fundos, usa o peso da posição no portfólio;
+    # não soma a exposição bruta do N-PORT quando ela passa de 100% do NAV.
     sum_pct_total: float
     oldest_report_date: dt.date | None
     n_funds_expanded: int

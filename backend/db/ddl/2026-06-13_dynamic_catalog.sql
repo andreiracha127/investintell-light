@@ -218,14 +218,18 @@ mmf AS (
     WHERE series_id IS NOT NULL
     ORDER BY series_id, (strategy_label IS NULL)
 ),
--- STAGE_LABELS_SQL: latest proposed reclassification label per instrument.
+-- STAGE_LABELS_SQL: explicit manual overrides are durable corrections and win
+-- over generated proposals; otherwise use the latest proposed label.
 stage AS (
     SELECT DISTINCT ON (source_pk) source_pk::uuid AS instrument_id,
            proposed_strategy_label AS label
     FROM strategy_reclassification_stage
     WHERE source_table = 'instruments_universe'
       AND proposed_strategy_label IS NOT NULL
-    ORDER BY source_pk, classified_at DESC
+    ORDER BY source_pk,
+             (classification_source = 'manual_override') DESC,
+             classified_at DESC,
+             stage_id DESC
 ),
 -- merge_risk_duplicates: latest calc_date per instrument; the peer-labeled
 -- variant wins ties (peer_strategy_label is the cascade's last specific label).

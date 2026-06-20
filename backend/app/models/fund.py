@@ -71,8 +71,8 @@ class Fund(Base):
 
     # Strategy classification cascade (dispatch §3 F8.1-2, extended after the
     # source diagnosis): registered → etf → mmf → reclassification stage
-    # (latest proposed label per instrument) → specific peer_strategy_label →
-    # 'Unclassified' (visible bucket, never NULL).
+    # (manual_override first, otherwise latest proposed label per instrument) →
+    # specific peer_strategy_label → 'Unclassified' (visible bucket, never NULL).
     strategy_label: Mapped[str] = mapped_column(String, nullable=False, index=True)
 
     # Coarse asset class from instruments_universe
