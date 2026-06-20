@@ -11,6 +11,8 @@ from app.services.fund_dossier_tier_b import (
     _INSIDER_SENTIMENT_SQL,
     _INSTITUTIONAL_REVEAL_SQL,
     _REVERSE_LOOKUP_SQL,
+    _append_unique,
+    _cik_nport_series_id,
     _max_drawdown_series,
     _ols_market_sensitivities,
     _regime_label,
@@ -83,6 +85,22 @@ def test_active_share_formula_and_overlap() -> None:
     assert active_share == pytest.approx(0.8)
     assert overlap == pytest.approx(0.2)
     assert common == 1
+
+
+def test_benchmark_nport_cik_series_id_normalization() -> None:
+    assert _cik_nport_series_id("884394") == "CIK:0000884394"
+    assert _cik_nport_series_id("0000884394") == "CIK:0000884394"
+    assert _cik_nport_series_id(None) is None
+
+
+def test_benchmark_series_candidates_are_deduped() -> None:
+    values: list[str] = []
+
+    _append_unique(values, "S000001")
+    _append_unique(values, "S000001")
+    _append_unique(values, "CIK:0000884394")
+
+    assert values == ["S000001", "CIK:0000884394"]
 
 
 def test_ols_market_sensitivities_include_t_stats() -> None:

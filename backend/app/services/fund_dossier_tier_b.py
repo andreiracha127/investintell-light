@@ -103,6 +103,12 @@ class HoldingsWeights:
     as_of: dt.date | None
 
 
+@dataclass(frozen=True)
+class BenchmarkHoldingsTarget:
+    name: str | None
+    series_ids: list[str]
+
+
 def _float(value: Any) -> float | None:
     return float(value) if value is not None else None
 
@@ -1647,6 +1653,81 @@ async def _holdings_weights(datalake: AsyncSession, series_id: str) -> HoldingsW
     return HoldingsWeights(weights, as_of)
 
 
+def _cik_nport_series_id(cik: str | None) -> str | None:
+    if not cik:
+        return None
+    digits = re.sub(r"\D", "", cik)
+    if not digits:
+        return None
+    return f"CIK:{digits.zfill(10)}"
+
+
+def _append_unique(values: list[str], value: str | None) -> None:
+    if value and value not in values:
+        values.append(value)
+
+
+async def _benchmark_holdings_target(
+    session: AsyncSession,
+    benchmark_id: uuid.UUID,
+) -> BenchmarkHoldingsTarget | None:
+    benchmark = await _fund_or_none(session, benchmark_id)
+    if benchmark is not None:
+        return BenchmarkHoldingsTarget(benchmark.name, [benchmark.series_id])
+
+    result = await session.execute(
+        text(
+            """
+            SELECT iu.ticker,
+                   iu.name,
+                   ii.sec_series_id,
+                   ii.cik_padded,
+                   ii.cik_unpadded
+            FROM instruments_universe iu
+            LEFT JOIN instrument_identity ii ON ii.instrument_id = iu.instrument_id
+            WHERE iu.instrument_id = :instrument_id
+            LIMIT 1
+            """
+        ),
+        {"instrument_id": benchmark_id},
+    )
+    row = result.mappings().first()
+    if row is None:
+        return None
+
+    ticker = str(row["ticker"]).upper() if row["ticker"] else None
+    series_ids: list[str] = []
+    _append_unique(series_ids, row["sec_series_id"])
+    _append_unique(series_ids, _cik_nport_series_id(row["cik_padded"]))
+    _append_unique(series_ids, _cik_nport_series_id(row["cik_unpadded"]))
+
+    if ticker:
+        sec_rows = (
+            await session.execute(
+                text(
+                    """
+                    SELECT series_id, cik
+                    FROM sec_etfs
+                    WHERE upper(ticker) = :ticker
+                    UNION ALL
+                    SELECT series_id, NULL::text AS cik
+                    FROM sec_fund_classes
+                    WHERE upper(ticker) = :ticker
+                    """
+                ),
+                {"ticker": ticker},
+            )
+        ).mappings().all()
+        for sec_row in sec_rows:
+            # Some ETF N-PORT rows are materialized under CIK:<cik> rather than
+            # the SEC ETF row's raw series_id. Prefer that candidate first.
+            _append_unique(series_ids, _cik_nport_series_id(sec_row["cik"]))
+            _append_unique(series_ids, sec_row["series_id"])
+
+    name = cast(str | None, row["name"] or ticker)
+    return BenchmarkHoldingsTarget(name, series_ids)
+
+
 def active_share_from_weights(
     portfolio: Mapping[str, float],
     benchmark: Mapping[str, float],
@@ -1676,29 +1757,28 @@ async def fetch_fund_active_share(
                 "sec_nport_holdings",
             ),
         )
-    benchmark = await _fund_or_none(session, benchmark_id)
-    if benchmark is None:
-        instrument = await _instrument_ticker_label(session, benchmark_id)
-        benchmark_name = None
-        if instrument is not None:
-            ticker, name = instrument
-            benchmark_name = name or ticker
+    benchmark_target = await _benchmark_holdings_target(session, benchmark_id)
+    if benchmark_target is None or not benchmark_target.series_ids:
         return FundActiveShareResponse(
             instrument_id=instrument_id,
             benchmark_id=benchmark_id,
-            benchmark_name=benchmark_name,
+            benchmark_name=benchmark_target.name if benchmark_target else None,
             empty_state=_empty(
-                "Benchmark instrument has no N-PORT holdings for active-share comparison.",
+                "Benchmark instrument could not be resolved to N-PORT holdings.",
                 "sec_nport_holdings",
             ),
         )
     portfolio = await _holdings_weights(datalake, fund.series_id)
-    benchmark_weights = await _holdings_weights(datalake, benchmark.series_id)
+    benchmark_weights = HoldingsWeights({}, None)
+    for benchmark_series_id in benchmark_target.series_ids:
+        benchmark_weights = await _holdings_weights(datalake, benchmark_series_id)
+        if benchmark_weights.weights:
+            break
     if not portfolio.weights:
         return FundActiveShareResponse(
             instrument_id=instrument_id,
             benchmark_id=benchmark_id,
-            benchmark_name=benchmark.name,
+            benchmark_name=benchmark_target.name,
             as_of_date=portfolio.as_of,
             empty_state=_empty("Portfolio fund has no N-PORT holdings.", "sec_nport_holdings"),
         )
@@ -1706,7 +1786,7 @@ async def fetch_fund_active_share(
         return FundActiveShareResponse(
             instrument_id=instrument_id,
             benchmark_id=benchmark_id,
-            benchmark_name=benchmark.name,
+            benchmark_name=benchmark_target.name,
             n_portfolio_positions=len(portfolio.weights),
             as_of_date=portfolio.as_of,
             empty_state=_empty("Benchmark fund has no N-PORT holdings.", "sec_nport_holdings"),
@@ -1720,7 +1800,7 @@ async def fetch_fund_active_share(
     return FundActiveShareResponse(
         instrument_id=instrument_id,
         benchmark_id=benchmark_id,
-        benchmark_name=benchmark.name,
+        benchmark_name=benchmark_target.name,
         active_share=active_share,
         overlap=overlap,
         n_portfolio_positions=len(portfolio.weights),
