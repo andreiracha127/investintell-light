@@ -205,22 +205,27 @@ def _solve_mu_free(
     cap: float | None,
     min_weight: float | None,
     linear: list[engine.LinearConstraint] | None = None,
+    blocks: list[engine.BlockBudget] | None = None,
 ) -> tuple[np.ndarray, str]:
     if objective == "equal_weight":
         return engine.solve_equal_weight(
-            sigma.shape[0], cap=cap, min_weight=min_weight, linear=linear
+            sigma.shape[0], cap=cap, min_weight=min_weight, blocks=blocks, linear=linear
         )
     if objective == "min_vol":
-        return engine.solve_min_vol(sigma, cap=cap, min_weight=min_weight, linear=linear)
+        return engine.solve_min_vol(
+            sigma, cap=cap, min_weight=min_weight, blocks=blocks, linear=linear
+        )
     if objective == "erc":
-        return engine.solve_erc(sigma, cap=cap, min_weight=min_weight, linear=linear)
+        return engine.solve_erc(
+            sigma, cap=cap, min_weight=min_weight, blocks=blocks, linear=linear
+        )
     if objective == "max_diversification":
         return engine.solve_max_diversification(
-            sigma, cap=cap, min_weight=min_weight, linear=linear
+            sigma, cap=cap, min_weight=min_weight, blocks=blocks, linear=linear
         )
     if objective == "min_cvar":
         return engine.solve_min_cvar(
-            scenarios, cap=cap, min_weight=min_weight, linear=linear
+            scenarios, cap=cap, min_weight=min_weight, blocks=blocks, linear=linear
         )
     raise BuilderError(f"unknown objective: {objective}")  # pragma: no cover - Literal-guarded
 
@@ -655,13 +660,14 @@ async def run_optimize(
         session, datalake, assets, labels, payload.constraints.overlap_cap
     )
     linear = overlap_linear or None
-    # Block budgets are honoured ONLY by min_cvar (ConstraintsIn docstring). The
-    # bundle replaces the scalar (cap, min_weight) block in the CVaR solver; it
-    # is reused by BOTH the views and no-views min_cvar paths so a user-requested
-    # risk constraint is never silently dropped. Because the bundle path REPLACES
-    # the scalar (cap, min_weight) constraints in bounds_constraints, the active
-    # scalars must be promoted to per-asset vectors here — otherwise the default
-    # cap (0.25) would be silently dropped the moment a block budget is supplied.
+    # Block budgets are honoured by ALL objectives. The scenario-based solvers
+    # (min_cvar / max_return_cvar) consume them via a BoundsBundle (which REPLACES
+    # the scalar (cap, min_weight) block in the CVaR solver), so the active scalars
+    # must be promoted to per-asset vectors here — otherwise the default cap (0.25)
+    # would be silently dropped the moment a block budget is supplied. The mu-free
+    # solvers and bl_utility take ``blocks=`` directly (passed through below). Both
+    # the views and no-views min_cvar paths reuse the bundle so a user-requested
+    # risk constraint is never silently dropped.
     n = len(labels)
     cvar_bounds = (
         engine.BoundsBundle(
@@ -683,6 +689,7 @@ async def run_optimize(
                 delta=delta,
                 cap=cap,
                 min_weight=min_weight,
+                blocks=blocks,
                 linear=linear,
             )
         elif payload.objective == "max_return_cvar":
@@ -746,7 +753,13 @@ async def run_optimize(
                 )
             else:
                 weights, status = _solve_mu_free(
-                    payload.objective, sigma, scenarios, cap, min_weight, linear=linear
+                    payload.objective,
+                    sigma,
+                    scenarios,
+                    cap,
+                    min_weight,
+                    linear=linear,
+                    blocks=blocks,
                 )
     except engine.OptimizerError as exc:
         raise BuilderError(str(exc)) from exc

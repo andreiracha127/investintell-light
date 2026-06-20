@@ -684,7 +684,7 @@ export function BuilderView() {
               <span className="font-normal normal-case tracking-normal text-text-muted">
                 (optional · % of portfolio)
               </span>
-              <InfoDot tip="Bound the total weight allocated to each asset class. Leave blank for no limit on that side. Honoured by the loss-limit and minimum-CVaR goals." />
+              <InfoDot tip="Bound the total weight allocated to each asset class. Leave blank for no limit on that side. Honoured by every optimization goal." />
             </p>
             <div className="flex flex-wrap gap-x-[18px] gap-y-3">
               {ASSET_CLASS_OPTIONS.map((cls) => {
