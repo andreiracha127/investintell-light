@@ -30,6 +30,7 @@ from app.models.portfolio_constraint import (
     PortfolioClassLimit,
     PortfolioConstraintSet,
 )
+from app.models.portfolio_drift_status import PortfolioDriftStatus
 from app.models.rebalance import RebalancePolicy
 from app.models.screen import Screen, ScreenFilter
 from app.models.screener_metrics import ScreenerMetrics
@@ -51,6 +52,7 @@ __all__ = [
     "Portfolio",
     "PortfolioClassLimit",
     "PortfolioConstraintSet",
+    "PortfolioDriftStatus",
     "PortfolioNavDaily",
     "PortfolioTransaction",
     "RebalancePolicy",
