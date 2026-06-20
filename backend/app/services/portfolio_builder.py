@@ -59,7 +59,7 @@ from app.schemas.builder import (
     ViewIn,
     WeightOut,
 )
-from app.services import funds_catalog, macro_regime
+from app.services import funds_catalog, lookthrough_exposure, macro_regime
 
 # Test seam: when set, overrides the regime state read (bypasses the data-lake).
 _OVERRIDE_REGIME_STATE: str | None = None
@@ -204,17 +204,24 @@ def _solve_mu_free(
     scenarios: np.ndarray,
     cap: float | None,
     min_weight: float | None,
+    linear: list[engine.LinearConstraint] | None = None,
 ) -> tuple[np.ndarray, str]:
     if objective == "equal_weight":
-        return engine.solve_equal_weight(sigma.shape[0], cap=cap, min_weight=min_weight)
+        return engine.solve_equal_weight(
+            sigma.shape[0], cap=cap, min_weight=min_weight, linear=linear
+        )
     if objective == "min_vol":
-        return engine.solve_min_vol(sigma, cap=cap, min_weight=min_weight)
+        return engine.solve_min_vol(sigma, cap=cap, min_weight=min_weight, linear=linear)
     if objective == "erc":
-        return engine.solve_erc(sigma, cap=cap, min_weight=min_weight)
+        return engine.solve_erc(sigma, cap=cap, min_weight=min_weight, linear=linear)
     if objective == "max_diversification":
-        return engine.solve_max_diversification(sigma, cap=cap, min_weight=min_weight)
+        return engine.solve_max_diversification(
+            sigma, cap=cap, min_weight=min_weight, linear=linear
+        )
     if objective == "min_cvar":
-        return engine.solve_min_cvar(scenarios, cap=cap, min_weight=min_weight)
+        return engine.solve_min_cvar(
+            scenarios, cap=cap, min_weight=min_weight, linear=linear
+        )
     raise BuilderError(f"unknown objective: {objective}")  # pragma: no cover - Literal-guarded
 
 
@@ -332,6 +339,86 @@ async def _resolve_assets(
     assets: list[AssetRefIn] = [FundRefIn(kind="fund", id=c.id) for c in candidates]
     label_map: _LabelMap = {f"fund:{c.id}": (c.ticker, c.name) for c in candidates}
     return assets, label_map
+
+
+async def _resolve_overlap_constraints(
+    session: AsyncSession,
+    datalake: AsyncSession | None,
+    assets: list[AssetRefIn],
+    labels: list[str],
+    overlap_cap: float | None,
+) -> list[engine.LinearConstraint]:
+    """Build the pruned per-equity look-through overlap constraints.
+
+    For each equity security ``s`` held (via look-through) by ≥1 fund in the
+    FINAL asset set, the aggregate indirect exposure is
+    ``Σ_i coef_s[i]·w_i`` with ``coef_s[i] = h_{fund_i, s}`` (the fund's
+    look-through fraction in ``s``; funds absent from the exposure dict
+    contribute 0). The constraint is ``coef_s·w ≤ overlap_cap``.
+
+    Exact pruning: weights are long-only and sum to 1, so exposure to ``s`` is a
+    convex combination of the per-fund ``h_{i,s}`` and therefore
+    ``≤ max_i coef_s[i]``. A constraint for ``s`` can only ever bind when
+    ``max_i coef_s[i] > overlap_cap``; below that it is vacuous. So we emit a
+    ``LinearConstraint`` ONLY for those securities — keeping the cvxpy problem
+    small while remaining exact. If none qualify, returns ``[]`` (no-op).
+
+    Direct-holding handling (v1 limitation): exposure is FUND-MEDIATED only.
+    Funds dominate the builder universe; a portfolio asset that is itself a
+    stock is not aggregated into ``s`` because resolving ticker→CUSIP cheaply
+    is not available here. Funds without N-PORT look-through simply contribute
+    0 (best-effort), matching ``fund_equity_exposure``'s absence semantics.
+    """
+    if overlap_cap is None:
+        return []
+    index_of = {label: i for i, label in enumerate(labels)}
+    # Map each FUND asset's column index by its label key, so we can place the
+    # fund's per-security exposures into the coef vector. Non-fund assets (none
+    # in v1) and funds absent from the exposure dict contribute 0.
+    fund_col: dict[uuid.UUID, int] = {}
+    for ref in assets:
+        if isinstance(ref, FundRefIn):
+            key = _ref_key(ref)
+            if key in index_of:
+                fund_col[ref.id] = index_of[key]
+    if not fund_col:
+        return []
+    # Look-through exposure needs the data-lake (N-PORT lives there). Off the
+    # request path (broad background job) it may be absent — fall back to the
+    # primary session so the call is structurally valid; a missing data-lake
+    # then yields no exposures (best-effort) rather than crashing the optimize.
+    exposure_session = datalake if datalake is not None else session
+    exposures = await lookthrough_exposure.fund_equity_exposure(
+        session, exposure_session, list(fund_col.keys())
+    )
+    # Pivot fund→{security→frac} into security→coef-vector over the final assets.
+    n = len(labels)
+    coef_by_security: dict[str, np.ndarray] = {}
+    max_by_security: dict[str, float] = {}
+    for fund_id, holdings in exposures.items():
+        col = fund_col.get(fund_id)
+        if col is None:
+            continue
+        for security_key, frac in holdings.items():
+            vec = coef_by_security.get(security_key)
+            if vec is None:
+                vec = np.zeros(n, dtype=float)
+                coef_by_security[security_key] = vec
+            vec[col] += frac
+            prev = max_by_security.get(security_key, 0.0)
+            if vec[col] > prev:
+                max_by_security[security_key] = vec[col]
+    out: list[engine.LinearConstraint] = []
+    for security_key, vec in coef_by_security.items():
+        # Exact pruning: only securities whose single largest per-fund exposure
+        # exceeds the cap can ever bind.
+        if max_by_security[security_key] > overlap_cap:
+            out.append(
+                engine.LinearConstraint(
+                    coef=vec, lo=None, hi=overlap_cap, label=f"overlap:{security_key}"
+                )
+            )
+    return out
 
 
 async def run_optimize(
@@ -559,6 +646,15 @@ async def run_optimize(
     blocks = await _resolve_block_budgets(
         session, assets, labels, payload.constraints.block_budgets
     )
+    # Per-equity look-through overlap cap (Task 4): pruned set of HARD linear
+    # constraints over the FINAL assets (broad mode: the selected
+    # representatives). Empty when overlap_cap is unset or no security's max
+    # per-fund exposure exceeds the cap — a no-op that leaves the solve
+    # unchanged. Passed as ``linear=`` to whichever solver is invoked.
+    overlap_linear = await _resolve_overlap_constraints(
+        session, datalake, assets, labels, payload.constraints.overlap_cap
+    )
+    linear = overlap_linear or None
     # Block budgets are honoured ONLY by min_cvar (ConstraintsIn docstring). The
     # bundle replaces the scalar (cap, min_weight) block in the CVaR solver; it
     # is reused by BOTH the views and no-views min_cvar paths so a user-requested
@@ -582,7 +678,12 @@ async def run_optimize(
             assert mu_equilibrium is not None  # needs_bl guarantees it
             mu_for_utility = mu_posterior if mu_posterior is not None else mu_equilibrium
             weights, status = bl.solve_bl_utility(
-                mu_for_utility, sigma, delta=delta, cap=cap, min_weight=min_weight
+                mu_for_utility,
+                sigma,
+                delta=delta,
+                cap=cap,
+                min_weight=min_weight,
+                linear=linear,
             )
         elif payload.objective == "max_return_cvar":
             assert payload.cvar_limit is not None  # schema validator guarantees it
@@ -610,6 +711,7 @@ async def run_optimize(
                 cap=cap,
                 min_weight=min_weight,
                 bounds=cvar_bounds,
+                linear=linear,
             )
         elif payload.objective == "min_cvar" and mu_posterior is not None:
             # Product default with views: re-centered scenarios + equilibrium
@@ -629,6 +731,7 @@ async def run_optimize(
                 mu=mu_posterior,
                 current_weights=current_vec,
                 turnover_lambda=payload.turnover_lambda,
+                linear=linear,
             )
         else:
             if payload.objective == "min_cvar":
@@ -639,10 +742,11 @@ async def run_optimize(
                     bounds=cvar_bounds,
                     current_weights=current_vec,
                     turnover_lambda=payload.turnover_lambda,
+                    linear=linear,
                 )
             else:
                 weights, status = _solve_mu_free(
-                    payload.objective, sigma, scenarios, cap, min_weight
+                    payload.objective, sigma, scenarios, cap, min_weight, linear=linear
                 )
     except engine.OptimizerError as exc:
         raise BuilderError(str(exc)) from exc

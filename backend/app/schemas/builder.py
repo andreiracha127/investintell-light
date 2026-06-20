@@ -125,6 +125,13 @@ class ConstraintsIn(BaseModel):
     cap: Annotated[float, Field(gt=0, le=1)] | None = 0.25
     min_weight: Annotated[float, Field(ge=0, le=1)] | None = None
     block_budgets: list[BlockBudgetIn] | None = None
+    # Per-equity look-through overlap cap (Sprint B / Task 4): when set, the
+    # aggregate INDIRECT exposure to any single stock held across the funds in
+    # the universe (Σ_i h_{fund_i,s}·w_i) is constrained ≤ overlap_cap as a HARD
+    # linear constraint. Fund-mediated only in v1 (direct equity holdings are
+    # not aggregated unless they resolve to the same security key cheaply, which
+    # the builder does not do yet). Must be in (0, 1].
+    overlap_cap: Annotated[float, Field(gt=0, le=1)] | None = None
 
 
 class UniverseSpecIn(BaseModel):
