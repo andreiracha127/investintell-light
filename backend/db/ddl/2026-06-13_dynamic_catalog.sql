@@ -218,6 +218,17 @@ mmf AS (
     WHERE series_id IS NOT NULL
     ORDER BY series_id, (strategy_label IS NULL)
 ),
+-- SERIES_NAME_SQL: the N-CEN series-level fund name (one per series, latest
+-- filing). sec_registered_funds is trust-level and some sec_etfs rows carry
+-- the trust/umbrella name, so this is the only catalog source of the SPECIFIC
+-- fund name (e.g. "WisdomTree Siegel Longevity Digital Fund", not the trust
+-- "WisdomTree Digital Trust"). Used to repair trust-named registrants below.
+fc AS (
+    SELECT DISTINCT ON (series_id) series_id, series_name
+    FROM sec_fund_classes
+    WHERE series_id IS NOT NULL AND NULLIF(btrim(series_name), '') IS NOT NULL
+    ORDER BY series_id, xbrl_period_end DESC NULLS LAST
+),
 -- STAGE_LABELS_SQL: explicit manual overrides are durable corrections and win
 -- over generated proposals; otherwise use the latest proposed label.
 stage AS (
@@ -302,10 +313,27 @@ SELECT
     e.cusip_9 AS cusip,
     e.lei,
     COALESCE(
+        -- Trust/umbrella registrants surface the TRUST name, not the fund's
+        -- (sec_registered_funds is trust-level; some sec_etfs rows do the same).
+        -- When the resolved catalog name ends in "Trust" (optionally a numeral)
+        -- or is an "Exchange-Traded Fund" umbrella, prefer the N-CEN
+        -- series-level name so the look-through sunburst labels the fund series,
+        -- not the trust. "First Trust ... ETF" (manager) is intentionally NOT
+        -- matched — the pattern anchors "trust" at the end of the name.
+        CASE
+            WHEN COALESCE(
+                     NULLIF(btrim(rf.fund_name), ''),
+                     NULLIF(btrim(etf.fund_name), ''),
+                     NULLIF(btrim(mmf.fund_name), ''),
+                     NULLIF(btrim(u.name), ''), ''
+                 ) ~* '(trust\s*[ivxl0-9]*\s*$|exchange.?traded\s+fund)'
+            THEN NULLIF(btrim(fc.series_name), '')
+        END,
         NULLIF(btrim(rf.fund_name), ''),
         NULLIF(btrim(etf.fund_name), ''),
         NULLIF(btrim(mmf.fund_name), ''),
         NULLIF(btrim(u.name), ''),
+        NULLIF(btrim(fc.series_name), ''),
         e.sec_series_id
     ) AS name,
     CASE
@@ -364,6 +392,7 @@ FROM eligible e
 LEFT JOIN rf             ON rf.series_id = e.sec_series_id
 LEFT JOIN etf            ON etf.series_id = e.sec_series_id
 LEFT JOIN mmf            ON mmf.series_id = e.sec_series_id
+LEFT JOIN fc             ON fc.series_id = e.sec_series_id
 LEFT JOIN stage          ON stage.instrument_id = e.instrument_id
 LEFT JOIN peer           ON peer.instrument_id = e.instrument_id
 LEFT JOIN prospectus     ON prospectus.series_id = e.sec_series_id
