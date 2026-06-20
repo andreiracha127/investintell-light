@@ -652,6 +652,110 @@
         }
       }
     },
+    "/portfolios/{portfolio_id}/constraints": {
+      "get": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Get Portfolio Constraints",
+        "description": "Return the persisted construction constraints for a portfolio.\n\n404 only when the PORTFOLIO is missing. A portfolio that exists but was\nnever saved with constraints renders as nulls + an empty class-limit list\n(a legitimate 200), not a 404.",
+        "operationId": "get_portfolio_constraints_portfolios__portfolio_id__constraints_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConstraintsView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Put Portfolio Constraints",
+        "description": "Validate and upsert the construction constraints for a portfolio.\n\nBound validation (``0 < cap <= 1``, ``0 < overlap_cap <= 1``,\n``0 <= min_weight <= 1``, per-class ``0 <= min <= max <= 1``) is enforced\nby the request schema and surfaces as 422. 404 when the portfolio is\nmissing. The persisted class-limit set is replaced wholesale.",
+        "operationId": "put_portfolio_constraints_portfolios__portfolio_id__constraints_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConstraintsPut"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConstraintsView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/portfolios/{portfolio_id}/positions/{ticker}": {
       "put": {
         "tags": [
@@ -4634,6 +4738,56 @@
         "title": "Candle",
         "description": "One OHLCV candle built from RAW (un-adjusted) prices.\n\nDaily for ranges up to 5Y; weekly (W-FRI buckets: open=first, high=max,\nlow=min, close=last, volume=sum) for range MAX."
       },
+      "ClassLimitItem": {
+        "properties": {
+          "asset_class": {
+            "type": "string",
+            "enum": [
+              "equity",
+              "fixed_income",
+              "cash",
+              "alternatives",
+              "multi_asset"
+            ],
+            "title": "Asset Class",
+            "description": "One of: equity, fixed_income, cash, alternatives, multi_asset."
+          },
+          "min_weight": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Weight",
+            "description": "Lower weight bound, decimal fraction in [0, 1]; null = none."
+          },
+          "max_weight": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Weight",
+            "description": "Upper weight bound, decimal fraction in [0, 1]; null = none."
+          }
+        },
+        "type": "object",
+        "required": [
+          "asset_class"
+        ],
+        "title": "ClassLimitItem",
+        "description": "One per-asset-class min/max weight bound.\n\nBoth bounds are decimal fractions in [0, 1] and nullable (absent = no\nbound of that side). When both are present ``min_weight <= max_weight``."
+      },
       "ConcentrationOut": {
         "properties": {
           "eigenvalues": {
@@ -4793,11 +4947,145 @@
               }
             ],
             "title": "Block Budgets"
+          },
+          "overlap_cap": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Cap"
           }
         },
         "type": "object",
         "title": "ConstraintsIn",
         "description": "Long-only and sum(w)=1 are always enforced; these are the knobs.\n\n``block_budgets`` (per-asset-class \u03a3-weight bounds) are honoured ONLY by the\n``min_cvar`` objective in v1; they are resolved against ``Fund.asset_class``\nserver-side and IGNORED by the other objectives. Empty/None = no blocks."
+      },
+      "ConstraintsPut": {
+        "properties": {
+          "cap": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cap",
+            "description": "Max per-position weight, decimal fraction in (0, 1]; null = none."
+          },
+          "min_weight": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Weight",
+            "description": "Min per-position weight, decimal fraction in [0, 1]; null = none."
+          },
+          "overlap_cap": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Cap",
+            "description": "Max pairwise overlap, decimal fraction in (0, 1]; null = none."
+          },
+          "class_limits": {
+            "items": {
+              "$ref": "#/components/schemas/ClassLimitItem"
+            },
+            "type": "array",
+            "title": "Class Limits",
+            "description": "Per-asset-class min/max weight bounds (replaced wholesale)."
+          }
+        },
+        "type": "object",
+        "title": "ConstraintsPut",
+        "description": "Body for PUT /portfolios/{id}/constraints.\n\nHeader limits are each nullable (absent/null = no limit of that kind):\n``cap`` and ``overlap_cap`` are in (0, 1]; ``min_weight`` is in [0, 1].\n``class_limits`` is a (possibly empty) list of per-asset-class bounds; the\nwhole set is replaced wholesale on upsert."
+      },
+      "ConstraintsView": {
+        "properties": {
+          "cap": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cap",
+            "description": "Max per-position weight, decimal fraction in (0, 1]; null = none."
+          },
+          "min_weight": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Weight",
+            "description": "Min per-position weight, decimal fraction in [0, 1]; null = none."
+          },
+          "overlap_cap": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Cap",
+            "description": "Max pairwise overlap, decimal fraction in (0, 1]; null = none."
+          },
+          "class_limits": {
+            "items": {
+              "$ref": "#/components/schemas/ClassLimitItem"
+            },
+            "type": "array",
+            "title": "Class Limits",
+            "description": "Per-asset-class min/max weight bounds (replaced wholesale)."
+          },
+          "portfolio_id": {
+            "type": "integer",
+            "title": "Portfolio Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "portfolio_id"
+        ],
+        "title": "ConstraintsView",
+        "description": "Response for GET /portfolios/{id}/constraints \u2014 the persisted set.\n\nSame shape as the PUT body plus the owning ``portfolio_id``. A portfolio\nwith no persisted constraints renders as nulls + an empty ``class_limits``."
       },
       "CorrelationMatrixOut": {
         "properties": {
@@ -13486,6 +13774,28 @@
             "maxItems": 50,
             "minItems": 1,
             "title": "Weights"
+          },
+          "constraints": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConstraintsIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "inception_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inception Date"
           }
         },
         "type": "object",

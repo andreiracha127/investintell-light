@@ -7,7 +7,11 @@
  */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
-import type { BuilderObjective, OptimizeResponse } from "@/lib/api/client";
+import type {
+  BuilderObjective,
+  OptimizeRequest,
+  OptimizeResponse,
+} from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
 
 import { BUTTON_CLASS, BUTTON_PRIMARY_CLASS } from "@/components/screener/shared";
@@ -66,6 +70,7 @@ export function ResultsPanel({
   result,
   objective,
   constraints,
+  saveConstraints = null,
   windowDays,
   cvarLimit,
   assetsByKey,
@@ -77,6 +82,8 @@ export function ResultsPanel({
   result: OptimizeResponse;
   objective: BuilderObjective;
   constraints: UsedConstraints;
+  /** Full constraints actually sent on the run, persisted on save (Sprint B). */
+  saveConstraints?: OptimizeRequest["constraints"] | null;
   windowDays: number | null;
   cvarLimit: number | null;
   assetsByKey: Map<string, UniverseAsset>;
@@ -203,6 +210,7 @@ export function ResultsPanel({
           colors={colors}
           grouped={grouped}
           cvarLimitPct={cvarLimitPct}
+          saveConstraints={saveConstraints}
           onRegisterActions={setAllocationActions}
         />
       </TabPanel>

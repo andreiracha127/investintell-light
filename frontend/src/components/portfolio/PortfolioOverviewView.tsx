@@ -52,6 +52,7 @@ import { retryPolicy } from "@/components/screener/shared";
 import { PortfolioNewsPanel } from "@/components/portfolio/PortfolioNewsPanel";
 import { PortfolioLookthroughSection } from "@/components/portfolio/PortfolioLookthroughSection";
 import { PortfolioRebalanceSection } from "@/components/portfolio/PortfolioRebalanceSection";
+import { PortfolioConstraintsSection } from "@/components/portfolio/PortfolioConstraintsSection";
 import { PortfolioPerformanceView } from "@/components/portfolio/PortfolioPerformanceView";
 import { usePortfolioNav } from "@/components/portfolio/usePortfolioNav";
 import { compactDatetimeXAxis, formatTimestampDate } from "@/lib/charts/hc/dateAxis";
@@ -186,7 +187,10 @@ export function PortfolioOverviewView() {
                 <PortfolioLookthroughSection portfolioId={selected.id} />
               )}
               {activeSection === "rebalance" && (
-                <PortfolioRebalanceSection portfolioId={selected.id} />
+                <div className="flex flex-col gap-px">
+                  <PortfolioRebalanceSection portfolioId={selected.id} />
+                  <PortfolioConstraintsSection portfolioId={selected.id} />
+                </div>
               )}
               {activeSection === "news" && (
                 <PortfolioNewsPanel portfolioId={selected.id} />

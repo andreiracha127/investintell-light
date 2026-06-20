@@ -77,6 +77,7 @@ type RebalancePolicyOperation =
   paths["/portfolios/{portfolio_id}/rebalance/policy"]["get"];
 type RebalancePreviewOperation =
   paths["/portfolios/{portfolio_id}/rebalance/preview"]["get"];
+type PortfolioConstraintsPath = paths["/portfolios/{portfolio_id}/constraints"];
 
 type MarketOverviewOperation = paths["/stocks/overview"]["get"];
 export type MarketOverview =
@@ -294,6 +295,21 @@ export type RebalancePreview =
   RebalancePreviewOperation["responses"]["200"]["content"]["application/json"];
 export type PositionDrift = components["schemas"]["PositionDriftOut"];
 export type Proposal = components["schemas"]["ProposalOut"];
+
+/** Persisted construction constraints (Sprint B) — GET response shape. */
+export type PortfolioConstraints =
+  PortfolioConstraintsPath["get"]["responses"]["200"]["content"]["application/json"];
+/** PUT body for the persisted construction constraints. */
+export type PortfolioConstraintsPut =
+  PortfolioConstraintsPath["put"]["requestBody"]["content"]["application/json"];
+/** One per-asset-class min/max weight bound. */
+export type ClassLimit = NonNullable<PortfolioConstraintsPut["class_limits"]>[number];
+/** Asset-class vocabulary shared by block budgets and class limits. */
+export type ConstraintAssetClass = ClassLimit["asset_class"];
+/** Per-asset-class Σ-weight budget sent in the optimize/save `constraints`. */
+export type BlockBudget = NonNullable<
+  NonNullable<OptimizeRequest["constraints"]>["block_budgets"]
+>[number];
 
 export type OptimizeRequest =
   BuilderOptimizeOperation["requestBody"]["content"]["application/json"];
@@ -1341,5 +1357,32 @@ export function fetchRebalancePreview(
   return request<RebalancePreview>(
     `/portfolios/${portfolioId}/rebalance/preview`,
     signal,
+  );
+}
+
+/* ── Construction constraints (Sprint B) ──────────────────────────────────── */
+
+/** Load the persisted construction constraints for a portfolio (nulls + empty
+ *  class limits when none were ever saved). */
+export function getPortfolioConstraints(
+  portfolioId: number,
+  signal?: AbortSignal,
+): Promise<PortfolioConstraints> {
+  return request<PortfolioConstraints>(
+    `/portfolios/${portfolioId}/constraints`,
+    signal,
+  );
+}
+
+/** Upsert the construction constraints for a portfolio (replaced wholesale). */
+export function putPortfolioConstraints(
+  portfolioId: number,
+  body: PortfolioConstraintsPut,
+  signal?: AbortSignal,
+): Promise<PortfolioConstraints> {
+  return request<PortfolioConstraints>(
+    `/portfolios/${portfolioId}/constraints`,
+    signal,
+    { method: "PUT", json: body },
   );
 }

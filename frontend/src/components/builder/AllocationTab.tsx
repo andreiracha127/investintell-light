@@ -16,6 +16,7 @@ import {
   type BuilderObjective,
   type BuilderSaveRequest,
   type FundProfile,
+  type OptimizeRequest,
   type OptimizeResponse,
 } from "@/lib/api/client";
 import { parseDecimal } from "@/lib/parse";
@@ -107,6 +108,7 @@ export function AllocationTab({
   colors,
   grouped,
   cvarLimitPct,
+  saveConstraints = null,
   onRegisterActions,
 }: {
   result: OptimizeResponse;
@@ -116,6 +118,8 @@ export function AllocationTab({
   colors: ChartColors | null;
   grouped: boolean;
   cvarLimitPct: string | null;
+  /** Full constraints sent on the run, persisted with the saved portfolio. */
+  saveConstraints?: OptimizeRequest["constraints"] | null;
   /** Lift Export/Save controls into the results header (Builder.dc.html). */
   onRegisterActions?: (actions: AllocationActions | null) => void;
 }) {
@@ -240,6 +244,10 @@ export function AllocationTab({
     saveMutation.mutate({
       name: saveName.trim(),
       notional_usd: notional,
+      // Persist the construction limits the optimization actually used, so the
+      // saved portfolio remembers how it was built (Sprint B). Omitted when the
+      // run carried no constraints.
+      ...(saveConstraints ? { constraints: saveConstraints } : {}),
       weights: rowState.map(({ row, exec, fill, commission }) => ({
         asset: row.asset,
         weight: row.weight,

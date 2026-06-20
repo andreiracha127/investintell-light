@@ -254,6 +254,39 @@ export interface paths {
         patch: operations["patch_portfolio_portfolios__portfolio_id__patch"];
         trace?: never;
     };
+    "/portfolios/{portfolio_id}/constraints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Portfolio Constraints
+         * @description Return the persisted construction constraints for a portfolio.
+         *
+         *     404 only when the PORTFOLIO is missing. A portfolio that exists but was
+         *     never saved with constraints renders as nulls + an empty class-limit list
+         *     (a legitimate 200), not a 404.
+         */
+        get: operations["get_portfolio_constraints_portfolios__portfolio_id__constraints_get"];
+        /**
+         * Put Portfolio Constraints
+         * @description Validate and upsert the construction constraints for a portfolio.
+         *
+         *     Bound validation (``0 < cap <= 1``, ``0 < overlap_cap <= 1``,
+         *     ``0 <= min_weight <= 1``, per-class ``0 <= min <= max <= 1``) is enforced
+         *     by the request schema and surfaces as 422. 404 when the portfolio is
+         *     missing. The persisted class-limit set is replaced wholesale.
+         */
+        put: operations["put_portfolio_constraints_portfolios__portfolio_id__constraints_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/portfolios/{portfolio_id}/positions/{ticker}": {
         parameters: {
             query?: never;
@@ -1763,6 +1796,31 @@ export interface components {
             /** Volume */
             volume: number;
         };
+        /**
+         * ClassLimitItem
+         * @description One per-asset-class min/max weight bound.
+         *
+         *     Both bounds are decimal fractions in [0, 1] and nullable (absent = no
+         *     bound of that side). When both are present ``min_weight <= max_weight``.
+         */
+        ClassLimitItem: {
+            /**
+             * Asset Class
+             * @description One of: equity, fixed_income, cash, alternatives, multi_asset.
+             * @enum {string}
+             */
+            asset_class: "equity" | "fixed_income" | "cash" | "alternatives" | "multi_asset";
+            /**
+             * Min Weight
+             * @description Lower weight bound, decimal fraction in [0, 1]; null = none.
+             */
+            min_weight?: number | null;
+            /**
+             * Max Weight
+             * @description Upper weight bound, decimal fraction in [0, 1]; null = none.
+             */
+            max_weight?: number | null;
+        };
         /** ConcentrationOut */
         ConcentrationOut: {
             /** Eigenvalues */
@@ -1839,6 +1897,70 @@ export interface components {
             min_weight?: number | null;
             /** Block Budgets */
             block_budgets?: components["schemas"]["BlockBudgetIn"][] | null;
+            /** Overlap Cap */
+            overlap_cap?: number | null;
+        };
+        /**
+         * ConstraintsPut
+         * @description Body for PUT /portfolios/{id}/constraints.
+         *
+         *     Header limits are each nullable (absent/null = no limit of that kind):
+         *     ``cap`` and ``overlap_cap`` are in (0, 1]; ``min_weight`` is in [0, 1].
+         *     ``class_limits`` is a (possibly empty) list of per-asset-class bounds; the
+         *     whole set is replaced wholesale on upsert.
+         */
+        ConstraintsPut: {
+            /**
+             * Cap
+             * @description Max per-position weight, decimal fraction in (0, 1]; null = none.
+             */
+            cap?: number | null;
+            /**
+             * Min Weight
+             * @description Min per-position weight, decimal fraction in [0, 1]; null = none.
+             */
+            min_weight?: number | null;
+            /**
+             * Overlap Cap
+             * @description Max pairwise overlap, decimal fraction in (0, 1]; null = none.
+             */
+            overlap_cap?: number | null;
+            /**
+             * Class Limits
+             * @description Per-asset-class min/max weight bounds (replaced wholesale).
+             */
+            class_limits?: components["schemas"]["ClassLimitItem"][];
+        };
+        /**
+         * ConstraintsView
+         * @description Response for GET /portfolios/{id}/constraints — the persisted set.
+         *
+         *     Same shape as the PUT body plus the owning ``portfolio_id``. A portfolio
+         *     with no persisted constraints renders as nulls + an empty ``class_limits``.
+         */
+        ConstraintsView: {
+            /**
+             * Cap
+             * @description Max per-position weight, decimal fraction in (0, 1]; null = none.
+             */
+            cap?: number | null;
+            /**
+             * Min Weight
+             * @description Min per-position weight, decimal fraction in [0, 1]; null = none.
+             */
+            min_weight?: number | null;
+            /**
+             * Overlap Cap
+             * @description Max pairwise overlap, decimal fraction in (0, 1]; null = none.
+             */
+            overlap_cap?: number | null;
+            /**
+             * Class Limits
+             * @description Per-asset-class min/max weight bounds (replaced wholesale).
+             */
+            class_limits?: components["schemas"]["ClassLimitItem"][];
+            /** Portfolio Id */
+            portfolio_id: number;
         };
         /**
          * CorrelationMatrixOut
@@ -5292,6 +5414,9 @@ export interface components {
             notional_usd: number;
             /** Weights */
             weights: components["schemas"]["SaveWeightIn"][];
+            constraints?: components["schemas"]["ConstraintsIn"] | null;
+            /** Inception Date */
+            inception_date?: string | null;
         };
         /** SaveResponse */
         SaveResponse: {
@@ -6397,6 +6522,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PortfolioOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_portfolio_constraints_portfolios__portfolio_id__constraints_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConstraintsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_portfolio_constraints_portfolios__portfolio_id__constraints_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConstraintsPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConstraintsView"];
                 };
             };
             /** @description Validation Error */

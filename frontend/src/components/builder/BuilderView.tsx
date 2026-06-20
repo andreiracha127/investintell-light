@@ -22,8 +22,10 @@ import {
   getBuilderOptimizeJob,
   postBuilderOptimize,
   postBuilderOptimizeAsync,
+  type BlockBudget,
   type BuilderObjective,
   type BuilderViewIn,
+  type ConstraintAssetClass,
   type OptimizeJobState,
   type OptimizeRequest,
   type OptimizeResponse,
@@ -95,6 +97,43 @@ function parseNum(text: string): number | null {
   if (text.trim() === "") return null;
   const value = Number(text);
   return Number.isFinite(value) ? value : null;
+}
+
+/** Per-asset-class block-budget inputs, raw percent text. */
+type BlockBudgetDraft = Partial<
+  Record<ConstraintAssetClass, { lo: string; hi: string }>
+>;
+
+/** Asset classes the per-class block budgets can constrain (label for the UI). */
+const ASSET_CLASS_OPTIONS: { value: ConstraintAssetClass; label: string }[] = [
+  { value: "equity", label: "Equity" },
+  { value: "fixed_income", label: "Fixed income" },
+  { value: "cash", label: "Cash" },
+  { value: "alternatives", label: "Alternatives" },
+  { value: "multi_asset", label: "Multi-asset" },
+];
+
+/**
+ * Convert the per-class block-budget draft (percent text) into the API
+ * ``block_budgets`` list (decimal fractions). A class contributes a budget only
+ * when at least one of its bounds is a valid number; a blank bound defaults to
+ * 0 (lo) or 1 (hi). Returns null when nothing is set (back-compat: omit field).
+ */
+function buildBlockBudgets(draft: BlockBudgetDraft): BlockBudget[] | null {
+  const out: BlockBudget[] = [];
+  for (const { value: cls } of ASSET_CLASS_OPTIONS) {
+    const entry = draft[cls];
+    if (!entry) continue;
+    const lo = parseNum(entry.lo);
+    const hi = parseNum(entry.hi);
+    if (lo === null && hi === null) continue;
+    out.push({
+      asset_class: cls,
+      lo: lo !== null ? lo / 100 : 0,
+      hi: hi !== null ? hi / 100 : 1,
+    });
+  }
+  return out.length > 0 ? out : null;
 }
 
 export function BuilderView() {
@@ -175,6 +214,20 @@ export function BuilderView() {
   const [objective, setObjective] = useState<BuilderObjective>("max_return_cvar");
   const [capPct, setCapPct] = useState("25");
   const [minWeightPct, setMinWeightPct] = useState("");
+  // Per-equity look-through overlap cap (Sprint B / Task 4). Blank = no cap.
+  const [overlapCapPct, setOverlapCapPct] = useState("");
+  // Per-asset-class Σ-weight budgets (block_budgets). Each class has an optional
+  // min (lo) and max (hi) in percent; blank = no bound that side.
+  const [blockBudgets, setBlockBudgets] = useState<BlockBudgetDraft>({});
+  const setBlockBudget = (
+    cls: ConstraintAssetClass,
+    side: "lo" | "hi",
+    value: string,
+  ) =>
+    setBlockBudgets((prev) => ({
+      ...prev,
+      [cls]: { ...(prev[cls] ?? { lo: "", hi: "" }), [side]: value },
+    }));
   // Blank = full nav_timeseries history (backend default; the 2-year gate is
   // removed). A typed value opts into a narrower estimation window.
   const [windowDays, setWindowDays] = useState("");
@@ -258,11 +311,14 @@ export function BuilderView() {
   const cap = parseNum(capPct);
   const windowVal = parseNum(windowDays);
   const minWeight = parseNum(minWeightPct);
+  const overlapCap = parseNum(overlapCapPct);
   const delta = parseNum(deltaText);
   const tau = parseNum(tauText);
   const cvarLimit = parseNum(cvarLimitPct);
   // Blank cap = uncapped (null); a typed but non-numeric cap blocks the run.
   const capOk = capPct.trim() === "" || cap !== null;
+  // Blank overlap cap = none; a typed but non-numeric value blocks the run.
+  const overlapCapOk = overlapCapPct.trim() === "" || overlapCap !== null;
   // Blank window = full history (null → backend uses all of nav_timeseries);
   // a typed but non-numeric window blocks the run (mirrors cap).
   const windowOk = windowDays.trim() === "" || windowVal !== null;
@@ -278,6 +334,7 @@ export function BuilderView() {
   const canRun =
     windowOk &&
     capOk &&
+    overlapCapOk &&
     blParamsOk &&
     cvarLimitOk &&
     (mode === "simulate"
@@ -288,9 +345,12 @@ export function BuilderView() {
 
   const onRun = () => {
     if (!canRun || runPending) return;
+    const blockBudgetList = buildBlockBudgets(blockBudgets);
     const constraints = {
       cap: cap !== null ? cap / 100 : null,
       min_weight: minWeight !== null ? minWeight / 100 : null,
+      ...(overlapCap !== null ? { overlap_cap: overlapCap / 100 } : {}),
+      ...(blockBudgetList !== null ? { block_budgets: blockBudgetList } : {}),
     };
     const common = {
       objective,
@@ -361,6 +421,10 @@ export function BuilderView() {
         ? minWeight / 100
         : null,
   };
+  // Full constraints actually sent on the run that produced the visible result
+  // (cap/min_weight/overlap_cap/block_budgets), persisted verbatim on save so
+  // the portfolio remembers how it was built. Null before any run.
+  const saveConstraints = submittedRequest?.constraints ?? null;
   const resultWindowDays = submittedRequest
     ? (submittedRequest.window_days ?? null)
     : windowVal;
@@ -600,6 +664,59 @@ export function BuilderView() {
               ariaLabel="History window"
               width="w-[208px]"
             />
+            <AffixField
+              label="Overlap cap"
+              optional
+              tip="Caps the aggregate indirect (look-through) exposure to any single stock held across the selected funds."
+              affix="%"
+              value={overlapCapPct}
+              onChange={setOverlapCapPct}
+              placeholder="—"
+              ariaLabel="Overlap cap"
+              width="w-[172px]"
+            />
+          </div>
+
+          {/* Per-asset-class min/max weight budgets (block_budgets) */}
+          <div className="mt-4 border-t border-border pt-4">
+            <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.07em] text-text-muted">
+              Asset-class limits
+              <span className="font-normal normal-case tracking-normal text-text-muted">
+                (optional · % of portfolio)
+              </span>
+              <InfoDot tip="Bound the total weight allocated to each asset class. Leave blank for no limit on that side. Honoured by the loss-limit and minimum-CVaR goals." />
+            </p>
+            <div className="flex flex-wrap gap-x-[18px] gap-y-3">
+              {ASSET_CLASS_OPTIONS.map((cls) => {
+                const entry = blockBudgets[cls.value] ?? { lo: "", hi: "" };
+                return (
+                  <fieldset
+                    key={cls.value}
+                    className="m-0 flex flex-col gap-1.5 border-0 p-0"
+                  >
+                    <span className="text-[11px] font-bold text-text-secondary">
+                      {cls.label}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <ClassBudgetInput
+                        ariaLabel={`${cls.label} min`}
+                        value={entry.lo}
+                        onChange={(v) => setBlockBudget(cls.value, "lo", v)}
+                        placeholder="min"
+                      />
+                      <span className="text-[11px] text-text-muted">–</span>
+                      <ClassBudgetInput
+                        ariaLabel={`${cls.label} max`}
+                        value={entry.hi}
+                        onChange={(v) => setBlockBudget(cls.value, "hi", v)}
+                        placeholder="max"
+                      />
+                      <span className="text-[11px] text-text-muted">%</span>
+                    </div>
+                  </fieldset>
+                );
+              })}
+            </div>
           </div>
         </NumberedSection>
 
@@ -670,6 +787,7 @@ export function BuilderView() {
             result={resultData}
             objective={resultObjective}
             constraints={resultConstraints}
+            saveConstraints={saveConstraints}
             windowDays={resultWindowDays}
             cvarLimit={resultCvarLimit}
             assetsByKey={assetsByKey}
@@ -768,6 +886,29 @@ function AffixField({
         </span>
       </div>
     </div>
+  );
+}
+
+function ClassBudgetInput({
+  ariaLabel,
+  value,
+  onChange,
+  placeholder,
+}: {
+  ariaLabel: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <input
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      inputMode="decimal"
+      aria-label={ariaLabel}
+      className="h-[32px] w-[64px] border border-border-strong bg-field px-2 text-right text-[13px] tabular-nums text-text-primary outline-none focus:border-accent placeholder:text-text-muted"
+    />
   );
 }
 
