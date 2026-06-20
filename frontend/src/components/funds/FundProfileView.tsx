@@ -152,14 +152,29 @@ function benchmarkDisplayLabel(
   benchmarkId: string,
   activeShare: FundActiveShare | null | undefined,
   entityAnalytics: FundEntityAnalytics | null | undefined,
+  fallbackLabel?: string | null,
 ): string {
   const selected = displayText(benchmarkId);
   if (!selected) return "none";
   return (
     benchmarkLabelText(activeShare?.benchmark_name) ??
     benchmarkLabelText(entityAnalytics?.capture.benchmark_label) ??
+    benchmarkLabelText(fallbackLabel) ??
     (isUuidLike(selected) ? "resolving..." : selected)
   );
+}
+
+function proxyTicker(value: string | null | undefined): string {
+  return displayText(value)?.toUpperCase() ?? "";
+}
+
+function proxyBenchmarkLabel(
+  name: string | null | undefined,
+  ticker: string,
+): string | null {
+  const label = benchmarkLabelText(name);
+  if (label && ticker) return `${label} (${ticker})`;
+  return label ?? (ticker || null);
 }
 
 function benchmarkMetricLabel(
@@ -218,6 +233,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
   const [relationshipsOpen, setRelationshipsOpen] = useState(false);
   const [benchmarkDraft, setBenchmarkDraft] = useState("");
   const [benchmarkId, setBenchmarkId] = useState("");
+  const [benchmarkAutoDisabled, setBenchmarkAutoDisabled] = useState(false);
   const [selectedCusip, setSelectedCusip] = useState("");
 
   useEffect(() => {
@@ -227,6 +243,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     setRelationshipsOpen(false);
     setBenchmarkDraft("");
     setBenchmarkId("");
+    setBenchmarkAutoDisabled(false);
     setSelectedCusip("");
   }, [instrumentId]);
 
@@ -256,6 +273,19 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     staleTime: FUND_DOSSIER_STALE_TIME_MS.profile,
     retry: retryPolicy,
   });
+  const resolvedBenchmark = profileQuery.data?.benchmark;
+  const autoBenchmarkTicker = proxyTicker(resolvedBenchmark?.proxy_ticker);
+  const autoBenchmarkLabel = proxyBenchmarkLabel(
+    resolvedBenchmark?.name,
+    autoBenchmarkTicker,
+  );
+  const autoBenchmarkInstrumentId = resolvedBenchmark?.proxy_instrument_id ?? null;
+
+  useEffect(() => {
+    if (benchmarkAutoDisabled || benchmarkId || !autoBenchmarkInstrumentId) return;
+    setBenchmarkDraft(autoBenchmarkInstrumentId);
+    setBenchmarkId(autoBenchmarkInstrumentId);
+  }, [benchmarkAutoDisabled, benchmarkId, autoBenchmarkInstrumentId]);
 
   const timeseriesQuery = useQuery({
     queryKey: dossierQueryKeys.timeseries(instrumentId, { range }),
@@ -564,12 +594,14 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
       : "text-text-primary";
 
   const applyBenchmark = (value = benchmarkDraft) => {
+    setBenchmarkAutoDisabled(true);
     setBenchmarkId(value.trim());
   };
   const activeBenchmarkLabel = benchmarkDisplayLabel(
     benchmarkId,
     activeShareQuery.data,
     entityAnalyticsQuery.data,
+    autoBenchmarkLabel,
   );
 
   return (

@@ -6136,6 +6136,18 @@
             ],
             "title": "Proxy Ticker"
           },
+          "proxy_instrument_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proxy Instrument Id"
+          },
           "proxy_fit_quality_score": {
             "anyOf": [
               {
@@ -6194,6 +6206,7 @@
         "required": [
           "name",
           "proxy_ticker",
+          "proxy_instrument_id",
           "proxy_fit_quality_score",
           "proxy_asset_class",
           "resolution_method",

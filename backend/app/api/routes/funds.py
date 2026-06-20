@@ -510,6 +510,7 @@ async def get_fund_profile(
             FundBenchmarkOut(
                 name=benchmark.benchmark_name,
                 proxy_ticker=benchmark.benchmark_proxy_ticker,
+                proxy_instrument_id=benchmark.benchmark_proxy_instrument_id,
                 proxy_fit_quality_score=(
                     float(benchmark.benchmark_proxy_fit_quality_score)
                     if benchmark.benchmark_proxy_fit_quality_score is not None

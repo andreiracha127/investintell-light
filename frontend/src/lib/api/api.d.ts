@@ -2420,6 +2420,8 @@ export interface components {
             name: string | null;
             /** Proxy Ticker */
             proxy_ticker: string | null;
+            /** Proxy Instrument Id */
+            proxy_instrument_id: string | null;
             /** Proxy Fit Quality Score */
             proxy_fit_quality_score: number | null;
             /** Proxy Asset Class */

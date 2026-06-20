@@ -313,6 +313,7 @@ def _profile() -> catalog.FundProfile:
     benchmark = SimpleNamespace(
         benchmark_name="CRSP US Total Market",
         benchmark_proxy_ticker="VTI",
+        benchmark_proxy_instrument_id=uuid.UUID("33333333-3333-4333-8333-333333333333"),
         benchmark_proxy_fit_quality_score=0.92,
         benchmark_proxy_asset_class="equity_us_large",
         benchmark_resolution_method="class_name_exact",
@@ -349,6 +350,7 @@ async def test_fund_profile_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["benchmark"] == {
         "name": "CRSP US Total Market",
         "proxy_ticker": "VTI",
+        "proxy_instrument_id": "33333333-3333-4333-8333-333333333333",
         "proxy_fit_quality_score": 0.92,
         "proxy_asset_class": "equity_us_large",
         "resolution_method": "class_name_exact",

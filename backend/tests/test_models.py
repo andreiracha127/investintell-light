@@ -477,6 +477,7 @@ def test_fund_benchmark_candidates_columns() -> None:
     for col in (
         "benchmark_name",
         "benchmark_proxy_ticker",
+        "benchmark_proxy_instrument_id",
         "benchmark_proxy_fit_quality_score",
         "benchmark_proxy_asset_class",
         "benchmark_resolution_method",

@@ -71,6 +71,9 @@ def test_fund_benchmark_candidates_sql_uses_all_resolution_paths() -> None:
     assert "sec_fund_classes" in sql
     assert "instruments_universe" in sql
     assert "benchmark_etf_canonical_map" in sql
+    assert "benchmark_proxy_instrument_id" in sql
+    assert "proxy_instruments" in sql
+    assert "max(coalesce(proxy_instrument_count, 0))" in sql
 
 
 def test_fund_benchmark_candidates_sql_marks_proxy_conflicts() -> None:
@@ -78,5 +81,6 @@ def test_fund_benchmark_candidates_sql_marks_proxy_conflicts() -> None:
 
     assert "count(DISTINCT proxy_etf_ticker)" in sql
     assert "CASE WHEN proxy_count = 1 THEN proxy_etf_ticker END" in sql
+    assert "CASE WHEN proxy_count = 1 AND proxy_instrument_count = 1" in sql
     assert "(benchmark_name_count > 1 OR proxy_count > 1)" in sql
     assert "benchmark_proxy_candidates" in sql

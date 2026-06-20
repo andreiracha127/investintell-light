@@ -162,6 +162,7 @@ class FundBenchmarkOut(BaseModel):
 
     name: str | None
     proxy_ticker: str | None
+    proxy_instrument_id: uuid.UUID | None
     proxy_fit_quality_score: float | None
     proxy_asset_class: str | None
     resolution_method: str | None

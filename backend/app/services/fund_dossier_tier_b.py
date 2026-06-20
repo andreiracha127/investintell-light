@@ -29,18 +29,8 @@ from app.schemas.fund_analysis import (
     FundDrawdownAnalysis,
     FundDrawdownPeriod,
     FundEntityAnalyticsResponse,
-    FundInstitutionalRevealResponse,
     FundFactorsResponse,
-    HolderNetwork,
-    HolderNetworkEdge,
-    HolderNetworkNode,
-    HoldingReverseLookupResponse,
-    InsiderData,
-    InsiderQuarterSentiment,
-    InstitutionalHolder,
-    InstitutionalOverlapSecurity,
-    ReverseLookupFundExposure,
-    ReverseLookupInstitution,
+    FundInstitutionalRevealResponse,
     FundMarketSensitivity,
     FundRegimeBand,
     FundReturnDistribution,
@@ -54,6 +44,16 @@ from app.schemas.fund_analysis import (
     FundStyleDriftResponse,
     FundStyleSectorWeight,
     FundTailRiskMetrics,
+    HolderNetwork,
+    HolderNetworkEdge,
+    HolderNetworkNode,
+    HoldingReverseLookupResponse,
+    InsiderData,
+    InsiderQuarterSentiment,
+    InstitutionalHolder,
+    InstitutionalOverlapSecurity,
+    ReverseLookupFundExposure,
+    ReverseLookupInstitution,
 )
 from app.services.fund_analysis import (
     FundAnalysisError,
@@ -847,8 +847,12 @@ _INSIDER_SENTIMENT_SQL = """
                     quarterly AS (
                         SELECT
                             quarter,
-                            SUM(CASE WHEN trans_code = 'P' THEN trans_value ELSE 0 END) AS buy_value,
-                            SUM(CASE WHEN trans_code = 'S' THEN trans_value ELSE 0 END) AS sell_value,
+                            SUM(
+                                CASE WHEN trans_code = 'P' THEN trans_value ELSE 0 END
+                            ) AS buy_value,
+                            SUM(
+                                CASE WHEN trans_code = 'S' THEN trans_value ELSE 0 END
+                            ) AS sell_value,
                             COUNT(*) FILTER (WHERE trans_code = 'P') AS buy_count,
                             COUNT(*) FILTER (WHERE trans_code = 'S') AS sell_count,
                             array_agg(DISTINCT cik) AS issuer_ciks
@@ -986,6 +990,86 @@ async def _nav_for_window(
     return build_nav_series(rows)
 
 
+async def _instrument_ticker_label(
+    session: AsyncSession,
+    instrument_id: uuid.UUID,
+) -> tuple[str | None, str | None] | None:
+    result = await session.execute(
+        text(
+            """
+            SELECT ticker, name
+            FROM instruments_universe
+            WHERE instrument_id = :instrument_id
+            LIMIT 1
+            """
+        ),
+        {"instrument_id": instrument_id},
+    )
+    row = result.first()
+    if row is None:
+        return None
+    ticker, name = row
+    return ticker, name
+
+
+async def _eod_close_for_window(
+    session: AsyncSession,
+    ticker: str,
+    window: WindowKey,
+) -> pd.Series:
+    bounds = await session.execute(
+        text(
+            """
+            SELECT min(date) AS first_date, max(date) AS last_date
+            FROM eod_prices
+            WHERE ticker = :ticker
+              AND adj_close IS NOT NULL
+            """
+        ),
+        {"ticker": ticker},
+    )
+    first_date, last_date = bounds.one()
+    if first_date is None or last_date is None:
+        raise InsufficientFundDataError(f"No EOD history for benchmark {ticker}.")
+    start = last_date - dt.timedelta(days=int(WINDOW_DAYS[window] * 1.6) + lookback_pad_days(21))
+    rows = await session.execute(
+        text(
+            """
+            SELECT date, adj_close
+            FROM eod_prices
+            WHERE ticker = :ticker
+              AND date >= :start
+              AND date <= :last_date
+              AND adj_close IS NOT NULL
+            ORDER BY date
+            """
+        ),
+        {"ticker": ticker, "start": max(first_date, start), "last_date": last_date},
+    )
+    return build_nav_series((date, close) for date, close in rows.all())
+
+
+async def _benchmark_nav_for_window(
+    session: AsyncSession,
+    benchmark_id: uuid.UUID,
+    window: WindowKey,
+) -> tuple[pd.Series, str | None]:
+    benchmark = await _fund_or_none(session, benchmark_id)
+    if benchmark is not None:
+        return (
+            await _nav_for_window(session, benchmark_id, window),
+            benchmark.ticker or benchmark.name,
+        )
+
+    instrument = await _instrument_ticker_label(session, benchmark_id)
+    if instrument is None:
+        raise InvalidBenchmarkError(f"Benchmark instrument {benchmark_id} not found.")
+    ticker, name = instrument
+    if not ticker:
+        raise InvalidBenchmarkError(f"Benchmark instrument {benchmark_id} has no ticker.")
+    return await _eod_close_for_window(session, ticker.upper(), window), ticker or name
+
+
 async def fetch_fund_entity_analytics(
     session: AsyncSession,
     datalake: AsyncSession,
@@ -1001,11 +1085,9 @@ async def fetch_fund_entity_analytics(
     benchmark_nav = None
     benchmark_label = None
     if benchmark_id is not None:
-        benchmark = await _fund_or_none(session, benchmark_id)
-        if benchmark is None:
-            raise InvalidBenchmarkError(f"Benchmark fund {benchmark_id} not found.")
-        benchmark_nav = await _nav_for_window(session, benchmark_id, window)
-        benchmark_label = benchmark.ticker or benchmark.name
+        benchmark_nav, benchmark_label = await _benchmark_nav_for_window(
+            session, benchmark_id, window
+        )
     insider_data = await fetch_fund_insider_data(session, datalake, fund)
     return assemble_entity_analytics(
         nav,
@@ -1261,7 +1343,10 @@ async def fetch_fund_institutional_reveal(
             holdings_report_date,
             holdings,
             [],
-            empty_state=_empty("No CUSIP-bearing holdings are available for 13F matching.", "fund_holdings"),
+            empty_state=_empty(
+                "No CUSIP-bearing holdings are available for 13F matching.",
+                "fund_holdings",
+            ),
         )
     try:
         rows = (
@@ -1277,7 +1362,10 @@ async def fetch_fund_institutional_reveal(
                 holdings_report_date,
                 holdings,
                 [],
-                empty_state=_empty("SEC 13F holdings tables are not deployed yet.", "sec_13f_holdings"),
+                empty_state=_empty(
+                    "SEC 13F holdings tables are not deployed yet.",
+                    "sec_13f_holdings",
+                ),
             )
         raise _source_error("sec_13f_holdings", exc) from exc
     if not rows:
@@ -1286,7 +1374,10 @@ async def fetch_fund_institutional_reveal(
             holdings_report_date,
             holdings,
             [],
-            empty_state=_empty("No 13F institutional holdings matched this fund's CUSIPs.", "sec_13f_holdings"),
+            empty_state=_empty(
+                "No 13F institutional holdings matched this fund's CUSIPs.",
+                "sec_13f_holdings",
+            ),
         )
     return _institutional_payload(
         fund,
@@ -1361,7 +1452,10 @@ async def fetch_holding_reverse_lookup(
     except SQLAlchemyError as exc:
         if _is_missing_relation(exc):
             rows = []
-            empty_state = _empty("SEC 13F holdings tables are not deployed yet.", "sec_13f_holdings")
+            empty_state = _empty(
+                "SEC 13F holdings tables are not deployed yet.",
+                "sec_13f_holdings",
+            )
         else:
             raise _source_error("sec_13f_holdings", exc) from exc
 
@@ -1584,7 +1678,20 @@ async def fetch_fund_active_share(
         )
     benchmark = await _fund_or_none(session, benchmark_id)
     if benchmark is None:
-        raise InvalidBenchmarkError(f"Benchmark fund {benchmark_id} not found.")
+        instrument = await _instrument_ticker_label(session, benchmark_id)
+        benchmark_name = None
+        if instrument is not None:
+            ticker, name = instrument
+            benchmark_name = name or ticker
+        return FundActiveShareResponse(
+            instrument_id=instrument_id,
+            benchmark_id=benchmark_id,
+            benchmark_name=benchmark_name,
+            empty_state=_empty(
+                "Benchmark instrument has no N-PORT holdings for active-share comparison.",
+                "sec_nport_holdings",
+            ),
+        )
     portfolio = await _holdings_weights(datalake, fund.series_id)
     benchmark_weights = await _holdings_weights(datalake, benchmark.series_id)
     if not portfolio.weights:

@@ -77,6 +77,7 @@ def test_benchmark_out_can_represent_proxy_conflict() -> None:
     out = FundBenchmarkOut(
         name="Russell 2500 Growth Index",
         proxy_ticker=None,
+        proxy_instrument_id=None,
         proxy_fit_quality_score=None,
         proxy_asset_class=None,
         resolution_method="class_name_exact",

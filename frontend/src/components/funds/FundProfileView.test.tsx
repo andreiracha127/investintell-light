@@ -653,4 +653,42 @@ describe("FundProfileView", () => {
       ),
     );
   });
+
+  it("auto-resolves the profile benchmark proxy ticker for Deep Analysis", async () => {
+    mockDossierResponses();
+    const user = userEvent.setup();
+    const benchmarkUuid = "11111111-2222-4333-8444-555555555555";
+    mocked.fetchFundProfile.mockResolvedValueOnce({
+      ...makeProfile(),
+      primary_benchmark: "S&P 500",
+      benchmark: {
+        name: "S&P 500",
+        proxy_ticker: "SPY",
+        proxy_instrument_id: benchmarkUuid,
+        proxy_fit_quality_score: 0.95,
+        proxy_asset_class: "equity_us_large",
+        resolution_method: "class_name_exact",
+        resolution_conflict: false,
+        proxy_candidates: ["SPY"],
+        canonical_name_matches: ["S&P 500"],
+      },
+    });
+
+    renderFundProfile();
+
+    expect(await screen.findByText("Vanguard 500 Index Fund")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Deep Analysis" }));
+
+    await waitFor(() =>
+      expect(mocked.fetchFundEntityAnalytics).toHaveBeenCalledWith(
+        FUND_ID,
+        { window: "1Y", benchmark_id: benchmarkUuid },
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(
+      await screen.findByText("Active benchmark: S&P 500 (SPY)"),
+    ).toBeInTheDocument();
+  });
 });

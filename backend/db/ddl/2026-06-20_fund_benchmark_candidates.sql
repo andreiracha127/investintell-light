@@ -99,6 +99,16 @@ active_map AS (
     FROM benchmark_etf_canonical_map
     WHERE current_date BETWEEN effective_from AND effective_to
 ),
+proxy_instruments AS (
+    SELECT
+        upper(ticker) AS proxy_etf_ticker,
+        min(instrument_id::text)::uuid AS proxy_instrument_id,
+        count(DISTINCT instrument_id) AS proxy_instrument_count
+    FROM instruments_universe
+    WHERE NULLIF(btrim(ticker), '') IS NOT NULL
+      AND is_active
+    GROUP BY upper(ticker)
+),
 map_matches AS (
     SELECT
         p.series_id,
@@ -108,11 +118,15 @@ map_matches AS (
         m.benchmark_name_canonical,
         m.proxy_etf_ticker,
         m.proxy_asset_class,
-        m.fit_quality_score
+        m.fit_quality_score,
+        pi.proxy_instrument_id,
+        pi.proxy_instrument_count
     FROM per_series p
     LEFT JOIN active_map m
       ON p.benchmark_name = m.benchmark_name_canonical
       OR p.benchmark_name = ANY(m.benchmark_name_aliases)
+    LEFT JOIN proxy_instruments pi
+      ON upper(m.proxy_etf_ticker) = pi.proxy_etf_ticker
 ),
 resolved AS (
     SELECT
@@ -121,9 +135,11 @@ resolved AS (
         benchmark_resolution_method,
         benchmark_name_count,
         count(DISTINCT proxy_etf_ticker) FILTER (WHERE proxy_etf_ticker IS NOT NULL) AS proxy_count,
+        max(coalesce(proxy_instrument_count, 0)) AS proxy_instrument_count,
         array_remove(array_agg(DISTINCT proxy_etf_ticker ORDER BY proxy_etf_ticker), NULL) AS proxy_candidates,
         array_remove(array_agg(DISTINCT benchmark_name_canonical ORDER BY benchmark_name_canonical), NULL) AS canonical_name_matches,
         min(proxy_etf_ticker) AS proxy_etf_ticker,
+        min(proxy_instrument_id::text)::uuid AS proxy_instrument_id,
         max(proxy_asset_class) AS proxy_asset_class,
         max(fit_quality_score) AS fit_quality_score
     FROM map_matches
@@ -138,5 +154,6 @@ SELECT
     benchmark_resolution_method,
     (benchmark_name_count > 1 OR proxy_count > 1) AS benchmark_resolution_conflict,
     coalesce(proxy_candidates, ARRAY[]::text[]) AS benchmark_proxy_candidates,
-    coalesce(canonical_name_matches, ARRAY[]::text[]) AS benchmark_canonical_name_matches
+    coalesce(canonical_name_matches, ARRAY[]::text[]) AS benchmark_canonical_name_matches,
+    CASE WHEN proxy_count = 1 AND proxy_instrument_count = 1 THEN proxy_instrument_id END AS benchmark_proxy_instrument_id
 FROM resolved;

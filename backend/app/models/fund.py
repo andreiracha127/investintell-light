@@ -109,6 +109,9 @@ class FundBenchmarkCandidate(Base):
     series_id: Mapped[str] = mapped_column(String, primary_key=True)
     benchmark_name: Mapped[str | None] = mapped_column(String, nullable=True)
     benchmark_proxy_ticker: Mapped[str | None] = mapped_column(String, nullable=True)
+    benchmark_proxy_instrument_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, nullable=True
+    )
     benchmark_proxy_fit_quality_score: Mapped[Decimal | None] = mapped_column(
         Numeric, nullable=True
     )
