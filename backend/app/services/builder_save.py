@@ -30,6 +30,7 @@ builder flow treats it as an input problem, not a 409 resource conflict.
 import datetime as dt
 import uuid
 from dataclasses import dataclass
+from decimal import Decimal
 
 from pydantic import ValidationError
 from sqlalchemy import func, select
@@ -37,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.eod_price import EodPrice
 from app.models.fund import Fund, FundClass, FundNav
+from app.models.portfolio import PortfolioTransaction
 from app.schemas.builder import (
     EquityRefIn,
     FundRefIn,
@@ -46,7 +48,7 @@ from app.schemas.builder import (
     SaveWeightIn,
 )
 from app.schemas.portfolios import PortfolioCreate, PositionBasis, PositionCreate
-from app.services import portfolio_crud
+from app.services import portfolio_constraints, portfolio_crud, portfolio_ledger
 from app.services.portfolio_builder import BuilderError
 
 # positions.quantity is a float column — 4 decimals is the product contract.
@@ -238,6 +240,37 @@ def _resolve_class_ticker(
     return wanted
 
 
+async def _seed_inception_ledger(
+    session: AsyncSession,
+    portfolio_id: int,
+    positions: list[PositionCreate],
+    sizing_prices: list[float],
+    inception_date: dt.date,
+) -> None:
+    """Insert one inception buy per sized position into the trade ledger.
+
+    The quantity and price mirror the sizing already done in ``run_save`` (the
+    fill price when executed, else the reference spot/NAV). Commission is
+    carried over for executed fills (0 otherwise). These rows are the source of
+    truth for NAV reconstruction (``materialize_portfolio_nav``);
+    ``create_portfolio`` records only the positions snapshot, so seeding here
+    does not duplicate any ledger entry.
+    """
+    for position, price in zip(positions, sizing_prices, strict=True):
+        session.add(
+            PortfolioTransaction(
+                portfolio_id=portfolio_id,
+                ticker=position.ticker,
+                side="buy",
+                quantity=position.quantity,
+                price=price,
+                commission=Decimal(str(position.commission or 0.0)),
+                trade_date=inception_date,
+            )
+        )
+    await session.flush()
+
+
 async def run_save(session: AsyncSession, payload: SaveRequest) -> SaveResponse:
     """Resolve reference prices, size positions and persist the portfolio
     (origin='builder'). See the module docstring for the F8.6b semantics."""
@@ -316,8 +349,14 @@ async def run_save(session: AsyncSession, payload: SaveRequest) -> SaveResponse:
         )
         sizing_prices.append(item.fill_price if item.fill_price is not None else price)
 
+    inception_date = payload.inception_date or dt.date.today()
     try:
-        create_payload = PortfolioCreate(name=payload.name, cash=0.0, positions=positions)
+        create_payload = PortfolioCreate(
+            name=payload.name,
+            cash=0.0,
+            inception_date=inception_date,
+            positions=positions,
+        )
     except ValidationError as exc:
         raise BuilderError(str(exc)) from exc
     try:
@@ -326,6 +365,33 @@ async def run_save(session: AsyncSession, payload: SaveRequest) -> SaveResponse:
         )
     except portfolio_crud.DuplicatePortfolioNameError as exc:
         raise BuilderError(str(exc)) from exc
+
+    # Seed the auditable ledger so NAV can be reconstructed: one inception buy
+    # per sized position, dated at the inception date, priced/quantified exactly
+    # as the position was sized (the fill price when executed, else the
+    # reference spot/NAV). create_portfolio records only the positions snapshot,
+    # not transactions, so this does not duplicate any ledger rows.
+    await _seed_inception_ledger(
+        session, portfolio.id, positions, sizing_prices, inception_date
+    )
+    # Rebuild portfolio_nav_daily from the freshly-seeded ledger. Reference
+    # prices may be missing for some dates, but the inception buy always prices
+    # the trade-date row (build_transaction_nav seeds last_prices from the tx),
+    # so at least the inception NAV point is materialized.
+    await portfolio_ledger.materialize_portfolio_nav(session, portfolio.id)
+
+    if payload.constraints is not None:
+        c = payload.constraints
+        await portfolio_constraints.upsert_constraints(
+            session,
+            portfolio.id,
+            cap=c.cap,
+            min_weight=c.min_weight,
+            overlap_cap=c.overlap_cap,
+            class_limits=[
+                (b.asset_class, b.lo, b.hi) for b in (c.block_budgets or [])
+            ],
+        )
 
     return SaveResponse(
         portfolio_id=portfolio.id,

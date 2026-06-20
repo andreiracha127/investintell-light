@@ -414,6 +414,17 @@ class SaveRequest(BaseModel):
     name: str = Field(description="Portfolio name; same rules as POST /portfolios.")
     notional_usd: Annotated[float, Field(gt=0, allow_inf_nan=False)] = 1_000_000
     weights: Annotated[list[SaveWeightIn], Field(min_length=1, max_length=50)]
+    # Optional construction limits to persist alongside the portfolio (Sprint B,
+    # Task 5). When present, cap/min_weight/overlap_cap and the per-asset-class
+    # ``block_budgets`` are written to ``portfolio_constraint_set`` /
+    # ``portfolio_class_limits`` so the portfolio remembers how it was built
+    # (drift checks in Sprint C compare current weights against these). Absent =
+    # no constraints persisted (back-compat).
+    constraints: ConstraintsIn | None = None
+    # User-declared inception date for the persisted portfolio's NAV index. The
+    # inception buy transactions are dated here. Defaults to today's date when
+    # absent.
+    inception_date: dt.date | None = None
 
     @field_validator("name")
     @classmethod
