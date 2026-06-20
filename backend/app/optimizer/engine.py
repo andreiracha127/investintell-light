@@ -207,14 +207,27 @@ def _check_constraint_params(n: int, cap: float | None, min_weight: float | None
 
 
 def base_constraints(
-    w: cp.Variable, cap: float | None, min_weight: float | None
+    w: cp.Variable,
+    cap: float | None,
+    min_weight: float | None,
+    blocks: "list[BlockBudget] | None" = None,
+    linear: "list[LinearConstraint] | None" = None,
 ) -> list[cp.Constraint]:
-    """Shared constraint block: long-only, sum=1, optional cap / min weight."""
+    """Shared constraint block: long-only, sum=1, optional cap / min weight,
+    plus optional block budgets and generic linear constraints.
+
+    ``blocks`` / ``linear`` default to ``None`` (current behavior unchanged).
+    All solvers route through this single path so block budgets AND linear
+    constraints are honored everywhere — never re-assembling ``[w>=0, sum(w)==1]``
+    themselves.
+    """
     cons: list[cp.Constraint] = [w >= 0, cp.sum(w) == 1]
     if cap is not None:
         cons.append(w <= cap)
     if min_weight is not None:
         cons.append(w >= min_weight)
+    cons.extend(_block_constraints(w, blocks, cap_arr=None))
+    cons.extend(_linear_constraints(w, linear))
     return cons
 
 
@@ -231,6 +244,102 @@ class BlockBudget:
     indices: list[int]
     lo: float
     hi: float
+
+
+@dataclass(frozen=True)
+class LinearConstraint:
+    """Generic linear constraint ``lo <= coef·w <= hi`` on the weight vector.
+
+    ``coef`` is a length-n vector; ``lo`` / ``hi`` are scalar bounds (either may
+    be ``None`` to leave that side unbounded). Linear by construction, so it
+    composes with every objective in this module. Used (e.g.) for the per-equity
+    overlap cap, where ``coef`` selects the funds' exposures to a single equity
+    and ``hi`` caps the combined look-through weight.
+    """
+
+    coef: np.ndarray
+    lo: float | None
+    hi: float | None
+    label: str
+
+
+def _validate_linear(
+    n: int, linear: list[LinearConstraint] | None
+) -> list[tuple[np.ndarray, float | None, float | None, str]]:
+    """Validate ``LinearConstraint`` inputs; return parsed (coef, lo, hi, label).
+
+    Pre-solve infeasibility / malformed-input checks raised as ``OptimizerError``
+    (matching ``bounds_constraints`` style) so they never reach the solver as a
+    silent ``infeasible`` status:
+    - ``coef`` shape must be (n,) and finite;
+    - at least one of ``lo`` / ``hi`` is required, and each (when given) finite;
+    - ``lo <= hi``;
+    - for a non-negative ``coef`` (the common selector/exposure case), ``coef·w``
+      is itself non-negative under ``w >= 0``, so a ``hi < 0`` is structurally
+      infeasible — fail loud.
+    """
+    if not linear:
+        return []
+    parsed: list[tuple[np.ndarray, float | None, float | None, str]] = []
+    for lc in linear:
+        coef = np.asarray(lc.coef, dtype=float).ravel()
+        if coef.shape != (n,):
+            raise OptimizerError(
+                f"linear constraint '{lc.label}': coef has shape {coef.shape}, "
+                f"expected ({n},)"
+            )
+        if not np.isfinite(coef).all():
+            raise OptimizerError(
+                f"linear constraint '{lc.label}': coef contains NaN/inf"
+            )
+        if lc.lo is None and lc.hi is None:
+            raise OptimizerError(
+                f"linear constraint '{lc.label}': at least one of lo/hi is required"
+            )
+        if lc.lo is not None and not np.isfinite(lc.lo):
+            raise OptimizerError(f"linear constraint '{lc.label}': lo is not finite")
+        if lc.hi is not None and not np.isfinite(lc.hi):
+            raise OptimizerError(f"linear constraint '{lc.label}': hi is not finite")
+        if lc.lo is not None and lc.hi is not None and lc.lo > lc.hi + 1e-12:
+            raise OptimizerError(
+                f"infeasible constraints: linear constraint '{lc.label}' has "
+                f"lo {lc.lo} > hi {lc.hi}"
+            )
+        # coef·w is non-negative whenever coef >= 0 and w >= 0, so a negative
+        # upper bound can never be met — structurally infeasible.
+        if lc.hi is not None and lc.hi < -1e-12 and (coef >= 0).all():
+            raise OptimizerError(
+                f"infeasible constraints: linear constraint '{lc.label}' has "
+                f"hi {lc.hi} < 0 but coef·w >= 0 under long-only weights"
+            )
+        parsed.append((coef, lc.lo, lc.hi, lc.label))
+    return parsed
+
+
+def _linear_constraints(
+    w: cp.Variable,
+    linear: list[LinearConstraint] | None,
+    denom: cp.Expression | None = None,
+) -> list[cp.Constraint]:
+    """Build cvxpy rows for ``LinearConstraint`` (validated, fail-loud).
+
+    With ``denom is None`` the bounds are absolute (``coef·w`` direct — the
+    standard normalized weight space). With a ``denom`` expression the bounds are
+    scaled by it: ``coef·w <= hi·denom`` / ``>= lo·denom`` — used by the ERC and
+    max-diversification solvers, whose variable ``y`` lives in an un-normalized
+    space where ``w = y/denom`` and ``denom = Σy``.
+    """
+    n = int(w.shape[0])
+    cons: list[cp.Constraint] = []
+    for coef, lo, hi, _label in _validate_linear(n, linear):
+        expr = coef @ w
+        hi_bound = hi if denom is None else (hi * denom if hi is not None else None)
+        lo_bound = lo if denom is None else (lo * denom if lo is not None else None)
+        if hi is not None:
+            cons.append(expr <= hi_bound)
+        if lo is not None:
+            cons.append(expr >= lo_bound)
+    return cons
 
 
 @dataclass(frozen=True)
@@ -287,24 +396,96 @@ def _check_bound_vectors(
     return cap_arr, min_arr
 
 
+def _validate_blocks(
+    n: int, blocks: list[BlockBudget] | None, cap_arr: np.ndarray | None
+) -> None:
+    """Fail-loud pre-solve validation of ``BlockBudget`` inputs (no rows built).
+
+    Checks (raised as ``OptimizerError`` so they never reach the solver as a
+    silent ``infeasible`` status):
+    - an empty block index list ("empty");
+    - duplicate indices within a block;
+    - an out-of-range index;
+    - a block floor exceeds the max attainable group sum under the caps
+      (``cap_arr``, when given) ("block floor" — singular);
+    - the sum of block floors exceeds 1 ("block floors" — plural).
+    """
+    if not blocks:
+        return
+    for b in blocks:
+        if not b.indices:
+            raise OptimizerError("block budget has an empty index list")
+        if len(set(b.indices)) != len(b.indices):
+            raise OptimizerError(
+                "block budget has duplicate indices — each asset must appear at most once"
+            )
+        for idx in b.indices:
+            if not 0 <= idx < n:
+                raise OptimizerError(f"block index {idx} out of range (n={n})")
+        if not (0.0 <= b.lo <= b.hi <= 1.0):
+            raise OptimizerError(
+                f"block budget bounds must satisfy 0 <= lo <= hi <= 1, got "
+                f"[{b.lo}, {b.hi}]"
+            )
+        if b.lo > 0:
+            if cap_arr is not None:
+                max_attainable = float(min(cap_arr[b.indices].sum(), 1.0))
+            else:
+                max_attainable = float(min(len(b.indices), 1.0))
+            if b.lo > max_attainable + 1e-12:
+                raise OptimizerError(
+                    f"infeasible constraints: block floor {b.lo} exceeds the maximum "
+                    f"attainable sum {max_attainable} of its {len(b.indices)} assets under "
+                    "their caps — lower the floor or raise the caps"
+                )
+    if sum(b.lo for b in blocks) > 1 + 1e-12:
+        raise OptimizerError(
+            f"infeasible constraints: block floors sum to {sum(b.lo for b in blocks)} > 1 — "
+            "sum(w)=1 cannot satisfy all minimums"
+        )
+
+
+def _block_constraints(
+    w: cp.Variable,
+    blocks: list[BlockBudget] | None,
+    cap_arr: np.ndarray | None,
+    denom: cp.Expression | None = None,
+) -> list[cp.Constraint]:
+    """Build (validated) cvxpy rows for ``BlockBudget``: ``lo <= Σ_block wᵢ <= hi``.
+
+    With ``denom is None`` the bounds are absolute (normalized weight space).
+    With a ``denom`` expression the bounds scale by it (``Σ_block y <= hi·denom``)
+    — the ERC / max-diversification un-normalized space where ``w = y/denom``.
+    """
+    if not blocks:
+        return []
+    n = int(w.shape[0])
+    _validate_blocks(n, blocks, cap_arr)
+    cons: list[cp.Constraint] = []
+    for b in blocks:
+        group_sum = cp.sum(w[b.indices])
+        if denom is None:
+            cons.append(group_sum >= b.lo)
+            cons.append(group_sum <= b.hi)
+        else:
+            cons.append(group_sum >= b.lo * denom)
+            cons.append(group_sum <= b.hi * denom)
+    return cons
+
+
 def bounds_constraints(
     w: cp.Variable,
     cap_vec: np.ndarray | None,
     min_vec: np.ndarray | None,
     blocks: list[BlockBudget] | None,
+    linear: list[LinearConstraint] | None = None,
 ) -> list[cp.Constraint]:
-    """Long-only + sum=1 + per-asset bound vectors + block budgets.
+    """Long-only + sum=1 + per-asset bound vectors + block budgets + linear.
 
     Always enforces ``w >= 0`` and ``cp.sum(w) == 1`` (the universal contract).
     Per-asset bounds (when given) replace the scalar cap/min. Block budgets add
-    ``lo <= Σ_{i in block} wᵢ <= hi`` per group.
-
-    Fail-loud pre-solve infeasibility checks (raised as ``OptimizerError`` so
-    they never reach the solver as a silent ``infeasible`` status):
-    - an empty block index list ("empty");
-    - a block floor exceeds the max attainable group sum under the caps
-      ("block floor" — singular);
-    - the sum of block floors exceeds 1 ("block floors" — plural).
+    ``lo <= Σ_{i in block} wᵢ <= hi`` per group. Generic ``linear`` constraints
+    add ``lo <= coef·w <= hi`` (default ``None`` — current behavior unchanged).
     """
     n = int(w.shape[0])
     cap_arr, min_arr = _check_bound_vectors(n, cap_vec, min_vec)
@@ -313,42 +494,50 @@ def bounds_constraints(
         cons.append(w <= cap_arr)
     if min_arr is not None:
         cons.append(w >= min_arr)
+    cons.extend(_block_constraints(w, blocks, cap_arr))
+    cons.extend(_linear_constraints(w, linear))
+    return cons
+
+
+def _verify_blocks_and_linear(
+    weights: np.ndarray,
+    blocks: list[BlockBudget] | None,
+    linear: list[LinearConstraint] | None,
+    label: str,
+) -> None:
+    """Post-solve check that realized weights honor block / linear budgets.
+
+    Used by the closed-form ``solve_equal_weight`` (which cannot re-shape its
+    allocation to satisfy a budget) to fail loud rather than return a vector that
+    silently breaches a requested constraint. A small 1e-6 tolerance mirrors the
+    solver-side verification.
+    """
+    w = np.asarray(weights, dtype=float).ravel()
     if blocks:
         for b in blocks:
-            if not b.indices:
-                raise OptimizerError("block budget has an empty index list")
-            if len(set(b.indices)) != len(b.indices):
+            s = float(w[b.indices].sum())
+            if s > b.hi + 1e-6 or s < b.lo - 1e-6:
                 raise OptimizerError(
-                    "block budget has duplicate indices — each asset must appear at most once"
-                )
-            for idx in b.indices:
-                if not 0 <= idx < n:
-                    raise OptimizerError(f"block index {idx} out of range (n={n})")
-            if not (0.0 <= b.lo <= b.hi <= 1.0):
-                raise OptimizerError(
-                    f"block budget bounds must satisfy 0 <= lo <= hi <= 1, got "
+                    f"{label}: block budget {b.indices} sum {s} outside "
                     f"[{b.lo}, {b.hi}]"
                 )
-            if b.lo > 0:
-                if cap_arr is not None:
-                    max_attainable = float(min(cap_arr[b.indices].sum(), 1.0))
-                else:
-                    max_attainable = float(min(len(b.indices), 1.0))
-                if b.lo > max_attainable + 1e-12:
-                    raise OptimizerError(
-                        f"infeasible constraints: block floor {b.lo} exceeds the maximum "
-                        f"attainable sum {max_attainable} of its {len(b.indices)} assets under "
-                        "their caps — lower the floor or raise the caps"
-                    )
-            group_sum = cp.sum(w[b.indices])
-            cons.append(group_sum >= b.lo)
-            cons.append(group_sum <= b.hi)
-        if sum(b.lo for b in blocks) > 1 + 1e-12:
-            raise OptimizerError(
-                f"infeasible constraints: block floors sum to {sum(b.lo for b in blocks)} > 1 — "
-                "sum(w)=1 cannot satisfy all minimums"
-            )
-    return cons
+    if linear:
+        for lc in linear:
+            coef = np.asarray(lc.coef, dtype=float).ravel()
+            if coef.shape != w.shape:
+                raise OptimizerError(
+                    f"{label}: linear constraint '{lc.label}' coef has shape "
+                    f"{coef.shape}, expected {w.shape}"
+                )
+            val = float(coef @ w)
+            if lc.hi is not None and val > lc.hi + 1e-6:
+                raise OptimizerError(
+                    f"{label}: linear constraint '{lc.label}' value {val} > hi {lc.hi}"
+                )
+            if lc.lo is not None and val < lc.lo - 1e-6:
+                raise OptimizerError(
+                    f"{label}: linear constraint '{lc.label}' value {val} < lo {lc.lo}"
+                )
 
 
 def _verify_constraints(
@@ -496,14 +685,23 @@ def solve_equal_weight(
     n_assets: int,
     cap: float | None = DEFAULT_CAP,
     min_weight: float | None = None,
+    blocks: list[BlockBudget] | None = None,
+    linear: list[LinearConstraint] | None = None,
 ) -> tuple[np.ndarray, str]:
-    """1/n weights (closed form). Constraints still validated for feasibility."""
+    """1/n weights (closed form). Constraints still validated for feasibility.
+
+    ``blocks`` / ``linear`` are accepted for interface symmetry. Equal weight is
+    a fixed allocation, so they cannot reshape it — instead they are verified
+    against the realized 1/n vector and a violation fails loud (rather than
+    silently returning weights that breach the requested budgets).
+    """
     _check_constraint_params(n_assets, cap, min_weight)
     w = np.full(n_assets, 1.0 / n_assets)
     if cap is not None and w[0] > cap + 1e-12:  # pragma: no cover - caught above
         raise OptimizerError(f"equal_weight: 1/{n_assets} exceeds cap {cap}")
     if min_weight is not None and w[0] < min_weight - 1e-12:
         raise OptimizerError(f"equal_weight: 1/{n_assets} below min_weight {min_weight}")
+    _verify_blocks_and_linear(w, blocks, linear, "equal_weight")
     return w, "optimal"
 
 
@@ -511,6 +709,8 @@ def solve_min_vol(
     sigma: np.ndarray,
     cap: float | None = DEFAULT_CAP,
     min_weight: float | None = None,
+    blocks: list[BlockBudget] | None = None,
+    linear: list[LinearConstraint] | None = None,
 ) -> tuple[np.ndarray, str]:
     """Minimum-variance portfolio: min wᵀΣw."""
     sigma = _validate_sigma(sigma, "min_vol")
@@ -519,7 +719,7 @@ def solve_min_vol(
     w = cp.Variable(n)
     problem = cp.Problem(
         cp.Minimize(cp.quad_form(w, cp.psd_wrap(sigma))),
-        base_constraints(w, cap, min_weight),
+        base_constraints(w, cap, min_weight, blocks=blocks, linear=linear),
     )
     return _finalize(problem, w, "min_vol", cap=cap, min_weight=min_weight)
 
@@ -528,6 +728,8 @@ def solve_erc(
     sigma: np.ndarray,
     cap: float | None = DEFAULT_CAP,
     min_weight: float | None = None,
+    blocks: list[BlockBudget] | None = None,
+    linear: list[LinearConstraint] | None = None,
 ) -> tuple[np.ndarray, str]:
     """Equal Risk Contribution via Spinu's convex formulation.
 
@@ -537,18 +739,22 @@ def solve_erc(
     portfolio. Cap / min-weight are imposed as the LINEAR constraints
     yᵢ ≤ cap·Σy and yᵢ ≥ min_weight·Σy (equivalent to wᵢ ≤ cap, wᵢ ≥ min after
     normalization), preserving convexity; when a cap binds, the result is the
-    natural constrained risk-parity projection.
+    natural constrained risk-parity projection. Block budgets and generic linear
+    constraints enter the same way, scaled by ``Σy`` (since ``w = y/Σy``).
     """
     sigma = _validate_sigma(sigma, "erc")
     n = sigma.shape[0]
     _check_constraint_params(n, cap, min_weight)
     y = cp.Variable(n, pos=True)
     objective = cp.Minimize(0.5 * cp.quad_form(y, cp.psd_wrap(sigma)) - cp.sum(cp.log(y)) / n)
+    denom = cp.sum(y)
     cons: list[cp.Constraint] = []
     if cap is not None:
-        cons.append(y <= cap * cp.sum(y))
+        cons.append(y <= cap * denom)
     if min_weight is not None and min_weight > 0:
-        cons.append(y >= min_weight * cp.sum(y))
+        cons.append(y >= min_weight * denom)
+    cons.extend(_block_constraints(y, blocks, cap_arr=None, denom=denom))
+    cons.extend(_linear_constraints(y, linear, denom=denom))
     problem = cp.Problem(objective, cons)
     try:
         problem.solve()
@@ -568,12 +774,15 @@ def solve_max_diversification(
     sigma: np.ndarray,
     cap: float | None = DEFAULT_CAP,
     min_weight: float | None = None,
+    blocks: list[BlockBudget] | None = None,
+    linear: list[LinearConstraint] | None = None,
 ) -> tuple[np.ndarray, str]:
     """Most-diversified portfolio: max (wᵀσ)/√(wᵀΣw) (Choueifaty–Coignard).
 
     Convex transform: min yᵀΣy s.t. σᵀy = 1, y ≥ 0, then w = y/Σy.
     Cap / min-weight enter as the linear constraints yᵢ ≤ cap·Σy,
-    yᵢ ≥ min_weight·Σy (exact in the normalized space).
+    yᵢ ≥ min_weight·Σy (exact in the normalized space). Block budgets and generic
+    linear constraints enter the same way, scaled by ``Σy`` (since ``w = y/Σy``).
     """
     sigma = _validate_sigma(sigma, "max_diversification")
     n = sigma.shape[0]
@@ -582,11 +791,14 @@ def solve_max_diversification(
     if (vols <= 0).any():
         raise OptimizerError("max_diversification: an asset has zero variance")
     y = cp.Variable(n)
+    denom = cp.sum(y)
     cons: list[cp.Constraint] = [y >= 0, vols @ y == 1]
     if cap is not None:
-        cons.append(y <= cap * cp.sum(y))
+        cons.append(y <= cap * denom)
     if min_weight is not None and min_weight > 0:
-        cons.append(y >= min_weight * cp.sum(y))
+        cons.append(y >= min_weight * denom)
+    cons.extend(_block_constraints(y, blocks, cap_arr=None, denom=denom))
+    cons.extend(_linear_constraints(y, linear, denom=denom))
     problem = cp.Problem(cp.Minimize(cp.quad_form(y, cp.psd_wrap(sigma))), cons)
     try:
         problem.solve()
@@ -616,6 +828,8 @@ def solve_min_cvar(
     ret_floor: float | None = None,
     mu: np.ndarray | None = None,
     cvar_limit: float | None = None,
+    blocks: list[BlockBudget] | None = None,
+    linear: list[LinearConstraint] | None = None,
 ) -> tuple[np.ndarray, str]:
     """Min-CVaR (Rockafellar–Uryasev) on historical daily scenarios (T×n).
 
@@ -665,10 +879,13 @@ def solve_min_cvar(
     losses = -scenarios @ w  # per-scenario loss
     cvar = z + cp.sum(cp.pos(losses - z)) / ((1 - alpha) * t)
     if bounds is not None:
-        cons = bounds_constraints(w, bounds.cap_vec, bounds.min_vec, bounds.blocks)
+        merged_blocks = (bounds.blocks or []) + (blocks or []) or None
+        cons = bounds_constraints(
+            w, bounds.cap_vec, bounds.min_vec, merged_blocks, linear=linear
+        )
     else:
         _check_constraint_params(n, cap, min_weight)
-        cons = base_constraints(w, cap, min_weight)
+        cons = base_constraints(w, cap, min_weight, blocks=blocks, linear=linear)
     if ret_floor is not None and mu is not None:
         mu_arr = np.asarray(mu, dtype=float).ravel()
         if mu_arr.shape != (n,):
@@ -768,6 +985,8 @@ def solve_max_return_cvar_capped(
     min_weight: float | None = None,
     bounds: BoundsBundle | None = None,
     cvar_tol: float = 1e-4,
+    blocks: list[BlockBudget] | None = None,
+    linear: list[LinearConstraint] | None = None,
 ) -> tuple[np.ndarray, str]:
     """Max-return s.t. CVaR_α(w) ≤ ``cvar_limit`` (Rockafellar-Uryasev cap).
 
@@ -813,10 +1032,13 @@ def solve_max_return_cvar_capped(
     losses = -scenarios @ w
     cvar_expr = z + cp.sum(cp.pos(losses - z)) / ((1 - alpha) * t)
     if bounds is not None:
-        cons = bounds_constraints(w, bounds.cap_vec, bounds.min_vec, bounds.blocks)
+        merged_blocks = (bounds.blocks or []) + (blocks or []) or None
+        cons = bounds_constraints(
+            w, bounds.cap_vec, bounds.min_vec, merged_blocks, linear=linear
+        )
     else:
         _check_constraint_params(n, cap, min_weight)
-        cons = base_constraints(w, cap, min_weight)
+        cons = base_constraints(w, cap, min_weight, blocks=blocks, linear=linear)
     cons.append(cvar_expr <= cvar_limit)
     problem = cp.Problem(cp.Maximize(mu_arr @ w), cons)
     weights, status = _solve_with_ladder(problem, w, "max_return_cvar")

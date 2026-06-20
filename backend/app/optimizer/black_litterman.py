@@ -21,6 +21,8 @@ import numpy as np
 
 from app.optimizer.engine import (
     TRADING_DAYS,
+    BlockBudget,
+    LinearConstraint,
     OptimizerError,
     _check_constraint_params,
     _finalize,
@@ -380,13 +382,16 @@ def solve_bl_utility(
     delta: float = DEFAULT_DELTA,
     cap: float | None = None,
     min_weight: float | None = None,
+    blocks: list[BlockBudget] | None = None,
+    linear: list[LinearConstraint] | None = None,
 ) -> tuple[np.ndarray, str]:
     """Max-utility weights: max μᵀw − (δ/2)·wᵀΣw, long-only, sum=1.
 
     Lives here (not in ``engine``) because it is the one objective that
     consumes expected returns — by contract μ is the BL posterior (or π for
     the zero-views sanity case, where the unconstrained optimum recovers
-    w_mkt exactly).
+    w_mkt exactly). Block budgets and generic linear constraints flow through
+    the shared ``base_constraints`` path (default ``None`` — unchanged).
     """
     sigma_ann = _validate_sigma(sigma_ann, "bl_utility")
     mu_arr = np.asarray(mu_ann, dtype=float).ravel()
@@ -398,7 +403,9 @@ def solve_bl_utility(
     _check_constraint_params(n, cap, min_weight)
     w = cp.Variable(n)
     objective = cp.Maximize(mu_arr @ w - (delta / 2.0) * cp.quad_form(w, cp.psd_wrap(sigma_ann)))
-    problem = cp.Problem(objective, base_constraints(w, cap, min_weight))
+    problem = cp.Problem(
+        objective, base_constraints(w, cap, min_weight, blocks=blocks, linear=linear)
+    )
     return _finalize(problem, w, "bl_utility")
 
 
@@ -435,6 +442,8 @@ def solve_bl_robust(
     min_weight: float | None = None,
     confidence: float = 0.95,
     uncertainty_level: float | None = None,
+    blocks: list[BlockBudget] | None = None,
+    linear: list[LinearConstraint] | None = None,
 ) -> tuple[np.ndarray, str]:
     """Robust max-return under ellipsoidal μ-uncertainty (SOCP).
 
@@ -463,7 +472,9 @@ def solve_bl_robust(
     kappa = _kappa_from_chi2(confidence, n, uncertainty_level)
     w = cp.Variable(n)
     objective = cp.Maximize(mu_arr @ w - kappa * cp.norm(chol.T @ w, 2))
-    problem = cp.Problem(objective, base_constraints(w, cap, min_weight))
+    problem = cp.Problem(
+        objective, base_constraints(w, cap, min_weight, blocks=blocks, linear=linear)
+    )
     return _finalize(problem, w, "bl_robust", cap=cap, min_weight=min_weight)
 
 

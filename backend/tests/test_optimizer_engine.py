@@ -463,3 +463,124 @@ def test_max_return_cvar_argmax_invariant_to_mu_scale() -> None:
     )
     assert s1 == "optimal" and s2 == "optimal"
     assert np.allclose(w1, w2, atol=1e-4)
+
+
+# ── Sprint B Task 1: generic LinearConstraint honored by all objectives ──────
+
+
+def test_linear_constraint_min_vol_hi_binds() -> None:
+    """solve_min_vol honors LinearConstraint(coef=[1,1,0], hi=0.5): w0+w1 ≤ 0.5."""
+    # Without the constraint the two low-vol assets would dominate.
+    sigma = np.diag([0.05**2, 0.05**2, 0.30**2])
+    lc = engine.LinearConstraint(
+        coef=np.array([1.0, 1.0, 0.0]), lo=None, hi=0.5, label="overlap"
+    )
+    weights, status = engine.solve_min_vol(sigma, cap=None, linear=[lc])
+    _assert_valid(weights, status)
+    assert weights[0] + weights[1] <= 0.5 + 1e-6
+
+
+def test_linear_constraint_min_vol_lo_binds() -> None:
+    """A lower-bound LinearConstraint forces a minimum group sum."""
+    sigma = np.diag([0.05**2, 0.05**2, 0.30**2])
+    lc = engine.LinearConstraint(
+        coef=np.array([0.0, 0.0, 1.0]), lo=0.4, hi=None, label="floor_high_vol"
+    )
+    weights, status = engine.solve_min_vol(sigma, cap=None, linear=[lc])
+    _assert_valid(weights, status)
+    assert weights[2] >= 0.4 - 1e-6
+
+
+def test_linear_constraint_bl_utility_respected() -> None:
+    """solve_bl_utility honors the same LinearConstraint."""
+    from app.optimizer.black_litterman import solve_bl_utility
+
+    mu = np.array([0.10, 0.10, 0.02])
+    sigma = np.diag([0.05**2, 0.05**2, 0.30**2])
+    lc = engine.LinearConstraint(
+        coef=np.array([1.0, 1.0, 0.0]), lo=None, hi=0.5, label="overlap"
+    )
+    weights, status = solve_bl_utility(mu, sigma, cap=None, linear=[lc])
+    _assert_valid(weights, status)
+    assert weights[0] + weights[1] <= 0.5 + 1e-6
+
+
+def test_block_budget_now_respected_by_solve_erc() -> None:
+    """A BlockBudget is now honored by solve_erc (was not before this task)."""
+    sigma = np.diag([0.05**2, 0.05**2, 0.20**2, 0.20**2])
+    blocks = [engine.BlockBudget(indices=[0, 1], lo=0.0, hi=0.30)]
+    weights, status = engine.solve_erc(sigma, cap=None, blocks=blocks)
+    _assert_valid(weights, status)
+    assert weights[0] + weights[1] <= 0.30 + 1e-6
+
+
+def test_block_budget_now_respected_by_solve_max_diversification() -> None:
+    sigma = np.diag([0.04, 0.04, 0.09, 0.09])
+    blocks = [engine.BlockBudget(indices=[0, 1], lo=0.0, hi=0.25)]
+    weights, status = engine.solve_max_diversification(sigma, cap=None, blocks=blocks)
+    _assert_valid(weights, status)
+    assert weights[0] + weights[1] <= 0.25 + 1e-6
+
+
+def test_linear_constraint_infeasible_hi_fails_loud() -> None:
+    """LinearConstraint with an obviously infeasible hi (< 0 for a non-negative
+    coef·w) raises OptimizerError pre-solve."""
+    sigma = np.diag([0.04, 0.09, 0.16])
+    lc = engine.LinearConstraint(
+        coef=np.array([1.0, 1.0, 1.0]), lo=None, hi=-1.0, label="bad"
+    )
+    with pytest.raises(engine.OptimizerError, match="infeasible"):
+        engine.solve_min_vol(sigma, cap=None, linear=[lc])
+
+
+def test_linear_constraint_lo_above_hi_fails_loud() -> None:
+    sigma = np.diag([0.04, 0.09, 0.16])
+    lc = engine.LinearConstraint(
+        coef=np.array([1.0, 0.0, 0.0]), lo=0.6, hi=0.3, label="inverted"
+    )
+    with pytest.raises(engine.OptimizerError, match="lo .* hi|infeasible"):
+        engine.solve_min_vol(sigma, cap=None, linear=[lc])
+
+
+def test_linear_constraint_coef_shape_checked() -> None:
+    sigma = np.diag([0.04, 0.09, 0.16])
+    lc = engine.LinearConstraint(
+        coef=np.array([1.0, 1.0]), lo=None, hi=0.5, label="wrongshape"
+    )
+    with pytest.raises(engine.OptimizerError, match="shape|coef"):
+        engine.solve_min_vol(sigma, cap=None, linear=[lc])
+
+
+def test_block_budget_and_linear_compose_in_min_cvar() -> None:
+    """Backward-compat + composition: min_cvar accepts blocks/linear kwargs."""
+    scenarios = _random_scenarios(t=500, n=4)
+    blocks = [engine.BlockBudget(indices=[0, 1], lo=0.0, hi=0.40)]
+    lc = engine.LinearConstraint(
+        coef=np.array([1.0, 0.0, 1.0, 0.0]), lo=None, hi=0.5, label="overlap"
+    )
+    weights, status = engine.solve_min_cvar(
+        scenarios, cap=None, blocks=blocks, linear=[lc]
+    )
+    _assert_valid(weights, status)
+    assert weights[0] + weights[1] <= 0.40 + 1e-6
+    assert weights[0] + weights[2] <= 0.5 + 1e-6
+
+
+def test_solvers_accept_blocks_and_linear_default_none() -> None:
+    """Signature back-compat: every solver gained blocks/linear defaulting None."""
+    from app.optimizer.black_litterman import solve_bl_utility
+
+    for func in (
+        engine.solve_min_vol,
+        engine.solve_erc,
+        engine.solve_max_diversification,
+        engine.solve_min_cvar,
+        engine.solve_max_return_cvar_capped,
+        engine.solve_equal_weight,
+        solve_bl_utility,
+    ):
+        params = inspect.signature(func).parameters
+        assert "linear" in params, f"{func.__name__} must accept linear"
+        assert params["linear"].default is None
+        assert "blocks" in params, f"{func.__name__} must accept blocks"
+        assert params["blocks"].default is None
