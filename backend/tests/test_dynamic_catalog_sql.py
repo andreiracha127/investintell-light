@@ -65,6 +65,8 @@ def test_fund_benchmark_candidates_sql_uses_all_resolution_paths() -> None:
     sql = BENCHMARK_DDL_PATH.read_text(encoding="utf-8")
 
     assert "CREATE OR REPLACE VIEW fund_benchmark_candidates_v" in sql
+    assert "CREATE TABLE IF NOT EXISTS sec_nport_fund_var_info" in sql
+    assert "'nport_designated_index'::text" in sql
     assert "'direct_series'::text" in sql
     assert "'class_name_exact'::text" in sql
     assert "'universe_name_exact'::text" in sql
@@ -74,13 +76,26 @@ def test_fund_benchmark_candidates_sql_uses_all_resolution_paths() -> None:
     assert "benchmark_proxy_instrument_id" in sql
     assert "proxy_instruments" in sql
     assert "max(coalesce(proxy_instrument_count, 0))" in sql
+    assert "fund_strategy_benchmark_proxy_map" in sql
+    assert "'strategy_label_proxy'::text" in sql
 
 
 def test_fund_benchmark_candidates_sql_marks_proxy_conflicts() -> None:
     sql = BENCHMARK_DDL_PATH.read_text(encoding="utf-8")
 
     assert "count(DISTINCT proxy_etf_ticker)" in sql
-    assert "CASE WHEN proxy_count = 1 THEN proxy_etf_ticker END" in sql
-    assert "CASE WHEN proxy_count = 1 AND proxy_instrument_count = 1" in sql
-    assert "(benchmark_name_count > 1 OR proxy_count > 1)" in sql
+    assert "CASE WHEN d.proxy_count = 1 THEN d.proxy_etf_ticker END" in sql
+    assert "WHEN d.proxy_count = 1 AND d.proxy_instrument_count = 1" in sql
+    assert "(d.benchmark_name_count > 1 OR d.proxy_count > 1)" in sql
+    assert "d.benchmark_resolution_method || '_strategy_proxy'" in sql
+    assert "unmapped_declared:" in sql
     assert "benchmark_proxy_candidates" in sql
+
+
+def test_fund_benchmark_candidates_sql_preserves_declared_composite_proxy() -> None:
+    sql = BENCHMARK_DDL_PATH.read_text(encoding="utf-8")
+
+    assert "60%/40% S&P 500 Index/Bloomberg U.S. Aggregate Index" in sql
+    assert "60SPX40LBUSTRUU" in sql
+    assert "'AOR'::text AS proxy_etf_ticker" in sql
+    assert "coalesce(d.benchmark_name, s.benchmark_name) AS benchmark_name" in sql
