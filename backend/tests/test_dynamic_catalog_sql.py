@@ -24,6 +24,12 @@ REAL_ASSET_OVERRIDES_DDL_PATH = (
     / "ddl"
     / "2026-06-21_real_asset_strategy_overrides.sql"
 )
+TECHNOLOGY_OVERRIDES_DDL_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "db"
+    / "ddl"
+    / "2026-06-21_technology_strategy_overrides.sql"
+)
 
 
 def test_stage_labels_sql_prefers_manual_overrides() -> None:
@@ -64,6 +70,7 @@ def test_dynamic_catalog_knows_alternative_sublabels() -> None:
     assert "THEN 'Inverse / Hedge'" in sql
     assert "natural resources" in sql
     assert "THEN 'Sector Equity'" in sql
+    assert "THEN 'Technology'" in sql
 
 
 def test_alternative_override_migration_captures_reviewed_buckets() -> None:
@@ -105,6 +112,24 @@ def test_real_asset_override_migration_recovers_contaminated_labels() -> None:
     assert "THEN 'Sector Equity'" in sql
     assert "THEN 'Alternative'" in sql
     assert "THEN 'Large Blend'" in sql
+    assert "public.asset_class_from_strategy(fv.strategy_label)" in sql
+
+
+def test_technology_override_migration_splits_tech_from_sector_equity() -> None:
+    sql = TECHNOLOGY_OVERRIDES_DDL_PATH.read_text(encoding="utf-8")
+
+    assert "'Large Blend', 'Sector Equity', 'Technology'" in sql
+    assert "technology_review_pure_technology" in sql
+    assert r"\mtech\M" in sql
+    assert "technology_review_biotech_sector_equity" in sql
+    assert "technology_review_ex_technology_large_blend" in sql
+    assert "technology_review_option_income" in sql
+    assert "technology_review_inverse_hedge" in sql
+    assert "THEN 'Technology'" in sql
+    assert "THEN 'Sector Equity'" in sql
+    assert "THEN 'Large Blend'" in sql
+    assert "THEN 'Defined Outcome / Option Income'" in sql
+    assert "THEN 'Inverse / Hedge'" in sql
     assert "public.asset_class_from_strategy(fv.strategy_label)" in sql
 
 
