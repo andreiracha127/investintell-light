@@ -59,7 +59,7 @@ from app.schemas.builder import (
     ViewIn,
     WeightOut,
 )
-from app.services import funds_catalog, lookthrough_exposure, macro_regime
+from app.services import funds_catalog, lookthrough_exposure, macro_regime, taa_bands
 
 # Test seam: when set, overrides the regime state read (bypasses the data-lake).
 _OVERRIDE_REGIME_STATE: str | None = None
@@ -281,6 +281,79 @@ async def _resolve_block_budgets(
             )
         out.append(engine.BlockBudget(indices=idxs, lo=budget.lo, hi=budget.hi))
     return out
+
+
+# COMBO band classes (the 4-class TAA table). ``multi_asset`` is intentionally
+# absent: its representatives are left UNBOUNDED by class band (decision O5).
+_COMBO_BAND_CLASSES = ("equity", "fixed_income", "alternatives", "cash")
+
+
+async def _fund_class_columns(
+    session: AsyncSession,
+    assets: list[AssetRefIn],
+    labels: list[str],
+) -> dict[str, list[int]]:
+    """Group FUND column indices by their resolved ``asset_class``.
+
+    Unlike ``_resolve_block_budgets`` (which fails loud), this is the lenient
+    mapping the COMBO regime path needs: equities (no ``asset_class`` in the
+    builder) and funds with an unknown/absent class simply contribute to no
+    group — they are left UNBOUNDED by the regime bands (decision O5). Classes
+    with no member fund are absent from the returned dict (skipped downstream).
+    """
+    index_of = {label: i for i, label in enumerate(labels)}
+    fund_ids = [ref.id for ref in assets if isinstance(ref, FundRefIn)]
+    class_by_id = await optimizer_data.load_fund_asset_class(session, fund_ids)
+    columns: dict[str, list[int]] = {}
+    for ref in assets:
+        if not isinstance(ref, FundRefIn):
+            continue  # equities carry no asset_class → unbounded (O5)
+        cls = class_by_id.get(ref.id)
+        if cls is None:
+            continue  # unknown class → unbounded (not failed; combo derives bands)
+        col = index_of.get(_ref_key(ref))
+        if col is not None:
+            columns.setdefault(cls, []).append(col)
+    return columns
+
+
+async def _resolve_regime_block_budgets(
+    session: AsyncSession,
+    datalake: AsyncSession | None,
+    assets: list[AssetRefIn],
+    labels: list[str],
+) -> tuple[list[engine.BlockBudget], str, str | None]:
+    """Derive the COMBO per-class ``BlockBudget`` envelope from the live gate.
+
+    Reads the worker-materialized gate snapshot (state + growth/inflation
+    quadrant — decision A; the quadrant is READ, never computed in the backend),
+    resolves the combined band-state via ``taa_bands.combined_regime``, and maps
+    ``taa_bands.effective_class_bands`` onto engine column groups for each band
+    class PRESENT in the universe. ``multi_asset`` and absent classes are skipped
+    (O5). The ``STAG_GOLD`` haven sentinel (SLOWDOWN) returns NO class blocks —
+    the dispatch (Task 3) routes the goldfix target instead.
+
+    Returns ``(regime_blocks, combined_regime_label, quadrant_or_none)``.
+    """
+    gate = await taa_bands.fetch_gate_regime(datalake) if datalake is not None else None
+    # The combo gate state honours the same test seam as the CVaR-scaling read,
+    # so a forced state drives the bands deterministically in tests.
+    gate_state = _OVERRIDE_REGIME_STATE or (gate.state if gate else None)
+    quadrant = gate.quadrant if gate else None
+    regime = taa_bands.combined_regime(gate_state, quadrant)
+    if regime == "STAG_GOLD":
+        # Goldfix haven bypasses class bands (Task 3 routes the fixed target).
+        return [], regime, quadrant
+    bands, _smoothed = taa_bands.effective_class_bands(regime)
+    columns = await _fund_class_columns(session, assets, labels)
+    blocks: list[engine.BlockBudget] = []
+    for cls in _COMBO_BAND_CLASSES:
+        idxs = columns.get(cls)
+        if not idxs:
+            continue  # class absent from the universe → no block
+        lo, hi = bands[cls]
+        blocks.append(engine.BlockBudget(indices=idxs, lo=lo, hi=hi))
+    return blocks, regime, quadrant
 
 
 def _filters_from_spec(spec: UniverseSpecIn) -> funds_catalog.FundFilters:
