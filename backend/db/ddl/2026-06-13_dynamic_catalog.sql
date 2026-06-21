@@ -173,6 +173,112 @@ LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $fn$
   END::varchar;
 $fn$;
 
+-- High-confidence ETF identity overrides. Some upstream ETF rows carry a
+-- contaminated strategy_label (notably iShares/MSCI equity ETFs classified as
+-- Government Bond). When SEC/N-CEN metadata is missing or wrong, the ETF name,
+-- ticker, and tracked index are safer for broad strategy/asset-class routing.
+CREATE OR REPLACE FUNCTION public.etf_strategy_label_from_identity(
+    ticker text,
+    fund_name text,
+    benchmark_name text DEFAULT NULL
+)
+RETURNS text
+LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $fn$
+WITH normalized AS (
+    SELECT
+        upper(coalesce(ticker, '')) AS ticker_code,
+        regexp_replace(
+            lower(
+                coalesce(fund_name, '') || ' ' ||
+                coalesce(benchmark_name, '') || ' ' ||
+                coalesce(ticker, '')
+            ),
+            '[^a-z0-9]+',
+            ' ',
+            'g'
+        ) AS text_blob
+)
+SELECT CASE
+    WHEN text_blob ~ '\m(treasury|bond|fixed income|aggregate bond|municipal|corporate|high yield|credit|senior loan|floating rate|mortgage|mbs|abs|clo|securitized|duration|inflation protected|tips|preferred securities|core plus|ultra short|short term)\M'
+        THEN NULL
+    WHEN text_blob ~ '\m(buffer|defined outcome|option strategy|managed futures|merger arbitrage|alternative)\M'
+        THEN 'Alternative'
+    WHEN text_blob ~ '\m(real estate|reit)\M'
+        THEN 'Real Estate'
+    WHEN text_blob ~ '\m(gold|silver|metals|mining)\M'
+        THEN 'Precious Metals'
+    WHEN text_blob ~ '\m(commodity|commodities|agriculture|natural resources)\M'
+        THEN 'Commodities'
+    WHEN ticker_code = 'QQQ'
+      OR text_blob LIKE '%nasdaq 100%'
+      OR text_blob LIKE '%nasdaq100%'
+        THEN 'Large Growth'
+    WHEN text_blob LIKE '%russell 2000 growth%'
+        THEN 'Small Growth'
+    WHEN text_blob LIKE '%russell 2000 value%'
+        THEN 'Small Value'
+    WHEN ticker_code = 'IWM'
+      OR text_blob LIKE '%russell 2000%'
+        THEN 'Small Blend'
+    WHEN text_blob LIKE '%russell midcap growth%'
+      OR text_blob LIKE '%midcap growth%'
+      OR text_blob LIKE '%mid cap growth%'
+        THEN 'Mid Growth'
+    WHEN text_blob LIKE '%russell midcap value%'
+      OR text_blob LIKE '%midcap value%'
+      OR text_blob LIKE '%mid cap value%'
+        THEN 'Mid Value'
+    WHEN text_blob LIKE '%s p midcap 400%'
+      OR text_blob LIKE '%s&p midcap 400%'
+      OR text_blob LIKE '%midcap%'
+      OR text_blob LIKE '%mid cap%'
+        THEN 'Mid Blend'
+    WHEN text_blob LIKE '%small cap growth%'
+      OR text_blob LIKE '%smallcap growth%'
+        THEN 'Small Growth'
+    WHEN text_blob LIKE '%small cap value%'
+      OR text_blob LIKE '%smallcap value%'
+        THEN 'Small Value'
+    WHEN text_blob LIKE '%s p smallcap 600%'
+      OR text_blob LIKE '%s&p smallcap 600%'
+      OR text_blob LIKE '%small cap%'
+      OR text_blob LIKE '%smallcap%'
+        THEN 'Small Blend'
+    WHEN text_blob LIKE '%russell 1000 growth%'
+      OR text_blob LIKE '%s p 500 growth%'
+      OR text_blob LIKE '%s&p 500 growth%'
+        THEN 'Large Growth'
+    WHEN text_blob LIKE '%russell 1000 value%'
+      OR text_blob LIKE '%s p 500 value%'
+      OR text_blob LIKE '%s&p 500 value%'
+        THEN 'Large Value'
+    WHEN text_blob ~ '\m(msci emerging markets|emerging markets|msci em|china|india|brazil|mexico|south korea|taiwan|thailand|turkey|saudi arabia|qatar|kuwait|uae|south africa|indonesia|malaysia|philippines|poland|chile|bic)\M'
+        THEN 'Emerging Markets Equity'
+    WHEN text_blob ~ '\m(msci eafe|eafe|international|intl|world ex|acwi ex|all country asia ex japan|pacific ex japan|developed|europe|eurozone|japan|australia|canada|germany|france|spain|italy|switzerland|united kingdom|hong kong|singapore|ireland|israel|norway|new zealand|denmark|sweden|finland|netherlands|austria|belgium|kokusai)\M'
+        THEN 'International Equity'
+    WHEN text_blob LIKE '%msci acwi%'
+      OR text_blob LIKE '%total world stock%'
+      OR text_blob LIKE '%global equity%'
+        THEN 'Global Equity'
+    WHEN text_blob ~ '\m(technology|tech|cybersecurity|semiconductor|solar|energy storage|consumer focused|regional banks|bank|environmental solutions|exponential technologies|self driving|multisector tech)\M'
+        THEN 'Sector Equity'
+    WHEN text_blob LIKE '%russell 1000%'
+      OR text_blob LIKE '%russell 3000%'
+      OR text_blob LIKE '%s p 500%'
+      OR text_blob LIKE '%s&p 500%'
+      OR text_blob LIKE '%large cap%'
+      OR text_blob LIKE '%broad market%'
+      OR text_blob LIKE '%dividend equity%'
+      OR text_blob LIKE '%msci usa%'
+      OR text_blob LIKE '%msci us%'
+      OR text_blob LIKE '%us equity%'
+      OR text_blob LIKE '%u s equity%'
+        THEN 'Large Blend'
+    ELSE NULL
+END
+FROM normalized;
+$fn$;
+
 CREATE OR REPLACE VIEW funds_v AS
 WITH eligible AS (
     SELECT ii.instrument_id, ii.sec_series_id, ii.ticker, ii.isin,
@@ -185,14 +291,20 @@ WITH eligible AS (
         HAVING max(calc_date) >= DATE '2026-01-01'
     ) lr ON lr.instrument_id = ii.instrument_id
     JOIN (
-        SELECT instrument_id, min(nav_date) AS min_nav_date,
-               max(nav_date) AS max_nav_date
+        SELECT instrument_id, max(nav_date) AS max_nav_date,
+               count(*) AS n_nav
         FROM nav_timeseries
         GROUP BY instrument_id
     ) ns ON ns.instrument_id = ii.instrument_id
     WHERE ii.sec_series_id IS NOT NULL
-      AND ns.min_nav_date <= (current_date - 730)
-      AND ns.max_nav_date >= (current_date - 30)
+      -- RELAXED gate (Frente 1, 2026-06-20): established funds were being cut
+      -- for short IN-SYSTEM history (JP Morgan / T. Rowe / PIMCO etc.), starving
+      -- the optimizer's universe. Drop the ">= 2 years history" floor and widen
+      -- the recency window 30 -> 90 days; keep a small observation floor so every
+      -- catalogued fund still has a usable return series. Long-horizon metrics
+      -- (3y/5y) are simply null until the series accumulates.
+      AND ns.max_nav_date >= (current_date - 90)
+      AND ns.n_nav >= 60
 ),
 -- index_profiles_by_series: one row per series_id, preferring a labeled row.
 rf AS (
@@ -343,6 +455,20 @@ SELECT
         ELSE 'mutual_fund'
     END AS fund_type,
     COALESCE(
+        CASE
+            WHEN etf.series_id IS NOT NULL
+              OR (e.ticker IS NOT NULL AND etp.ticker IS NOT NULL)
+            THEN public.etf_strategy_label_from_identity(
+                e.ticker,
+                COALESCE(
+                    NULLIF(btrim(fc.series_name), ''),
+                    NULLIF(btrim(rf.fund_name), ''),
+                    NULLIF(btrim(etf.fund_name), ''),
+                    NULLIF(btrim(u.name), '')
+                ),
+                NULLIF(btrim(etf.index_tracked), '')
+            )
+        END,
         NULLIF(btrim(rf.strategy_label), ''),
         NULLIF(btrim(etf.strategy_label), ''),
         NULLIF(btrim(mmf.strategy_label), ''),
