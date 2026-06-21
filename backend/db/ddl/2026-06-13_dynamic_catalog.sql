@@ -141,6 +141,10 @@ LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $fn$
     WHEN 'Municipal Bond' THEN 'fixed_income'
     WHEN 'Private Credit' THEN 'fixed_income'
     WHEN 'Structured Credit' THEN 'fixed_income'
+    WHEN 'Defined Outcome / Option Income' THEN 'alternatives'
+    WHEN 'Crypto / Digital Assets' THEN 'alternatives'
+    WHEN 'Leveraged' THEN 'alternatives'
+    WHEN 'Inverse / Hedge' THEN 'alternatives'
     WHEN 'Asian Equity' THEN 'equity'
     WHEN 'Emerging Markets Equity' THEN 'equity'
     WHEN 'ESG/Sustainable Equity' THEN 'equity'
@@ -199,9 +203,24 @@ WITH normalized AS (
         ) AS text_blob
 )
 SELECT CASE
-    WHEN text_blob ~ '\m(treasury|bond|fixed income|aggregate bond|municipal|corporate|high yield|credit|senior loan|floating rate|mortgage|mbs|abs|clo|securitized|duration|inflation protected|tips|preferred securities|core plus|ultra short|short term)\M'
+    WHEN text_blob ~ '\m(ultra short|short term income|short duration|short term bond)\M'
+        THEN 'Cash Equivalent'
+    WHEN text_blob ~ '\m(treasury|bond|fixed income|aggregate bond|municipal|corporate|high yield|credit|senior loan|floating rate|mortgage|mbs|abs|clo|securitized|duration|inflation protected|tips|preferred securities|core plus)\M'
         THEN NULL
-    WHEN text_blob ~ '\m(buffer|defined outcome|option strategy|managed futures|merger arbitrage|alternative)\M'
+    WHEN text_blob ~ '\m(bitcoin|btc|ether|crypto)\M'
+        THEN 'Crypto / Digital Assets'
+    WHEN text_blob ~ '\m(1x short|bear|inverse)\M'
+      OR text_blob LIKE '%short qqq%'
+      OR text_blob LIKE '%short s p%'
+      OR text_blob LIKE '%short s&p%'
+      OR text_blob LIKE '%short 20%'
+      OR text_blob LIKE '%short innovation%'
+        THEN 'Inverse / Hedge'
+    WHEN text_blob ~ '\m(leveraged long|ultrapro|ultra|2x|3x|25x|5x|bull)\M'
+        THEN 'Leveraged'
+    WHEN text_blob ~ '\m(buffer|defined outcome|option strategy|option income|yieldmax|yieldboost|covered call|weeklypay|income strategy)\M'
+        THEN 'Defined Outcome / Option Income'
+    WHEN text_blob ~ '\m(managed futures|merger arbitrage|alternative|multi strategy|hedge|long short|market neutral)\M'
         THEN 'Alternative'
     WHEN text_blob ~ '\m(real estate|reit)\M'
         THEN 'Real Estate'
@@ -354,6 +373,15 @@ stage AS (
              classified_at DESC,
              stage_id DESC
 ),
+manual_stage AS (
+    SELECT DISTINCT ON (source_pk) source_pk::uuid AS instrument_id,
+           proposed_strategy_label AS label
+    FROM strategy_reclassification_stage
+    WHERE source_table = 'instruments_universe'
+      AND proposed_strategy_label IS NOT NULL
+      AND classification_source = 'manual_override'
+    ORDER BY source_pk, classified_at DESC, stage_id DESC
+),
 -- merge_risk_duplicates: latest calc_date per instrument; the peer-labeled
 -- variant wins ties (peer_strategy_label is the cascade's last specific label).
 peer AS (
@@ -455,6 +483,7 @@ SELECT
         ELSE 'mutual_fund'
     END AS fund_type,
     COALESCE(
+        NULLIF(btrim(manual_stage.label), ''),
         CASE
             WHEN etf.series_id IS NOT NULL
               OR (e.ticker IS NOT NULL AND etp.ticker IS NOT NULL)
@@ -520,6 +549,7 @@ LEFT JOIN etf            ON etf.series_id = e.sec_series_id
 LEFT JOIN mmf            ON mmf.series_id = e.sec_series_id
 LEFT JOIN fc             ON fc.series_id = e.sec_series_id
 LEFT JOIN stage          ON stage.instrument_id = e.instrument_id
+LEFT JOIN manual_stage   ON manual_stage.instrument_id = e.instrument_id
 LEFT JOIN peer           ON peer.instrument_id = e.instrument_id
 LEFT JOIN prospectus     ON prospectus.series_id = e.sec_series_id
 LEFT JOIN classes_aum    ON classes_aum.series_id = e.sec_series_id

@@ -70,6 +70,8 @@ INSERT INTO fund_strategy_benchmark_proxy_map (
     ('Cash Equivalent', 'BIL', 'fixed_income', 1.0000, 'strategy_label_proxy', '1-3 month T-bill ETF proxy.'),
     ('Commodities', 'GCC', 'alternatives', 0.9500, 'strategy_label_proxy', 'Broad commodity strategy ETF proxy.'),
     ('Convertible Securities', 'ICVT', 'fixed_income', 0.9500, 'strategy_label_proxy', 'Convertible bond ETF proxy.'),
+    ('Crypto / Digital Assets', 'BITO', 'alternatives', 0.9000, 'strategy_label_proxy', 'Bitcoin-linked ETF proxy for digital-asset strategy funds.'),
+    ('Defined Outcome / Option Income', 'BUFR', 'alternatives', 0.9000, 'strategy_label_proxy', 'Laddered buffer ETF proxy for defined-outcome and option-income funds.'),
     ('Emerging Markets Debt', 'EMB', 'fixed_income', 0.9800, 'strategy_label_proxy', 'USD emerging-markets bond ETF proxy.'),
     ('Emerging Markets Equity', 'IEMG', 'equity', 0.9800, 'strategy_label_proxy', 'Core emerging-markets equity ETF proxy.'),
     ('ESG/Sustainable Bond', 'VCEB', 'fixed_income', 0.9500, 'strategy_label_proxy', 'ESG corporate bond ETF proxy.'),
@@ -87,6 +89,8 @@ INSERT INTO fund_strategy_benchmark_proxy_map (
     ('Large Blend', 'IVV', 'equity', 1.0000, 'strategy_label_proxy', 'S&P 500 ETF proxy.'),
     ('Large Growth', 'QQQ', 'equity', 0.9800, 'strategy_label_proxy', 'Nasdaq-100 ETF proxy.'),
     ('Large Value', 'VOOV', 'equity', 0.9500, 'strategy_label_proxy', 'S&P 500 value ETF proxy.'),
+    ('Inverse / Hedge', 'SH', 'alternatives', 0.8500, 'strategy_label_proxy', 'Short S&P 500 ETF proxy for inverse hedge strategies; preserves negative market exposure.'),
+    ('Leveraged', 'SSO', 'alternatives', 0.8500, 'strategy_label_proxy', '2x S&P 500 ETF proxy for long leveraged equity exposure; declared benchmarks win when available.'),
     ('Long/Short Equity', 'HFND', 'equity', 0.8500, 'strategy_label_proxy', 'Multi-strategy return tracker ETF proxy.'),
     ('Mid Blend', 'SCHM', 'equity', 0.9500, 'strategy_label_proxy', 'US mid-cap ETF proxy.'),
     ('Mid Growth', 'IWP', 'equity', 0.9800, 'strategy_label_proxy', 'Russell Midcap Growth ETF proxy.'),
@@ -374,6 +378,7 @@ strategy_resolved AS (
     SELECT
         fs.series_id,
         fs.strategy_label AS benchmark_name,
+        fs.strategy_label IN ('Leveraged', 'Inverse / Hedge') AS strategy_overrides_declared,
         sm.proxy_etf_ticker,
         sm.proxy_asset_class,
         sm.fit_quality_score,
@@ -388,35 +393,48 @@ strategy_resolved AS (
 chosen AS (
     SELECT
         coalesce(d.series_id, s.series_id) AS series_id,
-        coalesce(d.benchmark_name, s.benchmark_name) AS benchmark_name,
+        coalesce(
+            CASE WHEN s.strategy_overrides_declared THEN s.benchmark_name END,
+            d.benchmark_name,
+            s.benchmark_name
+        ) AS benchmark_name,
         CASE
+            WHEN s.strategy_overrides_declared THEN s.proxy_etf_ticker
             WHEN d.proxy_count = 1 AND d.proxy_instrument_count = 1 THEN d.proxy_etf_ticker
             WHEN s.series_id IS NOT NULL THEN s.proxy_etf_ticker
             ELSE CASE WHEN d.proxy_count = 1 THEN d.proxy_etf_ticker END
         END AS benchmark_proxy_ticker,
         CASE
+            WHEN s.strategy_overrides_declared THEN s.fit_quality_score
             WHEN d.proxy_count = 1 AND d.proxy_instrument_count = 1 THEN d.fit_quality_score
             WHEN s.series_id IS NOT NULL THEN s.fit_quality_score
             ELSE CASE WHEN d.proxy_count = 1 THEN d.fit_quality_score END
         END AS benchmark_proxy_fit_quality_score,
         CASE
+            WHEN s.strategy_overrides_declared THEN s.proxy_asset_class
             WHEN d.proxy_count = 1 AND d.proxy_instrument_count = 1 THEN d.proxy_asset_class
             WHEN s.series_id IS NOT NULL THEN s.proxy_asset_class
             ELSE CASE WHEN d.proxy_count = 1 THEN d.proxy_asset_class END
         END AS benchmark_proxy_asset_class,
         CASE
+            WHEN s.strategy_overrides_declared AND d.series_id IS NOT NULL THEN d.benchmark_resolution_method || '_strategy_override'
+            WHEN s.strategy_overrides_declared THEN 'strategy_label_proxy'::text
             WHEN d.proxy_count = 1 AND d.proxy_instrument_count = 1 THEN d.benchmark_resolution_method
             WHEN d.series_id IS NOT NULL AND s.series_id IS NOT NULL THEN d.benchmark_resolution_method || '_strategy_proxy'
             WHEN s.series_id IS NOT NULL THEN 'strategy_label_proxy'::text
             ELSE d.benchmark_resolution_method
         END AS benchmark_resolution_method,
         CASE
+            WHEN s.strategy_overrides_declared THEN d.series_id IS NOT NULL
             WHEN d.proxy_count = 1 AND d.proxy_instrument_count = 1 THEN (d.benchmark_name_count > 1 OR d.proxy_count > 1)
             WHEN d.series_id IS NOT NULL AND s.series_id IS NOT NULL THEN true
             WHEN s.series_id IS NOT NULL THEN false
             ELSE (d.benchmark_name_count > 1 OR d.proxy_count > 1)
         END AS benchmark_resolution_conflict,
         CASE
+            WHEN s.strategy_overrides_declared AND d.series_id IS NOT NULL THEN
+                array_remove(coalesce(d.proxy_candidates, ARRAY[]::text[]) || ARRAY[s.proxy_etf_ticker]::text[], NULL)
+            WHEN s.strategy_overrides_declared THEN ARRAY[s.proxy_etf_ticker]::text[]
             WHEN d.proxy_count = 1 AND d.proxy_instrument_count = 1 THEN coalesce(d.proxy_candidates, ARRAY[]::text[])
             WHEN d.series_id IS NOT NULL AND s.series_id IS NOT NULL THEN
                 array_remove(coalesce(d.proxy_candidates, ARRAY[]::text[]) || ARRAY[s.proxy_etf_ticker]::text[], NULL)
@@ -424,6 +442,10 @@ chosen AS (
             ELSE coalesce(d.proxy_candidates, ARRAY[]::text[])
         END AS benchmark_proxy_candidates,
         CASE
+            WHEN s.strategy_overrides_declared AND d.series_id IS NOT NULL THEN
+                coalesce(d.canonical_name_matches, ARRAY[]::text[])
+                || ARRAY['declared_overridden:' || d.benchmark_name, 'strategy_label:' || s.benchmark_name]::text[]
+            WHEN s.strategy_overrides_declared THEN ARRAY['strategy_label:' || s.benchmark_name]::text[]
             WHEN d.proxy_count = 1 AND d.proxy_instrument_count = 1 THEN coalesce(d.canonical_name_matches, ARRAY[]::text[])
             WHEN d.series_id IS NOT NULL AND s.series_id IS NOT NULL THEN
                 coalesce(d.canonical_name_matches, ARRAY[]::text[])
@@ -432,6 +454,7 @@ chosen AS (
             ELSE coalesce(d.canonical_name_matches, ARRAY[]::text[])
         END AS benchmark_canonical_name_matches,
         CASE
+            WHEN s.strategy_overrides_declared AND s.proxy_instrument_count = 1 THEN s.proxy_instrument_id
             WHEN d.proxy_count = 1 AND d.proxy_instrument_count = 1 THEN d.proxy_instrument_id
             WHEN s.series_id IS NOT NULL AND s.proxy_instrument_count = 1 THEN s.proxy_instrument_id
             ELSE NULL::uuid

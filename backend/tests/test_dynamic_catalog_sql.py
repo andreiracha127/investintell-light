@@ -12,6 +12,12 @@ BENCHMARK_DDL_PATH = (
     / "ddl"
     / "2026-06-20_fund_benchmark_candidates.sql"
 )
+ALTERNATIVE_OVERRIDES_DDL_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "db"
+    / "ddl"
+    / "2026-06-21_alternative_strategy_overrides.sql"
+)
 
 
 def test_stage_labels_sql_prefers_manual_overrides() -> None:
@@ -25,6 +31,51 @@ def test_stage_labels_sql_prefers_manual_overrides() -> None:
 
     assert override_order in stage_sql
     assert stage_sql.index(override_order) < stage_sql.index(latest_order)
+    assert "manual_stage AS" in stage_sql
+
+
+def test_funds_v_manual_strategy_overrides_win_source_labels() -> None:
+    sql = DDL_PATH.read_text(encoding="utf-8")
+
+    strategy_expr = sql[sql.index("END AS fund_type,") : sql.index(") AS strategy_label,")]
+
+    assert "NULLIF(btrim(manual_stage.label), '')" in strategy_expr
+    assert "NULLIF(btrim(rf.strategy_label), '')" in strategy_expr
+    assert strategy_expr.index("manual_stage.label") < strategy_expr.index("rf.strategy_label")
+
+
+def test_dynamic_catalog_knows_alternative_sublabels() -> None:
+    sql = DDL_PATH.read_text(encoding="utf-8")
+
+    assert "WHEN 'Defined Outcome / Option Income' THEN 'alternatives'" in sql
+    assert "WHEN 'Crypto / Digital Assets' THEN 'alternatives'" in sql
+    assert "WHEN 'Leveraged' THEN 'alternatives'" in sql
+    assert "WHEN 'Inverse / Hedge' THEN 'alternatives'" in sql
+    assert "THEN 'Cash Equivalent'" in sql
+    assert "THEN 'Defined Outcome / Option Income'" in sql
+    assert "THEN 'Crypto / Digital Assets'" in sql
+    assert "THEN 'Leveraged'" in sql
+    assert "THEN 'Inverse / Hedge'" in sql
+
+
+def test_alternative_override_migration_captures_reviewed_buckets() -> None:
+    sql = ALTERNATIVE_OVERRIDES_DDL_PATH.read_text(encoding="utf-8")
+
+    assert "'manual_override'" in sql
+    assert "strategy_reclassification_stage" in sql
+    assert "alternative_review_cash_like_fixed_income" in sql
+    assert "alternative_review_defined_outcome_option_income" in sql
+    assert "alternative_review_crypto_digital_assets" in sql
+    assert "alternative_review_leveraged" in sql
+    assert "alternative_review_inverse_hedge" in sql
+    assert "alternative_review_cash_like_revert_broad_rule" in sql
+    assert "THEN 'Cash Equivalent'" in sql
+    assert "THEN 'Defined Outcome / Option Income'" in sql
+    assert "THEN 'Crypto / Digital Assets'" in sql
+    assert "THEN 'Leveraged'" in sql
+    assert "THEN 'Inverse / Hedge'" in sql
+    assert "'Leveraged / Inverse'" in sql
+    assert "public.asset_class_from_strategy(fv.strategy_label)" in sql
 
 
 def test_funds_v_name_prefers_series_name_for_trusts() -> None:
@@ -78,6 +129,12 @@ def test_fund_benchmark_candidates_sql_uses_all_resolution_paths() -> None:
     assert "max(coalesce(proxy_instrument_count, 0))" in sql
     assert "fund_strategy_benchmark_proxy_map" in sql
     assert "'strategy_label_proxy'::text" in sql
+    assert "'Defined Outcome / Option Income', 'BUFR'" in sql
+    assert "'Crypto / Digital Assets', 'BITO'" in sql
+    assert "'Leveraged', 'SSO'" in sql
+    assert "'Inverse / Hedge', 'SH'" in sql
+    assert "strategy_overrides_declared" in sql
+    assert "declared_overridden:" in sql
 
 
 def test_fund_benchmark_candidates_sql_marks_proxy_conflicts() -> None:
@@ -98,4 +155,5 @@ def test_fund_benchmark_candidates_sql_preserves_declared_composite_proxy() -> N
     assert "60%/40% S&P 500 Index/Bloomberg U.S. Aggregate Index" in sql
     assert "60SPX40LBUSTRUU" in sql
     assert "'AOR'::text AS proxy_etf_ticker" in sql
-    assert "coalesce(d.benchmark_name, s.benchmark_name) AS benchmark_name" in sql
+    assert "CASE WHEN s.strategy_overrides_declared THEN s.benchmark_name END" in sql
+    assert "d.benchmark_name" in sql
