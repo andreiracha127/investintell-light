@@ -18,6 +18,12 @@ ALTERNATIVE_OVERRIDES_DDL_PATH = (
     / "ddl"
     / "2026-06-21_alternative_strategy_overrides.sql"
 )
+REAL_ASSET_OVERRIDES_DDL_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "db"
+    / "ddl"
+    / "2026-06-21_real_asset_strategy_overrides.sql"
+)
 
 
 def test_stage_labels_sql_prefers_manual_overrides() -> None:
@@ -56,6 +62,8 @@ def test_dynamic_catalog_knows_alternative_sublabels() -> None:
     assert "THEN 'Crypto / Digital Assets'" in sql
     assert "THEN 'Leveraged'" in sql
     assert "THEN 'Inverse / Hedge'" in sql
+    assert "natural resources" in sql
+    assert "THEN 'Sector Equity'" in sql
 
 
 def test_alternative_override_migration_captures_reviewed_buckets() -> None:
@@ -75,6 +83,28 @@ def test_alternative_override_migration_captures_reviewed_buckets() -> None:
     assert "THEN 'Leveraged'" in sql
     assert "THEN 'Inverse / Hedge'" in sql
     assert "'Leveraged / Inverse'" in sql
+    assert "public.asset_class_from_strategy(fv.strategy_label)" in sql
+
+
+def test_real_asset_override_migration_recovers_contaminated_labels() -> None:
+    sql = REAL_ASSET_OVERRIDES_DDL_PATH.read_text(encoding="utf-8")
+
+    assert "'Balanced'" in sql
+    assert "'Commodities'" in sql
+    assert "'Precious Metals'" in sql
+    assert "'Real Estate'" in sql
+    assert "real_asset_review_target_date" in sql
+    assert "real_asset_review_sector_equity" in sql
+    assert "real_asset_review_real_estate_explicit" in sql
+    assert "real_asset_review_alternative_macro_futures" in sql
+    assert "real_asset_review_balanced_allocation" in sql
+    assert "real_asset_review_real_estate_fallback_large_blend" in sql
+    assert "real_asset_review_precious_fallback_alternative" in sql
+    assert "real_asset_review_precious_fallback_to_precious_metals" in sql
+    assert "THEN 'Target Date'" in sql
+    assert "THEN 'Sector Equity'" in sql
+    assert "THEN 'Alternative'" in sql
+    assert "THEN 'Large Blend'" in sql
     assert "public.asset_class_from_strategy(fv.strategy_label)" in sql
 
 
