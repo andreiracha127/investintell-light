@@ -1,4 +1,5 @@
-"""COMBO Sprint 3 — Tasks 2 & 3: regime BlockBudgets + the ``combo`` dispatch.
+"""Regime-Aware (research codename COMBO) — Tasks 2 & 3: regime BlockBudgets +
+the ``regime_aware`` dispatch, plus Sprint 5: the SPY-signal vol/beta overlays.
 
 These tests run the optimizer LIVE (real cvxpy solve); only the data loaders and
 the gate reader are stubbed — the same seam ``test_builder_block_budgets.py`` and
@@ -25,8 +26,8 @@ from app.schemas.builder import EquityRefIn, FundRefIn
 from app.services import portfolio_builder as pb
 from app.services import taa_bands as tb
 
-# Four funds spanning the COMBO band classes: equity / fixed_income /
-# alternatives / cash. A fifth name (a GLD equity) feeds the goldfix haven.
+# Four funds spanning the band classes: equity / fixed_income / alternatives /
+# cash. A fifth name (a GLD equity) feeds the goldfix haven.
 _FUND_IDS = [uuid.UUID(f"00000000-0000-0000-0000-00000000000{i}") for i in range(1, 5)]
 _CLASS_OF = {
     _FUND_IDS[0]: "equity",
@@ -62,7 +63,7 @@ def _async(value: Any):
 # ── Task 2: _resolve_regime_block_budgets ────────────────────────────────────
 
 
-async def test_combo_builds_riskon_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_regime_builds_riskon_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
     """Gate risk_on + no quadrant => RISK_ON bands; equity block is
     [center .52 ± hw .08*1.5] clamped by IPS => [0.40, 0.64]."""
     monkeypatch.setattr(
@@ -85,7 +86,7 @@ async def test_combo_builds_riskon_blocks(monkeypatch: pytest.MonkeyPatch) -> No
     assert abs(fi.lo - 0.21) < 1e-9 and abs(fi.hi - 0.39) < 1e-9
 
 
-async def test_combo_riskoff_gate_dominates(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_regime_riskoff_gate_dominates(monkeypatch: pytest.MonkeyPatch) -> None:
     """Gate risk_off overrides any quadrant => RISK_OFF bands (equity center
     .38 ± .12 -> [0.26, 0.50])."""
     monkeypatch.setattr(
@@ -106,7 +107,7 @@ async def test_combo_riskoff_gate_dominates(monkeypatch: pytest.MonkeyPatch) -> 
     assert abs(eq.lo - 0.26) < 1e-9 and abs(eq.hi - 0.50) < 1e-9
 
 
-async def test_combo_slowdown_returns_no_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_regime_slowdown_returns_no_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
     """SLOWDOWN routes the goldfix haven (STAG_GOLD sentinel) => no class
     blocks (Task 3 routes the haven)."""
     monkeypatch.setattr(
@@ -127,7 +128,7 @@ async def test_combo_slowdown_returns_no_blocks(monkeypatch: pytest.MonkeyPatch)
     assert quad == "slowdown"
 
 
-async def test_combo_absent_class_and_equity_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_regime_absent_class_and_equity_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
     """A class absent from the universe yields no block; equities (no
     asset_class) are left unbounded (O5) and never fail loud."""
     # Only equity + fixed_income funds present, plus a raw equity stock.
@@ -149,7 +150,7 @@ async def test_combo_absent_class_and_equity_skipped(monkeypatch: pytest.MonkeyP
     assert classes_covered == [[0], [1]]
 
 
-async def test_combo_no_gate_degrades_to_riskon(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_regime_no_gate_degrades_to_riskon(monkeypatch: pytest.MonkeyPatch) -> None:
     """No gate row (reader returns None) and no datalake => RISK_ON, no quadrant."""
     monkeypatch.setattr(
         optimizer_data,
@@ -167,14 +168,14 @@ async def test_combo_no_gate_degrades_to_riskon(monkeypatch: pytest.MonkeyPatch)
     assert len(blocks) == 4
 
 
-# ── Task 3: combo dispatch (end-to-end via the optimize route) ────────────────
+# ── Task 3: regime_aware dispatch (end-to-end via the optimize route) ─────────
 
 
 def _client() -> AsyncClient:
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
-    # The combo gate read is datalake-guarded (None datalake => no gate => RISK_ON
-    # in prod). Inject a non-None dummy so the monkeypatched ``fetch_gate_regime``
+    # The gate read is datalake-guarded (None datalake => no gate => RISK_ON in
+    # prod). Inject a non-None dummy so the monkeypatched ``fetch_gate_regime``
     # fires and drives the regime/quadrant deterministically.
     app.dependency_overrides[get_optional_datalake_session] = lambda: object()
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
@@ -216,13 +217,13 @@ def _stub_taxonomy(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(optimizer_data, "load_fund_strategy_label", fake_strategy)
 
 
-async def test_combo_respects_riskoff_equity_band(monkeypatch: pytest.MonkeyPatch) -> None:
-    """RISK_OFF equity band [0.26, 0.50] is enforced by the combo solve."""
+async def test_regime_respects_riskoff_equity_band(monkeypatch: pytest.MonkeyPatch) -> None:
+    """RISK_OFF equity band [0.26, 0.50] is enforced by the regime_aware solve."""
     _stub_returns(monkeypatch)
     monkeypatch.setattr(tb, "fetch_gate_regime", _async(_gate_snapshot(state="risk_off")))
     payload = {
         "assets": [{"kind": "fund", "id": str(fid)} for fid in _FUND_IDS],
-        "objective": "combo",
+        "objective": "regime_aware",
         "constraints": {"cap": 1.0},
     }
     async with _client() as client:
@@ -238,13 +239,13 @@ async def test_combo_respects_riskoff_equity_band(monkeypatch: pytest.MonkeyPatc
     assert body["diagnostics"]["class_bands"]["equity"] == pytest.approx([0.26, 0.50])
 
 
-async def test_combo_riskon_equity_band_is_floored(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_regime_riskon_equity_band_is_floored(monkeypatch: pytest.MonkeyPatch) -> None:
     """Control: RISK_ON raises the equity floor to 0.40 (vs risk_off 0.26)."""
     _stub_returns(monkeypatch)
     monkeypatch.setattr(tb, "fetch_gate_regime", _async(_gate_snapshot(state="risk_on")))
     payload = {
         "assets": [{"kind": "fund", "id": str(fid)} for fid in _FUND_IDS],
-        "objective": "combo",
+        "objective": "regime_aware",
         "constraints": {"cap": 1.0},
     }
     async with _client() as client:
@@ -257,7 +258,7 @@ async def test_combo_riskon_equity_band_is_floored(monkeypatch: pytest.MonkeyPat
     assert eq_w <= 0.64 + 1e-6
 
 
-async def test_combo_slowdown_routes_goldfix(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_regime_slowdown_routes_goldfix(monkeypatch: pytest.MonkeyPatch) -> None:
     """SLOWDOWN routes the fixed goldfix haven over available names; equity
     stocks go to 0 and diagnostics.haven_tilt is populated."""
     _stub_returns(monkeypatch)
@@ -272,7 +273,7 @@ async def test_combo_slowdown_routes_goldfix(monkeypatch: pytest.MonkeyPatch) ->
             {"kind": "equity", "ticker": "AAA"},
             {"kind": "equity", "ticker": "BBB"},
         ],
-        "objective": "combo",
+        "objective": "regime_aware",
         "constraints": {"cap": 1.0},
     }
 
@@ -309,14 +310,14 @@ async def test_combo_slowdown_routes_goldfix(monkeypatch: pytest.MonkeyPatch) ->
     assert abs(sum(w["weight"] for w in body["weights"]) - 1.0) < 1e-6
 
 
-async def test_combo_ignores_payload_block_budgets(monkeypatch: pytest.MonkeyPatch) -> None:
-    """combo derives bands from the regime; a payload block_budget is IGNORED
-    (the equity band is the regime's, not the payload's tight 0.05)."""
+async def test_regime_ignores_payload_block_budgets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """regime_aware derives bands from the regime; a payload block_budget is
+    IGNORED (the equity band is the regime's, not the payload's tight 0.05)."""
     _stub_returns(monkeypatch)
     monkeypatch.setattr(tb, "fetch_gate_regime", _async(_gate_snapshot(state="risk_on")))
     payload = {
         "assets": [{"kind": "fund", "id": str(fid)} for fid in _FUND_IDS],
-        "objective": "combo",
+        "objective": "regime_aware",
         "constraints": {"cap": 1.0, "block_budgets": [{"asset_class": "equity", "hi": 0.05}]},
     }
     async with _client() as client:
@@ -326,3 +327,201 @@ async def test_combo_ignores_payload_block_budgets(monkeypatch: pytest.MonkeyPat
     eq_w = next(w["weight"] for w in body["weights"] if w["asset"]["id"] == str(_FUND_IDS[0]))
     # If the payload budget had been honoured, eq_w<=0.05; the regime floor 0.40 wins.
     assert eq_w >= 0.40 - 1e-6
+
+
+# ── Sprint 5: SPY-signal vol/beta overlays activate WITHOUT SPY in universe ───
+
+
+def test_load_spy_signal_reads_eod_prices(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unit: ``_load_spy_signal`` builds a stress-bearing newest-first close
+    series and a frame-aligned SPY return vector from the eod_prices read —
+    independent of the traded universe."""
+    import asyncio
+
+    index = pd.bdate_range("2024-01-02", periods=120)
+    # A SPY price path with a drawdown into the latest dates (ascending by date).
+    levels = np.concatenate(
+        [np.linspace(100.0, 180.0, 90), np.linspace(180.0, 140.0, 30)]
+    )
+    rows = [(d.date(), float(p)) for d, p in zip(index, levels, strict=True)]
+
+    async def fake_rows(session: Any, ticker: str, start: Any, end: Any) -> list[tuple]:
+        assert ticker == "SPY"
+        return rows
+
+    monkeypatch.setattr(pb, "select_adj_close_rows", fake_rows)
+    closes_desc, spy_rets = asyncio.run(pb._load_spy_signal(object(), index))  # type: ignore[arg-type]
+    # Newest-first; stressed (latest below the trailing-63d high).
+    assert len(closes_desc) == 120
+    assert tb.market_stress(closes_desc) > 0.0
+    # Returns reindexed onto the frame => one per scenario row, finite.
+    assert spy_rets is not None
+    assert len(spy_rets) == len(index)
+    assert np.isfinite(spy_rets).all()
+
+
+def test_load_spy_signal_degrades_without_session() -> None:
+    """No DB session (test seam / no datalake) => empty signal, no crash."""
+    import asyncio
+
+    index = pd.bdate_range("2024-01-02", periods=120)
+    closes_desc, spy_rets = asyncio.run(pb._load_spy_signal(None, index))
+    assert closes_desc == [] and spy_rets is None
+
+
+def test_load_spy_signal_degrades_on_short_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fewer than the stress window of closes => degrade (flat-cap fallback)."""
+    import asyncio
+
+    index = pd.bdate_range("2024-01-02", periods=120)
+    rows = [(d.date(), 100.0 + i) for i, d in enumerate(index[:10])]
+
+    async def fake_rows(session: Any, ticker: str, start: Any, end: Any) -> list[tuple]:
+        return rows
+
+    monkeypatch.setattr(pb, "select_adj_close_rows", fake_rows)
+    closes_desc, spy_rets = asyncio.run(pb._load_spy_signal(object(), index))  # type: ignore[arg-type]
+    assert closes_desc == [] and spy_rets is None
+
+
+# Overlay universe: TWO equity funds (so the RISK_OFF equity floor 0.26 is met
+# by the pair) + a fixed_income + a cash fund. idx0 is the HIGH-vol/HIGH-beta
+# equity attractor the overlays should throttle; idx1 is its LOW-vol equity
+# sibling that absorbs the shed weight (the class floor stays feasible). SPY is
+# NOT in the universe — the signal must come from the loaded series.
+_OVL_IDS = [uuid.UUID(f"00000000-0000-0000-0000-0000000001{i:02d}") for i in range(4)]
+_OVL_CLASS = {
+    _OVL_IDS[0]: "equity",
+    _OVL_IDS[1]: "equity",
+    _OVL_IDS[2]: "fixed_income",
+    _OVL_IDS[3]: "cash",
+}
+
+
+def _ovl_payload() -> dict[str, Any]:
+    # cap 0.45 leaves room for the RISK_OFF equity floor 0.26 to split across the
+    # two equity funds in the control, and to RE-concentrate in the low-beta
+    # sibling once the beta overlay throttles the high-beta one.
+    return {
+        "assets": [{"kind": "fund", "id": str(fid)} for fid in _OVL_IDS],
+        "objective": "regime_aware",
+        "constraints": {"cap": 0.45},
+    }
+
+
+def _stub_overlay_world(monkeypatch: pytest.MonkeyPatch, n_obs: int = 400) -> np.ndarray:
+    """Wire the 2-equity overlay universe and return the SPY returns idx0 was
+    generated against (so ``asset_betas`` resolves against the SAME SPY series).
+
+    idx0 and idx1 are equities with MATCHED standalone vol / tail risk (so the
+    pure min-CVaR inner objective splits the RISK_OFF equity floor 0.26 between
+    them in the control) but DIFFERENT beta to SPY: idx0 β≈1.4 (high), idx1 β≈0
+    (idiosyncratic). The RISK_OFF beta-graduated cap therefore throttles idx0's
+    cap hard once SPY-derived stress is present — re-concentrating the floored
+    equity weight into idx1. fixed_income/cash are dull, low-beta fillers. SPY is
+    NOT in the universe — the beta signal comes only from the loaded series.
+    """
+    spy_rets = np.random.default_rng(11).normal(0.0003, 0.012, n_obs)
+
+    async def fake_load(
+        session: Any,
+        assets: list[optimizer_data.AssetRef],
+        window_days: int = 730,
+        today: dt.date | None = None,
+    ) -> pd.DataFrame:
+        index = pd.bdate_range("2024-01-02", periods=n_obs)
+        rng = np.random.default_rng(21)
+        # β≈1.4 to SPY, vol ≈ sqrt(1.4²·0.012² + 0.002²) ≈ 0.0169.
+        idx0 = 1.4 * spy_rets + rng.normal(0.0002, 0.0020, n_obs)
+        # β≈0, vol ≈ 0.0169 (matched) — same tail risk, no SPY exposure.
+        idx1 = rng.normal(0.0002, 0.0169, n_obs)
+        data = {
+            assets[0].label: idx0,
+            assets[1].label: idx1,
+            assets[2].label: rng.normal(0.0002, 0.0035, n_obs),  # fixed_income
+            assets[3].label: rng.normal(0.00005, 0.0010, n_obs),  # cash
+        }
+        return pd.DataFrame(data, index=index)
+
+    async def fake_class(session: Any, fund_ids: list[uuid.UUID]) -> dict[uuid.UUID, str | None]:
+        return {fid: _OVL_CLASS.get(fid) for fid in fund_ids}
+
+    monkeypatch.setattr(optimizer_data, "load_aligned_returns", fake_load)
+    monkeypatch.setattr(optimizer_data, "load_fund_asset_class", fake_class)
+    monkeypatch.setattr(tb, "fetch_gate_regime", _async(_gate_snapshot(state="risk_off")))
+    return spy_rets
+
+
+# A monotone-RISING SPY level series (NEWEST-FIRST): market_stress == 0, so it
+# isolates the RISK_OFF BETA overlay (which is NOT stress-gated) from the
+# vol-stress overlay — keeping per-asset cap CAPACITY intact (no infeasibility
+# from shrinking many caps at once). The beta overlay still fires off the loaded
+# SPY RETURNS, which is the mechanism under test here.
+_RISING_SPY_CLOSES = [float(x) for x in np.linspace(100.0, 200.0, 130)[::-1]]
+
+
+async def test_overlays_activate_without_spy_in_universe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The RISK_OFF beta-graduated cap SHRINKS a HIGH-beta asset's weight using a
+    SPY SIGNAL loaded from eod_prices — even though SPY is NOT in the traded
+    universe. Proven by contrast with a control that has no loaded SPY signal."""
+    spy_rets = _stub_overlay_world(monkeypatch)
+    assert tb.market_stress(_RISING_SPY_CLOSES) == 0.0  # isolate beta (no vol)
+
+    # ── Control: no SPY signal loaded (and SPY absent from the universe) => the
+    # beta overlay cannot fire => idx0 keeps its natural floor split. ──
+    monkeypatch.setattr(pb, "_load_spy_signal", _async(([], None)))
+    async with _client() as client:
+        ctrl = await client.post("/builder/optimize", json=_ovl_payload())
+    assert ctrl.status_code == 200, ctrl.text
+    w0_ctrl = next(
+        w["weight"] for w in ctrl.json()["weights"] if w["asset"]["id"] == str(_OVL_IDS[0])
+    )
+    assert w0_ctrl > 0.05  # the floor genuinely puts weight on idx0 in control
+
+    # ── Treatment: a loaded SPY signal (levels + the SPY returns the assets were
+    # generated against) => the beta overlay throttles idx0's cap. ──
+    monkeypatch.setattr(pb, "_load_spy_signal", _async((_RISING_SPY_CLOSES, spy_rets)))
+    async with _client() as client:
+        treat = await client.post("/builder/optimize", json=_ovl_payload())
+    assert treat.status_code == 200, treat.text
+    body = treat.json()
+    assert body["diagnostics"]["combined_regime"] == "RISK_OFF"
+    w0_overlay = next(
+        w["weight"] for w in body["weights"] if w["asset"]["id"] == str(_OVL_IDS[0])
+    )
+    w1_overlay = next(
+        w["weight"] for w in body["weights"] if w["asset"]["id"] == str(_OVL_IDS[1])
+    )
+    # The HIGH-beta equity gets a SMALLER weight once the SPY-derived beta cap
+    # activates — with SPY absent from the universe. The shed weight flows to the
+    # ~0-beta equity sibling, so the RISK_OFF equity floor 0.26 still holds.
+    assert w0_overlay < w0_ctrl - 1e-2
+    assert (w0_overlay + w1_overlay) >= 0.26 - 1e-6
+
+
+async def test_overlay_betas_come_from_loaded_spy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The throttle keys off the LOADED SPY RETURNS, not a fabricated signal:
+    same SPY levels but returns present vs absent flips the beta overlay on/off."""
+    spy_rets = _stub_overlay_world(monkeypatch)
+
+    # Levels present but RETURNS absent => beta overlay cannot fire (SPY also not
+    # in the universe), so idx0 keeps its natural floor split.
+    monkeypatch.setattr(pb, "_load_spy_signal", _async((_RISING_SPY_CLOSES, None)))
+    async with _client() as client:
+        no_rets = await client.post("/builder/optimize", json=_ovl_payload())
+    assert no_rets.status_code == 200, no_rets.text
+    w0_no_rets = next(
+        w["weight"] for w in no_rets.json()["weights"] if w["asset"]["id"] == str(_OVL_IDS[0])
+    )
+
+    # Same levels but the LOADED SPY returns present => beta overlay throttles idx0.
+    monkeypatch.setattr(pb, "_load_spy_signal", _async((_RISING_SPY_CLOSES, spy_rets)))
+    async with _client() as client:
+        with_rets = await client.post("/builder/optimize", json=_ovl_payload())
+    assert with_rets.status_code == 200, with_rets.text
+    w0_with_rets = next(
+        w["weight"] for w in with_rets.json()["weights"] if w["asset"]["id"] == str(_OVL_IDS[0])
+    )
+    # Returns present => idx0 throttled; returns absent => not. The difference is
+    # attributable solely to the loaded SPY return series feeding asset_betas.
+    assert w0_with_rets < w0_no_rets - 1e-2

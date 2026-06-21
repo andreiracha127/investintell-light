@@ -4280,7 +4280,7 @@ export interface components {
              * @default min_cvar
              * @enum {string}
              */
-            objective: "equal_weight" | "min_vol" | "erc" | "max_diversification" | "min_cvar" | "bl_utility" | "max_return_cvar" | "combo";
+            objective: "equal_weight" | "min_vol" | "erc" | "max_diversification" | "min_cvar" | "bl_utility" | "max_return_cvar" | "regime_aware";
             /**
              * @default {
              *       "cap": 0.25
@@ -6163,7 +6163,7 @@ export interface components {
              * Objective
              * @enum {string}
              */
-            objective: "equal_weight" | "min_vol" | "erc" | "max_diversification" | "min_cvar" | "bl_utility" | "max_return_cvar" | "combo";
+            objective: "equal_weight" | "min_vol" | "erc" | "max_diversification" | "min_cvar" | "bl_utility" | "max_return_cvar" | "regime_aware";
             /** N Obs */
             n_obs: number;
             /** N Splits Computed */
@@ -6195,7 +6195,7 @@ export interface components {
              * @default min_cvar
              * @enum {string}
              */
-            objective: "equal_weight" | "min_vol" | "erc" | "max_diversification" | "min_cvar" | "bl_utility" | "max_return_cvar" | "combo";
+            objective: "equal_weight" | "min_vol" | "erc" | "max_diversification" | "min_cvar" | "bl_utility" | "max_return_cvar" | "regime_aware";
             /**
              * @default {
              *       "cap": 0.25

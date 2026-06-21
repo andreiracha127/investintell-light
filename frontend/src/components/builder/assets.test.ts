@@ -110,6 +110,30 @@ describe("max_return_cvar objective entry", () => {
   });
 });
 
+describe("regime_aware objective entry", () => {
+  it("is exposed in ranked mode (the dropdown source)", () => {
+    const values = objectivesForBroad(false).map((o) => o.value);
+    expect(values).toContain("regime_aware");
+  });
+
+  it("is labelled and described in OBJECTIVES", () => {
+    const entry = OBJECTIVES.find((o) => o.value === "regime_aware");
+    expect(entry).toBeDefined();
+    expect(entry!.label.length).toBeGreaterThan(0);
+    expect(entry!.description.length).toBeGreaterThan(0);
+  });
+
+  it("broad mode EXCLUDES regime_aware (scenario-based, not covariance)", () => {
+    const values = objectivesForBroad(true).map((o) => o.value);
+    expect(values).not.toContain("regime_aware");
+  });
+
+  it("resolveObjectiveForBroad steers regime_aware to min_vol in broad mode", () => {
+    expect(resolveObjectiveForBroad("regime_aware", true)).toBe("min_vol");
+    expect(resolveObjectiveForBroad("regime_aware", false)).toBe("regime_aware");
+  });
+});
+
 describe("MANDATE_CVAR_PRESETS ladder", () => {
   it("covers every Mandate key exactly", () => {
     const keys = Object.keys(MANDATE_CVAR_PRESETS).sort();

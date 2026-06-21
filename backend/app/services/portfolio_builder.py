@@ -60,6 +60,7 @@ from app.schemas.builder import (
     WeightOut,
 )
 from app.services import funds_catalog, lookthrough_exposure, taa_bands
+from app.services._series import select_adj_close_rows
 
 # Test seam: when set, overrides the regime state read (bypasses the data-lake).
 _OVERRIDE_REGIME_STATE: str | None = None
@@ -169,6 +170,58 @@ def _spy_closes_from_frame(frame: "pd.DataFrame") -> list[float]:
     rets = frame[col].to_numpy(dtype=float)
     closes = np.cumprod(1.0 + rets)  # oldest→newest price proxy
     return [float(x) for x in closes[::-1]]  # newest-first for market_stress
+
+
+# Minimum SPY closes for a usable market-stress signal: ``market_stress`` reads
+# a 63-day trailing high, so anything below 64 closes scores a flat 0.0 (no
+# stress). Below this we degrade to the in-universe proxy / flat cap.
+_MIN_SPY_SIGNAL_OBS = 64
+
+
+async def _load_spy_signal(
+    session: AsyncSession | None,
+    frame_index: "pd.Index",
+) -> tuple[list[float], np.ndarray | None]:
+    """Load SPY as a SIGNAL series from ``eod_prices`` over the opt window.
+
+    Returns ``(spy_closes_desc, spy_returns_aligned)`` where ``spy_closes_desc``
+    is the NEWEST-FIRST SPY adjusted-close level series (for
+    ``taa_bands.market_stress``) and ``spy_returns_aligned`` is the SPY daily
+    return vector REINDEXED onto ``frame_index`` (row-aligned with the scenario
+    matrix, for ``taa_bands.asset_betas``).
+
+    SPY's full history lives in ``eod_prices`` (1993→) independent of the traded
+    universe, so this activates the vol/beta overlays for ANY universe. One
+    indexed read over the window — a local DB read on the request path, NOT the
+    Tiingo external-API latency concern. Degrade-safe: returns ``([], None)``
+    when the session is absent (test seam / no DB), the read fails, or fewer
+    than ``_MIN_SPY_SIGNAL_OBS`` closes come back — the caller then falls back to
+    the in-universe proxy / flat cap. Never raises.
+    """
+    if session is None or len(frame_index) == 0:
+        return [], None
+    start = frame_index.min().date()
+    end = frame_index.max().date()
+    try:
+        rows = await select_adj_close_rows(session, "SPY", start, end)
+    except Exception:
+        return [], None
+    if len(rows) < _MIN_SPY_SIGNAL_OBS:
+        return [], None
+    spy = pd.Series(
+        [float(c) for _d, c in rows],
+        index=pd.DatetimeIndex([pd.Timestamp(d) for d, _c in rows]),
+    ).sort_index()
+    # Newest-first close levels for market_stress (63d-drawdown).
+    closes_desc = [float(x) for x in spy.to_numpy(dtype=float)[::-1]]
+    # SPY daily returns reindexed onto the scenario rows so betas align with the
+    # asset return columns. Reindex to the frame's trading days; the rare missing
+    # SPY day is bridged so the vector length matches the scenario rows exactly.
+    spy_ret = spy.pct_change().reindex(frame_index).ffill().bfill()
+    returns_aligned = spy_ret.to_numpy(dtype=float)
+    if not np.isfinite(returns_aligned).all():
+        return closes_desc, None
+    return closes_desc, returns_aligned
 
 
 def _build_views(
@@ -635,7 +688,7 @@ async def run_optimize(
     pairwise_cov_path = broad and payload.objective not in (
         "min_cvar",
         "max_return_cvar",
-        "combo",
+        "regime_aware",
     )
     if pairwise_cov_path:
         assert payload.universe is not None
@@ -734,11 +787,12 @@ async def run_optimize(
     view_consistency: ViewConsistencyOut | None = None
     cvar_limit_effective: float | None = None
     regime_state: str | None = None
-    # COMBO diagnostics (Sprint 3): populated only on the ``combo`` path.
-    combo_quadrant: str | None = None
-    combo_regime: str | None = None
-    combo_class_bands: dict[str, list[float]] | None = None
-    combo_haven_tilt: dict[str, float] | None = None
+    # Regime-Aware diagnostics (research codename COMBO): populated only on the
+    # ``regime_aware`` path.
+    regime_quadrant: str | None = None
+    regime_combined: str | None = None
+    regime_class_bands: dict[str, list[float]] | None = None
+    regime_haven_tilt: dict[str, float] | None = None
     w_mkt: np.ndarray | None = None
     if needs_bl:
         w_mkt = await _market_weights_for(session, assets, labels)
@@ -797,12 +851,13 @@ async def run_optimize(
     )
 
     try:
-        if payload.objective == "combo":
-            # COMBO regime allocator (Sprint 3, spec §3.3): the gate-driven
-            # per-class band ENVELOPE + min-CVaR inside it (decision B), with the
-            # SLOWDOWN goldfix haven and vol/beta graduated caps. The payload's
-            # ``block_budgets`` are IGNORED here — bands derive from the regime.
-            regime_blocks, combo_regime, combo_quadrant = (
+        if payload.objective == "regime_aware":
+            # Regime-Aware allocator (research codename COMBO, spec §3.3): the
+            # gate-driven per-class band ENVELOPE + min-CVaR inside it (decision
+            # B), with the SLOWDOWN goldfix haven and vol/beta graduated caps. The
+            # payload's ``block_budgets`` are IGNORED here — bands derive from the
+            # regime.
+            regime_blocks, regime_combined, regime_quadrant = (
                 await _resolve_regime_block_budgets(session, datalake, assets, labels)
             )
             # Gate state also scales the reported CVaR limit + drives diagnostics,
@@ -817,7 +872,7 @@ async def run_optimize(
                     payload.cvar_limit, gate_state,
                     risk_off_factor=DEFAULT_RISK_OFF_CVAR_FACTOR,
                 )
-            if combo_regime == "STAG_GOLD":
+            if regime_combined == "STAG_GOLD":
                 # Goldfix haven: IMPOSE the fixed gold-led target over available
                 # names (port _haven_weights goldfix, main.py:959-972); the
                 # whitelist IS the defense — skip the solver entirely.
@@ -825,36 +880,50 @@ async def run_optimize(
                 target = taa_bands.goldfix_target(set(ticker_col.keys()))
                 if not target:
                     raise BuilderError(
-                        "combo SLOWDOWN haven needs at least one of GLD/VOOV/QAI/"
-                        "GCC/BIL in the universe; none were found"
+                        "regime_aware SLOWDOWN haven needs at least one of GLD/"
+                        "VOOV/QAI/GCC/BIL in the universe; none were found"
                     )
                 weights = np.zeros(len(labels), dtype=float)
                 for ticker, wgt in target.items():
                     weights[ticker_col[ticker]] = wgt
                 status = "goldfix"
-                combo_haven_tilt = dict(target)
+                regime_haven_tilt = dict(target)
             else:
                 # Band route — min-CVaR inside the regime envelope with the vol/
                 # (beta in RISK_OFF) graduated per-asset cap vector. Surface the
                 # per-class (min, max) bands actually enforced for transparency
                 # (only the classes PRESENT as a BlockBudget).
                 present_classes = await _fund_class_columns(session, assets, labels)
-                _band_map, _ = taa_bands.effective_class_bands(combo_regime)
-                combo_class_bands = {
+                _band_map, _ = taa_bands.effective_class_bands(regime_combined)
+                regime_class_bands = {
                     cls: [_band_map[cls][0], _band_map[cls][1]]
                     for cls in _COMBO_BAND_CLASSES
                     if present_classes.get(cls)
                 }
                 base_cap = cap if cap is not None else engine.DEFAULT_CAP
                 return_cols = [scenarios[:, j] for j in range(scenarios.shape[1])]
-                spy_desc = _spy_closes_from_frame(frame)
+                # SPY is loaded as a SIGNAL series from eod_prices over the
+                # optimization window — decoupled from the traded universe — so
+                # the vol/beta overlays activate for ANY universe (Sprint 5). The
+                # in-universe synthetic proxy is the fallback when the DB read
+                # yields too little history (degrade-safe: flat cap, no crash).
+                spy_desc, spy_rets_aligned = await _load_spy_signal(
+                    session, frame.index
+                )
+                if not spy_desc:
+                    spy_desc = _spy_closes_from_frame(frame)
                 graduated_caps = taa_bands.vol_graduated_caps(
                     base_cap, return_cols, spy_desc
                 )
-                if combo_regime == "RISK_OFF":
-                    spy_col = index_of.get("equity:SPY")
-                    if spy_col is not None and spy_desc:
-                        spy_rets = scenarios[:, spy_col]
+                if regime_combined == "RISK_OFF":
+                    # Prefer the loaded SPY returns (aligned to the scenario
+                    # rows); fall back to in-universe SPY if the loader was empty.
+                    spy_rets = spy_rets_aligned
+                    if spy_rets is None:
+                        spy_col = index_of.get("equity:SPY")
+                        if spy_col is not None and spy_desc:
+                            spy_rets = scenarios[:, spy_col]
+                    if spy_rets is not None and spy_desc:
                         betas = taa_bands.asset_betas(
                             {labels[j]: scenarios[:, j] for j in range(len(labels))},
                             spy_rets,
@@ -862,7 +931,7 @@ async def run_optimize(
                         graduated_caps = taa_bands.beta_graduated_caps(
                             graduated_caps, [betas[labels[j]] for j in range(len(labels))]
                         )
-                cvar_bounds_combo = engine.BoundsBundle(
+                cvar_bounds_regime = engine.BoundsBundle(
                     cap_vec=graduated_caps,
                     min_vec=np.full(n, min_weight) if min_weight is not None else None,
                     blocks=regime_blocks or None,
@@ -871,7 +940,7 @@ async def run_optimize(
                     scenarios,
                     cap=cap,
                     min_weight=min_weight,
-                    bounds=cvar_bounds_combo,
+                    bounds=cvar_bounds_regime,
                     current_weights=current_vec,
                     turnover_lambda=payload.turnover_lambda,
                     linear=linear,
@@ -1014,9 +1083,9 @@ async def run_optimize(
             selection=selection_diag,
             cvar_limit_effective=cvar_limit_effective,
             regime_state=regime_state,
-            quadrant=combo_quadrant,
-            combined_regime=combo_regime,
-            class_bands=combo_class_bands,
-            haven_tilt=combo_haven_tilt,
+            quadrant=regime_quadrant,
+            combined_regime=regime_combined,
+            class_bands=regime_class_bands,
+            haven_tilt=regime_haven_tilt,
         ),
     )

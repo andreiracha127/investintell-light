@@ -1,44 +1,45 @@
-"""COMBO Sprint 3 — Task 1: ``combo`` objective + combo diagnostics fields.
+"""Regime-Aware (research codename COMBO) — Task 1: ``regime_aware`` objective +
+diagnostics fields.
 
-Schema-only contract tests (no DB / no solver): the new ``"combo"`` objective is
-accepted by ``OptimizeRequest`` with no extra required field (bands derive from
-the regime), and ``DiagnosticsOut`` carries the additive combo fields
+Schema-only contract tests (no DB / no solver): the ``"regime_aware"`` objective
+is accepted by ``OptimizeRequest`` with no extra required field (bands derive
+from the regime), and ``DiagnosticsOut`` carries the additive regime fields
 (``quadrant`` / ``combined_regime`` / ``class_bands`` / ``haven_tilt``).
 """
 
 from app.schemas.builder import DiagnosticsOut, OptimizeRequest
 
 
-def test_combo_is_valid_objective() -> None:
+def test_regime_aware_is_valid_objective() -> None:
     req = OptimizeRequest.model_validate(
         {
             "assets": [
                 {"kind": "equity", "ticker": "AAA"},
                 {"kind": "equity", "ticker": "BBB"},
             ],
-            "objective": "combo",
+            "objective": "regime_aware",
         }
     )
-    assert req.objective == "combo"
+    assert req.objective == "regime_aware"
 
 
-def test_combo_needs_no_extra_required_field() -> None:
-    """combo derives its bands from the regime, so no ``cvar_limit`` (unlike
-    ``max_return_cvar``) and no ``block_budgets`` are required."""
+def test_regime_aware_needs_no_extra_required_field() -> None:
+    """regime_aware derives its bands from the regime, so no ``cvar_limit``
+    (unlike ``max_return_cvar``) and no ``block_budgets`` are required."""
     req = OptimizeRequest.model_validate(
         {
             "assets": [
                 {"kind": "fund", "id": "00000000-0000-0000-0000-000000000001"},
                 {"kind": "fund", "id": "00000000-0000-0000-0000-000000000002"},
             ],
-            "objective": "combo",
+            "objective": "regime_aware",
         }
     )
-    assert req.objective == "combo"
+    assert req.objective == "regime_aware"
     assert req.cvar_limit is None
 
 
-def test_diagnostics_has_combo_fields() -> None:
+def test_diagnostics_has_regime_fields() -> None:
     d = DiagnosticsOut(
         n_obs=10,
         status="optimal",
@@ -53,8 +54,8 @@ def test_diagnostics_has_combo_fields() -> None:
     assert d.haven_tilt is not None and d.haven_tilt["GLD"] == 0.3
 
 
-def test_diagnostics_combo_fields_default_none() -> None:
-    """The combo fields are additive/optional — absent on the non-combo paths."""
+def test_diagnostics_regime_fields_default_none() -> None:
+    """The regime fields are additive/optional — absent on the non-regime paths."""
     d = DiagnosticsOut(n_obs=5, status="optimal")
     assert d.quadrant is None
     assert d.combined_regime is None

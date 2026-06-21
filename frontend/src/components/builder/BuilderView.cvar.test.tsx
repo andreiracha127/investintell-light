@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -179,5 +179,28 @@ describe("BuilderView max_return_cvar controls", () => {
     expect(
       screen.getByText(/needs a daily loss limit/i),
     ).toBeInTheDocument();
+  });
+});
+
+describe("BuilderView Regime-Aware objective option", () => {
+  it("offers Regime-Aware in the objective dropdown and submits regime_aware", async () => {
+    const user = userEvent.setup();
+    renderView();
+    const objective = screen.getByLabelText(
+      "Optimization objective",
+    ) as HTMLSelectElement;
+    // The dropdown exposes a "Regime-Aware" option wired to the regime_aware value.
+    const option = within(objective).getByRole("option", {
+      name: "Regime-Aware",
+    }) as HTMLOptionElement;
+    expect(option.value).toBe("regime_aware");
+
+    // Selecting it submits the regime_aware objective end-to-end.
+    await user.click(screen.getByRole("button", { name: "seed-two" }));
+    await user.selectOptions(objective, "regime_aware");
+    await user.click(screen.getByRole("button", { name: /suggest weights/i }));
+    await waitFor(() => expect(optimizeMock).toHaveBeenCalled());
+    const body = optimizeMock.mock.calls.at(-1)?.[0];
+    expect(body?.objective).toBe("regime_aware");
   });
 });

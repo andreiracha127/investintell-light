@@ -243,6 +243,12 @@ export const OBJECTIVES: {
     description:
       "Mean-variance utility on the Black-Litterman posterior — requires views to tilt away from market weights.",
   },
+  {
+    value: "regime_aware",
+    label: "Regime-Aware",
+    description:
+      "Regime-conditioned cross-asset: a live risk-off gate + macro quadrant set per-asset-class bands, a min-CVaR optimizer allocates inside them, with a gold-led haven in a stagflationary slowdown.",
+  },
 ];
 
 /** Objectives the broad-universe path can actually serve: the COVARIANCE-based

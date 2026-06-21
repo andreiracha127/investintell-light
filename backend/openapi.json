@@ -11501,7 +11501,7 @@
               "min_cvar",
               "bl_utility",
               "max_return_cvar",
-              "combo"
+              "regime_aware"
             ],
             "title": "Objective",
             "default": "min_cvar"
@@ -15382,7 +15382,7 @@
               "min_cvar",
               "bl_utility",
               "max_return_cvar",
-              "combo"
+              "regime_aware"
             ],
             "title": "Objective"
           },
@@ -15458,7 +15458,7 @@
               "min_cvar",
               "bl_utility",
               "max_return_cvar",
-              "combo"
+              "regime_aware"
             ],
             "title": "Objective",
             "default": "min_cvar"

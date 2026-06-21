@@ -74,11 +74,11 @@ export const OBJECTIVE_COPY: Record<BuilderObjective, ObjectiveCopy> = {
     tip: "Mean-variance utility on the Black-Litterman posterior — needs at least one view to tilt away from market weights.",
     usesLossLimit: false,
   },
-  combo: {
-    label: "All-weather (regime-aware)",
+  regime_aware: {
+    label: "Regime-Aware",
     description:
       "Adapts to the market regime: a live risk-off gate sets per-asset-class limits, then the smallest-worst-case-loss optimizer allocates inside them. Tilts to a gold-led haven in a stagflationary slowdown.",
-    tip: "COMBO regime allocator — minimizes CVaR-95 within gate-driven per-class bands, with volatility/beta-graduated caps and a goldfix SLOWDOWN haven.",
+    tip: "Regime-Aware allocator (research codename COMBO) — minimizes CVaR-95 within gate-driven per-class bands, with volatility/beta-graduated caps and a goldfix SLOWDOWN haven.",
     usesLossLimit: false,
   },
 };

@@ -64,7 +64,7 @@ class BLParamsIn(BaseModel):
 
 Objective = Literal[
     "equal_weight", "min_vol", "erc", "max_diversification", "min_cvar",
-    "bl_utility", "max_return_cvar", "combo",
+    "bl_utility", "max_return_cvar", "regime_aware",
 ]
 
 Mandate = Literal[
@@ -305,10 +305,11 @@ class DiagnosticsOut(BaseModel):
     # Present only on the max_return_cvar path.
     cvar_limit_effective: float | None = None
     regime_state: str | None = None
-    # Present only on the combo path (COMBO regime allocator, Sprint 3): the
-    # growth×inflation quadrant read from the gate, the resolved band-state, the
-    # per-class (min, max) envelope actually enforced, and — when SLOWDOWN routed
-    # the goldfix haven — the imposed haven target (ticker -> weight).
+    # Present only on the regime_aware path (Regime-Aware allocator, research
+    # codename COMBO): the growth×inflation quadrant read from the gate, the
+    # resolved band-state, the per-class (min, max) envelope actually enforced,
+    # and — when SLOWDOWN routed the goldfix haven — the imposed haven target
+    # (ticker -> weight).
     quadrant: str | None = None
     combined_regime: str | None = None
     class_bands: dict[str, list[float]] | None = None
