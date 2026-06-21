@@ -28,11 +28,13 @@ import {
   type MacroPerformanceView,
 } from "@/lib/charts/hc/regime";
 import { buildHcMacroRrgOption } from "@/lib/charts/hc/macro-rrg";
+import { buildHcMacroBandsOption } from "@/lib/charts/hc/macro-bands";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
-import { formatDate, formatNumber } from "@/lib/format";
+import { formatDate, formatNumber, formatPercent } from "@/lib/format";
 
 type DatePoint = [string, number];
 type RegimeHistoryPoint = MacroRegime["history"][number];
+type MacroQuadrantBlock = NonNullable<MacroRegime["macro_quadrant"]>;
 
 const PERIODS: RangePreset[] = ["1M", "6M", "1Y", "5Y", "MAX"];
 
@@ -244,6 +246,12 @@ export function MacroRegimeView() {
     portfolioQuery.data?.name,
     range,
   ]);
+
+  const bandsOption = useMemo<Options | null>(() => {
+    const mq = macroQuery.data?.macro_quadrant;
+    if (!colors || !mq || mq.bands.length === 0) return null;
+    return buildHcMacroBandsOption(mq.bands, colors);
+  }, [macroQuery.data, colors]);
 
   // 404 → empty state.
   if (
@@ -539,6 +547,9 @@ export function MacroRegimeView() {
         </section>
       </div>
 
+      {/* ── COMBO regime allocator: live gate + quadrant + bands ── */}
+      <RegimeCombo macroQuadrant={data.macro_quadrant ?? null} bandsOption={bandsOption} />
+
       {/* ── Regime timeline strip ── */}
       <RegimeTimeline data={data} range={range} />
 
@@ -622,6 +633,219 @@ function VoteChip({ label, active, tip }: { label: string; active: boolean; tip:
       {label}
       <InfoDot tip={tip} />
     </span>
+  );
+}
+
+// ── COMBO regime allocator section ───────────────────────────────────────────
+
+const QUADRANT_LABEL: Record<string, string> = {
+  recovery: "Recovery",
+  expansion: "Expansion",
+  slowdown: "Slowdown",
+  contraction: "Contraction",
+};
+
+const COMBINED_REGIME_LABEL: Record<string, string> = {
+  RISK_ON: "Risk-on bands",
+  RISK_OFF: "Risk-off bands",
+  INFLATION: "Inflation bands",
+  STAG_GOLD: "Gold haven (slowdown)",
+};
+
+const GATE_TIPS = {
+  rule: "A live, debounced risk-off gate. Enters risk-off only after at least 2 of 3 cross-asset signals (trend, credit, drawdown) hold for 21 consecutive days; exits symmetrically. This gate drives the per-asset-class allocation bands.",
+  trend: "Trend. Turns on when the S&P 500 trades below its 200-day moving average.",
+  credit:
+    "Credit. Turns on when the high-yield / Treasury ratio (HYG/IEF) trades below its 60-day moving average.",
+  drawdown: "Drawdown. Turns on when the S&P 500 is at least 6% below its trailing 63-day high.",
+  quadrant:
+    "Growth × inflation clock. Growth is the S&P 500's 126-day return; inflation is the TIP/IEF breakeven's 126-day momentum. Slowdown (growth down, inflation up) routes to a gold-led haven.",
+  bands:
+    "The per-asset-class weight envelope the optimizer allocates within. Set by the live gate (risk-off) or the macro quadrant, then widened (×1.5) and clamped to policy bounds.",
+  haven:
+    "Conviction target for a stagflationary slowdown: a gold-led haven that replaces the bond sleeve. The realized tilt depends on which of these instruments are in the chosen universe.",
+} as const;
+
+function quadrantLabel(q: string | null | undefined): string {
+  if (!q) return "n/a";
+  return QUADRANT_LABEL[q.toLowerCase()] ?? q;
+}
+
+/** A signed score formatted as a percentage (growth/inflation momentum). */
+function scoreLabel(score: number | null | undefined): string {
+  if (score === null || score === undefined) return "--";
+  return `${score > 0 ? "+" : ""}${(score * 100).toFixed(1)}%`;
+}
+
+function GateVoteChip({ label, active, tip }: { label: string; active: boolean; tip: string }) {
+  return <VoteChip label={label} active={active} tip={tip} />;
+}
+
+function RegimeCombo({
+  macroQuadrant,
+  bandsOption,
+}: {
+  macroQuadrant: MacroQuadrantBlock | null;
+  bandsOption: Options | null;
+}) {
+  if (!macroQuadrant) {
+    return (
+      <section className="border border-t-0 border-border bg-surface-2 p-[var(--ix-pad)]">
+        <div className="mb-1 flex items-center gap-1.5">
+          <h2 className="ix-label m-0">Regime allocator</h2>
+          <InfoDot tip={GATE_TIPS.rule} />
+        </div>
+        <p className="m-0 text-[12px] text-text-muted">
+          The regime gate has not been populated yet — allocation bands will appear once the
+          gate worker has run.
+        </p>
+      </section>
+    );
+  }
+
+  const { gate, quadrant, combined_regime, growth_state, inflation_state } = macroQuadrant;
+  const growthScore = macroQuadrant.growth_score;
+  const inflationScore = macroQuadrant.inflation_score;
+  const haven = macroQuadrant.haven_tilt;
+  const isHaven = combined_regime === "STAG_GOLD";
+  const regimeLabel = COMBINED_REGIME_LABEL[combined_regime] ?? combined_regime;
+  const gateOff = gate?.state === "risk_off";
+
+  return (
+    <section className="border border-t-0 border-border bg-surface-2">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-[var(--ix-pad)] py-3">
+        <div className="flex items-center gap-1.5">
+          <h2 className="ix-label m-0">Regime allocator</h2>
+          <InfoDot tip={GATE_TIPS.rule} />
+        </div>
+        <span className="text-[11px] text-text-muted">
+          Live gate sets the per-class allocation bands · {combined_regime}
+        </span>
+      </div>
+
+      <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(280px,1fr))]">
+        {/* Gate + quadrant facts */}
+        <div className="flex flex-col gap-4 bg-surface-2 p-[var(--ix-pad)]">
+          {/* Live gate */}
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-[10px]">
+              <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.07em] text-text-muted">
+                Live gate
+                <InfoDot tip={GATE_TIPS.rule} />
+              </span>
+              <span
+                className={`inline-flex items-center gap-2 border px-2.5 py-[3px] text-[12px] font-bold ${
+                  gate
+                    ? gateOff
+                      ? "border-loss text-loss bg-loss/10"
+                      : "border-gain text-gain bg-gain/10"
+                    : "border-border-strong text-text-muted bg-field"
+                }`}
+              >
+                {gate ? (gateOff ? "RISK-OFF" : "RISK-ON") : "n/a"}
+              </span>
+              {gate && (
+                <span className="text-[11px] tabular-nums text-text-muted">
+                  {gate.vote_count}/3 votes · {gate.dwell_days} days latched
+                </span>
+              )}
+            </div>
+            {gate && (
+              <div className="flex flex-wrap gap-[7px]">
+                <GateVoteChip label="Trend" active={gate.trend_vote} tip={GATE_TIPS.trend} />
+                <GateVoteChip label="Credit" active={gate.credit_vote} tip={GATE_TIPS.credit} />
+                <GateVoteChip
+                  label="Drawdown"
+                  active={gate.drawdown_vote}
+                  tip={GATE_TIPS.drawdown}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Quadrant + scores */}
+          <div className="flex flex-col gap-2 border-t border-border pt-3">
+            <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.07em] text-text-muted">
+              Macro quadrant
+              <InfoDot tip={GATE_TIPS.quadrant} />
+            </span>
+            <span className="text-[15px] font-bold text-text-primary">
+              {quadrantLabel(quadrant)}
+            </span>
+            <div className="flex flex-wrap gap-x-[18px] gap-y-1 text-[11.5px] text-text-secondary">
+              <span>
+                Growth{" "}
+                <b className="tabular-nums text-text-primary">
+                  {scoreLabel(growthScore)}
+                </b>{" "}
+                <span className="text-text-muted">({growth_state ?? "--"})</span>
+              </span>
+              <span>
+                Inflation{" "}
+                <b className="tabular-nums text-text-primary">
+                  {scoreLabel(inflationScore)}
+                </b>{" "}
+                <span className="text-text-muted">({inflation_state ?? "--"})</span>
+              </span>
+            </div>
+            <span className="mt-1 inline-flex w-fit items-center gap-1.5 border border-border-strong bg-field px-2.5 py-[3px] text-[12px] font-bold text-text-primary">
+              {regimeLabel}
+              <span className="font-normal text-text-muted">· {combined_regime}</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Bands chart OR haven tilt */}
+        <div className="flex flex-col bg-surface-2 p-[var(--ix-pad)]">
+          {isHaven ? (
+            <div className="flex flex-col gap-2">
+              <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.07em] text-text-muted">
+                Haven target tilt
+                <InfoDot tip={GATE_TIPS.haven} />
+              </span>
+              {haven && Object.keys(haven).length > 0 ? (
+                <ul className="m-0 flex flex-col gap-1.5 p-0">
+                  {Object.entries(haven)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([ticker, weight]) => (
+                      <li
+                        key={ticker}
+                        className="flex items-center justify-between border-b border-border pb-1.5 text-[12.5px] last:border-0"
+                      >
+                        <span className="font-bold text-text-primary">{ticker}</span>
+                        <span className="tabular-nums text-text-secondary">
+                          {formatPercent(weight, 0)}
+                        </span>
+                      </li>
+                    ))}
+                </ul>
+              ) : (
+                <p className="m-0 text-[12px] text-text-muted">No haven instruments available.</p>
+              )}
+              <p className="m-0 mt-1 text-[11px] text-text-muted">
+                Conviction target — the realized tilt depends on the chosen universe.
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="mb-1 flex items-center gap-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-[0.07em] text-text-muted">
+                  Allocation bands
+                </span>
+                <InfoDot tip={GATE_TIPS.bands} />
+              </div>
+              {bandsOption ? (
+                <HighchartsChart options={bandsOption} className="h-[240px] w-full" />
+              ) : (
+                <div className="flex h-[240px] items-center justify-center px-4 text-center text-[12px] text-text-muted">
+                  No allocation bands for the current regime.
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
