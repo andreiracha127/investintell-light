@@ -59,7 +59,7 @@ from app.schemas.builder import (
     ViewIn,
     WeightOut,
 )
-from app.services import funds_catalog, lookthrough_exposure, macro_regime, taa_bands
+from app.services import funds_catalog, lookthrough_exposure, taa_bands
 
 # Test seam: when set, overrides the regime state read (bypasses the data-lake).
 _OVERRIDE_REGIME_STATE: str | None = None
@@ -894,9 +894,14 @@ async def run_optimize(
             # Gate G5-safe mu: the BL posterior when views exist, otherwise the
             # equilibrium return pi = delta*Sigma*w_mkt. Never the historical mean.
             mu = mu_posterior if mu_posterior is not None else mu_equilibrium
+            # CVaR-scaling regime read (Sprint 3, decision §3.3): the LIVE gate
+            # (debounced 2-of-3 cross-asset vote) REPLACES the credit-only read —
+            # its lowercase ``state`` ('risk_on'/'risk_off') is compatible with
+            # ``regime_cvar_multiplier``. The ``_OVERRIDE_REGIME_STATE`` seam
+            # still short-circuits the DB read.
             state = _OVERRIDE_REGIME_STATE
             if state is None and datalake is not None:
-                snap = await macro_regime.fetch_credit_regime(datalake)
+                snap = await taa_bands.fetch_gate_regime(datalake)
                 state = snap.state if snap is not None else None
             limit = apply_regime_cvar_limit(
                 payload.cvar_limit, state, risk_off_factor=DEFAULT_RISK_OFF_CVAR_FACTOR
