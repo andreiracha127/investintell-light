@@ -46,6 +46,16 @@ export function buildHcStyleDriftOption(
 
   return {
     chart: { type: "area" },
+    legend: {
+      layout: "vertical",
+      align: "right",
+      verticalAlign: "middle",
+      itemMarginTop: 1,
+      itemMarginBottom: 1,
+      itemStyle: { fontSize: "11px" },
+      symbolHeight: 8,
+      symbolWidth: 8,
+    },
     xAxis: { ...compactDatetimeXAxis(), crosshair: { width: 1, color: colors.grid } },
     yAxis: {
       title: { text: "% of holdings" },

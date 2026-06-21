@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { buildHcExposureBarsOption } from "@/lib/charts/hc/lookthrough";
+import {
+  buildHcAssetClassPieOption,
+  buildHcExposureBarsOption,
+  buildHcIssuerParetoOption,
+  bucketForAssetClass,
+  sanitizeIssuerName,
+} from "@/lib/charts/hc/lookthrough";
 import { TEST_COLORS } from "@/lib/charts/hc/__fixtures__/colors";
 import type { ExposureItem } from "@/lib/api/client";
 import { formatNumber } from "@/lib/format";
@@ -174,5 +180,134 @@ describe("buildHcExposureBarsOption", () => {
     expect(
       tooltip.formatter!.call({ points: [], index: 0, category: "" }),
     ).toBe("");
+  });
+});
+
+describe("sanitizeIssuerName", () => {
+  it("maps well-known issuers to short names", () => {
+    expect(sanitizeIssuerName("TAIWAN SEMICONDUCTOR MANUFACTURING CO LTD").display).toBe("TSMC");
+    expect(sanitizeIssuerName("META PLATFORMS INC").display).toBe("Meta");
+    expect(sanitizeIssuerName("BROADCOM INC").display).toBe("Broadcom");
+  });
+
+  it("folds Treasury issuance variants onto one issuer key", () => {
+    expect(sanitizeIssuerName("UNITED STATES TREASURY").key).toBe(
+      sanitizeIssuerName("US TREASURY NOTE 4.25%").key,
+    );
+    expect(sanitizeIssuerName("UNITED STATES TREASURY").display).toBe("U.S. Treasury");
+  });
+
+  it("strips corporate suffixes and title-cases unknown issuers", () => {
+    expect(sanitizeIssuerName("ACME WIDGETS CORP").display).toBe("Acme Widgets");
+  });
+
+  it("maps U.S. agencies and Capital Group central funds to short names", () => {
+    expect(sanitizeIssuerName("FEDERAL NATIONAL MORTGAGE ASSOCIATION").display).toBe("Fannie Mae");
+    expect(sanitizeIssuerName("FEDERAL HOME LOAN MORTGAGE CORP").display).toBe("Freddie Mac");
+    expect(sanitizeIssuerName("CAPITAL GROUP CENTRAL CASH FUND").display).toBe("CG Cash");
+    expect(sanitizeIssuerName("CAPITAL GROUP CENTRAL CORPORATE BOND FUND").display).toBe("CG Corp");
+  });
+
+  it("never returns more than two words", () => {
+    const cases = [
+      "SOME VERY LONG INDUSTRIAL CONGLOMERATE INTERNATIONAL CO LTD",
+      "GLOBAL INFRASTRUCTURE PARTNERS DELAWARE FEEDER FUND",
+      "ACME WIDGETS CORP",
+    ];
+    for (const name of cases) {
+      const words = sanitizeIssuerName(name).display.split(/\s+/).filter(Boolean);
+      expect(words.length).toBeLessThanOrEqual(2);
+    }
+  });
+});
+
+describe("buildHcIssuerParetoOption", () => {
+  const ISSUERS: ExposureItem[] = [
+    { key: "ust1", label: "UNITED STATES TREASURY", direct_pct: 6.2, indirect_pct: 0, total_pct: 6.2 },
+    { key: "ust2", label: "US TREASURY NOTE", direct_pct: 2.2, indirect_pct: 0, total_pct: 2.2 },
+    { key: "tsmc", label: "TAIWAN SEMICONDUCTOR MANUFACTURING CO LTD", direct_pct: 2.3, indirect_pct: 0, total_pct: 2.3 },
+    { key: "msft", label: "MICROSOFT CORP", direct_pct: 3.2, indirect_pct: 0, total_pct: 3.2 },
+  ];
+
+  it("aggregates issuance-level rows onto one issuer column", () => {
+    const opt = buildHcIssuerParetoOption(ISSUERS, TEST_COLORS);
+    const categories = (opt.xAxis as { categories?: string[] }).categories!;
+    // Two Treasury rows collapse into a single "U.S. Treasury" (6.2 + 2.2 = 8.4).
+    expect(categories.filter((c) => c === "U.S. Treasury")).toHaveLength(1);
+    expect(categories[0]).toBe("U.S. Treasury");
+    const series = opt.series as Array<{ name?: string; data?: number[] }>;
+    expect(series[0].data![0]).toBeCloseTo(8.4, 5);
+  });
+
+  it("emits column + column + cumulative line on a secondary axis", () => {
+    const opt = buildHcIssuerParetoOption(ISSUERS, TEST_COLORS);
+    const series = opt.series as Array<{ name?: string; type?: string; yAxis?: number }>;
+    expect(series.map((s) => s.name)).toEqual(["Direct", "Via funds", "Cumulative"]);
+    expect(series[2].type).toBe("line");
+    expect(series[2].yAxis).toBe(1);
+    const cumulative = (series[2] as { data?: number[] }).data!;
+    // Cumulative is monotonic and ends at 100% of total issuer exposure.
+    expect(cumulative[cumulative.length - 1]).toBeCloseTo(100, 5);
+    expect(cumulative[0]).toBeLessThan(cumulative[1]);
+  });
+
+  it("honors opts.topN", () => {
+    const opt = buildHcIssuerParetoOption(ISSUERS, TEST_COLORS, { topN: 2 });
+    const categories = (opt.xAxis as { categories?: string[] }).categories!;
+    expect(categories).toHaveLength(2);
+  });
+});
+
+describe("bucketForAssetClass", () => {
+  it("maps raw N-PORT codes to the four system buckets", () => {
+    expect(bucketForAssetClass("EC")).toBe("Equities");
+    expect(bucketForAssetClass("EP")).toBe("Equities");
+    expect(bucketForAssetClass("DBT")).toBe("Fixed Income");
+    expect(bucketForAssetClass("ABS-MBS")).toBe("Fixed Income");
+    expect(bucketForAssetClass("STIV")).toBe("Cash");
+    expect(bucketForAssetClass("DIR")).toBe("Alternatives");
+  });
+
+  it("falls back to Alternatives for unknown codes", () => {
+    expect(bucketForAssetClass("ZZZ")).toBe("Alternatives");
+  });
+});
+
+describe("buildHcAssetClassPieOption", () => {
+  const ASSET_ITEMS: ExposureItem[] = [
+    { key: "ec", label: "EC", direct_pct: 60, indirect_pct: 7.8, total_pct: 67.8 },
+    { key: "dbt", label: "DBT", direct_pct: 16.2, indirect_pct: 0, total_pct: 16.2 },
+    { key: "absmbs", label: "ABS-MBS", direct_pct: 7.6, indirect_pct: 0, total_pct: 7.6 },
+    { key: "stiv", label: "STIV", direct_pct: 4.6, indirect_pct: 0, total_pct: 4.6 },
+    { key: "ep", label: "EP", direct_pct: 0.6, indirect_pct: 0, total_pct: 0.6 },
+  ];
+
+  it("renders a donut pie normalized into the four buckets", () => {
+    const opt = buildHcAssetClassPieOption(ASSET_ITEMS, TEST_COLORS);
+    expect((opt.chart as { type?: string }).type).toBe("pie");
+    const pie = opt.plotOptions as { pie?: { innerSize?: string } };
+    expect(pie.pie?.innerSize).toBe("55%");
+    const data = (opt.series as Array<{ data?: Array<{ name: string; y: number }> }>)[0].data!;
+    // EC + EP fold into Equities (67.8 + 0.6 = 68.4); DBT + ABS-MBS into Fixed
+    // Income (23.8); STIV into Cash; no Alternatives slice present.
+    const byName = Object.fromEntries(data.map((d) => [d.name, d.y]));
+    expect(byName["Equities"]).toBeCloseTo(68.4, 5);
+    expect(byName["Fixed Income"]).toBeCloseTo(23.8, 5);
+    expect(byName["Cash"]).toBeCloseTo(4.6, 5);
+    expect(byName["Alternatives"]).toBeUndefined();
+  });
+
+  it("orders slices Equities → Fixed Income → Alternatives → Cash", () => {
+    const opt = buildHcAssetClassPieOption(ASSET_ITEMS, TEST_COLORS);
+    const data = (opt.series as Array<{ data?: Array<{ name: string }> }>)[0].data!;
+    expect(data.map((d) => d.name)).toEqual(["Equities", "Fixed Income", "Cash"]);
+  });
+
+  it("carries direct/indirect on each slice for the tooltip", () => {
+    const opt = buildHcAssetClassPieOption(ASSET_ITEMS, TEST_COLORS);
+    const data = (opt.series as Array<{ data?: Array<{ name: string; direct: number; indirect: number }> }>)[0].data!;
+    const equities = data.find((d) => d.name === "Equities")!;
+    expect(equities.direct).toBeCloseTo(60.6, 5);
+    expect(equities.indirect).toBeCloseTo(7.8, 5);
   });
 });

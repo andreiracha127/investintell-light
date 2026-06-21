@@ -1007,37 +1007,17 @@ function StyleTab({
   styleDriftOption: Highcharts.Options | null;
 }) {
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
-      <ChartCard
-        title="Style drift"
-        subtitle="N-PORT sectors"
-        option={styleDriftOption}
-        query={styleDriftQuery}
-        emptyMessage={
-          styleDriftQuery.data?.empty_state?.reason ??
-          "No historical sector drift available for this fund."
-        }
-        className="h-[360px]"
-      />
-      <Card title="Source">
-        {styleDriftQuery.data ? (
-          <dl className="m-0">
-            <StatRow label="Series" value={styleDriftQuery.data.series_id} />
-            <StatRow label="Periods" value={String(styleDriftQuery.data.periods.length)} />
-            <StatRow
-              label="Status"
-              value={styleDriftQuery.data.empty_state?.reason ?? "Available"}
-            />
-          </dl>
-        ) : (
-          <QueryMessage
-            query={styleDriftQuery}
-            emptyMessage="No style drift source metadata."
-            loadingMessage="Loading style drift..."
-          />
-        )}
-      </Card>
-    </div>
+    <ChartCard
+      title="Style drift"
+      subtitle="N-PORT sectors"
+      option={styleDriftOption}
+      query={styleDriftQuery}
+      emptyMessage={
+        styleDriftQuery.data?.empty_state?.reason ??
+        "No historical sector drift available for this fund."
+      }
+      className="mx-auto aspect-[21/9] max-w-[1040px]"
+    />
   );
 }
 

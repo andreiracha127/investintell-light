@@ -55,15 +55,18 @@
   --color-loss-muted:    var(--ix-neg-wash);
   --color-neutral-value: var(--ix-text-3);
 
-  /* ── Categorical palette (multi-asset series) — graphite ramp + accent ── */
-  --color-cat-1: var(--ix-accent);
-  --color-cat-2: var(--ix-graphite);
-  --color-cat-3: #565b63;
-  --color-cat-4: #7f858d;
-  --color-cat-5: var(--ix-grey-bar);
-  --color-cat-6: #d8dbe0;
-  --color-cat-7: #a08184;   /* muted accent-adjacent */
-  --color-cat-8: #4d5560;
+  /* ── Categorical palette — chart-owned "cool fintech" ramp ──────────────
+     Chart series get their OWN vivid tokens, decoupled from the graphite UI
+     grays (read only by chartColors.ts). Cool, saturated, high-contrast set
+     that stays legible on both light and dark surfaces. Dark variants below. */
+  --color-cat-1: #0f62fe;   /* blue */
+  --color-cat-2: #08bdba;   /* teal */
+  --color-cat-3: #8a3ffc;   /* violet */
+  --color-cat-4: #24a148;   /* green */
+  --color-cat-5: #33b1ff;   /* light blue */
+  --color-cat-6: #be95ff;   /* lavender */
+  --color-cat-7: #009d9a;   /* deep teal */
+  --color-cat-8: #ff832b;   /* warm accent (orange) */
 
   /* ── Text tokens ── */
   --color-text-primary:   var(--ix-text);
@@ -171,6 +174,15 @@ html[data-theme="dark"] {
   --ix-pos-wash: #16281b;
   --ix-neg: #fa4d56;
   --ix-neg-wash: #321a1c;
+  /* Brighter categorical ramp for dark surfaces (chart-owned). */
+  --color-cat-1: #4589ff;   /* blue */
+  --color-cat-2: #3ddbd9;   /* teal */
+  --color-cat-3: #be95ff;   /* violet */
+  --color-cat-4: #42be65;   /* green */
+  --color-cat-5: #82cfff;   /* light blue */
+  --color-cat-6: #d4bbff;   /* lavender */
+  --color-cat-7: #08bdba;   /* deep teal */
+  --color-cat-8: #ff832b;   /* warm accent (orange) */
 }
 html[data-theme="dark"] { --ix-accent: #e0828a; --ix-accent-hover: #d76b73; --ix-accent-wash: #3a2326; }
 html[data-theme="dark"][data-accent="blue"] { --ix-accent: #78a9ff; --ix-accent-hover: #a6c8ff; --ix-accent-wash: #1c2a45; }

@@ -57,14 +57,25 @@ export function highchartsTheme(colors: ChartColors): Options {
     },
     plotOptions: {
       series: {
-        animation: { duration: 350 },
+        animation: { duration: 650 },
         // Flat squares — Carbon language (the .dc.html mockups use radius 0).
         borderRadius: 0,
-        states: { hover: { lineWidthPlus: 1 } },
+        // Liven up interaction: thicken lines, brighten fills, and halo points
+        // on hover; dim the rest so the hovered series pops.
+        states: {
+          hover: { lineWidthPlus: 1, brightness: 0.1, halo: { size: 6, opacity: 0.18 } },
+          inactive: { opacity: 0.35 },
+        },
         marker: { enabledThreshold: 3, radius: 2 },
       } as PlotSeriesOptions,
-      column: { borderRadius: 0, groupPadding: 0.12, pointPadding: 0.04 },
+      column: {
+        borderRadius: 0,
+        groupPadding: 0.12,
+        pointPadding: 0.04,
+        states: { hover: { brightness: 0.12 } },
+      },
       bar: { borderRadius: 0, groupPadding: 0.12, pointPadding: 0.04 },
+      area: { lineWidth: 1.5, fillOpacity: 0.5, states: { hover: { halo: null } } },
       candlestick: {
         color: colors.loss,
         upColor: colors.gain,

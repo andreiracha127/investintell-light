@@ -18,7 +18,11 @@ import { useEffect, useMemo, useState } from "react";
 
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { Card, KpiTile } from "@/components/ui/panels";
-import { buildHcExposureBarsOption } from "@/lib/charts/hc/lookthrough";
+import {
+  buildHcAssetClassPieOption,
+  buildHcExposureBarsOption,
+  buildHcIssuerParetoOption,
+} from "@/lib/charts/hc/lookthrough";
 import { type ChartColors } from "@/lib/charts/chartColors";
 import { formatDate, formatNumber } from "@/lib/format";
 import type { ExposureItem, LookthroughSummary } from "@/lib/api/client";
@@ -69,6 +73,15 @@ function ExposureCharts({
   if (dimKeys.length === 0) return null;
 
   const activeItems = dimensions[activeDim] ?? [];
+  // Issuer renders a vertical Pareto (concentration curve) in a taller 21:9
+  // card; asset class renders an animated donut in a tall, roomy area; the
+  // other dimensions keep the compact horizontal bars.
+  const chartClassName =
+    activeDim === "issuer"
+      ? "aspect-[21/9] w-full"
+      : activeDim === "asset_class"
+        ? "h-[460px] w-full"
+        : "h-[320px] w-full";
 
   return (
     <>
@@ -101,7 +114,7 @@ function ExposureCharts({
       </div>
 
       {activeItems.length > 0 ? (
-        <HighchartsChart options={exposureOption} className="h-[320px] w-full" />
+        <HighchartsChart options={exposureOption} className={chartClassName} />
       ) : (
         <p className="py-8 text-center text-[13px] text-text-muted">
           No exposure data for this dimension.
@@ -153,10 +166,12 @@ export function LookthroughPanel({
     }
   }, [dimensions, activeDim]);
 
-  const exposureOption = useMemo(
-    () => buildHcExposureBarsOption(dimensions[activeDim] ?? [], colors),
-    [dimensions, activeDim, colors],
-  );
+  const exposureOption = useMemo(() => {
+    const items = dimensions[activeDim] ?? [];
+    if (activeDim === "issuer") return buildHcIssuerParetoOption(items, colors);
+    if (activeDim === "asset_class") return buildHcAssetClassPieOption(items, colors);
+    return buildHcExposureBarsOption(items, colors);
+  }, [dimensions, activeDim, colors]);
 
   return (
     <>

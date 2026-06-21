@@ -11,6 +11,7 @@ import { useEffect, useRef } from "react";
 import type { Chart, Options } from "highcharts";
 
 import { chartColors } from "@/lib/charts/chartColors";
+import { registerPieEntrance } from "@/lib/charts/hc/pieEntrance";
 import { highchartsTheme } from "@/lib/charts/hc/theme";
 
 type StockUiOptions = Options & {
@@ -83,6 +84,8 @@ export function HighchartsChart({
       await import("highcharts/esm/modules/sunburst.js");
       if (disposed || !containerRef.current) return;
       const Highcharts = mod.default;
+      // Custom pie fan-in entrance (idempotent; mutates the pie prototype once).
+      registerPieEntrance(Highcharts);
       // Apply the token-driven Graphite theme globally before creating.
       Highcharts.setOptions(highchartsTheme(chartColors()));
       const chart = Highcharts.chart(containerRef.current, coreOnlyOptions(latestOptions.current));
