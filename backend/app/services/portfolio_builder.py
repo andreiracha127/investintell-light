@@ -133,6 +133,44 @@ def _ref_key(ref: FundRefIn | EquityRefIn) -> str:
     return _to_data_ref(ref).label
 
 
+def _available_tickers(assets: list[AssetRefIn], label_map: _LabelMap) -> dict[str, int]:
+    """Map an UPPER-cased ticker → its column index, for the goldfix haven.
+
+    Equities expose their ticker directly; funds expose it via the universe
+    ``label_map`` (the explicit-list path leaves fund tickers unknown, so a fund
+    only participates in the haven when its ticker is known). The index is the
+    asset's position in ``assets`` (== its column once labels are built in the
+    same order).
+    """
+    out: dict[str, int] = {}
+    for i, ref in enumerate(assets):
+        if isinstance(ref, EquityRefIn):
+            out[ref.ticker.upper()] = i
+        else:
+            ticker = label_map.get(_ref_key(ref), (None, None))[0]
+            if ticker:
+                out[ticker.upper()] = i
+    return out
+
+
+def _spy_closes_from_frame(frame: "pd.DataFrame") -> list[float]:
+    """Reconstruct a NEWEST-FIRST synthetic SPY close series for the vol/beta
+    market-stress overlay, IF the universe contains ``equity:SPY``.
+
+    The builder has no SPY closes loader on the request path, so the overlay is
+    sourced opportunistically from the returns frame: a cumulative product of
+    (1 + r) gives a price proxy whose drawdown shape (what ``market_stress``
+    reads) matches SPY's. When SPY is absent the overlay degrades to the flat
+    ``cap`` (``vol_graduated_caps``' no-stress branch) — documented, degrade-safe.
+    """
+    col = "equity:SPY"
+    if col not in frame.columns:
+        return []
+    rets = frame[col].to_numpy(dtype=float)
+    closes = np.cumprod(1.0 + rets)  # oldest→newest price proxy
+    return [float(x) for x in closes[::-1]]  # newest-first for market_stress
+
+
 def _build_views(
     views: list[ViewIn], index_of: dict[str, int]
 ) -> list[bl.View]:
@@ -597,6 +635,7 @@ async def run_optimize(
     pairwise_cov_path = broad and payload.objective not in (
         "min_cvar",
         "max_return_cvar",
+        "combo",
     )
     if pairwise_cov_path:
         assert payload.universe is not None
@@ -695,6 +734,11 @@ async def run_optimize(
     view_consistency: ViewConsistencyOut | None = None
     cvar_limit_effective: float | None = None
     regime_state: str | None = None
+    # COMBO diagnostics (Sprint 3): populated only on the ``combo`` path.
+    combo_quadrant: str | None = None
+    combo_regime: str | None = None
+    combo_class_bands: dict[str, list[float]] | None = None
+    combo_haven_tilt: dict[str, float] | None = None
     w_mkt: np.ndarray | None = None
     if needs_bl:
         w_mkt = await _market_weights_for(session, assets, labels)
@@ -753,7 +797,86 @@ async def run_optimize(
     )
 
     try:
-        if payload.objective == "bl_utility":
+        if payload.objective == "combo":
+            # COMBO regime allocator (Sprint 3, spec §3.3): the gate-driven
+            # per-class band ENVELOPE + min-CVaR inside it (decision B), with the
+            # SLOWDOWN goldfix haven and vol/beta graduated caps. The payload's
+            # ``block_budgets`` are IGNORED here — bands derive from the regime.
+            regime_blocks, combo_regime, combo_quadrant = (
+                await _resolve_regime_block_budgets(session, datalake, assets, labels)
+            )
+            # Gate state also scales the reported CVaR limit + drives diagnostics,
+            # honouring the same test seam as the scaling read (Task 4).
+            gate_state = _OVERRIDE_REGIME_STATE
+            if gate_state is None and datalake is not None:
+                gate_snap = await taa_bands.fetch_gate_regime(datalake)
+                gate_state = gate_snap.state if gate_snap is not None else None
+            regime_state = gate_state
+            if payload.cvar_limit is not None:
+                cvar_limit_effective = apply_regime_cvar_limit(
+                    payload.cvar_limit, gate_state,
+                    risk_off_factor=DEFAULT_RISK_OFF_CVAR_FACTOR,
+                )
+            if combo_regime == "STAG_GOLD":
+                # Goldfix haven: IMPOSE the fixed gold-led target over available
+                # names (port _haven_weights goldfix, main.py:959-972); the
+                # whitelist IS the defense — skip the solver entirely.
+                ticker_col = _available_tickers(assets, label_map)
+                target = taa_bands.goldfix_target(set(ticker_col.keys()))
+                if not target:
+                    raise BuilderError(
+                        "combo SLOWDOWN haven needs at least one of GLD/VOOV/QAI/"
+                        "GCC/BIL in the universe; none were found"
+                    )
+                weights = np.zeros(len(labels), dtype=float)
+                for ticker, wgt in target.items():
+                    weights[ticker_col[ticker]] = wgt
+                status = "goldfix"
+                combo_haven_tilt = dict(target)
+            else:
+                # Band route — min-CVaR inside the regime envelope with the vol/
+                # (beta in RISK_OFF) graduated per-asset cap vector. Surface the
+                # per-class (min, max) bands actually enforced for transparency
+                # (only the classes PRESENT as a BlockBudget).
+                present_classes = await _fund_class_columns(session, assets, labels)
+                _band_map, _ = taa_bands.effective_class_bands(combo_regime)
+                combo_class_bands = {
+                    cls: [_band_map[cls][0], _band_map[cls][1]]
+                    for cls in _COMBO_BAND_CLASSES
+                    if present_classes.get(cls)
+                }
+                base_cap = cap if cap is not None else engine.DEFAULT_CAP
+                return_cols = [scenarios[:, j] for j in range(scenarios.shape[1])]
+                spy_desc = _spy_closes_from_frame(frame)
+                graduated_caps = taa_bands.vol_graduated_caps(
+                    base_cap, return_cols, spy_desc
+                )
+                if combo_regime == "RISK_OFF":
+                    spy_col = index_of.get("equity:SPY")
+                    if spy_col is not None and spy_desc:
+                        spy_rets = scenarios[:, spy_col]
+                        betas = taa_bands.asset_betas(
+                            {labels[j]: scenarios[:, j] for j in range(len(labels))},
+                            spy_rets,
+                        )
+                        graduated_caps = taa_bands.beta_graduated_caps(
+                            graduated_caps, [betas[labels[j]] for j in range(len(labels))]
+                        )
+                cvar_bounds_combo = engine.BoundsBundle(
+                    cap_vec=graduated_caps,
+                    min_vec=np.full(n, min_weight) if min_weight is not None else None,
+                    blocks=regime_blocks or None,
+                )
+                weights, status = engine.solve_min_cvar(
+                    scenarios,
+                    cap=cap,
+                    min_weight=min_weight,
+                    bounds=cvar_bounds_combo,
+                    current_weights=current_vec,
+                    turnover_lambda=payload.turnover_lambda,
+                    linear=linear,
+                )
+        elif payload.objective == "bl_utility":
             assert mu_equilibrium is not None  # needs_bl guarantees it
             mu_for_utility = mu_posterior if mu_posterior is not None else mu_equilibrium
             weights, status = bl.solve_bl_utility(
@@ -886,5 +1009,9 @@ async def run_optimize(
             selection=selection_diag,
             cvar_limit_effective=cvar_limit_effective,
             regime_state=regime_state,
+            quadrant=combo_quadrant,
+            combined_regime=combo_regime,
+            class_bands=combo_class_bands,
+            haven_tilt=combo_haven_tilt,
         ),
     )

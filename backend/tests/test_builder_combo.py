@@ -17,6 +17,7 @@ import pandas as pd
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.core.datalake import get_optional_datalake_session
 from app.core.db import get_session
 from app.main import create_app
 from app.optimizer import data as optimizer_data
@@ -172,6 +173,10 @@ async def test_combo_no_gate_degrades_to_riskon(monkeypatch: pytest.MonkeyPatch)
 def _client() -> AsyncClient:
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
+    # The combo gate read is datalake-guarded (None datalake => no gate => RISK_ON
+    # in prod). Inject a non-None dummy so the monkeypatched ``fetch_gate_regime``
+    # fires and drives the regime/quadrant deterministically.
+    app.dependency_overrides[get_optional_datalake_session] = lambda: object()
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
