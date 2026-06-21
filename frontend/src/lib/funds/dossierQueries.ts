@@ -42,6 +42,8 @@ export type FundsDossierResource =
   | "scatter"
   | "holding-reverse-lookup";
 
+const FUND_TIMESERIES_CACHE_VERSION = "daily-cagg-v1";
+
 type CacheTier = "short" | "long";
 
 const CACHE_SECONDS_BY_TIER = {
@@ -343,9 +345,11 @@ export function cacheKeyParts(
   id: string,
   pairs: readonly (readonly [string, QueryValue])[],
 ): string[] {
+  const version = resource === "timeseries" ? [`version:${FUND_TIMESERIES_CACHE_VERSION}`] : [];
   return [
     "fund-dossier",
     resource,
+    ...version,
     id,
     ...pairs.map(([key, value]) => `${key}:${value ?? "null"}`),
   ];
@@ -397,7 +401,7 @@ export const dossierQueryKeys = {
   profile: (instrumentId: string) => ["fund-profile", instrumentId] as const,
   timeseries: (instrumentId: string, query: { range?: QueryValue } = {}) => {
     const params = normalizeTimeseriesParams(query);
-    return ["fund-timeseries", instrumentId, params.range] as const;
+    return ["fund-timeseries", FUND_TIMESERIES_CACHE_VERSION, instrumentId, params.range] as const;
   },
   history: (instrumentId: string, query: { bars?: QueryValue } = {}) => {
     const params = normalizeHistoryParams(query);

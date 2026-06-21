@@ -62,7 +62,13 @@ describe("fund dossier route handlers", () => {
     );
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ cache: "no-store" });
     expect(cacheCalls[0]).toMatchObject({
-      keyParts: ["fund-dossier", "timeseries", "fund-1", "range:1Y"],
+      keyParts: [
+        "fund-dossier",
+        "timeseries",
+        "version:daily-cagg-v1",
+        "fund-1",
+        "range:1Y",
+      ],
       options: {
         revalidate: 3600,
         tags: ["fund:fund-1", "fund:fund-1:timeseries"],

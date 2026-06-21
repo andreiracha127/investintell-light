@@ -74,6 +74,13 @@ describe("fund dossier query config", () => {
       "fund:fund-1",
       "fund:fund-1:timeseries",
     ]);
+    expect(fundResourceCacheKey("timeseries", "fund-1", { range: "5Y" })).toEqual([
+      "fund-dossier",
+      "timeseries",
+      "version:daily-cagg-v1",
+      "fund-1",
+      "range:5Y",
+    ]);
     expect(fundResourceCacheKey("analysis", "fund-1", { range: "MAX" })).toEqual([
       "fund-dossier",
       "analysis",
