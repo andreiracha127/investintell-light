@@ -36,6 +36,12 @@ INTERNATIONAL_OVERRIDES_DDL_PATH = (
     / "ddl"
     / "2026-06-21_international_equity_strategy_overrides.sql"
 )
+SECTOR_CONVERTIBLE_OVERRIDES_DDL_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "db"
+    / "ddl"
+    / "2026-06-21_sector_convertible_strategy_overrides.sql"
+)
 
 
 def test_stage_labels_sql_prefers_manual_overrides() -> None:
@@ -75,8 +81,12 @@ def test_dynamic_catalog_knows_alternative_sublabels() -> None:
     assert "THEN 'Leveraged'" in sql
     assert "THEN 'Inverse / Hedge'" in sql
     assert "natural resources" in sql
-    assert "THEN 'Sector Equity'" in sql
     assert "THEN 'Technology'" in sql
+    assert "WHEN 'Health Care Equity' THEN 'equity'" in sql
+    assert "WHEN 'Financials Equity' THEN 'equity'" in sql
+    assert "WHEN 'Preferred Securities' THEN 'fixed_income'" in sql
+    assert "THEN 'Biotechnology Equity'" in sql
+    assert "THEN 'Sector Rotation Equity'" in sql
     assert "all country asia ex japan" in sql
     assert "global ex u s" in sql
     assert "THEN 'European Equity'" in sql
@@ -165,6 +175,30 @@ def test_international_override_migration_splits_regional_equity() -> None:
     assert "THEN 'International Equity'" in sql
     assert "THEN 'Global Equity'" in sql
     assert "public.asset_class_from_strategy(fv.strategy_label)" in sql
+
+
+def test_sector_convertible_override_migration_splits_broad_buckets() -> None:
+    sql = SECTOR_CONVERTIBLE_OVERRIDES_DDL_PATH.read_text(encoding="utf-8")
+    benchmark_sql = BENCHMARK_DDL_PATH.read_text(encoding="utf-8")
+
+    assert "'Sector Equity', 'Convertible Securities'" in sql
+    assert "sector_convertible_review_sector_split" in sql
+    assert "sector_convertible_review_convertible_cleanup" in sql
+    assert "sector_convertible_review_holdings_fixed_income" in sql
+    assert "THEN 'Health Care Equity'" in sql
+    assert "THEN 'Financials Equity'" in sql
+    assert "THEN 'Sector Rotation Equity'" in sql
+    assert "THEN 'Preferred Securities'" in sql
+    assert "THEN 'Convertible Securities'" in sql
+    assert "public.asset_class_from_strategy(fv.strategy_label)" in sql
+    assert "structured_pct >= 50" in sql
+    assert "equity_pct >= 70" in sql
+    assert "SELECT DISTINCT ON (source_pk)" in sql
+
+    assert "('Health Care Equity', 'XLV'" in benchmark_sql
+    assert "('Financials Equity', 'XLF'" in benchmark_sql
+    assert "('Preferred Securities', 'PFF'" in benchmark_sql
+    assert "('Sector Rotation Equity', 'EQL'" in benchmark_sql
 
 
 def test_funds_v_name_prefers_series_name_for_trusts() -> None:
