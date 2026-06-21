@@ -602,6 +602,88 @@ export function fetchStockTimeseries(
   );
 }
 
+/** One 13F institutional holder of a stock (Stocks → Holders tab). */
+export interface StockHolder {
+  cik: string;
+  manager_name: string;
+  shares: number | null;
+  market_value: number | null;
+  /** Stake as a fraction of shares outstanding (0.079 = 7.9% owned). */
+  pct_outstanding: number | null;
+  /** Price return from the holder's entry quarter to today (decimal fraction). */
+  position_return: number | null;
+  entry_date: string | null;
+}
+
+export interface StockHolders {
+  ticker: string;
+  cusip: string | null;
+  security_name: string | null;
+  period: string | null;
+  holder_count: number;
+  total_market_value: number | null;
+  shares_outstanding: number | null;
+  holders: StockHolder[];
+  empty_state: { reason: string; source: string | null } | null;
+}
+
+export function fetchStockHolders(
+  ticker: string,
+  signal?: AbortSignal,
+): Promise<StockHolders> {
+  return request<StockHolders>(
+    `/stocks/${encodeURIComponent(ticker)}/holders`,
+    signal,
+  );
+}
+
+/** One registered fund (N-PORT series) holding the stock. */
+export interface FundHolder {
+  series_id: string;
+  fund_name: string;
+  /** Light-catalog instrument id for the fund dossier link (null if uncatalogued). */
+  instrument_id: string | null;
+  quantity: number | null;
+  market_value: number | null;
+  /** Percent of the fund's NAV in this stock (percent points, 15.6 = 15.6%).
+   *  pct_of_nav is the latest quarter (Q0); q1..q3 are the three prior quarters. */
+  pct_of_nav: number | null;
+  pct_nav_q1: number | null;
+  pct_nav_q2: number | null;
+  pct_nav_q3: number | null;
+}
+
+/** A registrant/trust grouping its funds that hold the stock (tree parent). */
+export interface FundFamily {
+  registrant_cik: string;
+  family: string;
+  market_value: number | null;
+  fund_count: number;
+  funds: FundHolder[];
+}
+
+export interface StockFundHolders {
+  ticker: string;
+  cusip: string | null;
+  security_name: string | null;
+  period: string | null;
+  family_count: number;
+  fund_count: number;
+  total_market_value: number | null;
+  families: FundFamily[];
+  empty_state: { reason: string; source: string | null } | null;
+}
+
+export function fetchStockFundHolders(
+  ticker: string,
+  signal?: AbortSignal,
+): Promise<StockFundHolders> {
+  return request<StockFundHolders>(
+    `/stocks/${encodeURIComponent(ticker)}/holders/funds`,
+    signal,
+  );
+}
+
 export function fetchFundHistory(
   instrumentId: string,
   bars = 2520,

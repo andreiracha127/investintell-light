@@ -142,6 +142,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/stocks/{ticker}/holders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stock Holders
+         * @description Full 13F institutional holder list for one stock (latest period).
+         *
+         *     Resolves ticker → CUSIP and returns every filer in the >$5bn universe that
+         *     holds it — no curated filter, no row cap. `position_return` is reserved for
+         *     a later step (needs prior-period history) and is null for now.
+         */
+        get: operations["get_stock_holders_stocks__ticker__holders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/stocks/{ticker}/holders/funds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stock Fund Holders
+         * @description Registered funds (N-PORT) holding the stock, grouped family → fund.
+         *
+         *     The "by fund" view of the Holders tab: a registrant/trust parent with its
+         *     funds as children (shares, market value, % of NAV). Names come from the SEC
+         *     series-class crosswalk. Latest N-PORT period.
+         */
+        get: operations["get_stock_fund_holders_stocks__ticker__holders_funds_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/stocks/{ticker}/news": {
         parameters: {
             query?: never;
@@ -2572,6 +2620,25 @@ export interface components {
             /** Source Metadata */
             source_metadata: components["schemas"]["FundSourceMetadata"][];
         };
+        /**
+         * FundFamily
+         * @description A registrant/trust grouping its funds that hold the stock (tree parent).
+         */
+        FundFamily: {
+            /** Registrant Cik */
+            registrant_cik: string;
+            /** Family */
+            family: string;
+            /** Market Value */
+            market_value?: number | null;
+            /**
+             * Fund Count
+             * @default 0
+             */
+            fund_count: number;
+            /** Funds */
+            funds?: components["schemas"]["FundHolder"][];
+        };
         /** FundHistoryResponse */
         FundHistoryResponse: {
             /**
@@ -2590,6 +2657,30 @@ export interface components {
             count: number;
             /** Bars */
             bars: components["schemas"]["HistoryBar"][];
+        };
+        /**
+         * FundHolder
+         * @description One registered fund (N-PORT series) holding the stock.
+         */
+        FundHolder: {
+            /** Series Id */
+            series_id: string;
+            /** Fund Name */
+            fund_name: string;
+            /** Instrument Id */
+            instrument_id?: string | null;
+            /** Quantity */
+            quantity?: number | null;
+            /** Market Value */
+            market_value?: number | null;
+            /** Pct Of Nav */
+            pct_of_nav?: number | null;
+            /** Pct Nav Q1 */
+            pct_nav_q1?: number | null;
+            /** Pct Nav Q2 */
+            pct_nav_q2?: number | null;
+            /** Pct Nav Q3 */
+            pct_nav_q3?: number | null;
         };
         /**
          * FundHoldingItem
@@ -5730,6 +5821,93 @@ export interface components {
              */
             as_of: string;
         };
+        /**
+         * StockFundHoldersResponse
+         * @description Render-ready payload for the Holders "by fund" (N-PORT) tree view.
+         */
+        StockFundHoldersResponse: {
+            /** Ticker */
+            ticker: string;
+            /** Cusip */
+            cusip?: string | null;
+            /** Security Name */
+            security_name?: string | null;
+            /**
+             * Period
+             * @description Latest N-PORT report_date.
+             */
+            period?: string | null;
+            /**
+             * Family Count
+             * @default 0
+             */
+            family_count: number;
+            /**
+             * Fund Count
+             * @default 0
+             */
+            fund_count: number;
+            /** Total Market Value */
+            total_market_value?: number | null;
+            /** Families */
+            families?: components["schemas"]["FundFamily"][];
+            empty_state?: components["schemas"]["EmptyState"] | null;
+        };
+        /**
+         * StockHolder
+         * @description One institutional (13F) holder of the stock in the latest period.
+         */
+        StockHolder: {
+            /** Cik */
+            cik: string;
+            /** Manager Name */
+            manager_name: string;
+            /** Shares */
+            shares?: number | null;
+            /** Market Value */
+            market_value?: number | null;
+            /** Pct Outstanding */
+            pct_outstanding?: number | null;
+            /** Position Return */
+            position_return?: number | null;
+            /** Entry Date */
+            entry_date?: string | null;
+        };
+        /**
+         * StockHoldersResponse
+         * @description Render-ready payload for the Holders tab.
+         */
+        StockHoldersResponse: {
+            /** Ticker */
+            ticker: string;
+            /**
+             * Cusip
+             * @description Resolved CUSIP for the ticker.
+             */
+            cusip?: string | null;
+            /** Security Name */
+            security_name?: string | null;
+            /**
+             * Period
+             * @description Latest 13F report_date.
+             */
+            period?: string | null;
+            /**
+             * Holder Count
+             * @default 0
+             */
+            holder_count: number;
+            /** Total Market Value */
+            total_market_value?: number | null;
+            /**
+             * Shares Outstanding
+             * @description Latest shares outstanding (for ownership %).
+             */
+            shares_outstanding?: number | null;
+            /** Holders */
+            holders?: components["schemas"]["StockHolder"][];
+            empty_state?: components["schemas"]["EmptyState"] | null;
+        };
         /** SymbolSearchResult */
         SymbolSearchResult: {
             /** Symbol */
@@ -6160,6 +6338,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StockAnalysisResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_stock_holders_stocks__ticker__holders_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockHoldersResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_stock_fund_holders_stocks__ticker__holders_funds_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockFundHoldersResponse"];
                 };
             };
             /** @description Validation Error */

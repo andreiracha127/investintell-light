@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._shared import ensure_eod_or_http_error, raise_news_fetch_error
 from app.core.config import get_settings
+from app.core.datalake import get_datalake_session
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
 from app.ingestion.news import ensure_news
@@ -37,6 +38,7 @@ from app.schemas.analysis import RangeKey, StockAnalysisResponse
 from app.schemas.market import HistoryBar, HistoryResponse, MarketOverviewResponse
 from app.schemas.news import NewsArticle, NewsResponse
 from app.schemas.prices import PricePoint, PriceSeriesResponse
+from app.schemas.stock_holders import StockFundHoldersResponse, StockHoldersResponse
 from app.schemas.timeseries import OhlcSeriesResponse
 from app.services import market_overview
 from app.services._series import (
@@ -57,6 +59,11 @@ from app.services.stock_analysis import (
     build_adj_close_series,
     build_price_frame,
     lookback_pad_days,
+)
+from app.services.stock_holders import (
+    StockHoldersSourceError,
+    fetch_stock_fund_holders,
+    fetch_stock_holders,
 )
 from app.services.timeseries import (
     range_start,
@@ -348,6 +355,49 @@ async def get_stock_analysis(
         )
     except StockAnalysisError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# Holders endpoint (Stocks → Holders tab)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{ticker}/holders", response_model=StockHoldersResponse)
+async def get_stock_holders(
+    ticker: str,
+    datalake: Annotated[AsyncSession, Depends(get_datalake_session)],
+) -> StockHoldersResponse:
+    """Full 13F institutional holder list for one stock (latest period).
+
+    Resolves ticker → CUSIP and returns every filer in the >$5bn universe that
+    holds it — no curated filter, no row cap. `position_return` is reserved for
+    a later step (needs prior-period history) and is null for now.
+    """
+    try:
+        return await fetch_stock_holders(datalake, ticker)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except StockHoldersSourceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/{ticker}/holders/funds", response_model=StockFundHoldersResponse)
+async def get_stock_fund_holders(
+    ticker: str,
+    datalake: Annotated[AsyncSession, Depends(get_datalake_session)],
+) -> StockFundHoldersResponse:
+    """Registered funds (N-PORT) holding the stock, grouped family → fund.
+
+    The "by fund" view of the Holders tab: a registrant/trust parent with its
+    funds as children (shares, market value, % of NAV). Names come from the SEC
+    series-class crosswalk. Latest N-PORT period.
+    """
+    try:
+        return await fetch_stock_fund_holders(datalake, ticker)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except StockHoldersSourceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------

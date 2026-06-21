@@ -334,6 +334,92 @@
         }
       }
     },
+    "/stocks/{ticker}/holders": {
+      "get": {
+        "tags": [
+          "stocks"
+        ],
+        "summary": "Get Stock Holders",
+        "description": "Full 13F institutional holder list for one stock (latest period).\n\nResolves ticker \u2192 CUSIP and returns every filer in the >$5bn universe that\nholds it \u2014 no curated filter, no row cap. `position_return` is reserved for\na later step (needs prior-period history) and is null for now.",
+        "operationId": "get_stock_holders_stocks__ticker__holders_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockHoldersResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/stocks/{ticker}/holders/funds": {
+      "get": {
+        "tags": [
+          "stocks"
+        ],
+        "summary": "Get Stock Fund Holders",
+        "description": "Registered funds (N-PORT) holding the stock, grouped family \u2192 fund.\n\nThe \"by fund\" view of the Holders tab: a registrant/trust parent with its\nfunds as children (shares, market value, % of NAV). Names come from the SEC\nseries-class crosswalk. Latest N-PORT period.",
+        "operationId": "get_stock_fund_holders_stocks__ticker__holders_funds_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockFundHoldersResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/stocks/{ticker}/news": {
       "get": {
         "tags": [
@@ -6560,6 +6646,49 @@
         "title": "FundFactorsResponse",
         "description": "Market sensitivities and style-bias snapshot for one fund."
       },
+      "FundFamily": {
+        "properties": {
+          "registrant_cik": {
+            "type": "string",
+            "title": "Registrant Cik"
+          },
+          "family": {
+            "type": "string",
+            "title": "Family"
+          },
+          "market_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Value"
+          },
+          "fund_count": {
+            "type": "integer",
+            "title": "Fund Count",
+            "default": 0
+          },
+          "funds": {
+            "items": {
+              "$ref": "#/components/schemas/FundHolder"
+            },
+            "type": "array",
+            "title": "Funds"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "registrant_cik",
+          "family"
+        ],
+        "title": "FundFamily",
+        "description": "A registrant/trust grouping its funds that hold the stock (tree parent)."
+      },
       "FundHistoryResponse": {
         "properties": {
           "instrument_id": {
@@ -6607,6 +6736,104 @@
           "bars"
         ],
         "title": "FundHistoryResponse"
+      },
+      "FundHolder": {
+        "properties": {
+          "series_id": {
+            "type": "string",
+            "title": "Series Id"
+          },
+          "fund_name": {
+            "type": "string",
+            "title": "Fund Name"
+          },
+          "instrument_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Id"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity"
+          },
+          "market_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Value"
+          },
+          "pct_of_nav": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pct Of Nav"
+          },
+          "pct_nav_q1": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pct Nav Q1"
+          },
+          "pct_nav_q2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pct Nav Q2"
+          },
+          "pct_nav_q3": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pct Nav Q3"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "series_id",
+          "fund_name"
+        ],
+        "title": "FundHolder",
+        "description": "One registered fund (N-PORT series) holding the stock."
       },
       "FundHoldingItem": {
         "properties": {
@@ -14351,6 +14578,266 @@
         ],
         "title": "StockCorrelationResponse",
         "description": "Pairwise Pearson correlation matrix of the holdings' daily returns."
+      },
+      "StockFundHoldersResponse": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "cusip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cusip"
+          },
+          "security_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Security Name"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period",
+            "description": "Latest N-PORT report_date."
+          },
+          "family_count": {
+            "type": "integer",
+            "title": "Family Count",
+            "default": 0
+          },
+          "fund_count": {
+            "type": "integer",
+            "title": "Fund Count",
+            "default": 0
+          },
+          "total_market_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Market Value"
+          },
+          "families": {
+            "items": {
+              "$ref": "#/components/schemas/FundFamily"
+            },
+            "type": "array",
+            "title": "Families"
+          },
+          "empty_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmptyState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "ticker"
+        ],
+        "title": "StockFundHoldersResponse",
+        "description": "Render-ready payload for the Holders \"by fund\" (N-PORT) tree view."
+      },
+      "StockHolder": {
+        "properties": {
+          "cik": {
+            "type": "string",
+            "title": "Cik"
+          },
+          "manager_name": {
+            "type": "string",
+            "title": "Manager Name"
+          },
+          "shares": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shares"
+          },
+          "market_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Value"
+          },
+          "pct_outstanding": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pct Outstanding"
+          },
+          "position_return": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position Return"
+          },
+          "entry_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Date"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cik",
+          "manager_name"
+        ],
+        "title": "StockHolder",
+        "description": "One institutional (13F) holder of the stock in the latest period."
+      },
+      "StockHoldersResponse": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "cusip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cusip",
+            "description": "Resolved CUSIP for the ticker."
+          },
+          "security_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Security Name"
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period",
+            "description": "Latest 13F report_date."
+          },
+          "holder_count": {
+            "type": "integer",
+            "title": "Holder Count",
+            "default": 0
+          },
+          "total_market_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Market Value"
+          },
+          "shares_outstanding": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shares Outstanding",
+            "description": "Latest shares outstanding (for ownership %)."
+          },
+          "holders": {
+            "items": {
+              "$ref": "#/components/schemas/StockHolder"
+            },
+            "type": "array",
+            "title": "Holders"
+          },
+          "empty_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmptyState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "ticker"
+        ],
+        "title": "StockHoldersResponse",
+        "description": "Render-ready payload for the Holders tab."
       },
       "SymbolSearchResult": {
         "properties": {

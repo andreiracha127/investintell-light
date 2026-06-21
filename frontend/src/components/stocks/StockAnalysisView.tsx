@@ -31,6 +31,7 @@ import {
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { InteractiveChart } from "@/components/charts/InteractiveChart";
 import { AddToPortfolio } from "@/components/stocks/AddToPortfolio";
+import { HoldersTab } from "@/components/stocks/HoldersTab";
 import { NewsPanel } from "@/components/stocks/NewsPanel";
 import { useLiveTicks } from "@/lib/livefeed/useLiveTicks";
 import { Card, KpiTile, StatRow, valueTone } from "@/components/ui/panels";
@@ -157,6 +158,7 @@ function AnalysisContent({
   historyBars: HistoryBar[];
 }) {
   const { header, params, stats } = data;
+  const [tab, setTab] = useState<"analysis" | "holders">("analysis");
 
   const volatilityOption = useMemo(
     () =>
@@ -241,6 +243,32 @@ function AnalysisContent({
         <AddToPortfolio ticker={header.ticker} price={shownLast} variant="button" />
       </div>
 
+      {/* ── Tab bar (Analysis | Holders) ── */}
+      <div className="mb-px flex gap-px border-b border-border" role="tablist">
+        {(["analysis", "holders"] as const).map((id) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+            className={`px-4 py-2 text-[13px] font-semibold capitalize transition-colors ${
+              tab === id
+                ? "border-b-2 border-b-accent text-text-primary"
+                : "border-b-2 border-b-transparent text-text-secondary hover:text-text-primary"
+            }`}
+          >
+            {id}
+          </button>
+        ))}
+      </div>
+
+      {tab === "holders" ? (
+        <div className="mt-px">
+          <HoldersTab ticker={header.ticker} />
+        </div>
+      ) : (
+      <>
       {/* ── Interactive chart (Highcharts Stock + livefeed) ── */}
       <div className="mb-px">
         <InteractiveChart
@@ -371,6 +399,8 @@ function AnalysisContent({
       <div className="mt-px">
         <NewsPanel ticker={header.ticker} />
       </div>
+      </>
+      )}
     </div>
   );
 }
