@@ -5707,6 +5707,59 @@
               }
             ],
             "title": "Regime State"
+          },
+          "quadrant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quadrant"
+          },
+          "combined_regime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Combined Regime"
+          },
+          "class_bands": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Bands"
+          },
+          "haven_tilt": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Haven Tilt"
           }
         },
         "type": "object",
@@ -11240,7 +11293,8 @@
               "max_diversification",
               "min_cvar",
               "bl_utility",
-              "max_return_cvar"
+              "max_return_cvar",
+              "combo"
             ],
             "title": "Objective",
             "default": "min_cvar"
@@ -15120,7 +15174,8 @@
               "max_diversification",
               "min_cvar",
               "bl_utility",
-              "max_return_cvar"
+              "max_return_cvar",
+              "combo"
             ],
             "title": "Objective"
           },
@@ -15195,7 +15250,8 @@
               "max_diversification",
               "min_cvar",
               "bl_utility",
-              "max_return_cvar"
+              "max_return_cvar",
+              "combo"
             ],
             "title": "Objective",
             "default": "min_cvar"

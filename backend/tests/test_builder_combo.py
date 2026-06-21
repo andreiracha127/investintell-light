@@ -180,7 +180,7 @@ def _client() -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
-def _stub_returns(monkeypatch: pytest.MonkeyPatch, ids: list[uuid.UUID], n_obs: int = 500) -> None:
+def _stub_returns(monkeypatch: pytest.MonkeyPatch, n_obs: int = 500) -> None:
     """Aligned returns where the equity fund (idx 0) has the best risk-return so
     an unconstrained min-CVaR concentrates there — making the equity band bind."""
 
@@ -218,7 +218,7 @@ def _stub_taxonomy(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def test_combo_respects_riskoff_equity_band(monkeypatch: pytest.MonkeyPatch) -> None:
     """RISK_OFF equity band [0.26, 0.50] is enforced by the combo solve."""
-    _stub_returns(monkeypatch, _FUND_IDS)
+    _stub_returns(monkeypatch)
     monkeypatch.setattr(tb, "fetch_gate_regime", _async(_gate_snapshot(state="risk_off")))
     payload = {
         "assets": [{"kind": "fund", "id": str(fid)} for fid in _FUND_IDS],
@@ -240,7 +240,7 @@ async def test_combo_respects_riskoff_equity_band(monkeypatch: pytest.MonkeyPatc
 
 async def test_combo_riskon_equity_band_is_floored(monkeypatch: pytest.MonkeyPatch) -> None:
     """Control: RISK_ON raises the equity floor to 0.40 (vs risk_off 0.26)."""
-    _stub_returns(monkeypatch, _FUND_IDS)
+    _stub_returns(monkeypatch)
     monkeypatch.setattr(tb, "fetch_gate_regime", _async(_gate_snapshot(state="risk_on")))
     payload = {
         "assets": [{"kind": "fund", "id": str(fid)} for fid in _FUND_IDS],
@@ -260,7 +260,7 @@ async def test_combo_riskon_equity_band_is_floored(monkeypatch: pytest.MonkeyPat
 async def test_combo_slowdown_routes_goldfix(monkeypatch: pytest.MonkeyPatch) -> None:
     """SLOWDOWN routes the fixed goldfix haven over available names; equity
     stocks go to 0 and diagnostics.haven_tilt is populated."""
-    _stub_returns(monkeypatch, _FUND_IDS)
+    _stub_returns(monkeypatch)
     monkeypatch.setattr(
         tb, "fetch_gate_regime", _async(_gate_snapshot(state="risk_on", quadrant="slowdown"))
     )
@@ -277,7 +277,10 @@ async def test_combo_slowdown_routes_goldfix(monkeypatch: pytest.MonkeyPatch) ->
     }
 
     async def fake_load(
-        session: Any, assets: list[optimizer_data.AssetRef], window_days: int = 730, today: Any = None
+        session: Any,
+        assets: list[optimizer_data.AssetRef],
+        window_days: int = 730,
+        today: Any = None,
     ) -> pd.DataFrame:
         rng = np.random.default_rng(3)
         index = pd.bdate_range("2024-01-02", periods=300)
@@ -309,7 +312,7 @@ async def test_combo_slowdown_routes_goldfix(monkeypatch: pytest.MonkeyPatch) ->
 async def test_combo_ignores_payload_block_budgets(monkeypatch: pytest.MonkeyPatch) -> None:
     """combo derives bands from the regime; a payload block_budget is IGNORED
     (the equity band is the regime's, not the payload's tight 0.05)."""
-    _stub_returns(monkeypatch, _FUND_IDS)
+    _stub_returns(monkeypatch)
     monkeypatch.setattr(tb, "fetch_gate_regime", _async(_gate_snapshot(state="risk_on")))
     payload = {
         "assets": [{"kind": "fund", "id": str(fid)} for fid in _FUND_IDS],
