@@ -14,6 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.datalake import get_datalake_session
 from app.schemas.macro import (
+    ClassBandOut,
+    GateBlockOut,
+    MacroQuadrantOut,
     MacroRegimeResponse,
     RegimeFlipOut,
     RegimeHistoryOut,
@@ -27,16 +30,85 @@ from app.schemas.macro_scorecards import (
     MacroRegionalResponse,
     RegionScorecardOut,
 )
-from app.services import macro_regime
-from app.services import macro_scorecards
+from app.services import macro_regime, macro_scorecards, taa_bands
 
 router = APIRouter(tags=["macro"])
 
 DETECTOR_NAME = "vote2of3"
 
+# Asset-class display order for the per-class regime bands (matches taa_bands).
+_BAND_CLASS_ORDER = taa_bands.ASSET_CLASSES
+
 
 def _distance_pct(ratio: float | None, p20_5y: float | None) -> float | None:
     return 100.0 * (ratio - p20_5y) / p20_5y if p20_5y and ratio is not None else None
+
+
+def _score_state(score: float | None) -> str | None:
+    """``"up"``/``"down"`` from a score sign; ``None`` when the score is ``None``."""
+    if score is None:
+        return None
+    return "up" if score > 0.0 else "down"
+
+
+async def _build_macro_quadrant(datalake: AsyncSession) -> MacroQuadrantOut:
+    """Assemble the ADDITIVE COMBO macro block (gate + quadrant + bands + haven).
+
+    Decision A (spec §9): the quadrant + growth/inflation scores are READ from
+    ``regime_gate_daily`` via ``taa_bands.fetch_gate_regime`` (worker-materialized;
+    no proxy compute here). The gate's risk-off dominates the band state; SLOWDOWN
+    routes to the goldfix ``haven_tilt`` (then ``bands`` is empty). Best-effort:
+    when the gate row is missing, ``gate``/``quadrant`` degrade to ``None`` and the
+    combined regime falls back to RISK_ON with the 4 default class bands.
+    """
+    gate = await taa_bands.fetch_gate_regime(datalake)
+    gate_state = gate.state if gate else None
+    quadrant = gate.quadrant if gate else None
+    growth_score = gate.growth_score if gate else None
+    inflation_score = gate.inflation_score if gate else None
+
+    regime = taa_bands.combined_regime(gate_state, quadrant)
+
+    if regime == "STAG_GOLD":
+        # SLOWDOWN haven: the conviction goldfix target (realized tilt depends on
+        # the builder universe). Pass the full name set so all legs show.
+        bands: list[ClassBandOut] = []
+        haven_tilt = taa_bands.goldfix_target({"GLD", "VOOV", "QAI", "GCC", "BIL"})
+    else:
+        band_map, _smoothed = taa_bands.effective_class_bands(regime)
+        bands = [
+            ClassBandOut(asset_class=ac, min_weight=lo, max_weight=hi)
+            for ac in _BAND_CLASS_ORDER
+            for (lo, hi) in (band_map[ac],)
+        ]
+        haven_tilt = None
+
+    gate_block = (
+        GateBlockOut(
+            as_of=gate.as_of,
+            state=gate.state,
+            trend_vote=gate.trend_vote,
+            credit_vote=gate.credit_vote,
+            drawdown_vote=gate.drawdown_vote,
+            vote_count=gate.vote_count,
+            dwell_days=gate.dwell_days,
+        )
+        if gate
+        else None
+    )
+
+    return MacroQuadrantOut(
+        as_of=gate.as_of if gate else None,
+        quadrant=quadrant,
+        growth_state=_score_state(growth_score),
+        inflation_state=_score_state(inflation_score),
+        growth_score=growth_score,
+        inflation_score=inflation_score,
+        combined_regime=regime,
+        bands=bands,
+        haven_tilt=haven_tilt,
+        gate=gate_block,
+    )
 
 
 @router.get("/macro/regime", response_model=MacroRegimeResponse)
@@ -53,6 +125,10 @@ async def get_macro_regime(
                 "populated regime_composite_daily yet."
             ),
         )
+    # ADDITIVE COMBO block (Sprint 4): gate + quadrant + bands + haven tilt.
+    # Best-effort — degrades to gate/quadrant None when regime_gate_daily is empty.
+    macro_quadrant = await _build_macro_quadrant(datalake)
+
     return MacroRegimeResponse(
         detector=DETECTOR_NAME,
         state=snapshot.state,
@@ -94,6 +170,7 @@ async def get_macro_regime(
             )
             for point in snapshot.history
         ],
+        macro_quadrant=macro_quadrant,
     )
 
 
