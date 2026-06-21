@@ -289,6 +289,7 @@ export type ExposureItem = components["schemas"]["ExposureItem"];
 export type LookthroughSummary = components["schemas"]["LookthroughSummaryOut"];
 export type MacroRegime =
   MacroRegimeOperation["responses"]["200"]["content"]["application/json"];
+export type MacroQuadrant = NonNullable<MacroRegime["macro_quadrant"]>;
 export type RegimeSignal = components["schemas"]["RegimeSignalOut"];
 export type RegimeFlip = components["schemas"]["RegimeFlipOut"];
 export type RebalancePolicy =

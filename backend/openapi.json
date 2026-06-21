@@ -4855,6 +4855,30 @@
         "title": "Candle",
         "description": "One OHLCV candle built from RAW (un-adjusted) prices.\n\nDaily for ranges up to 5Y; weekly (W-FRI buckets: open=first, high=max,\nlow=min, close=last, volume=sum) for range MAX."
       },
+      "ClassBandOut": {
+        "properties": {
+          "asset_class": {
+            "type": "string",
+            "title": "Asset Class"
+          },
+          "min_weight": {
+            "type": "number",
+            "title": "Min Weight"
+          },
+          "max_weight": {
+            "type": "number",
+            "title": "Max Weight"
+          }
+        },
+        "type": "object",
+        "required": [
+          "asset_class",
+          "min_weight",
+          "max_weight"
+        ],
+        "title": "ClassBandOut",
+        "description": "Per-asset-class ``(min, max)`` weight band derived from the regime."
+      },
       "ClassLimitItem": {
         "properties": {
           "asset_class": {
@@ -9622,6 +9646,58 @@
         "title": "FundsStaleness",
         "description": "Global data-freshness markers (max over the synced universe)."
       },
+      "GateBlockOut": {
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "trend_vote": {
+            "type": "boolean",
+            "title": "Trend Vote"
+          },
+          "credit_vote": {
+            "type": "boolean",
+            "title": "Credit Vote"
+          },
+          "drawdown_vote": {
+            "type": "boolean",
+            "title": "Drawdown Vote"
+          },
+          "vote_count": {
+            "type": "integer",
+            "title": "Vote Count"
+          },
+          "dwell_days": {
+            "type": "integer",
+            "title": "Dwell Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "as_of",
+          "state",
+          "trend_vote",
+          "credit_vote",
+          "drawdown_vote",
+          "vote_count",
+          "dwell_days"
+        ],
+        "title": "GateBlockOut",
+        "description": "Live debounced risk-off gate state + the 3 votes (trend/credit/drawdown)."
+      },
       "GlobalIndicatorsResponse": {
         "properties": {
           "as_of_date": {
@@ -10513,6 +10589,127 @@
         "title": "LookthroughSummaryOut",
         "description": "Residual expl\u00edcito + proveni\u00eancia (espelha nport_lookthrough_summary)."
       },
+      "MacroQuadrantOut": {
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "quadrant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quadrant"
+          },
+          "growth_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Growth State"
+          },
+          "inflation_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inflation State"
+          },
+          "growth_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Growth Score"
+          },
+          "inflation_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inflation Score"
+          },
+          "combined_regime": {
+            "type": "string",
+            "title": "Combined Regime"
+          },
+          "bands": {
+            "items": {
+              "$ref": "#/components/schemas/ClassBandOut"
+            },
+            "type": "array",
+            "title": "Bands"
+          },
+          "haven_tilt": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Haven Tilt"
+          },
+          "gate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GateBlockOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "as_of",
+          "quadrant",
+          "growth_state",
+          "inflation_state",
+          "growth_score",
+          "inflation_score",
+          "combined_regime",
+          "bands",
+          "haven_tilt",
+          "gate"
+        ],
+        "title": "MacroQuadrantOut",
+        "description": "COMBO macro block: growth\u00d7inflation quadrant + gate + resulting bands.\n\nADDITIVE to the vote2of3 detector (decision O3 \u2014 the composite stays the\nheadline). The quadrant + growth/inflation scores are READ from\n``regime_gate_daily`` (decision A \u2014 worker-materialized; the backend lacks\nTIP/IEF), the live gate dominates the band state when risk-off, and the\nSLOWDOWN quadrant routes to the goldfix ``haven_tilt`` (then ``bands`` is\nempty). ``haven_tilt`` is the conviction TARGET; the realized tilt depends on\nthe builder universe."
+      },
       "MacroRegimeResponse": {
         "properties": {
           "detector": {
@@ -10567,6 +10764,16 @@
             },
             "type": "array",
             "title": "History"
+          },
+          "macro_quadrant": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MacroQuadrantOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -10583,7 +10790,7 @@
           "history"
         ],
         "title": "MacroRegimeResponse",
-        "description": "Estado do detector vote2of3 (worker regime_composite) + breakdown dos votos.\n\nrisk_off \u21d4 \u22652 votos entre credit/trend/nfci. Estados bin\u00e1rios \u2014 o composite\npor score ponderado (legado) foi refutado. O credit_regime segue materializado\n(\u00e9 1 dos votos); o composite \u00e9 o detector promovido (Sharpe 0,549 / DD 25,3%)."
+        "description": "Estado do detector vote2of3 (worker regime_composite) + breakdown dos votos.\n\nrisk_off \u21d4 \u22652 votos entre credit/trend/nfci. Estados bin\u00e1rios \u2014 o composite\npor score ponderado (legado) foi refutado. O credit_regime segue materializado\n(\u00e9 1 dos votos); o composite \u00e9 o detector promovido (Sharpe 0,549 / DD 25,3%).\n\n``macro_quadrant`` (COMBO, Sprint 4) \u00e9 um bloco ADITIVO: gate ao vivo +\nquadrante growth\u00d7inflation + bandas por classe + haven tilt (SLOWDOWN)."
       },
       "MacroRegionalResponse": {
         "properties": {

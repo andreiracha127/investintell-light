@@ -1864,6 +1864,18 @@ export interface components {
             volume: number;
         };
         /**
+         * ClassBandOut
+         * @description Per-asset-class ``(min, max)`` weight band derived from the regime.
+         */
+        ClassBandOut: {
+            /** Asset Class */
+            asset_class: string;
+            /** Min Weight */
+            min_weight: number;
+            /** Max Weight */
+            max_weight: number;
+        };
+        /**
          * ClassLimitItem
          * @description One per-asset-class min/max weight bound.
          *
@@ -2234,6 +2246,18 @@ export interface components {
             cvar_limit_effective?: number | null;
             /** Regime State */
             regime_state?: string | null;
+            /** Quadrant */
+            quadrant?: string | null;
+            /** Combined Regime */
+            combined_regime?: string | null;
+            /** Class Bands */
+            class_bands?: {
+                [key: string]: number[];
+            } | null;
+            /** Haven Tilt */
+            haven_tilt?: {
+                [key: string]: number;
+            } | null;
         };
         /** DimensionOut */
         DimensionOut: {
@@ -3508,6 +3532,26 @@ export interface components {
             source_nav_max_date: string | null;
         };
         /**
+         * GateBlockOut
+         * @description Live debounced risk-off gate state + the 3 votes (trend/credit/drawdown).
+         */
+        GateBlockOut: {
+            /** As Of */
+            as_of: string | null;
+            /** State */
+            state: string;
+            /** Trend Vote */
+            trend_vote: boolean;
+            /** Credit Vote */
+            credit_vote: boolean;
+            /** Drawdown Vote */
+            drawdown_vote: boolean;
+            /** Vote Count */
+            vote_count: number;
+            /** Dwell Days */
+            dwell_days: number;
+        };
+        /**
          * GlobalIndicatorsResponse
          * @description Global macro risk indicators (0-100). Note: polarity varies by field —
          *     geopolitical_risk_score and energy_stress are risk measures (higher = worse),
@@ -3848,12 +3892,50 @@ export interface components {
             oldest_report_date: string | null;
         };
         /**
+         * MacroQuadrantOut
+         * @description COMBO macro block: growth×inflation quadrant + gate + resulting bands.
+         *
+         *     ADDITIVE to the vote2of3 detector (decision O3 — the composite stays the
+         *     headline). The quadrant + growth/inflation scores are READ from
+         *     ``regime_gate_daily`` (decision A — worker-materialized; the backend lacks
+         *     TIP/IEF), the live gate dominates the band state when risk-off, and the
+         *     SLOWDOWN quadrant routes to the goldfix ``haven_tilt`` (then ``bands`` is
+         *     empty). ``haven_tilt`` is the conviction TARGET; the realized tilt depends on
+         *     the builder universe.
+         */
+        MacroQuadrantOut: {
+            /** As Of */
+            as_of: string | null;
+            /** Quadrant */
+            quadrant: string | null;
+            /** Growth State */
+            growth_state: string | null;
+            /** Inflation State */
+            inflation_state: string | null;
+            /** Growth Score */
+            growth_score: number | null;
+            /** Inflation Score */
+            inflation_score: number | null;
+            /** Combined Regime */
+            combined_regime: string;
+            /** Bands */
+            bands: components["schemas"]["ClassBandOut"][];
+            /** Haven Tilt */
+            haven_tilt: {
+                [key: string]: number;
+            } | null;
+            gate: components["schemas"]["GateBlockOut"] | null;
+        };
+        /**
          * MacroRegimeResponse
          * @description Estado do detector vote2of3 (worker regime_composite) + breakdown dos votos.
          *
          *     risk_off ⇔ ≥2 votos entre credit/trend/nfci. Estados binários — o composite
          *     por score ponderado (legado) foi refutado. O credit_regime segue materializado
          *     (é 1 dos votos); o composite é o detector promovido (Sharpe 0,549 / DD 25,3%).
+         *
+         *     ``macro_quadrant`` (COMBO, Sprint 4) é um bloco ADITIVO: gate ao vivo +
+         *     quadrante growth×inflation + bandas por classe + haven tilt (SLOWDOWN).
          */
         MacroRegimeResponse: {
             /** Detector */
@@ -3877,6 +3959,7 @@ export interface components {
             recent_flips: components["schemas"]["RegimeFlipOut"][];
             /** History */
             history: components["schemas"]["RegimeHistoryOut"][];
+            macro_quadrant?: components["schemas"]["MacroQuadrantOut"] | null;
         };
         /**
          * MacroRegionalResponse
@@ -4197,7 +4280,7 @@ export interface components {
              * @default min_cvar
              * @enum {string}
              */
-            objective: "equal_weight" | "min_vol" | "erc" | "max_diversification" | "min_cvar" | "bl_utility" | "max_return_cvar";
+            objective: "equal_weight" | "min_vol" | "erc" | "max_diversification" | "min_cvar" | "bl_utility" | "max_return_cvar" | "combo";
             /**
              * @default {
              *       "cap": 0.25
@@ -6080,7 +6163,7 @@ export interface components {
              * Objective
              * @enum {string}
              */
-            objective: "equal_weight" | "min_vol" | "erc" | "max_diversification" | "min_cvar" | "bl_utility" | "max_return_cvar";
+            objective: "equal_weight" | "min_vol" | "erc" | "max_diversification" | "min_cvar" | "bl_utility" | "max_return_cvar" | "combo";
             /** N Obs */
             n_obs: number;
             /** N Splits Computed */
@@ -6112,7 +6195,7 @@ export interface components {
              * @default min_cvar
              * @enum {string}
              */
-            objective: "equal_weight" | "min_vol" | "erc" | "max_diversification" | "min_cvar" | "bl_utility" | "max_return_cvar";
+            objective: "equal_weight" | "min_vol" | "erc" | "max_diversification" | "min_cvar" | "bl_utility" | "max_return_cvar" | "combo";
             /**
              * @default {
              *       "cap": 0.25
