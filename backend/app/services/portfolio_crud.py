@@ -20,10 +20,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import get_settings
 from app.models.eod_price import EodPrice
 from app.models.fund import Fund, FundClass, FundNav
 from app.models.instrument import Instrument
 from app.models.portfolio import Portfolio, Position
+from app.models.price_latest import PriceLatest
 from app.optimizer import data as optimizer_data
 from app.schemas.portfolios import (
     OverviewAggregates,
@@ -290,7 +292,7 @@ async def delete_position(
 # ---------------------------------------------------------------------------
 
 
-async def select_last_two_closes(
+async def _select_last_two_closes_legacy(
     session: AsyncSession, tickers: Sequence[str]
 ) -> dict[str, list[tuple[dt.date, float]]]:
     """The two most recent (date, close) rows per ticker, newest first.
@@ -318,6 +320,47 @@ async def select_last_two_closes(
     closes: dict[str, list[tuple[dt.date, float]]] = {}
     for ticker, date_, close in result.all():
         closes.setdefault(ticker, []).append((date_, close))
+    return closes
+
+
+async def select_last_two_closes(
+    session: AsyncSession,
+    tickers: Sequence[str],
+    *,
+    use_mv: bool | None = None,
+) -> dict[str, list[tuple[dt.date, float]]]:
+    """Two most recent (date, close) per ticker, newest first.
+
+    DB-first: lê de price_latest_mv quando habilitado; tickers ausentes do MV
+    (ex.: recém-backfillados, ainda não capturados pelo matview_refresh) caem
+    para a tabela base, então o shape de saída é idêntico ao legado.
+    """
+    if not tickers:
+        return {}
+    if use_mv is None:
+        use_mv = get_settings().use_latest_mv_prices
+    if not use_mv:
+        return await _select_last_two_closes_legacy(session, tickers)
+
+    rows = await session.execute(
+        select(
+            PriceLatest.ticker,
+            PriceLatest.as_of,
+            PriceLatest.last_close,
+            PriceLatest.prev_date,
+            PriceLatest.prev_close,
+        ).where(PriceLatest.ticker.in_(tickers))
+    )
+    closes: dict[str, list[tuple[dt.date, float]]] = {}
+    for ticker, as_of, last_close, prev_date, prev_close in rows.all():
+        series = [(as_of, float(last_close))]
+        if prev_close is not None and prev_date is not None:
+            series.append((prev_date, float(prev_close)))
+        closes[ticker] = series
+
+    missing = [t for t in tickers if t not in closes]
+    if missing:
+        closes.update(await _select_last_two_closes_legacy(session, missing))
     return closes
 
 

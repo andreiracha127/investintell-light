@@ -101,6 +101,10 @@ class Settings(BaseSettings):
     # How many articles to request from Tiingo per refresh (Tiingo caps at 100).
     news_fetch_limit: int = 50
 
+    # DB-first Grupo D: quando True, leituras de preço/NAV usam os
+    # *_latest_mv (com fallback à tabela base p/ entidades ainda ausentes).
+    use_latest_mv_prices: bool = False
+
 
 @functools.lru_cache
 def get_settings() -> Settings:
