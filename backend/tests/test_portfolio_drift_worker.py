@@ -253,3 +253,122 @@ async def test_run_skips_when_lock_not_acquired(
     assert called is False
     # No work, and no release of a lock we never held.
     assert "release" not in session.lock_calls
+
+
+# ---------------------------------------------------------------------------
+# Gate flip-read (COMBO Sprint 1, Task 6 — observational v1)
+# ---------------------------------------------------------------------------
+
+
+class _FakeResult:
+    def __init__(self, row: Any) -> None:
+        self._row = row
+
+    def first(self) -> Any:
+        return self._row
+
+
+class _FakeDatalake:
+    """Read-only data-lake stand-in returning a single regime_gate_daily row."""
+
+    def __init__(self, row: Any) -> None:
+        self._row = row
+        self.queries: list[str] = []
+
+    async def execute(self, statement: Any, *_a: Any, **_k: Any) -> _FakeResult:
+        self.queries.append(str(statement))
+        return _FakeResult(self._row)
+
+
+class _FakeDatalakeRaises:
+    """Data-lake stand-in whose query blows up (table absent) — must degrade."""
+
+    async def execute(self, *_a: Any, **_k: Any) -> Any:
+        from sqlalchemy.exc import ProgrammingError
+
+        raise ProgrammingError("SELECT ...", {}, Exception("undefined table"))
+
+
+def _datalake_cm(datalake: Any):
+    class _Ctx:
+        async def __aenter__(self) -> Any:
+            return datalake
+
+        async def __aexit__(self, *_exc: Any) -> None:
+            return None
+
+    def _factory() -> _Ctx:
+        return _Ctx()
+
+    return _factory
+
+
+def _patch_session_with_datalake(
+    monkeypatch: pytest.MonkeyPatch, wk, session: FakeAsyncSession, datalake: Any
+) -> None:
+    monkeypatch.setattr(wk, "AsyncSessionLocal", lambda: session)
+    monkeypatch.setattr(wk, "_open_datalake", _datalake_cm(datalake))
+
+
+async def test_read_gate_flip_returns_latest_row(monkeypatch, worker) -> None:
+    row = (dt.date(2022, 4, 20), "risk_off", True)
+    datalake = _FakeDatalake(row)
+    flipped, state, regime_date = await worker._read_gate_flip(datalake)
+    assert flipped is True
+    assert state == "risk_off"
+    assert regime_date == dt.date(2022, 4, 20)
+    # It queried regime_gate_daily.
+    assert any("regime_gate_daily" in q for q in datalake.queries)
+
+
+async def test_read_gate_flip_none_datalake_degrades() -> None:
+    from app.jobs.workers import portfolio_drift_daily as job
+
+    assert await job._read_gate_flip(None) == (False, None, None)
+
+
+async def test_read_gate_flip_missing_table_degrades(worker) -> None:
+    # Table absent on the data-lake -> graceful (False, None, None), no raise.
+    assert await worker._read_gate_flip(_FakeDatalakeRaises()) == (False, None, None)
+
+
+async def test_drift_run_reports_gate_flip(
+    monkeypatch: pytest.MonkeyPatch, worker
+) -> None:
+    session = FakeAsyncSession(lock_acquired=True)
+    datalake = _FakeDatalake((dt.date(2022, 4, 20), "risk_off", True))
+    _patch_session_with_datalake(monkeypatch, worker, session, datalake)
+
+    async def _materialize(*_a: Any, **_k: Any) -> dict:
+        return {"portfolios": [{"id": 7, "worst_status": "urgent"}]}
+
+    monkeypatch.setattr(
+        worker.portfolio_drift, "materialize_all_portfolio_drifts", _materialize
+    )
+
+    result = await worker.run(portfolio_ids=[7])
+    assert result["status"] == "ok"
+    assert result["gate_flip"] is True
+    assert result["gate_state"] == "risk_off"
+    # Still materializes the drift rows unconditionally (observational v1).
+    assert result["portfolios"] == [{"id": 7, "worst_status": "urgent"}]
+
+
+async def test_drift_run_degrades_without_gate_table(
+    monkeypatch: pytest.MonkeyPatch, worker
+) -> None:
+    # No data-lake at all -> gate_flip False, run still succeeds.
+    session = FakeAsyncSession(lock_acquired=True)
+    _patch_session(monkeypatch, worker, session)
+
+    async def _materialize(*_a: Any, **_k: Any) -> dict:
+        return {"portfolios": []}
+
+    monkeypatch.setattr(
+        worker.portfolio_drift, "materialize_all_portfolio_drifts", _materialize
+    )
+
+    result = await worker.run()
+    assert result["status"] == "ok"
+    assert result["gate_flip"] is False
+    assert result["gate_state"] is None

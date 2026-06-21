@@ -23,6 +23,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from sqlalchemy import text
+from sqlalchemy.exc import DatabaseError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import datalake as datalake_module
@@ -58,6 +59,41 @@ async def _release_lock(session: Any) -> None:
     )
 
 
+async def _read_gate_flip(
+    datalake: AsyncSession | None,
+) -> tuple[bool, str | None, dt.date | None]:
+    """Read the latest ``regime_gate_daily`` row from the data-lake (COMBO).
+
+    Returns ``(flipped, state, regime_date)`` where ``flipped`` is the latest
+    row's per-day ``flip`` flag (a confirmed, 21d-debounced regime change). This
+    is OBSERVATIONAL in v1 (decision C): the value is surfaced on the run/alert
+    so a rebalance is explained as regime-driven, but the materialize stays
+    daily/unconditional.
+
+    Degrades gracefully to ``(False, None, None)`` when the data-lake is not
+    configured (``datalake is None``) or the ``regime_gate_daily`` table is absent
+    (the ``regime_gate`` worker has not run yet) — mirrors how the overlap
+    evaluator degrades when the data-lake is unavailable.
+    """
+    if datalake is None:
+        return (False, None, None)
+    try:
+        result = await datalake.execute(
+            text(
+                "SELECT regime_date, state, flip FROM regime_gate_daily "
+                "ORDER BY regime_date DESC LIMIT 1"
+            )
+        )
+    except DatabaseError:
+        # Table missing / not yet materialized — observational read is best-effort.
+        return (False, None, None)
+    row = result.first()
+    if row is None:
+        return (False, None, None)
+    regime_date, state, flip = row[0], row[1], row[2]
+    return (bool(flip), state, regime_date)
+
+
 @asynccontextmanager
 async def _open_datalake() -> AsyncIterator[AsyncSession | None]:
     """Yield a read-only data-lake session, or None when no DSN is configured.
@@ -88,6 +124,11 @@ async def run(
 
         try:
             async with _open_datalake() as datalake:
+                # COMBO (observational v1): read the latest confirmed gate flip
+                # from the same read-only data-lake session BEFORE materializing,
+                # so a regime-driven rebalance is auditable. The materialize stays
+                # daily/unconditional (decision C) — the flip is surfaced, not gated.
+                gate_flip, gate_state, _gate_date = await _read_gate_flip(datalake)
                 result = await portfolio_drift.materialize_all_portfolio_drifts(
                     session,
                     datalake,
@@ -99,6 +140,8 @@ async def run(
                 "status": "ok",
                 "lock_id": ADVISORY_LOCK_ID,
                 "portfolios": result["portfolios"],
+                "gate_flip": gate_flip,
+                "gate_state": gate_state,
             }
         except Exception:
             await session.rollback()
