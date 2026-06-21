@@ -18,7 +18,7 @@ export const FUND_DOSSIER_DEFAULTS = {
   holdingsTopLimit: 25,
   peersLimit: 10,
   scatterLimit: 250,
-  styleDriftQuarters: 8,
+  styleDriftQuarters: 40,
   entityWindow: "1Y",
   historyBars: 2520,
 } as const;

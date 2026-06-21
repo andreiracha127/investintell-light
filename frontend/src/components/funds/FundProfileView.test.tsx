@@ -583,26 +583,11 @@ describe("FundProfileView", () => {
     expect(screen.getAllByText("Information Technology").length).toBeGreaterThan(0);
     expect(screen.queryByText("CORP")).not.toBeInTheDocument();
 
-    const benchmarkUuid = "11111111-2222-4333-8444-555555555555";
-    await user.type(screen.getByLabelText("Benchmark fund id"), benchmarkUuid);
-    await user.click(screen.getByRole("button", { name: "Apply" }));
-    await waitFor(() =>
-      expect(mocked.fetchFundActiveShare).toHaveBeenCalledWith(
-        FUND_ID,
-        { benchmark_id: benchmarkUuid },
-        expect.any(AbortSignal),
-      ),
-    );
-    expect(
-      await screen.findByText("Active benchmark: Vanguard Total Stock Market ETF"),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(`Active benchmark: ${benchmarkUuid}`)).not.toBeInTheDocument();
-
     await user.click(screen.getByRole("tab", { name: "Style" }));
     await waitFor(() =>
       expect(mocked.fetchFundStyleDrift).toHaveBeenCalledWith(
         FUND_ID,
-        { quarters: 8 },
+        { quarters: 40 },
         expect.any(AbortSignal),
       ),
     );
@@ -632,7 +617,7 @@ describe("FundProfileView", () => {
     await waitFor(() =>
       expect(mocked.fetchFundEntityAnalytics).toHaveBeenCalledWith(
         FUND_ID,
-        { window: "1Y", benchmark_id: benchmarkUuid },
+        expect.objectContaining({ window: "1Y" }),
         expect.any(AbortSignal),
       ),
     );
@@ -687,8 +672,5 @@ describe("FundProfileView", () => {
         expect.any(AbortSignal),
       ),
     );
-    expect(
-      await screen.findByText("Active benchmark: S&P 500 (SPY)"),
-    ).toBeInTheDocument();
   });
 });

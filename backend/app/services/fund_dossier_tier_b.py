@@ -431,15 +431,46 @@ async def fetch_fund_style_drift(
                         WHERE series_id = :series_id
                         ORDER BY report_date DESC
                         LIMIT :quarters
+                    ),
+                    resolved AS (
+                        SELECT h.report_date,
+                               COALESCE(
+                                   -- equities: real GICS sector by CUSIP
+                                   NULLIF(btrim(m.gics_sector), ''),
+                                   -- fixed income / other: friendly N-PORT issuer label
+                                   CASE upper(btrim(h.sector))
+                                       WHEN 'CORP' THEN 'Corporate'
+                                       WHEN 'UST'  THEN 'U.S. Treasury'
+                                       WHEN 'GOVT' THEN 'Government'
+                                       WHEN 'USGA' THEN 'U.S. Gov Agency'
+                                       WHEN 'MUNI' THEN 'Municipal'
+                                       WHEN 'MUN'  THEN 'Municipal'
+                                       WHEN 'MBS'  THEN 'Mortgage-Backed'
+                                       WHEN 'ABS'  THEN 'Asset-Backed'
+                                       WHEN 'CMO'  THEN 'Collateralized Mortgage'
+                                       WHEN 'SUPRA' THEN 'Supranational'
+                                       WHEN 'NUSS' THEN 'Non-U.S. Sovereign'
+                                       WHEN 'RF'   THEN 'Registered Fund'
+                                       ELSE NULLIF(btrim(h.sector), '')
+                                   END,
+                                   'Unknown'
+                               ) AS sector,
+                               h.pct_of_nav
+                        FROM sec_nport_holdings h
+                        JOIN q ON q.report_date = h.report_date
+                        LEFT JOIN LATERAL (
+                            SELECT gics_sector
+                            FROM sec_cusip_ticker_map
+                            WHERE cusip = h.cusip
+                              AND NULLIF(btrim(gics_sector), '') IS NOT NULL
+                            LIMIT 1
+                        ) m ON TRUE
+                        WHERE h.series_id = :series_id
                     )
-                    SELECT h.report_date,
-                           COALESCE(h.sector, 'Unknown') AS sector,
-                           SUM(h.pct_of_nav) AS weight
-                    FROM sec_nport_holdings h
-                    JOIN q ON q.report_date = h.report_date
-                    WHERE h.series_id = :series_id
-                    GROUP BY h.report_date, COALESCE(h.sector, 'Unknown')
-                    ORDER BY h.report_date ASC, weight DESC NULLS LAST
+                    SELECT report_date, sector, SUM(pct_of_nav) AS weight
+                    FROM resolved
+                    GROUP BY report_date, sector
+                    ORDER BY report_date ASC, weight DESC NULLS LAST
                     """
                 ),
                 {"series_id": fund.series_id, "quarters": quarters},

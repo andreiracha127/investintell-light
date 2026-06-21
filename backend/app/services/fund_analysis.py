@@ -15,7 +15,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -379,6 +379,40 @@ async def _sector_breakdown_from_lookthrough(
     ]
 
 
+async def _gics_sector_by_cusip(
+    datalake: AsyncSession | None, holdings: Sequence[FundHolding]
+) -> dict[str, str]:
+    """Map CUSIP -> GICS sector from the datalake (same source as the breakdown).
+
+    App-DB holdings only carry the raw N-PORT asset category; the GICS sector
+    lives in sec_cusip_ticker_map keyed by CUSIP.
+    """
+    if datalake is None:
+        return {}
+    cusips = [h.cusip for h in holdings if h.cusip]
+    if not cusips:
+        return {}
+    try:
+        rows = (
+            await datalake.execute(
+                text(
+                    """
+                    SELECT DISTINCT ON (cusip) cusip, gics_sector
+                    FROM sec_cusip_ticker_map
+                    WHERE cusip = ANY(:cusips)
+                      AND NULLIF(btrim(gics_sector), '') IS NOT NULL
+                    ORDER BY cusip
+                    """
+                ),
+                {"cusips": cusips},
+            )
+        ).mappings().all()
+    except SQLAlchemyError as exc:
+        logger.warning("Fund holdings GICS-by-cusip resolution degraded: %s", exc)
+        return {}
+    return {row["cusip"]: row["gics_sector"] for row in rows}
+
+
 async def fetch_fund_holdings_top(
     session: AsyncSession,
     datalake: AsyncSession | None,
@@ -412,6 +446,11 @@ async def fetch_fund_holdings_top(
     if not sector_breakdown:
         sector_breakdown = _sector_breakdown_from_holdings(holdings)
 
+    # The app-DB holdings carry the raw N-PORT asset category (e.g. "CORP"), not
+    # the GICS sector. Resolve the GICS sector per holding by CUSIP from the same
+    # datalake map the sector_breakdown uses, so the table and the chart agree.
+    cusip_gics = await _gics_sector_by_cusip(datalake, holdings)
+
     reported = [float(h.pct_of_nav) for h in holdings if h.pct_of_nav is not None]
     return FundHoldingsTopResponse(
         instrument_id=instrument_id,
@@ -425,8 +464,8 @@ async def fetch_fund_holdings_top(
                 isin=h.isin,
                 asset_class=h.asset_class,
                 sector=h.sector,
-                gics_sector=h.gics_sector,
-                sector_label=_sector_label(h),
+                gics_sector=cusip_gics.get(h.cusip or "") or h.gics_sector,
+                sector_label=cusip_gics.get(h.cusip or "") or _sector_label(h),
                 market_value=_float(h.market_value),
                 pct_of_nav=_float(h.pct_of_nav),
             )

@@ -231,9 +231,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
   const [range, setRange] = useState<RangePreset>("1Y");
   const [deepOpen, setDeepOpen] = useState(false);
   const [relationshipsOpen, setRelationshipsOpen] = useState(false);
-  const [benchmarkDraft, setBenchmarkDraft] = useState("");
   const [benchmarkId, setBenchmarkId] = useState("");
-  const [benchmarkAutoDisabled, setBenchmarkAutoDisabled] = useState(false);
   const [selectedCusip, setSelectedCusip] = useState("");
 
   useEffect(() => {
@@ -241,9 +239,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     setRange("1Y");
     setDeepOpen(false);
     setRelationshipsOpen(false);
-    setBenchmarkDraft("");
     setBenchmarkId("");
-    setBenchmarkAutoDisabled(false);
     setSelectedCusip("");
   }, [instrumentId]);
 
@@ -282,10 +278,9 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
   const autoBenchmarkInstrumentId = resolvedBenchmark?.proxy_instrument_id ?? null;
 
   useEffect(() => {
-    if (benchmarkAutoDisabled || benchmarkId || !autoBenchmarkInstrumentId) return;
-    setBenchmarkDraft(autoBenchmarkInstrumentId);
+    if (benchmarkId || !autoBenchmarkInstrumentId) return;
     setBenchmarkId(autoBenchmarkInstrumentId);
-  }, [benchmarkAutoDisabled, benchmarkId, autoBenchmarkInstrumentId]);
+  }, [benchmarkId, autoBenchmarkInstrumentId]);
 
   const timeseriesQuery = useQuery({
     queryKey: dossierQueryKeys.timeseries(instrumentId, { range }),
@@ -593,10 +588,6 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
           : "text-text-primary"
       : "text-text-primary";
 
-  const applyBenchmark = (value = benchmarkDraft) => {
-    setBenchmarkAutoDisabled(true);
-    setBenchmarkId(value.trim());
-  };
   const activeBenchmarkLabel = benchmarkDisplayLabel(
     benchmarkId,
     activeShareQuery.data,
@@ -728,11 +719,6 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
           instrumentId={fund.instrument_id}
           holdingsTopQuery={holdingsTopQuery}
           activeShareQuery={activeShareQuery}
-          benchmarkDraft={benchmarkDraft}
-          benchmarkId={benchmarkId}
-          activeBenchmarkLabel={activeBenchmarkLabel}
-          onBenchmarkDraftChange={setBenchmarkDraft}
-          onApplyBenchmark={applyBenchmark}
         />
       )}
 
@@ -765,11 +751,8 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
       {deepOpen && (
         <DeepAnalysisModal
           entityAnalyticsQuery={entityAnalyticsQuery}
-          benchmarkDraft={benchmarkDraft}
           benchmarkId={benchmarkId}
           activeBenchmarkLabel={activeBenchmarkLabel}
-          onBenchmarkDraftChange={setBenchmarkDraft}
-          onApplyBenchmark={applyBenchmark}
           onClose={() => setDeepOpen(false)}
           tailRiskOption={tailRiskOption}
           distributionOption={distributionOption}
@@ -968,20 +951,10 @@ function HoldingsTab({
   instrumentId,
   holdingsTopQuery,
   activeShareQuery,
-  benchmarkDraft,
-  benchmarkId,
-  activeBenchmarkLabel,
-  onBenchmarkDraftChange,
-  onApplyBenchmark,
 }: {
   instrumentId: string;
   holdingsTopQuery: UseQueryResult<FundHoldingsTop, Error>;
   activeShareQuery: UseQueryResult<FundActiveShare, Error>;
-  benchmarkDraft: string;
-  benchmarkId: string;
-  activeBenchmarkLabel: string;
-  onBenchmarkDraftChange: (value: string) => void;
-  onApplyBenchmark: (value?: string) => void;
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -1006,13 +979,6 @@ function HoldingsTab({
         </Card>
 
         <div className="flex flex-col gap-4">
-          <BenchmarkControl
-            benchmarkDraft={benchmarkDraft}
-            benchmarkId={benchmarkId}
-            activeBenchmarkLabel={activeBenchmarkLabel}
-            onBenchmarkDraftChange={onBenchmarkDraftChange}
-            onApplyBenchmark={onApplyBenchmark}
-          />
           <ActiveSharePanel query={activeShareQuery} />
           <Card title="Sector breakdown">
             {holdingsTopQuery.data ? (
@@ -1174,11 +1140,8 @@ function PeersTab({
 
 function DeepAnalysisModal({
   entityAnalyticsQuery,
-  benchmarkDraft,
   benchmarkId,
   activeBenchmarkLabel,
-  onBenchmarkDraftChange,
-  onApplyBenchmark,
   onClose,
   tailRiskOption,
   distributionOption,
@@ -1186,11 +1149,8 @@ function DeepAnalysisModal({
   insiderOption,
 }: {
   entityAnalyticsQuery: UseQueryResult<FundEntityAnalytics, Error>;
-  benchmarkDraft: string;
   benchmarkId: string;
   activeBenchmarkLabel: string;
-  onBenchmarkDraftChange: (value: string) => void;
-  onApplyBenchmark: (value?: string) => void;
   onClose: () => void;
   tailRiskOption: Highcharts.Options | null;
   distributionOption: Highcharts.Options | null;
@@ -1218,16 +1178,6 @@ function DeepAnalysisModal({
       onClose={onClose}
     >
         <div className="overflow-y-auto px-4 py-4">
-          <div className="mb-4">
-            <BenchmarkControl
-              benchmarkDraft={benchmarkDraft}
-              benchmarkId={benchmarkId}
-              activeBenchmarkLabel={activeBenchmarkLabel}
-              onBenchmarkDraftChange={onBenchmarkDraftChange}
-              onApplyBenchmark={onApplyBenchmark}
-            />
-          </div>
-
           {!data ? (
             <QueryMessage
               query={entityAnalyticsQuery}
@@ -1613,58 +1563,6 @@ function QueryMessage({
 
 function EmptyMessage({ message }: { message: string }) {
   return <p className="py-6 text-center text-[13px] text-text-muted">{message}</p>;
-}
-
-function BenchmarkControl({
-  benchmarkDraft,
-  benchmarkId,
-  activeBenchmarkLabel,
-  onBenchmarkDraftChange,
-  onApplyBenchmark,
-}: {
-  benchmarkDraft: string;
-  benchmarkId: string;
-  activeBenchmarkLabel: string;
-  onBenchmarkDraftChange: (value: string) => void;
-  onApplyBenchmark: (value?: string) => void;
-}) {
-  return (
-    <section className="border border-border bg-surface-2 p-3">
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="flex min-w-[220px] flex-1 flex-col gap-1">
-          <span className="ix-label">Benchmark fund id</span>
-          <input
-            value={benchmarkDraft}
-            onChange={(event) => onBenchmarkDraftChange(event.target.value)}
-            className="h-[32px] border border-border-strong bg-field px-2 text-[12px] tabular-nums text-text-primary outline-none focus:border-accent"
-            placeholder="UUID"
-          />
-        </label>
-        <button
-          type="button"
-          onClick={() => onApplyBenchmark()}
-          className="h-[32px] border border-border-strong bg-surface px-3 text-[11px] font-bold uppercase tracking-[0.06em] text-text-secondary hover:bg-layer-hover"
-        >
-          Apply
-        </button>
-        {benchmarkId && (
-          <button
-            type="button"
-            onClick={() => {
-              onBenchmarkDraftChange("");
-              onApplyBenchmark("");
-            }}
-            className="h-[32px] border border-border-strong bg-surface px-3 text-[11px] font-bold uppercase tracking-[0.06em] text-text-secondary hover:bg-layer-hover"
-          >
-            Clear
-          </button>
-        )}
-      </div>
-      <p className="mt-2 text-[11px] tabular-nums text-text-muted">
-        Active benchmark: {benchmarkId ? activeBenchmarkLabel : "none"}
-      </p>
-    </section>
-  );
 }
 
 function ActiveSharePanel({ query }: { query: UseQueryResult<FundActiveShare, Error> }) {

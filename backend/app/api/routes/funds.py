@@ -323,8 +323,8 @@ async def get_fund_style_drift(
     session: SessionDep,
     datalake: DatalakeDep,
     quarters: Annotated[
-        int, Query(ge=1, le=20, description="Historical N-PORT periods returned.")
-    ] = 8,
+        int, Query(ge=1, le=60, description="Historical N-PORT periods returned.")
+    ] = 40,
 ) -> FundStyleDriftResponse:
     """Tier B historical sector drift from N-PORT reports."""
     try:

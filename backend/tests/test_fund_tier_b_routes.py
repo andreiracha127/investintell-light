@@ -288,7 +288,7 @@ async def test_fund_style_drift_success(monkeypatch: pytest.MonkeyPatch) -> None
     assert seen == {"instrument_id": _FUND_ID, "quarters": 4}
 
 
-@pytest.mark.parametrize("quarters", [0, 21])
+@pytest.mark.parametrize("quarters", [0, 61])
 async def test_fund_style_drift_quarter_bounds(quarters: int) -> None:
     async with _client() as client:
         resp = await client.get(
