@@ -1,7 +1,29 @@
 -- Additive, non-destructive dynamic-catalog DDL (Tiger t83f4np6x4, public).
 -- Idempotent where possible; safe to re-run. Rollback in the deploy runbook.
 
--- 1) EOD weekly OHLC (adjusted) for Highcharts long-range downsample.
+-- 1) EOD daily OHLCV for DB-first Highcharts reads across every range.
+CREATE MATERIALIZED VIEW IF NOT EXISTS cagg_eod_daily
+WITH (timescaledb.continuous) AS
+SELECT ticker,
+       time_bucket('1 day', date) AS bucket,
+       first(open,  date) AS open,
+       max(high)          AS high,
+       min(low)           AS low,
+       last(close, date)  AS close,
+       sum(volume)        AS volume,
+       first(adj_open,  date) AS adj_open,
+       max(adj_high)          AS adj_high,
+       min(adj_low)           AS adj_low,
+       last(adj_close, date)  AS adj_close,
+       sum(adj_volume)        AS adj_volume
+FROM eod_prices
+GROUP BY ticker, time_bucket('1 day', date)
+WITH NO DATA;
+
+CREATE INDEX IF NOT EXISTS cagg_eod_daily_ticker_bucket_idx
+  ON cagg_eod_daily (ticker, bucket);
+
+-- 2) EOD weekly OHLC (adjusted) retained for non-chart analytical workloads.
 CREATE MATERIALIZED VIEW IF NOT EXISTS cagg_eod_weekly
 WITH (timescaledb.continuous) AS
 SELECT ticker,
@@ -15,7 +37,7 @@ FROM eod_prices
 GROUP BY ticker, time_bucket('1 week', date)
 WITH NO DATA;
 
--- 2) EOD monthly OHLC (adjusted).
+-- 3) EOD monthly OHLC (adjusted).
 CREATE MATERIALIZED VIEW IF NOT EXISTS cagg_eod_monthly
 WITH (timescaledb.continuous) AS
 SELECT ticker,
@@ -29,7 +51,7 @@ FROM eod_prices
 GROUP BY ticker, time_bucket('1 month', date)
 WITH NO DATA;
 
--- 3) NAV daily/weekly (last-of-period) — cagg_nav_monthly already exists.
+-- 4) NAV daily/weekly (last-of-period) — cagg_nav_monthly already exists.
 CREATE MATERIALIZED VIEW IF NOT EXISTS cagg_nav_daily
 WITH (timescaledb.continuous) AS
 SELECT instrument_id,
@@ -58,11 +80,15 @@ GROUP BY instrument_id, time_bucket('1 week', nav_date)
 WITH NO DATA;
 
 -- Populate once, then keep fresh daily (ingestion writes daily).
+CALL refresh_continuous_aggregate('cagg_eod_daily',   NULL, NULL);
 CALL refresh_continuous_aggregate('cagg_eod_weekly',  NULL, NULL);
 CALL refresh_continuous_aggregate('cagg_eod_monthly', NULL, NULL);
 CALL refresh_continuous_aggregate('cagg_nav_daily',   NULL, NULL);
 CALL refresh_continuous_aggregate('cagg_nav_weekly',  NULL, NULL);
 
+SELECT add_continuous_aggregate_policy('cagg_eod_daily',
+  start_offset => INTERVAL '90 days', end_offset => INTERVAL '1 day',
+  schedule_interval => INTERVAL '1 day', if_not_exists => true);
 SELECT add_continuous_aggregate_policy('cagg_eod_weekly',
   start_offset => INTERVAL '90 days', end_offset => INTERVAL '1 day',
   schedule_interval => INTERVAL '1 day', if_not_exists => true);

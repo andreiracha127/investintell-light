@@ -1,14 +1,13 @@
 """Monte Carlo endpoint: POST /monte-carlo/projection (single instrument).
 
-DB-first contract (same as the stock/portfolio/statistics routes): never talks
-to Tiingo directly — the service warms EOD via the shared error-mapping helper,
-then serves from eod_prices. The route stays thin: validate -> run -> map
+DB-first contract (same as the stock/portfolio/statistics routes): never calls
+Tiingo for historical EOD data on the request path. The route stays thin:
+validate -> run -> map
 InsufficientDataError/StockAnalysisError to 404/422.
 
 Error mapping (fail loud):
 - request validation (ticker/statistic/n_simulations/horizons)  -> 422 (Pydantic)
 - unknown ticker / no price rows                                 -> 404
-- Tiingo rate limited / auth / server error                     -> 503/502 (warm helper)
 - insufficient history for the projection                       -> 422
 """
 
@@ -18,7 +17,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
-from app.core.tiingo_provider import get_tiingo_client
 from app.schemas.monte_carlo import (
     MonteCarloRequest,
     MonteCarloResponse,
@@ -27,7 +25,6 @@ from app.schemas.monte_carlo import (
 )
 from app.services.monte_carlo import run_monte_carlo, run_portfolio_monte_carlo
 from app.services.stock_analysis import InsufficientDataError, StockAnalysisError
-from app.tiingo.client import TiingoClient
 
 router = APIRouter(prefix="/monte-carlo", tags=["monte-carlo"])
 
@@ -36,7 +33,6 @@ router = APIRouter(prefix="/monte-carlo", tags=["monte-carlo"])
 async def project_monte_carlo(
     payload: MonteCarloRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
-    client: Annotated[TiingoClient, Depends(get_tiingo_client)],
 ) -> MonteCarloResponse:
     """Block-bootstrap Monte Carlo projection for one instrument — single call.
 
@@ -48,7 +44,6 @@ async def project_monte_carlo(
     try:
         return await run_monte_carlo(
             session,
-            client,
             ticker=payload.ticker,
             statistic=payload.statistic,
             range_key=payload.range,

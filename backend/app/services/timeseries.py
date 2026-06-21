@@ -1,8 +1,8 @@
 """Timeseries assembly: DB-first series reads packed into Highcharts arrays.
 
-Stocks still use range-aware OHLCV aggregates. Fund NAV charts use one daily
-continuous aggregate for every range, so a stale weekly/monthly CAGG cannot
-make longer windows disagree with the daily source.
+Stock/EOD and fund/NAV charts use one daily continuous aggregate for every
+range, so longer windows never disagree with the daily source and route
+requests never downsample or backfill data on the fly.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ Interval = Literal["daily", "weekly", "monthly"]
 RangeKey = Literal["1M", "6M", "1Y", "5Y", "MAX"]
 
 _INTERVAL_BY_RANGE: dict[str, Interval] = {
-    "1M": "daily", "6M": "daily", "1Y": "daily", "5Y": "weekly", "MAX": "monthly",
+    "1M": "daily", "6M": "daily", "1Y": "daily", "5Y": "daily", "MAX": "daily",
 }
 _RANGE_DAYS: dict[str, int] = {"1M": 30, "6M": 182, "1Y": 365, "5Y": 1826}
 
@@ -49,21 +49,16 @@ def to_ms_ohlc(
 
 # --- DB reads (return ascending (date, …) tuples) -------------------------
 
-_EOD_TABLE: dict[Interval, tuple[str, str]] = {
-    "daily":   ("eod_prices",      "date"),
-    "weekly":  ("cagg_eod_weekly", "bucket"),
-    "monthly": ("cagg_eod_monthly","bucket"),
-}
+EOD_PRICE_INTERVAL: Interval = "daily"
 
 
 async def select_eod_ohlc(
-    session: AsyncSession, ticker: str, interval: Interval, start: dt.date | None
+    session: AsyncSession, ticker: str, start: dt.date | None
 ) -> list[tuple[dt.date, float, float, float, float, float]]:
-    table, tcol = _EOD_TABLE[interval]
-    where = "ticker = :ticker" + ("" if start is None else f" AND {tcol} >= :start")
+    where = "ticker = :ticker" + ("" if start is None else " AND bucket >= :start")
     sql = text(
-        f"SELECT {tcol} AS d, adj_open, adj_high, adj_low, adj_close, adj_volume "
-        f"FROM {table} WHERE {where} ORDER BY {tcol}"
+        "SELECT bucket AS d, adj_open, adj_high, adj_low, adj_close, adj_volume "
+        f"FROM cagg_eod_daily WHERE {where} ORDER BY bucket"
     )
     params: dict[str, object] = {"ticker": ticker}
     if start is not None:

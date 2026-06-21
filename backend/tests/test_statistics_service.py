@@ -29,8 +29,6 @@ from app.analytics import (
     sortino_ratio,
     weight_series,
 )
-from app.api import _shared as api_shared
-from app.ingestion.service import EnsureReport
 from app.schemas.statistics import AssetRef, PortfolioRef, TickerRef
 from app.services import statistics as statistics_service
 from app.services._series import join_prices
@@ -205,9 +203,6 @@ def _install_resolver_stubs(
     rows_map: dict[str, pd.Series],
     portfolio: Any | None,
 ) -> None:
-    async def fake_ensure(*args: Any, **kwargs: Any) -> EnsureReport:
-        return EnsureReport()
-
     async def fake_rows(
         session: Any, ticker: str, start: dt.date, end: dt.date
     ) -> list[tuple[dt.date, float]]:
@@ -223,7 +218,6 @@ def _install_resolver_stubs(
     async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
         return set()
 
-    monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
     monkeypatch.setattr(statistics_service, "_select_adj_close_rows", fake_rows)
     monkeypatch.setattr(statistics_service.portfolio_crud, "get_portfolio", fake_get_portfolio)
     monkeypatch.setattr(
@@ -251,7 +245,7 @@ async def test_resolve_ticker_ref(monkeypatch: pytest.MonkeyPatch) -> None:
     end = rows_map["SPY"].index[-1].date()
 
     label, returns = await resolve_asset_returns(
-        None, object(), TickerRef(kind="ticker", ticker="SPY"), start, end
+        None, TickerRef(kind="ticker", ticker="SPY"), start, end
     )
     assert label == "SPY"
     # check_index_type=False: the DB round-trip (Timestamp -> date -> Timestamp)
@@ -275,7 +269,7 @@ async def test_resolve_portfolio_ref_equals_portfolio_returns(
     end = rows_map["AAPL"].index[-1].date()
 
     label, returns = await resolve_asset_returns(
-        None, object(), PortfolioRef(kind="portfolio", id=7), start, end
+        None, PortfolioRef(kind="portfolio", id=7), start, end
     )
     assert label == "Temp F5"
     prices = join_prices(rows_map)
@@ -292,7 +286,6 @@ async def test_resolve_unknown_portfolio_raises_404(
     with pytest.raises(HTTPException) as excinfo:
         await resolve_asset_returns(
             None,
-            object(),
             PortfolioRef(kind="portfolio", id=99),
             dt.date(2025, 1, 1),
             dt.date(2026, 1, 1),
@@ -307,7 +300,6 @@ async def test_resolve_empty_portfolio_raises_insufficient(
     with pytest.raises(InsufficientDataError, match="no positions"):
         await resolve_asset_returns(
             None,
-            object(),
             PortfolioRef(kind="portfolio", id=7),
             dt.date(2025, 1, 1),
             dt.date(2026, 1, 1),
@@ -321,7 +313,6 @@ async def test_resolve_ticker_with_short_history_raises_insufficient(
     with pytest.raises(InsufficientDataError, match="SPY"):
         await resolve_asset_returns(
             None,
-            object(),
             TickerRef(kind="ticker", ticker="SPY"),
             dt.date(2000, 1, 1),
             dt.date.today(),

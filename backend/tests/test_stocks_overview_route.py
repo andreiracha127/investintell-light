@@ -6,17 +6,14 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.core.db import get_session
-from app.core.tiingo_provider import get_tiingo_client
 from app.main import create_app
 from app.schemas.market import IndexCard, LeaderRow, MarketBreadth, SectorPerf
 from app.services import market_overview as mo
-from app.tiingo.exceptions import TiingoError
 
 
 def _client() -> AsyncClient:
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
-    app.dependency_overrides[get_tiingo_client] = lambda: None
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
@@ -56,12 +53,6 @@ def _patch_happy(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_overview_assembles_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_happy(monkeypatch)
 
-    async def fake_ensure(session, client, symbols, start, end):
-        assert set(symbols) == set(mo.INDEX_TICKERS)
-
-    import app.api.routes.stocks as stocks_routes
-    monkeypatch.setattr(stocks_routes, "_ensure_eod_or_http_error", fake_ensure)
-
     async with _client() as client:
         resp = await client.get("/stocks/overview")
     assert resp.status_code == 200
@@ -75,17 +66,16 @@ async def test_overview_assembles_payload(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.mark.anyio
-async def test_overview_degrades_indices_when_tiingo_fails(
+async def test_overview_allows_empty_local_index_strip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Índices são painel secundário: falha da Tiingo degrada para [], não 5xx."""
+    """Índices vêm do banco local; sem linhas locais, o painel fica vazio."""
     _patch_happy(monkeypatch)
 
-    async def fake_ensure(session, client, symbols, start, end):
-        raise TiingoError("down")
+    async def empty_indices(session):
+        return []
 
-    import app.api.routes.stocks as stocks_routes
-    monkeypatch.setattr(stocks_routes, "_ensure_eod_or_http_error", fake_ensure)
+    monkeypatch.setattr(mo, "fetch_index_rows", empty_indices)
 
     async with _client() as client:
         resp = await client.get("/stocks/overview")

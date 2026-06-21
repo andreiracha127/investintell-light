@@ -3,16 +3,13 @@
 import datetime as dt
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 import app.api.routes.funds as funds_routes
 from app.core.db import get_session
-from app.core.tiingo_provider import get_tiingo_client
 from app.main import create_app
-from app.tiingo.exceptions import TiingoError
 
 FUND_ID = uuid.uuid4()
 
@@ -20,15 +17,7 @@ FUND_ID = uuid.uuid4()
 def _client(session_factory=None) -> AsyncClient:
     app = create_app()
     app.dependency_overrides[get_session] = session_factory or (lambda: None)
-    app.dependency_overrides[get_tiingo_client] = lambda: None
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
-
-
-def _async_session_stub() -> AsyncMock:
-    """Return a lightweight async session stub with a no-op rollback()."""
-    stub = AsyncMock()
-    stub.rollback = AsyncMock(return_value=None)
-    return stub
 
 
 def _etf() -> SimpleNamespace:
@@ -51,9 +40,6 @@ def _stub(monkeypatch: pytest.MonkeyPatch):
     async def get_fund(session, instrument_id):
         return _etf()
 
-    async def ensure(session, client, symbols, start, end):
-        return None
-
     async def adj(session, ticker, start, end):
         assert ticker == "SPY"
         return OHLCV_ROWS
@@ -62,7 +48,6 @@ def _stub(monkeypatch: pytest.MonkeyPatch):
         return NAV_ROWS
 
     monkeypatch.setattr(funds_routes, "_get_fund", get_fund)
-    monkeypatch.setattr(funds_routes, "_ensure_eod_or_http_error", ensure)
     monkeypatch.setattr(funds_routes, "_select_adj_ohlcv_rows", adj)
     monkeypatch.setattr(funds_routes, "_select_nav_rows", nav)
 
@@ -98,17 +83,17 @@ async def test_mutual_fund_uses_nav_path(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 @pytest.mark.anyio
-async def test_etf_degrades_to_nav_when_tiingo_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def ensure(session, client, symbols, start, end):
-        raise TiingoError("down")
+async def test_etf_degrades_to_nav_when_no_local_eod_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def empty_adj(session, ticker, start, end):
+        return []
 
-    session_stub = _async_session_stub()
-    monkeypatch.setattr(funds_routes, "_ensure_eod_or_http_error", ensure)
-    async with _client(session_factory=lambda: session_stub) as client:
+    monkeypatch.setattr(funds_routes, "_select_adj_ohlcv_rows", empty_adj)
+    async with _client() as client:
         resp = await client.get(f"/funds/{FUND_ID}/history")
     assert resp.status_code == 200
     assert resp.json()["mode"] == "nav"
-    session_stub.rollback.assert_awaited_once()
 
 
 @pytest.mark.anyio

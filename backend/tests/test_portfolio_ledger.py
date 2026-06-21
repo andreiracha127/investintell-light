@@ -7,11 +7,8 @@ from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.api import _shared as api_shared
 from app.core.auth import CurrentUser, get_current_user
 from app.core.db import get_session
-from app.core.tiingo_provider import get_tiingo_client
-from app.ingestion.service import EnsureReport
 from app.main import create_app
 from app.services import portfolio_crud, portfolio_ledger
 from app.services.portfolio_ledger import (
@@ -55,7 +52,6 @@ def _tx(
 def _client() -> AsyncClient:
     app = create_app()
     app.dependency_overrides[get_session] = FakeRouteSession
-    app.dependency_overrides[get_tiingo_client] = lambda: object()
     app.dependency_overrides[get_current_user] = lambda: CurrentUser(
         sub="u-1", org_id=None, claims={}
     )
@@ -66,13 +62,11 @@ def _client() -> AsyncClient:
 def ensure_calls(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     calls: list[list[str]] = []
 
-    async def fake_ensure(
-        session: Any, client: Any, tickers: list[str], start: Any, end: Any, **kwargs: Any
-    ) -> EnsureReport:
+    async def fake_eod_known(session: Any, tickers: Any) -> set[str]:
         calls.append(list(tickers))
-        return EnsureReport()
+        return set(tickers)
 
-    monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
+    monkeypatch.setattr(portfolio_crud, "select_tickers_with_eod", fake_eod_known)
     return calls
 
 
@@ -125,7 +119,7 @@ def test_build_transaction_nav_rejects_oversell() -> None:
         )
 
 
-async def test_create_transaction_route_normalizes_ensures_and_persists(
+async def test_create_transaction_route_normalizes_checks_coverage_and_persists(
     monkeypatch: pytest.MonkeyPatch, ensure_calls: list[list[str]]
 ) -> None:
     received: list[Any] = []
@@ -181,7 +175,7 @@ async def test_create_transaction_route_normalizes_ensures_and_persists(
     assert materialized == [7]
 
 
-async def test_create_transaction_route_skips_ensure_for_funds(
+async def test_create_transaction_route_skips_eod_check_for_funds(
     monkeypatch: pytest.MonkeyPatch, ensure_calls: list[list[str]]
 ) -> None:
     materialized: list[int] = []

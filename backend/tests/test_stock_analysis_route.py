@@ -1,8 +1,7 @@
 """Tests for GET /stocks/{ticker}/analysis.
 
-The ingestion service and DB read helpers are stubbed at the route-module
-boundary; the Tiingo client and DB session dependencies are overridden.
-No live network, no live DB.
+DB read helpers are stubbed at the route-module boundary. Historical analysis
+is DB-only: no live network, no live DB.
 """
 
 import datetime as dt
@@ -15,13 +14,9 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.api import _shared as api_shared
 from app.api.routes import stocks
 from app.core.db import get_session
-from app.core.tiingo_provider import get_tiingo_client
-from app.ingestion.service import EnsureReport
 from app.main import create_app
-from app.tiingo.exceptions import TiingoNotFoundError
 
 N_DAYS = 420
 
@@ -46,7 +41,6 @@ BENCH_ROWS = _synthetic_rows(seed=2)
 def _app_with_overrides() -> FastAPI:
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
-    app.dependency_overrides[get_tiingo_client] = lambda: object()
     return app
 
 
@@ -55,9 +49,6 @@ def _install_stubs(
     asset_rows: list[OhlcvRow] | None = None,
 ) -> None:
     rows = ASSET_ROWS if asset_rows is None else asset_rows
-
-    async def fake_ensure(*args: Any, **kwargs: Any) -> EnsureReport:
-        return EnsureReport()
 
     async def fake_bounds(
         session: Any, ticker: str
@@ -79,8 +70,6 @@ def _install_stubs(
     async def fake_name(session: Any, ticker: str) -> str | None:
         return "Apple Inc"
 
-    # ensure_eod_data is called from app.api._shared — patch the canonical location.
-    monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
     monkeypatch.setattr(stocks, "_select_date_bounds", fake_bounds)
     monkeypatch.setattr(stocks, "_select_ohlcv_rows", fake_ohlcv)
     monkeypatch.setattr(stocks, "_select_adj_close_rows", fake_adj_close)
@@ -154,10 +143,12 @@ async def test_benchmark_and_window_are_echoed(stub_client: AsyncClient) -> None
 
 
 async def test_unknown_ticker_returns_404(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_ensure(*args: Any, **kwargs: Any) -> EnsureReport:
-        raise TiingoNotFoundError("nope")
+    async def missing_bounds(
+        session: Any, ticker: str
+    ) -> tuple[dt.date | None, dt.date | None]:
+        return None, None
 
-    monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
+    monkeypatch.setattr(stocks, "_select_date_bounds", missing_bounds)
     transport = ASGITransport(app=_app_with_overrides())
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         response = await ac.get("/stocks/ZZZZZZ/analysis")

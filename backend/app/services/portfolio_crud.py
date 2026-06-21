@@ -45,7 +45,7 @@ class DuplicatePortfolioNameError(Exception):
 
 
 class MissingPriceDataError(Exception):
-    """Raised when a position ticker has no EOD rows even after the ensure step."""
+    """Raised when a position ticker has no local EOD/NAV rows."""
 
 
 # ---------------------------------------------------------------------------
@@ -203,9 +203,9 @@ async def insert_position(
 ) -> Position:
     """Upsert a position via INSERT ... ON CONFLICT (portfolio_id, ticker) DO UPDATE.
 
-    The route checks existence FIRST (get_position) to gate the Tiingo ensure
-    call on the INSERT path only.  After ensure, this upsert collapses any
-    concurrent INSERT race to last-write-wins instead of an unhandled
+    The route checks existence FIRST (get_position) to gate local coverage
+    validation on the INSERT path only. After validation, this upsert collapses
+    any concurrent INSERT race to last-write-wins instead of an unhandled
     IntegrityError → 500.
 
     NOTE: Core-level upserts bypass the ORM onupdate hook, so updated_at is
@@ -328,7 +328,7 @@ async def select_fund_tickers(
     tickers in ``funds`` OR share-class tickers in ``fund_classes`` (F8.6b).
 
     Used to make portfolio pricing fund-aware (F8.5): fund tickers are priced
-    from fund_nav and must NOT be sent to the Tiingo EOD ensure.
+    from fund_nav and do not require local EOD coverage.
     """
     if not tickers:
         return set()

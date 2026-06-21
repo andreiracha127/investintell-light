@@ -1,8 +1,7 @@
 """Tests for the /statistics/* routes (F5).
 
-The ingestion service, DB reads and portfolio loading are stubbed at the
-service-module boundary; the Tiingo client and DB session dependencies are
-overridden. No live network, no live DB (same approach as the F3.2 tests).
+DB reads and portfolio loading are stubbed at the service-module boundary.
+Historical EOD data is DB-only: no live network, no live DB.
 """
 
 import datetime as dt
@@ -16,13 +15,9 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.api import _shared as api_shared
 from app.core.db import get_session
-from app.core.tiingo_provider import get_tiingo_client
-from app.ingestion.service import EnsureReport
 from app.main import create_app
 from app.services import statistics as statistics_service
-from app.tiingo.exceptions import TiingoNotFoundError
 
 N_DAYS = 420
 
@@ -59,7 +54,6 @@ END = dt.date.today().isoformat()
 def _app_with_overrides() -> FastAPI:
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
-    app.dependency_overrides[get_tiingo_client] = lambda: object()
     return app
 
 
@@ -69,9 +63,6 @@ def _install_stubs(
     portfolio: Any | None = PORTFOLIO,
 ) -> None:
     rows_map = ROWS_BY_TICKER if rows_by_ticker is None else rows_by_ticker
-
-    async def fake_ensure(*args: Any, **kwargs: Any) -> EnsureReport:
-        return EnsureReport()
 
     async def fake_adj_close(
         session: Any, ticker: str, start: dt.date, end: dt.date
@@ -86,7 +77,6 @@ def _install_stubs(
     async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
         return set()
 
-    monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
     monkeypatch.setattr(statistics_service, "_select_adj_close_rows", fake_adj_close)
     monkeypatch.setattr(
         statistics_service.portfolio_crud, "get_portfolio", fake_get_portfolio
@@ -114,8 +104,7 @@ async def stub_client(
 async def test_scenario_fund_position_guarded_with_422(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Portfolios holding fund positions (F8.5) are not EOD-analyzable yet —
-    the guard returns a clear 422 instead of a Tiingo 404 or a 500."""
+    """Portfolios holding fund positions (F8.5) are not EOD-analyzable yet."""
     _install_stubs(monkeypatch)
 
     async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
@@ -258,11 +247,9 @@ async def test_beta_ticker_vs_portfolio(stub_client: AsyncClient) -> None:
 
 
 async def test_beta_unknown_ticker_returns_404(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_ensure(*args: Any, **kwargs: Any) -> EnsureReport:
-        raise TiingoNotFoundError("nope")
-
-    _install_stubs(monkeypatch)
-    monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
+    rows = dict(ROWS_BY_TICKER)
+    rows["NOPE"] = []
+    _install_stubs(monkeypatch, rows_by_ticker=rows)
     transport = ASGITransport(app=_app_with_overrides())
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         response = await ac.post(

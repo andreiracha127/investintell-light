@@ -4,8 +4,8 @@ holdings correlation.
 Structure (the F2/F3 pattern):
 - pure ``assemble_*`` functions: pandas → response schema, no I/O — unit-tested
   directly on synthetic frames;
-- async ``run_*`` orchestrators: ensure EOD data is warm (shared error-mapping
-  helper), read adjusted closes from the DB, then call the pure assembler.
+- async ``run_*`` orchestrators: read adjusted closes from the local DB, then
+  call the pure assembler.
   Routes stay thin: validate → run → map ``StockAnalysisError`` to 422.
 
 Replay semantics (documented on the schemas too): a persisted portfolio is
@@ -14,10 +14,8 @@ buy-and-hold historical replay ("what would this portfolio have done?"), not a
 reconstruction of past trades. See ``app.analytics.portfolio``.
 
 Error contract (fail loud, never silently empty):
-- unknown portfolio                          -> HTTPException 404 (raised here,
-  because the resolver's EOD-ensure step already speaks HTTP via the shared
-  ``ensure_eod_or_http_error`` mapping — one error channel per concern);
-- unknown ticker / provider failures         -> mapped by the shared ensure;
+- unknown portfolio                          -> HTTPException 404;
+- unknown ticker / missing local price rows  -> ``InsufficientDataError`` (422);
 - empty portfolio / insufficient history /
   engine-undefined statistics               -> ``InsufficientDataError`` (422);
 - oversized window                           -> ``PayloadTooLargeError`` (422).
@@ -53,7 +51,6 @@ from app.analytics import (
     weight_series,
 )
 from app.analytics._validation import to_date as _to_date
-from app.api._shared import ensure_eod_or_http_error
 from app.models.portfolio import Portfolio
 from app.schemas.analysis import DatedValue, HistogramOut
 from app.schemas.statistics import (
@@ -102,7 +99,6 @@ from app.services.stock_analysis import (
     build_adj_close_series,
     lookback_pad_days,
 )
-from app.tiingo.client import TiingoClient
 
 _HISTOGRAM_BINS = 20
 
@@ -187,7 +183,6 @@ def _require_positions(portfolio: Portfolio) -> dict[str, float]:
 
 async def _load_portfolio_prices(
     session: AsyncSession,
-    client: TiingoClient,
     portfolio_id: int,
     start: dt.date,
     end: dt.date,
@@ -195,7 +190,7 @@ async def _load_portfolio_prices(
     """Load, validate and read prices for a portfolio in one call.
 
     Sequence: _load_portfolio_or_404 → _require_positions → build tickers list
-    → ensure_eod_or_http_error → _load_series_map.
+    → _load_series_map.
 
     Returns:
         portfolio: the ORM object (for name, cash, id, etc.)
@@ -204,7 +199,6 @@ async def _load_portfolio_prices(
 
     Raises:
         HTTPException 404: unknown portfolio_id.
-        HTTPException 4xx: provider failure / unknown ticker (from ensure).
         InsufficientDataError: portfolio has no positions, or holds fund
             positions (NAV-priced — not supported by the EOD analyses yet).
     """
@@ -213,15 +207,20 @@ async def _load_portfolio_prices(
     tickers = list(quantities)
     # Fund positions (F8.5 saved proposals) are NAV-priced and have no EOD
     # rows — the replay/beta/correlation engines are not fund-aware yet.
-    # Cheap guard: clear 422 instead of a Tiingo 404 or a 500 downstream.
+    # Cheap guard: clear 422 instead of a missing-local-price error downstream.
     fund_tickers = await portfolio_crud.select_fund_tickers(session, tickers)
     if fund_tickers:
         raise InsufficientDataError(
             "fund positions not yet supported in this analysis: "
             f"{', '.join(sorted(fund_tickers))}"
         )
-    await ensure_eod_or_http_error(session, client, tickers, start, end)
     series_by_ticker = await _load_series_map(session, tickers, start, end)
+    missing = [ticker for ticker, series in series_by_ticker.items() if series.empty]
+    if missing:
+        raise InsufficientDataError(
+            "No local price data available for: "
+            f"{', '.join(sorted(missing))}. Run the EOD backfill before analysis."
+        )
     return portfolio, quantities, series_by_ticker
 
 
@@ -232,15 +231,13 @@ async def _load_portfolio_prices(
 
 async def resolve_asset_returns(
     session: AsyncSession,
-    client: TiingoClient,
     ref: AssetRef,
     start: dt.date,
     end: dt.date,
 ) -> tuple[str, pd.Series]:
     """Resolve a pseudo-asset reference into ``(label, daily return series)``.
 
-    - ``kind='ticker'``: EOD-ensure the ticker, then simple returns of its
-      adjusted closes over [start, end]; label = the ticker.
+    - ``kind='ticker'``: local adjusted closes over [start, end]; label = the ticker.
     - ``kind='portfolio'``: load the persisted portfolio (404 when unknown),
       replay its CURRENT quantities (inner-join of its holdings' adjusted
       closes, engine ``portfolio_returns``); label = the portfolio name.
@@ -248,14 +245,20 @@ async def resolve_asset_returns(
       beta/correlation against the invested positions.
 
     Raises:
-        HTTPException: 404 for an unknown portfolio; whatever the shared EOD
-            ensure raises for unknown tickers / provider failures.
+        HTTPException: 404 for an unknown portfolio.
         InsufficientDataError: empty portfolio, or too few common trading days
             in the window (the shortest-history ticker is named).
     """
     if isinstance(ref, TickerRef):
-        await ensure_eod_or_http_error(session, client, [ref.ticker], start, end)
         series = (await _load_series_map(session, [ref.ticker], start, end))[ref.ticker]
+        if series.empty:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"No local price data available for {ref.ticker}. "
+                    "Run the EOD backfill before analysis."
+                ),
+            )
         if len(series) < MIN_IN_RANGE_RETURNS + 1:
             raise InsufficientDataError(
                 f"Only {len(series)} price rows for {ref.ticker} between {start} and "
@@ -265,7 +268,7 @@ async def resolve_asset_returns(
         return ref.ticker, simple_returns(series)
 
     portfolio, quantities, series_by_ticker = await _load_portfolio_prices(
-        session, client, ref.id, start, end
+        session, ref.id, start, end
     )
     prices = _join_prices(series_by_ticker)
     _require_common_rows(
@@ -433,14 +436,13 @@ def assemble_scenario(
 
 async def run_scenario(
     session: AsyncSession,
-    client: TiingoClient,
     payload: ScenarioRequest,
     *,
     max_points: int,
 ) -> ScenarioResponse:
-    """Orchestrate the scenario: load portfolio, ensure EOD, read, assemble."""
+    """Orchestrate the scenario: load portfolio, read local prices, assemble."""
     portfolio, quantities, series_by_ticker = await _load_portfolio_prices(
-        session, client, payload.portfolio_id, payload.start_date, payload.end_date
+        session, payload.portfolio_id, payload.start_date, payload.end_date
     )
     return assemble_scenario(
         series_by_ticker,
@@ -511,17 +513,16 @@ def assemble_beta(
 
 async def run_beta(
     session: AsyncSession,
-    client: TiingoClient,
     payload: BetaRequest,
     *,
     max_points: int,
 ) -> BetaResponse:
     """Orchestrate the beta scatter: resolve both pseudo-assets, assemble."""
     label_x, returns_x = await resolve_asset_returns(
-        session, client, payload.asset_x, payload.start_date, payload.end_date
+        session, payload.asset_x, payload.start_date, payload.end_date
     )
     label_y, returns_y = await resolve_asset_returns(
-        session, client, payload.asset_y, payload.start_date, payload.end_date
+        session, payload.asset_y, payload.start_date, payload.end_date
     )
     return assemble_beta(
         label_x, returns_x, label_y, returns_y, max_points=max_points
@@ -580,7 +581,6 @@ def assemble_rolling_correlation(
 
 async def run_rolling_correlation(
     session: AsyncSession,
-    client: TiingoClient,
     payload: CorrelationRequest,
     *,
     max_points: int,
@@ -594,10 +594,10 @@ async def run_rolling_correlation(
         days=lookback_pad_days(payload.window)
     )
     label_x, returns_x = await resolve_asset_returns(
-        session, client, payload.asset_x, pad_start, payload.end_date
+        session, payload.asset_x, pad_start, payload.end_date
     )
     label_y, returns_y = await resolve_asset_returns(
-        session, client, payload.asset_y, pad_start, payload.end_date
+        session, payload.asset_y, pad_start, payload.end_date
     )
     return assemble_rolling_correlation(
         label_x,
@@ -650,7 +650,6 @@ def assemble_stock_correlation(
 
 async def run_stock_correlation(
     session: AsyncSession,
-    client: TiingoClient,
     payload: StockCorrelationRequest,
 ) -> StockCorrelationResponse:
     """Orchestrate the holdings correlation matrix over a trailing window.
@@ -663,6 +662,6 @@ async def run_stock_correlation(
     end = payload.end_date or dt.date.today()
     pad_start = end - dt.timedelta(days=lookback_pad_days(payload.window + 1))
     _, _, series_by_ticker = await _load_portfolio_prices(
-        session, client, payload.portfolio_id, pad_start, end
+        session, payload.portfolio_id, pad_start, end
     )
     return assemble_stock_correlation(series_by_ticker, window=payload.window)

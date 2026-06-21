@@ -7,14 +7,12 @@ from httpx import ASGITransport, AsyncClient
 
 import app.api.routes.stocks as stocks_routes
 from app.core.db import get_session
-from app.core.tiingo_provider import get_tiingo_client
 from app.main import create_app
 
 
 def _client() -> AsyncClient:
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
-    app.dependency_overrides[get_tiingo_client] = lambda: None
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
@@ -28,14 +26,10 @@ def _rows() -> list[tuple]:
 
 @pytest.fixture(autouse=True)
 def _stub(monkeypatch: pytest.MonkeyPatch):
-    async def fake_ensure(session, client, symbols, start, end):
-        assert symbols == ["TSLA"]
-
     async def fake_select(session, ticker, start, end):
         assert ticker == "TSLA"
         return _rows()
 
-    monkeypatch.setattr(stocks_routes, "_ensure_eod_or_http_error", fake_ensure)
     monkeypatch.setattr(stocks_routes, "_select_adj_ohlcv_rows", fake_select)
 
 
@@ -64,13 +58,9 @@ async def test_history_truncates_to_bars_param() -> None:
 
 @pytest.mark.anyio
 async def test_history_404_when_no_rows(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def ensure_any(session, client, symbols, start, end):
-        return None
-
     async def empty(session, ticker, start, end):
         return []
 
-    monkeypatch.setattr(stocks_routes, "_ensure_eod_or_http_error", ensure_any)
     monkeypatch.setattr(stocks_routes, "_select_adj_ohlcv_rows", empty)
     async with _client() as client:
         resp = await client.get("/stocks/ZZZZ/history")

@@ -5,9 +5,10 @@ app can boot without a TIINGO_TOKEN — /health must keep working on a
 misconfigured box.  If created, the client is closed in main.py's lifespan
 shutdown via ``provider.aclose()``.
 
-Routes must never import ``TiingoClient`` directly — they depend on
-``get_tiingo_client`` and pass the client to the ingestion service, which is
-the only code allowed to call api.tiingo.com.
+Historical price/history/analysis routes must not depend on this provider.
+They read local DB tables only. Provider-backed endpoints and batch jobs can
+depend on ``get_tiingo_client`` explicitly when they are not serving historical
+EOD on demand.
 """
 
 import logging

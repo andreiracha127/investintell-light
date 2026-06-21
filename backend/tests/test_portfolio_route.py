@@ -1,8 +1,7 @@
 """Tests for POST /portfolio/analysis.
 
-The ingestion service and DB read helpers are stubbed at the route-module
-boundary; the Tiingo client and DB session dependencies are overridden.
-No live network, no live DB.
+DB read helpers are stubbed at the route-module boundary. Historical EOD data
+is DB-only: no live network, no live DB.
 """
 
 import datetime as dt
@@ -15,13 +14,9 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.api import _shared as api_shared
 from app.api.routes import portfolio
 from app.core.db import get_session
-from app.core.tiingo_provider import get_tiingo_client
-from app.ingestion.service import EnsureReport
 from app.main import create_app
-from app.tiingo.exceptions import TiingoNotFoundError
 
 N_DAYS = 420
 
@@ -55,7 +50,6 @@ WEIGHTS_BODY: dict[str, Any] = {
 def _app_with_overrides() -> FastAPI:
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
-    app.dependency_overrides[get_tiingo_client] = lambda: object()
     return app
 
 
@@ -64,9 +58,6 @@ def _install_stubs(
     rows_by_ticker: dict[str, list[AdjCloseRow]] | None = None,
 ) -> None:
     rows_map = ROWS_BY_TICKER if rows_by_ticker is None else rows_by_ticker
-
-    async def fake_ensure(*args: Any, **kwargs: Any) -> EnsureReport:
-        return EnsureReport()
 
     async def fake_bounds(
         session: Any, ticker: str
@@ -81,11 +72,8 @@ def _install_stubs(
     ) -> list[AdjCloseRow]:
         return [r for r in rows_map.get(ticker, []) if start <= r[0] <= end]
 
-    # ensure_eod_or_http_error lives in app.api._shared and calls ensure_eod_data
-    # from that module's namespace — patch the one canonical location.
     # The read helpers are looked up as portfolio-module globals (aliases to the
     # canonical implementations in app.services._series).
-    monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
     monkeypatch.setattr(portfolio, "_select_date_bounds", fake_bounds)
     monkeypatch.setattr(portfolio, "_select_adj_close_rows", fake_adj_close)
 
@@ -405,10 +393,9 @@ async def test_invalid_ticker_format_is_rejected(stub_client: AsyncClient) -> No
 
 
 async def test_unknown_ticker_returns_404(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_ensure(*args: Any, **kwargs: Any) -> EnsureReport:
-        raise TiingoNotFoundError("nope")
-
-    monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
+    rows = dict(ROWS_BY_TICKER)
+    rows["AAPL"] = []
+    _install_stubs(monkeypatch, rows_by_ticker=rows)
     transport = ASGITransport(app=_app_with_overrides())
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         response = await ac.post("/portfolio/analysis", json=WEIGHTS_BODY)

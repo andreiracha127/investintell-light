@@ -39,9 +39,8 @@ export interface paths {
          * @description Payload único da landing /stocks — leaders/setores das tabelas locais.
          *
          *     Leaders e setores leem eod_prices ⋈ universe_constituents (pipeline batch
-         *     F6.2); ficam tão frescos quanto o último backfill. Os 4 ETFs de índice são
-         *     painel SECUNDÁRIO: warm on-demand via ensure_eod, e falha da Tiingo degrada
-         *     para indices=[] com warning (degradação declarada, como o news stale).
+         *     F6.2); ficam tão frescos quanto o último backfill. Os 4 ETFs de índice
+         *     também são lidos somente do banco local.
          */
         get: operations["get_market_overview_stocks_overview_get"];
         put?: never;
@@ -61,7 +60,7 @@ export interface paths {
         };
         /**
          * Get Price Series
-         * @description Return the EOD price series for *ticker*, ingesting on demand if cold/stale.
+         * @description Return the local EOD price series for *ticker*.
          */
         get: operations["get_price_series_stocks__ticker__prices_get"];
         put?: never;
@@ -103,11 +102,10 @@ export interface paths {
         };
         /**
          * Get Stock Timeseries
-         * @description Adjusted OHLC + volume in Highcharts Stock arrays; granularity by range.
+         * @description Adjusted daily OHLC + volume in Highcharts Stock arrays.
          *
-         *     <=1Y serves daily (raw hypertable), 1-5Y weekly CAGG, >5Y monthly CAGG —
-         *     the downsample happens in the DB, never in Python. Always warms raw daily
-         *     first so every interval reads off a fresh cache.
+         *     Every range reads the same DB-first daily CAGG; the range only changes the
+         *     date floor. Historical ingestion is outside the request path.
          */
         get: operations["get_stock_timeseries_stocks__ticker__timeseries_get"];
         put?: never;
@@ -263,9 +261,8 @@ export interface paths {
          * Create Portfolio
          * @description Create a portfolio with optional initial positions.
          *
-         *     Position tickers are validated against Tiingo via the EOD ensure — a typo
-         *     fails loud (404) BEFORE anything is persisted — which also warms the EOD
-         *     cache for the overview.
+         *     Position tickers must already exist in local EOD/fund coverage. Missing
+         *     coverage fails loud before anything is persisted.
          */
         post: operations["create_portfolio_portfolios_post"];
         delete?: never;
@@ -314,9 +311,9 @@ export interface paths {
          * Put Position
          * @description Upsert one position.
          *
-         *     INSERT path validates the ticker against Tiingo (and warms the EOD cache);
-         *     the UPDATE path deliberately does NOT re-ensure — the ticker was already
-         *     validated when the position was created.
+         *     INSERT path validates that the ticker already has local EOD/fund coverage;
+         *     the UPDATE path deliberately does not re-check coverage — the ticker was
+         *     already accepted when the position was created.
          *
          *     F8.6b: the body optionally carries basis/commission/trade_date (manual
          *     fill registration). Fields absent from the body keep the stored values
@@ -390,7 +387,7 @@ export interface paths {
          * @description Render-ready position table with P&L and column-header aggregates (D6).
          *
          *     Last/prev closes come from the two most recent eod_prices rows per ticker;
-         *     the EOD ensure runs first so stale tickers are refreshed.  An empty
+         *     stale/missing tickers must be handled by the out-of-band backfill. An empty
          *     portfolio is a legitimate 200 with zeroed/null aggregates.
          */
         get: operations["get_portfolio_overview_portfolios__portfolio_id__overview_get"];
@@ -439,7 +436,7 @@ export interface paths {
          * @description Exposição consolidada do portfólio atravessando os fundos (Frente C).
          *
          *     DB-first: pesos vêm dos preços/NAVs já sincronizados localmente (sem
-         *     ensure Tiingo — posição sem preço local é 409 explícito) e as exposições
+         *     fetch de preço no request — posição sem preço local é 409 explícito) e as exposições
          *     vêm das tabelas materializadas pelo worker ``nport_lookthrough`` no
          *     data-lake. Posições não atravessadas (ações, fundos sem materialização)
          *     ficam EXPLÍCITAS em ``unexpanded`` — nunca somem silenciosamente.
@@ -1086,8 +1083,8 @@ export interface paths {
          * @description Série do fundo no contrato do chart interativo ({t,o,h,l,c,v} + mode).
          *
          *     ETF com ticker → OHLCV ajustado de eod_prices (mesmo caminho dos stocks,
-         *     com warm on-demand); demais fundos (ou ETF sem cobertura/Tiingo fora) →
-         *     NAV de fund_nav com o=h=l=c=nav, v=0.
+         *     sem warm on-demand); demais fundos (ou ETF sem cobertura local) → NAV de
+         *     nav_timeseries com o=h=l=c=nav, v=0.
          */
         get: operations["get_fund_history_funds__instrument_id__history_get"];
         put?: never;

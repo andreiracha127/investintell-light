@@ -1,18 +1,16 @@
 """Persisted-portfolio endpoints (F4): CRUD, enriched overview, aggregated news.
 
 Distinct from ``app.api.routes.portfolio`` (the ad-hoc, no-persistence
-analysis router).  DB-first contract, same as everywhere: routes never talk to
-Tiingo directly — the EOD ensure (shared error mapping) validates tickers and
-warms the cache; reads are served from the tables.  Routes are thin: SQL and
-the overview math live in ``app.services.portfolio_crud``.
+analysis router).  DB-first contract, same as everywhere: routes never call
+Tiingo for historical EOD data on the request path; prices are served from
+local tables populated by backfill/worker jobs. Routes are thin: SQL and the
+overview math live in ``app.services.portfolio_crud``.
 
 Error mapping (fail loud, never silently empty):
 - portfolio / position not found            -> 404
-- ticker unknown to Tiingo (create/insert)  -> 404 (shared ensure mapping)
+- ticker without local price/fund coverage  -> 404
 - duplicate portfolio name                  -> 409
 - validation (name/ticker/quantity/price)   -> 422
-- cold-ticker cap exceeded                  -> 422
-- Tiingo rate limited / auth / server       -> 503 / 502 / 502
 - news fetch failed with empty cache        -> 502/503; with cache -> 200 stale=true
 """
 
@@ -25,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api._shared import ensure_eod_or_http_error, raise_news_fetch_error
+from app.api._shared import raise_news_fetch_error
 from app.core.auth import get_current_user
 from app.core.config import get_settings
 from app.core.datalake import get_datalake_session
@@ -69,17 +67,6 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
-# Window passed to the EOD ensure: informational only — the ingestion service
-# fetches full history for cold tickers and refreshes incrementally for stale
-# ones regardless of this window (see its fetch-window policy).
-_ENSURE_WINDOW_DAYS = 30
-
-
-def _ensure_window() -> tuple[dt.date, dt.date]:
-    today = dt.date.today()
-    return today - dt.timedelta(days=_ENSURE_WINDOW_DAYS), today
-
-
 def _normalize_ticker_or_422(ticker: str) -> str:
     try:
         return normalize_ticker(ticker, "ticker")
@@ -87,19 +74,27 @@ def _normalize_ticker_or_422(ticker: str) -> str:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-async def _ensure_trade_tickers(
+async def _require_local_trade_tickers(
     session: AsyncSession,
-    client: TiingoClient,
     tickers: Sequence[str],
 ) -> None:
     if not tickers:
         return
     symbols = sorted(set(tickers))
     fund_tickers = await portfolio_crud.select_fund_tickers(session, symbols)
-    ensure_tickers = [ticker for ticker in symbols if ticker not in fund_tickers]
-    if ensure_tickers:
-        start, end = _ensure_window()
-        await ensure_eod_or_http_error(session, client, ensure_tickers, start, end)
+    eod_candidates = [ticker for ticker in symbols if ticker not in fund_tickers]
+    if not eod_candidates:
+        return
+    eod_tickers = await portfolio_crud.select_tickers_with_eod(session, eod_candidates)
+    missing = [ticker for ticker in eod_candidates if ticker not in eod_tickers]
+    if missing:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "No local price or fund coverage for: "
+                f"{', '.join(missing)}. Run the EOD backfill before using these tickers."
+            ),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -111,18 +106,15 @@ async def _ensure_trade_tickers(
 async def create_portfolio(
     payload: PortfolioCreate,
     session: Annotated[AsyncSession, Depends(get_session)],
-    client: Annotated[TiingoClient, Depends(get_tiingo_client)],
 ) -> PortfolioOut:
     """Create a portfolio with optional initial positions.
 
-    Position tickers are validated against Tiingo via the EOD ensure — a typo
-    fails loud (404) BEFORE anything is persisted — which also warms the EOD
-    cache for the overview.
+    Position tickers must already exist in local EOD/fund coverage. Missing
+    coverage fails loud before anything is persisted.
     """
     if payload.positions:
-        start, end = _ensure_window()
-        await ensure_eod_or_http_error(
-            session, client, [p.ticker for p in payload.positions], start, end
+        await _require_local_trade_tickers(
+            session, [p.ticker for p in payload.positions]
         )
     try:
         portfolio = await portfolio_crud.create_portfolio(session, payload)
@@ -201,13 +193,12 @@ async def put_position(
     ticker: str,
     payload: PositionBody,
     session: Annotated[AsyncSession, Depends(get_session)],
-    client: Annotated[TiingoClient, Depends(get_tiingo_client)],
 ) -> PositionOut:
     """Upsert one position.
 
-    INSERT path validates the ticker against Tiingo (and warms the EOD cache);
-    the UPDATE path deliberately does NOT re-ensure — the ticker was already
-    validated when the position was created.
+    INSERT path validates that the ticker already has local EOD/fund coverage;
+    the UPDATE path deliberately does not re-check coverage — the ticker was
+    already accepted when the position was created.
 
     F8.6b: the body optionally carries basis/commission/trade_date (manual
     fill registration). Fields absent from the body keep the stored values
@@ -220,12 +211,11 @@ async def put_position(
     position = await portfolio_crud.get_position(session, portfolio_id, symbol)
     if position is None:
         # Fund tickers (synced funds/fund_classes tables) are valid positions
-        # priced from fund_nav — they must NOT be validated against Tiingo
+        # priced from fund_nav — they do not require local EOD coverage
         # (F8.5; class tickers use the series NAV as a proxy, F8.6b).
         is_fund = bool(await portfolio_crud.select_fund_tickers(session, [symbol]))
         if not is_fund:
-            start, end = _ensure_window()
-            await ensure_eod_or_http_error(session, client, [symbol], start, end)
+            await _require_local_trade_tickers(session, [symbol])
         position = await portfolio_crud.insert_position(
             session,
             portfolio_id,
@@ -302,12 +292,11 @@ async def create_portfolio_transaction(
     portfolio_id: int,
     payload: PortfolioTransactionCreate,
     session: Annotated[AsyncSession, Depends(get_session)],
-    client: Annotated[TiingoClient, Depends(get_tiingo_client)],
 ) -> PortfolioTransactionOut:
     """Append a real buy/sell event and update the current position snapshot."""
     if not await portfolio_crud.portfolio_exists(session, portfolio_id):
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
-    await _ensure_trade_tickers(session, client, [payload.ticker])
+    await _require_local_trade_tickers(session, [payload.ticker])
     try:
         row = await portfolio_ledger.create_transaction(session, portfolio_id, payload)
         await portfolio_ledger.materialize_portfolio_nav(session, portfolio_id)
@@ -364,12 +353,11 @@ async def get_portfolio_nav(
 async def get_portfolio_overview(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
-    client: Annotated[TiingoClient, Depends(get_tiingo_client)],
 ) -> PortfolioOverviewResponse:
     """Render-ready position table with P&L and column-header aggregates (D6).
 
     Last/prev closes come from the two most recent eod_prices rows per ticker;
-    the EOD ensure runs first so stale tickers are refreshed.  An empty
+    stale/missing tickers must be handled by the out-of-band backfill. An empty
     portfolio is a legitimate 200 with zeroed/null aggregates.
     """
     portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
@@ -380,17 +368,9 @@ async def get_portfolio_overview(
     fund_tickers: set[str] = set()
     if tickers:
         # Fund-aware pricing (F8.5): tickers known to the synced funds table
-        # are priced from fund_nav and skipped by the Tiingo ensure — UNLESS
-        # they already have eod_prices rows (pre-existing equity/ETF positions
-        # keep their refresh + EOD pricing unchanged).
+        # are priced from fund_nav. Equity/ETF positions are priced only from
+        # local eod_prices rows already populated by the backfill.
         fund_tickers = await portfolio_crud.select_fund_tickers(session, tickers)
-        eod_known = await portfolio_crud.select_tickers_with_eod(session, tickers)
-        ensure_tickers = [
-            t for t in tickers if t not in fund_tickers or t in eod_known
-        ]
-        if ensure_tickers:
-            start, end = _ensure_window()
-            await ensure_eod_or_http_error(session, client, ensure_tickers, start, end)
 
     closes = await portfolio_crud.select_last_two_closes(session, tickers)
     names = await portfolio_crud.select_instrument_names(session, tickers)
@@ -517,7 +497,7 @@ async def get_portfolio_lookthrough(
     """Exposição consolidada do portfólio atravessando os fundos (Frente C).
 
     DB-first: pesos vêm dos preços/NAVs já sincronizados localmente (sem
-    ensure Tiingo — posição sem preço local é 409 explícito) e as exposições
+    fetch de preço no request — posição sem preço local é 409 explícito) e as exposições
     vêm das tabelas materializadas pelo worker ``nport_lookthrough`` no
     data-lake. Posições não atravessadas (ações, fundos sem materialização)
     ficam EXPLÍCITAS em ``unexpanded`` — nunca somem silenciosamente.
@@ -552,7 +532,7 @@ async def get_portfolio_lookthrough(
             detail=(
                 "No local price data for: "
                 f"{', '.join(sorted(missing))} — open the portfolio overview "
-                "to refresh prices first."
+                "after the EOD backfill has populated prices."
             ),
         )
 

@@ -1,9 +1,9 @@
 """Assembly + orchestration for POST /monte-carlo/projection.
 
 assemble_monte_carlo is a pure adapter (numpy return array -> response schema,
-no I/O). run_monte_carlo is the async orchestrator: warm EOD, read the DB,
-build the daily-return array, call assemble. Mirrors the assemble_* / run_*
-split and the underscore-aliased read-helper imports used by
+no I/O). run_monte_carlo is the async orchestrator: read the local DB, build
+the daily-return array, call assemble. Mirrors the assemble_* / run_* split and
+the underscore-aliased read-helper imports used by
 app.services.statistics.
 
 Scale contract: drawdown/return percentiles are decimal fractions; sharpe is
@@ -21,8 +21,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.monte_carlo import block_bootstrap_monte_carlo
 from app.analytics.returns import simple_returns
-from app.api._shared import ensure_eod_or_http_error
-from app.ingestion.service import HISTORY_FLOOR
 from app.optimizer import data as optimizer_data
 from app.schemas.analysis import RangeKey
 from app.schemas.monte_carlo import (
@@ -48,7 +46,6 @@ from app.services.stock_analysis import (
     InsufficientDataError,
     build_adj_close_series,
 )
-from app.tiingo.client import TiingoClient
 
 _MIN_RETURNS = 42
 
@@ -126,7 +123,6 @@ def assemble_monte_carlo(
 
 async def run_monte_carlo(
     session: AsyncSession,
-    client: TiingoClient,
     *,
     ticker: str,
     statistic: Statistic,
@@ -136,20 +132,12 @@ async def run_monte_carlo(
     risk_free_rate: float,
     seed: int | None,
 ) -> MonteCarloResponse:
-    """Warm EOD, read adjusted closes, build the return array, then assemble.
+    """Read local adjusted closes, build the return array, then assemble.
 
     Raises:
         InsufficientDataError: no price rows, fewer than 2 closes, or the
             analytics layer rejects the return array.
     """
-    today = dt.date.today()
-    ensure_start = (
-        HISTORY_FLOOR
-        if range_key == "MAX"
-        else today - dt.timedelta(days=RANGE_DAYS[range_key])
-    )
-    await ensure_eod_or_http_error(session, client, [ticker], ensure_start, today)
-
     first, last = await _select_date_bounds(session, ticker)
     if first is None or last is None:
         raise InsufficientDataError(f"No price data available for {ticker}.")

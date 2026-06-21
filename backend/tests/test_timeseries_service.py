@@ -1,13 +1,23 @@
 import datetime as dt
 
-from app.services.timeseries import FUND_NAV_INTERVAL, resolve_interval, to_ms_ohlc, to_ms_pairs
+from app.services.timeseries import (
+    EOD_PRICE_INTERVAL,
+    FUND_NAV_INTERVAL,
+    resolve_interval,
+    to_ms_ohlc,
+    to_ms_pairs,
+)
 
 
 def test_resolve_interval_by_range() -> None:
-    # Stocks/EOD still downsample by range.
+    # Stocks/EOD and fund/NAV use one daily CAGG for every visible range.
     assert resolve_interval("1Y") == "daily"
-    assert resolve_interval("5Y") == "weekly"
-    assert resolve_interval("MAX") == "monthly"
+    assert resolve_interval("5Y") == "daily"
+    assert resolve_interval("MAX") == "daily"
+
+
+def test_eod_price_interval_is_daily_for_every_range() -> None:
+    assert EOD_PRICE_INTERVAL == "daily"
 
 
 def test_fund_nav_interval_is_daily_for_every_range() -> None:

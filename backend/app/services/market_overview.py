@@ -2,7 +2,8 @@
 
 DB-first sobre tabelas LOCAIS (universe_constituents + eod_prices), mantidas
 pelo pipeline batch existente (sync_universe.py + backfill_universe_eod.py).
-Nenhuma chamada Tiingo aqui — o warm dos índices é responsabilidade da rota.
+Nenhuma chamada Tiingo aqui; os índices também dependem de preços já populados
+localmente pelo backfill/worker.
 
 Separação para testabilidade:
 - ``fetch_overview_rows`` / ``fetch_index_rows`` — readers SQL finos;
@@ -153,7 +154,7 @@ async def fetch_overview_rows(session: AsyncSession) -> list[OverviewRow]:
 
 
 async def fetch_index_rows(session: AsyncSession) -> list[IndexCard]:
-    """Últimos SPARK_POINTS closes de cada ETF de índice (warm é da rota)."""
+    """Últimos SPARK_POINTS closes de cada ETF de índice já presente no DB local."""
     cards: list[IndexCard] = []
     for ticker in INDEX_TICKERS:
         result = await session.execute(

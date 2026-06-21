@@ -1,7 +1,7 @@
 """Tests for GET /portfolios/{id}/overview and the pure overview math.
 
-DB reads and the EOD ensure are stubbed; ``build_overview`` runs for real so
-the route tests exercise the actual P&L math. No live network, no live DB.
+DB reads are stubbed; ``build_overview`` runs for real so the route tests
+exercise the actual P&L math. No live network, no live DB.
 """
 
 import datetime as dt
@@ -11,11 +11,8 @@ from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.api import _shared as api_shared
 from app.core.auth import CurrentUser, get_current_user
 from app.core.db import get_session
-from app.core.tiingo_provider import get_tiingo_client
-from app.ingestion.service import EnsureReport
 from app.main import create_app
 from app.services import portfolio_crud
 from app.services.portfolio_crud import MissingPriceDataError, build_overview
@@ -59,7 +56,6 @@ def _portfolio(positions: list[SimpleNamespace], cash: float = 0.0) -> SimpleNam
 def _client() -> AsyncClient:
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
-    app.dependency_overrides[get_tiingo_client] = lambda: object()
     app.dependency_overrides[get_current_user] = lambda: CurrentUser(
         sub="u-1", org_id=None, claims={}
     )
@@ -75,13 +71,7 @@ def _install_stubs(
     navs: ClosesMap | None = None,
     fund_names: dict[str, str | None] | None = None,
 ) -> list[list[str]]:
-    ensure_calls: list[list[str]] = []
-
-    async def fake_ensure(
-        session: Any, client: Any, tickers: list[str], start: Any, end: Any, **kw: Any
-    ) -> EnsureReport:
-        ensure_calls.append(list(tickers))
-        return EnsureReport()
+    coverage_checks: list[list[str]] = []
 
     async def fake_get(session: Any, portfolio_id: int) -> SimpleNamespace | None:
         return portfolio
@@ -107,7 +97,6 @@ def _install_stubs(
     async def fake_taxonomy(session: Any, tickers: Any) -> dict[str, Any]:
         return {t: portfolio_crud.PositionTaxonomy(None, None, None) for t in tickers}
 
-    monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
     monkeypatch.setattr(portfolio_crud, "get_portfolio", fake_get)
     monkeypatch.setattr(portfolio_crud, "select_last_two_closes", fake_closes)
     monkeypatch.setattr(portfolio_crud, "select_instrument_names", fake_names)
@@ -116,7 +105,7 @@ def _install_stubs(
     monkeypatch.setattr(portfolio_crud, "select_last_two_navs", fake_navs)
     monkeypatch.setattr(portfolio_crud, "select_fund_names", fake_fund_names)
     monkeypatch.setattr(portfolio_crud, "resolve_position_taxonomy", fake_taxonomy)
-    return ensure_calls
+    return coverage_checks
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +114,7 @@ def _install_stubs(
 
 
 async def test_overview_pnl_math(monkeypatch: pytest.MonkeyPatch) -> None:
-    ensure_calls = _install_stubs(
+    coverage_checks = _install_stubs(
         monkeypatch,
         _portfolio([_position("AAPL", 2.0, 100.0)]),
         closes={"AAPL": [(_LAST, 110.0), (_PREV, 105.0)]},
@@ -136,7 +125,7 @@ async def test_overview_pnl_math(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert ensure_calls == [["AAPL"]]  # staleness refresh ran first
+    assert coverage_checks == []  # overview reads local prices only
     (row,) = body["positions"]
     assert row["ticker"] == "AAPL"
     assert row["name"] == "Apple Inc"
@@ -244,15 +233,15 @@ async def test_overview_empty_portfolio_zeroed_null_aggregates_no_ensure(
         "total_value": 123.0,
         "as_of": None,
     }
-    assert ensure_calls == []  # nothing to refresh
+    assert ensure_calls == []
 
 
 async def test_overview_fund_position_priced_via_nav(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A fund position (no eod_prices rows) is priced from fund_nav: latest
-    NAV = last, second-latest = prev; Tiingo is never consulted for it."""
-    ensure_calls = _install_stubs(
+    NAV = last, second-latest = prev; EOD coverage is not required for it."""
+    coverage_checks = _install_stubs(
         monkeypatch,
         _portfolio(
             [_position("AAPL", 2.0, 100.0), _position("VFIAX", 10.0, 440.0)],
@@ -268,8 +257,7 @@ async def test_overview_fund_position_priced_via_nav(
 
     assert response.status_code == 200, response.text
     body = response.json()
-    # Only the equity is refreshed via Tiingo — the fund ticker is skipped.
-    assert ensure_calls == [["AAPL"]]
+    assert coverage_checks == []
     fund_row = next(r for r in body["positions"] if r["ticker"] == "VFIAX")
     assert fund_row["name"] == "Vanguard 500 Index Admiral"
     assert fund_row["last_close"] == 450.0
@@ -315,7 +303,7 @@ async def test_overview_ticker_without_price_rows_404(
     _install_stubs(
         monkeypatch,
         _portfolio([_position("GHOST", 1.0, None)]),
-        closes={},  # ensure "succeeded" but no rows came back — fail loud
+        closes={},  # no local rows came back — fail loud
     )
     async with _client() as ac:
         response = await ac.get("/portfolios/1/overview")
@@ -332,8 +320,8 @@ async def test_overview_ticker_without_price_rows_404(
 async def test_overview_class_ticker_priced_via_series_nav_proxy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A share-class ticker (fund_classes) is a fund ticker: skipped by the
-    Tiingo ensure, priced from the SERIES NAV (proxy) and displayed as
+    """A share-class ticker (fund_classes) is a fund ticker: priced from the
+    SERIES NAV (proxy) and displayed as
     'Fund — Class'. Executed fill fields surface on the overview row."""
     ensure_calls = _install_stubs(
         monkeypatch,
@@ -355,7 +343,7 @@ async def test_overview_class_ticker_priced_via_series_nav_proxy(
         response = await ac.get("/portfolios/1/overview")
 
     assert response.status_code == 200
-    assert ensure_calls == []  # class ticker — Tiingo never consulted
+    assert ensure_calls == []
     (row,) = response.json()["positions"]
     assert row["name"] == "Growth Fund of America — Class R-6"
     assert row["last_close"] == 80.0  # series NAV proxies the class NAV

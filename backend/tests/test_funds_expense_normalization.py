@@ -50,6 +50,7 @@ def _fund(expense_ratio: float | None) -> SimpleNamespace:
 def _profile(fund: SimpleNamespace) -> SimpleNamespace:
     return SimpleNamespace(
         fund=fund,
+        benchmark=None,
         risk=None,
         nav=[],
         holdings=[],

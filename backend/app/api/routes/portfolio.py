@@ -1,8 +1,8 @@
 """Portfolio endpoint: POST /portfolio/analysis (ad-hoc, no persistence).
 
-DB-first contract, same as the stock routes: never talks to Tiingo directly —
-it calls the ingestion service (via the shared error-mapping helper) so the
-cache is warm, then serves from eod_prices.
+DB-first contract, same as the stock routes: never calls Tiingo for historical
+EOD data on the request path. Backfill workers populate eod_prices; this route
+only reads local history.
 
 Window resolution:
 - ``end``   = the COMMON last date: min over (positions + benchmark) of each
@@ -14,10 +14,7 @@ Window resolution:
 
 Error mapping (fail loud, never silently empty):
 - request validation (weights/quantities/tickers/bounds)  -> 422 (Pydantic)
-- unknown ticker / no price rows                           -> 404
-- Tiingo rate limited                                      -> 503
-- Tiingo auth misconfiguration / server error              -> 502
-- cold-ticker cap exceeded                                 -> 422
+- unknown ticker / no local price rows                     -> 404
 - insufficient common history / oversized payload          -> 422
 """
 
@@ -27,11 +24,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api._shared import ensure_eod_or_http_error
 from app.core.config import get_settings
 from app.core.db import get_session
-from app.core.tiingo_provider import get_tiingo_client
-from app.ingestion.service import HISTORY_FLOOR
 from app.schemas.portfolio_analysis import (
     PortfolioAnalysisRequest,
     PortfolioAnalysisResponse,
@@ -47,7 +41,6 @@ from app.services._series import (
 )
 from app.services.portfolio_analysis import assemble_portfolio_analysis
 from app.services.stock_analysis import StockAnalysisError, build_adj_close_series
-from app.tiingo.client import TiingoClient
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
@@ -56,7 +49,6 @@ router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 async def analyze_portfolio(
     payload: PortfolioAnalysisRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
-    client: Annotated[TiingoClient, Depends(get_tiingo_client)],
 ) -> PortfolioAnalysisResponse:
     """Render-ready analysis payload for an ad-hoc portfolio — single call.
 
@@ -68,16 +60,6 @@ async def analyze_portfolio(
     tickers = [position.ticker for position in payload.positions]
     bench_symbol = payload.benchmark
     symbols = tickers + ([] if bench_symbol in tickers else [bench_symbol])
-
-    # Ensure every symbol is warm (cold tickers get full history; the cap may
-    # raise 422 with an actionable message — see the ingestion service).
-    today = dt.date.today()
-    ensure_start = (
-        HISTORY_FLOOR
-        if payload.range == "MAX"
-        else today - dt.timedelta(days=RANGE_DAYS[payload.range])
-    )
-    await ensure_eod_or_http_error(session, client, symbols, ensure_start, today)
 
     # Resolve the common window across positions AND benchmark.
     first_dates: dict[str, dt.date] = {}

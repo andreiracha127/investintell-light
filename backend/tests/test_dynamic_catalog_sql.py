@@ -66,6 +66,15 @@ def test_dynamic_catalog_creates_daily_nav_cagg() -> None:
     assert "add_continuous_aggregate_policy('cagg_nav_daily'" in sql
 
 
+def test_dynamic_catalog_creates_daily_eod_cagg() -> None:
+    sql = DDL_PATH.read_text(encoding="utf-8")
+
+    assert "CREATE MATERIALIZED VIEW IF NOT EXISTS cagg_eod_daily" in sql
+    assert "FROM eod_prices" in sql
+    assert "CALL refresh_continuous_aggregate('cagg_eod_daily'" in sql
+    assert "add_continuous_aggregate_policy('cagg_eod_daily'" in sql
+
+
 def test_funds_v_manual_strategy_overrides_win_source_labels() -> None:
     sql = DDL_PATH.read_text(encoding="utf-8")
 

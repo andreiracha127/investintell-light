@@ -1,9 +1,11 @@
-"""On-demand-with-cache EOD ingestion service.
+"""EOD ingestion service for workers/admin backfills.
 
-The single sanctioned cold path to Tiingo: routes call ``ensure_eod_data``,
-which decides per ticker whether the cache (TimescaleDB) is fresh or whether a
-synchronous fetch through ``TiingoClient`` is required, then upserts
-idempotently on (ticker, date).
+This is a batch/admin historical backfill path. User-facing
+price/history/analysis routes read local DB tables only; they must not call
+``ensure_eod_data`` on demand. Backfill jobs can call it (or lower-level sync
+helpers) to decide per ticker whether local TimescaleDB coverage is fresh or
+whether a fetch through ``TiingoClient`` is required, then upsert idempotently
+on (ticker, date).
 
 Transaction semantics (documented, deliberate): tickers are processed
 SEQUENTIALLY with one commit per ticker.  If ticker N fails, its work is
@@ -20,7 +22,7 @@ Fetch-window policy:
 The caller's requested [start, end] window is intentionally NOT used to bound
 the fetch — the cache is filled wide once, then read narrow forever.
 
-Concurrent cold-fetch window: two simultaneous requests for the same cold
+Concurrent cold-fetch window: two simultaneous jobs for the same cold
 ticker may both reach Tiingo and attempt to upsert the same rows; ON CONFLICT
 DO UPDATE keeps the DB correct (last writer wins on each row).
 TODO: add a per-ticker asyncio.Lock to collapse the redundant Tiingo fetch.

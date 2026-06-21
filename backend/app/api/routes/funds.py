@@ -16,14 +16,12 @@ Classification caveat: ``strategy_label`` mirrors the mother DB, whose
 automatic classifier has known errors — every response carries the fixed
 ``classification_note`` disclaimer (no per-row provenance is stored).
 
-ETF exception: GET /funds/{id}/history may warm eod_prices via the sanctioned
-ingestion path (app.api._shared.ensure_eod_or_http_error) — ETFs trade like
-stocks and reuse the stocks OHLCV series; on Tiingo failure it degrades to
-the local nav_timeseries series (mode "nav").
+ETF exception: GET /funds/{id}/history may reuse local stock OHLCV rows when
+the ETF ticker is present in eod_prices; otherwise it degrades to the local
+nav_timeseries series (mode "nav"). It does not call Tiingo on the request path.
 """
 
 import datetime as dt
-import logging
 import uuid
 from typing import Annotated, Literal
 
@@ -32,11 +30,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.expense_ratio import to_decimal_fraction
-from app.api._shared import ensure_eod_or_http_error
 from app.core.config import get_settings
 from app.core.datalake import get_datalake_session
 from app.core.db import get_session
-from app.core.tiingo_provider import get_tiingo_client
 from app.models.fund import Fund
 from app.schemas.fund_analysis import (
     FundActiveShareResponse,
@@ -83,15 +79,10 @@ from app.services.timeseries import (
 from app.services.timeseries import (
     select_nav_line as _select_nav_line_impl,
 )
-from app.tiingo.client import TiingoClient
-from app.tiingo.exceptions import TiingoError
 
 router = APIRouter(tags=["funds"])
 
-logger = logging.getLogger(__name__)
-
 # Module-level aliases so tests can monkeypatch them directly on this module.
-_ensure_eod_or_http_error = ensure_eod_or_http_error
 _select_adj_ohlcv_rows = _select_adj_ohlcv_rows_impl
 _select_nav_line = _select_nav_line_impl
 
@@ -708,7 +699,6 @@ def _ms(d: dt.date) -> int:
 async def get_fund_history(
     instrument_id: uuid.UUID,
     session: SessionDep,
-    client: Annotated[TiingoClient, Depends(get_tiingo_client)],
     bars: Annotated[
         int, Query(ge=30, le=5000, description="Nº de barras diárias mais recentes.")
     ] = 2520,
@@ -716,8 +706,8 @@ async def get_fund_history(
     """Série do fundo no contrato do chart interativo ({t,o,h,l,c,v} + mode).
 
     ETF com ticker → OHLCV ajustado de eod_prices (mesmo caminho dos stocks,
-    com warm on-demand); demais fundos (ou ETF sem cobertura/Tiingo fora) →
-    NAV de fund_nav com o=h=l=c=nav, v=0.
+    sem warm on-demand); demais fundos (ou ETF sem cobertura local) → NAV de
+    nav_timeseries com o=h=l=c=nav, v=0.
     """
     fund = await _get_fund(session, instrument_id)
     if fund is None:
@@ -728,13 +718,7 @@ async def get_fund_history(
 
     if fund.fund_type == "etf" and fund.ticker:
         symbol = fund.ticker.strip().upper()
-        try:
-            await _ensure_eod_or_http_error(session, client, [symbol], start, today)
-            rows = await _select_adj_ohlcv_rows(session, symbol, start, today)
-        except (HTTPException, TiingoError) as exc:
-            logger.warning("Fund %s ETF history degraded to NAV: %s", instrument_id, exc)
-            await session.rollback()
-            rows = []
+        rows = await _select_adj_ohlcv_rows(session, symbol, start, today)
         if rows:
             rows = rows[-bars:]
             return FundHistoryResponse(

@@ -1,9 +1,8 @@
 """Tests for the persisted-portfolio CRUD routes (app/api/routes/portfolios.py).
 
 The persistence service is stubbed at its canonical module
-(``app.services.portfolio_crud``); the EOD ensure is stubbed at
-``app.api._shared.ensure_eod_data`` so the shared HTTP error mapping stays
-live. No live network, no live DB.
+(``app.services.portfolio_crud``); local EOD/fund coverage checks are stubbed.
+No live network, no live DB.
 """
 
 import datetime as dt
@@ -13,14 +12,10 @@ from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.api import _shared as api_shared
 from app.core.auth import CurrentUser, get_current_user
 from app.core.db import get_session
-from app.core.tiingo_provider import get_tiingo_client
-from app.ingestion.service import EnsureReport
 from app.main import create_app
 from app.services import portfolio_crud
-from app.tiingo.exceptions import TiingoNotFoundError
 
 _CREATED = dt.datetime(2026, 6, 10, 12, 0, tzinfo=dt.UTC)
 
@@ -83,7 +78,6 @@ def _portfolio(
 def _client() -> AsyncClient:
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
-    app.dependency_overrides[get_tiingo_client] = lambda: object()
     app.dependency_overrides[get_current_user] = lambda: CurrentUser(
         sub="u-1", org_id=None, claims={}
     )
@@ -92,16 +86,18 @@ def _client() -> AsyncClient:
 
 @pytest.fixture
 def ensure_calls(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
-    """Record tickers passed to the EOD ensure (mapping logic stays live)."""
+    """Record tickers checked for local EOD coverage."""
     calls: list[list[str]] = []
 
-    async def fake_ensure(
-        session: Any, client: Any, tickers: list[str], start: Any, end: Any, **kwargs: Any
-    ) -> EnsureReport:
+    async def fake_eod_known(session: Any, tickers: Any) -> set[str]:
         calls.append(list(tickers))
-        return EnsureReport()
+        return set(tickers)
 
-    monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
+    async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
+        return set()
+
+    monkeypatch.setattr(portfolio_crud, "select_fund_tickers", fake_fund_tickers)
+    monkeypatch.setattr(portfolio_crud, "select_tickers_with_eod", fake_eod_known)
     return calls
 
 
@@ -147,7 +143,7 @@ async def test_create_portfolio_201_normalizes_and_ensures(
     # Name trimmed and tickers uppercased BEFORE the service sees them.
     assert received[0].name == "Test"
     assert [p.ticker for p in received[0].positions] == ["AAPL", "MSFT"]
-    # Tickers were validated/warmed against Tiingo in one ensure call.
+    # Tickers were validated against local EOD coverage in one DB check.
     assert ensure_calls == [["AAPL", "MSFT"]]
 
 
@@ -182,11 +178,14 @@ async def test_create_duplicate_name_returns_409(
     assert "already exists" in response.json()["detail"]
 
 
-async def test_create_with_tiingo_unknown_ticker_returns_404_before_persisting(
+async def test_create_with_missing_local_price_returns_404_before_persisting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_ensure(*args: Any, **kwargs: Any) -> EnsureReport:
-        raise TiingoNotFoundError("404 from Tiingo")
+    async def fake_eod_known(session: Any, tickers: Any) -> set[str]:
+        return set()
+
+    async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
+        return set()
 
     created: list[Any] = []
 
@@ -194,7 +193,8 @@ async def test_create_with_tiingo_unknown_ticker_returns_404_before_persisting(
         created.append(payload)
         return _portfolio()
 
-    monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
+    monkeypatch.setattr(portfolio_crud, "select_fund_tickers", fake_fund_tickers)
+    monkeypatch.setattr(portfolio_crud, "select_tickers_with_eod", fake_eod_known)
     monkeypatch.setattr(portfolio_crud, "create_portfolio", fake_create)
     async with _client() as ac:
         response = await ac.post(
@@ -203,7 +203,7 @@ async def test_create_with_tiingo_unknown_ticker_returns_404_before_persisting(
         )
 
     assert response.status_code == 404
-    assert "Unknown ticker" in response.json()["detail"]
+    assert "No local price" in response.json()["detail"]
     assert created == []  # fail loud BEFORE anything is persisted
 
 
@@ -554,7 +554,7 @@ async def test_put_position_insert_path_ensures_ticker(
 
     assert response.status_code == 200
     assert response.json() == _position_json("NVDA", 3.0, 120.0)
-    assert ensure_calls == [["NVDA"]]  # INSERT path validates against Tiingo
+    assert ensure_calls == [["NVDA"]]  # INSERT path validates local coverage
     assert calls["insert"] == [(1, "NVDA", 3.0, 120.0, "reference", None, None)]
     assert calls["update"] == []
 
@@ -575,11 +575,11 @@ async def test_put_position_update_path_does_not_re_ensure(
     assert calls["insert"] == []
 
 
-async def test_put_position_fund_ticker_insert_skips_tiingo_ensure(
+async def test_put_position_fund_ticker_insert_skips_eod_coverage_check(
     monkeypatch: pytest.MonkeyPatch, ensure_calls: list[list[str]]
 ) -> None:
     """Fund tickers (synced funds table) are valid positions priced from
-    fund_nav — the INSERT path must NOT validate them against Tiingo (F8.5)."""
+    fund_nav — the INSERT path must NOT require local EOD coverage (F8.5)."""
     calls = _install_put_stubs(monkeypatch, existing=None, fund_tickers={"VFIAX"})
     async with _client() as ac:
         response = await ac.put(
@@ -588,7 +588,7 @@ async def test_put_position_fund_ticker_insert_skips_tiingo_ensure(
 
     assert response.status_code == 200
     assert response.json() == _position_json("VFIAX", 10.0, 450.0)
-    assert ensure_calls == []  # fund ticker — Tiingo never consulted
+    assert ensure_calls == []  # fund ticker — EOD coverage not required
     assert calls["insert"] == [(1, "VFIAX", 10.0, 450.0, "reference", None, None)]
 
 

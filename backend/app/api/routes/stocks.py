@@ -1,15 +1,12 @@
 """Stock endpoints: GET /stocks/{ticker}/prices and /stocks/{ticker}/analysis.
 
-DB-first contract: these routes never talk to Tiingo directly. They call the
-ingestion service (the only sanctioned Tiingo path) to guarantee the cache is
-warm and fresh, then serve from the eod_prices table.
+DB-first contract: request handlers never call Tiingo for historical EOD data.
+Historical freshness is owned by out-of-band ingestion/backfill workers; route
+requests read local tables only and return explicit missing-data errors when
+the DB has not been populated.
 
 Error mapping (fail loud, never silently empty):
-- unknown ticker                      -> 404
-- Tiingo rate limited                 -> 503
-- Tiingo auth misconfiguration        -> 502 (no detail leak)
-- Tiingo server / bad response        -> 502
-- cold-ticker cap exceeded            -> 422
+- unknown ticker / no local price rows -> 404
 - inverted dates / oversized window   -> 422
 - insufficient history for analysis   -> 422
 """
@@ -24,13 +21,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api._shared import ensure_eod_or_http_error, raise_news_fetch_error
+from app.api._shared import raise_news_fetch_error
 from app.core.config import get_settings
 from app.core.datalake import get_datalake_session
 from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
 from app.ingestion.news import ensure_news
-from app.ingestion.service import HISTORY_FLOOR
 from app.models.eod_price import EodPrice
 from app.models.instrument import Instrument
 from app.models.news_item import NewsItem
@@ -66,8 +62,8 @@ from app.services.stock_holders import (
     fetch_stock_holders,
 )
 from app.services.timeseries import (
+    EOD_PRICE_INTERVAL,
     range_start,
-    resolve_interval,
     to_ms_ohlc,
 )
 from app.services.timeseries import (
@@ -87,17 +83,6 @@ _TICKER_PATTERN = re.compile(r"^[A-Z0-9.\-]{1,10}$")
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
 
-async def _ensure_eod_or_http_error(
-    session: AsyncSession,
-    client: TiingoClient,
-    symbols: list[str],
-    start: dt.date,
-    end: dt.date,
-) -> None:
-    """Thin wrapper — delegates to the shared canonical implementation in app.api._shared."""
-    await ensure_eod_or_http_error(session, client, symbols, start, end)
-
-
 # Module-level alias so tests can monkeypatch the DB read independently of the
 # service module's own binding.
 _select_eod_ohlc = _select_eod_ohlc_impl
@@ -111,26 +96,14 @@ _select_eod_ohlc = _select_eod_ohlc_impl
 @router.get("/overview", response_model=MarketOverviewResponse)
 async def get_market_overview(
     session: Annotated[AsyncSession, Depends(get_session)],
-    client: Annotated[TiingoClient, Depends(get_tiingo_client)],
 ) -> MarketOverviewResponse:
     """Payload único da landing /stocks — leaders/setores das tabelas locais.
 
     Leaders e setores leem eod_prices ⋈ universe_constituents (pipeline batch
-    F6.2); ficam tão frescos quanto o último backfill. Os 4 ETFs de índice são
-    painel SECUNDÁRIO: warm on-demand via ensure_eod, e falha da Tiingo degrada
-    para indices=[] com warning (degradação declarada, como o news stale).
+    F6.2); ficam tão frescos quanto o último backfill. Os 4 ETFs de índice
+    também são lidos somente do banco local.
     """
-    indices: list = []
-    today = dt.date.today()
-    try:
-        await _ensure_eod_or_http_error(
-            session, client, list(market_overview.INDEX_TICKERS),
-            today - dt.timedelta(days=60), today,
-        )
-        indices = await market_overview.fetch_index_rows(session)
-    except (HTTPException, TiingoError) as exc:
-        logger.warning("Index strip degraded (ensure/fetch failed): %s", exc)
-
+    indices = await market_overview.fetch_index_rows(session)
     rows = await market_overview.fetch_overview_rows(session)
     ranked = market_overview.rank_overview(rows)
     return MarketOverviewResponse(universe_size=len(rows), indices=indices, **ranked)
@@ -157,11 +130,10 @@ async def _select_price_rows(
 async def get_price_series(
     ticker: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-    client: Annotated[TiingoClient, Depends(get_tiingo_client)],
     start_date: Annotated[dt.date | None, Query(description="Defaults to end_date - 365d")] = None,
     end_date: Annotated[dt.date | None, Query(description="Defaults to today")] = None,
 ) -> PriceSeriesResponse:
-    """Return the EOD price series for *ticker*, ingesting on demand if cold/stale."""
+    """Return the local EOD price series for *ticker*."""
     end = end_date if end_date is not None else dt.date.today()
     start = start_date if start_date is not None else end - dt.timedelta(days=DEFAULT_WINDOW_DAYS)
     if start > end:
@@ -172,10 +144,10 @@ async def get_price_series(
 
     symbol = ticker.strip().upper()
 
-    await _ensure_eod_or_http_error(session, client, [symbol], start, end)
-
     max_points = get_settings().price_series_max_points
     rows = await _select_price_rows(session, symbol, start, end, max_points + 1)
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"No price data available for {symbol}.")
     if len(rows) > max_points:
         raise HTTPException(
             status_code=422,
@@ -224,7 +196,6 @@ async def _select_ohlcv_rows(
 async def get_stock_history(
     ticker: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-    client: Annotated[TiingoClient, Depends(get_tiingo_client)],
     bars: Annotated[
         int, Query(ge=30, le=5000, description="Nº de barras diárias mais recentes.")
     ] = 760,
@@ -237,7 +208,6 @@ async def get_stock_history(
     today = dt.date.today()
     # ~252 pregões/ano → 1.6 dias-calendário por barra cobre feriados com folga.
     start = today - dt.timedelta(days=int(bars * 1.6) + 10)
-    await _ensure_eod_or_http_error(session, client, [symbol], start, today)
 
     rows = await _select_adj_ohlcv_rows(session, symbol, start, today)
     if not rows:
@@ -261,26 +231,20 @@ async def get_stock_history(
 async def get_stock_timeseries(
     ticker: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-    client: Annotated[TiingoClient, Depends(get_tiingo_client)],
     range_: Annotated[
         RangeKey, Query(alias="range", description="Visible range preset.")
     ] = "1Y",
 ) -> OhlcSeriesResponse:
-    """Adjusted OHLC + volume in Highcharts Stock arrays; granularity by range.
+    """Adjusted daily OHLC + volume in Highcharts Stock arrays.
 
-    <=1Y serves daily (raw hypertable), 1-5Y weekly CAGG, >5Y monthly CAGG —
-    the downsample happens in the DB, never in Python. Always warms raw daily
-    first so every interval reads off a fresh cache.
+    Every range reads the same DB-first daily CAGG; the range only changes the
+    date floor. Historical ingestion is outside the request path.
     """
     symbol = ticker.strip().upper()
     today = dt.date.today()
-    interval = resolve_interval(range_)
+    interval = EOD_PRICE_INTERVAL
     start = range_start(range_, today)
-    # Warm raw daily before any read (keeps the cache fresh for all intervals).
-    await _ensure_eod_or_http_error(
-        session, client, [symbol], start or (today - dt.timedelta(days=3650)), today
-    )
-    rows = await _select_eod_ohlc(session, symbol, interval, start)
+    rows = await _select_eod_ohlc(session, symbol, start)
     if not rows:
         raise HTTPException(status_code=404, detail=f"No price data for {symbol}.")
     ohlc, volume = to_ms_ohlc(rows)
@@ -296,7 +260,6 @@ async def _select_instrument_name(session: AsyncSession, ticker: str) -> str | N
 async def get_stock_analysis(
     ticker: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-    client: Annotated[TiingoClient, Depends(get_tiingo_client)],
     range_: Annotated[
         RangeKey,
         Query(alias="range", description="Visible-range preset; MAX = full available history."),
@@ -316,15 +279,6 @@ async def get_stock_analysis(
     """
     symbol = ticker.strip().upper()
     bench_symbol = benchmark.strip().upper()
-
-    # Ensure both symbols are warm. The service fetches full history for cold
-    # tickers regardless of this window (informational — see service docstring).
-    today = dt.date.today()
-    ensure_start = (
-        HISTORY_FLOOR if range_ == "MAX" else today - dt.timedelta(days=RANGE_DAYS[range_])
-    )
-    symbols = [symbol] if bench_symbol == symbol else [symbol, bench_symbol]
-    await _ensure_eod_or_http_error(session, client, symbols, ensure_start, today)
 
     first_date, last_date = await _select_date_bounds(session, symbol)
     if first_date is None or last_date is None:

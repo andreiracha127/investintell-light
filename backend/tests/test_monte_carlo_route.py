@@ -1,8 +1,8 @@
 """Tests for POST /monte-carlo/projection.
 
-The ingestion service and DB read helpers are stubbed at the SERVICE-module
-boundary (the canonical pattern from test_statistics_routes.py); the Tiingo
-client and DB session dependencies are overridden. No live network, no live DB.
+DB read helpers are stubbed at the SERVICE-module boundary (the canonical
+pattern from test_statistics_routes.py). Historical EOD data is DB-only:
+no live network, no live DB.
 """
 
 import datetime as dt
@@ -15,10 +15,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.api import _shared as api_shared
 from app.core.db import get_session
-from app.core.tiingo_provider import get_tiingo_client
-from app.ingestion.service import EnsureReport
 from app.main import create_app
 from app.services import monte_carlo as mc_service
 
@@ -39,7 +36,6 @@ ROWS_BY_TICKER: dict[str, list[AdjCloseRow]] = {"AAPL": _synthetic_rows(seed=1)}
 def _app_with_overrides() -> FastAPI:
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
-    app.dependency_overrides[get_tiingo_client] = lambda: object()
     return app
 
 
@@ -48,9 +44,6 @@ def _install_stubs(
     rows_by_ticker: dict[str, list[AdjCloseRow]] | None = None,
 ) -> None:
     rows_map = ROWS_BY_TICKER if rows_by_ticker is None else rows_by_ticker
-
-    async def fake_ensure(*args: Any, **kwargs: Any) -> EnsureReport:
-        return EnsureReport()
 
     async def fake_bounds(
         session: Any, ticker: str
@@ -65,10 +58,8 @@ def _install_stubs(
     ) -> list[AdjCloseRow]:
         return [r for r in rows_map.get(ticker, []) if start <= r[0] <= end]
 
-    # ensure_eod_or_http_error calls ensure_eod_data from app.api._shared's
-    # namespace; the read helpers are looked up as SERVICE-module globals
-    # (underscore aliases to app.services._series).
-    monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
+    # Read helpers are looked up as SERVICE-module globals (underscore aliases
+    # to app.services._series).
     monkeypatch.setattr(mc_service, "_select_date_bounds", fake_bounds)
     monkeypatch.setattr(mc_service, "_select_adj_close_rows", fake_adj_close)
 
