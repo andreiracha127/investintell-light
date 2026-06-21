@@ -3417,7 +3417,7 @@
           "funds"
         ],
         "summary": "Get Fund Timeseries",
-        "description": "Fund NAV line in Highcharts arrays; granularity by range.\n\n<=1Y serves daily (raw nav_timeseries), 1-5Y weekly CAGG, >5Y monthly CAGG \u2014\nthe downsample happens in the DB, never in Python.",
+        "description": "Daily fund NAV line in Highcharts arrays.\n\nEvery range reads the same DB-first daily CAGG; the range only changes the\ndate floor.",
         "operationId": "get_fund_timeseries_funds__instrument_id__timeseries_get",
         "parameters": [
           {

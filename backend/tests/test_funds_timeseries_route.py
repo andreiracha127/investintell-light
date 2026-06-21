@@ -20,8 +20,8 @@ def _client() -> AsyncClient:
 
 
 async def test_fund_timeseries_line_arrays(monkeypatch) -> None:
-    async def fake_select(session, instrument_id, interval, start):
-        assert str(instrument_id) == str(_FUND_ID) and interval == "weekly"
+    async def fake_select(session, instrument_id, start):
+        assert str(instrument_id) == str(_FUND_ID)
         return [(dt.date(2026, 6, 5), 306.2)]
 
     monkeypatch.setattr(funds_routes, "_select_nav_line", fake_select)
@@ -30,5 +30,5 @@ async def test_fund_timeseries_line_arrays(monkeypatch) -> None:
     assert resp.status_code == 200
     body = resp.json()
     t = int(dt.datetime(2026, 6, 5, tzinfo=dt.UTC).timestamp() * 1000)
-    assert body["interval"] == "weekly"
+    assert body["interval"] == "daily"
     assert body["series"] == [[t, 306.2]]

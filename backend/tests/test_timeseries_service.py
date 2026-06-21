@@ -1,12 +1,17 @@
 import datetime as dt
 
-from app.services.timeseries import resolve_interval, to_ms_ohlc, to_ms_pairs
+from app.services.timeseries import FUND_NAV_INTERVAL, resolve_interval, to_ms_ohlc, to_ms_pairs
 
 
 def test_resolve_interval_by_range() -> None:
+    # Stocks/EOD still downsample by range.
     assert resolve_interval("1Y") == "daily"
     assert resolve_interval("5Y") == "weekly"
     assert resolve_interval("MAX") == "monthly"
+
+
+def test_fund_nav_interval_is_daily_for_every_range() -> None:
+    assert FUND_NAV_INTERVAL == "daily"
 
 
 def test_to_ms_pairs() -> None:

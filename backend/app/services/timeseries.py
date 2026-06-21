@@ -1,7 +1,8 @@
-"""Timeseries assembly: pick raw vs CAGG by range, pack into Highcharts arrays.
+"""Timeseries assembly: DB-first series reads packed into Highcharts arrays.
 
-Granularity by visible range: <=1Y daily (raw hypertable), 1-5Y weekly CAGG,
->5Y monthly CAGG. Downsample happens in the DB (CAGG), never in Python.
+Stocks still use range-aware OHLCV aggregates. Fund NAV charts use one daily
+continuous aggregate for every range, so a stale weekly/monthly CAGG cannot
+make longer windows disagree with the daily source.
 """
 from __future__ import annotations
 
@@ -71,21 +72,16 @@ async def select_eod_ohlc(
     return [(d, o, h, lo, c, v) for d, o, h, lo, c, v in rows]
 
 
-_NAV_TABLE: dict[Interval, tuple[str, str, str]] = {
-    "daily":   ("nav_timeseries",  "nav_date", "nav"),
-    "weekly":  ("cagg_nav_weekly", "bucket",   "nav_eow"),
-    "monthly": ("cagg_nav_monthly","month",    "nav_eom"),
-}
+FUND_NAV_INTERVAL: Interval = "daily"
 
 
 async def select_nav_line(
-    session: AsyncSession, instrument_id: str, interval: Interval, start: dt.date | None
+    session: AsyncSession, instrument_id: str, start: dt.date | None
 ) -> list[tuple[dt.date, float]]:
-    table, tcol, vcol = _NAV_TABLE[interval]
-    where = "instrument_id = :iid" + ("" if start is None else f" AND {tcol} >= :start")
+    where = "instrument_id = :iid" + ("" if start is None else " AND bucket >= :start")
     sql = text(
-        f"SELECT {tcol} AS d, {vcol} AS v FROM {table} "
-        f"WHERE {where} AND {vcol} IS NOT NULL ORDER BY {tcol}"
+        "SELECT bucket AS d, nav AS v FROM cagg_nav_daily "
+        f"WHERE {where} AND nav IS NOT NULL ORDER BY bucket"
     )
     params: dict[str, object] = {"iid": instrument_id}
     if start is not None:

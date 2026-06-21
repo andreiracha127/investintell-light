@@ -29,7 +29,22 @@ FROM eod_prices
 GROUP BY ticker, time_bucket('1 month', date)
 WITH NO DATA;
 
--- 3) NAV weekly (last-of-week) — cagg_nav_monthly already exists.
+-- 3) NAV daily/weekly (last-of-period) — cagg_nav_monthly already exists.
+CREATE MATERIALIZED VIEW IF NOT EXISTS cagg_nav_daily
+WITH (timescaledb.continuous) AS
+SELECT instrument_id,
+       time_bucket('1 day', nav_date) AS bucket,
+       last(nav, nav_date)       AS nav,
+       last(return_1d, nav_date) AS return_1d,
+       count(*)                  AS n_obs,
+       last(aum_usd, nav_date)   AS aum_usd
+FROM nav_timeseries
+GROUP BY instrument_id, time_bucket('1 day', nav_date)
+WITH NO DATA;
+
+CREATE INDEX IF NOT EXISTS cagg_nav_daily_instrument_bucket_idx
+  ON cagg_nav_daily (instrument_id, bucket);
+
 CREATE MATERIALIZED VIEW IF NOT EXISTS cagg_nav_weekly
 WITH (timescaledb.continuous) AS
 SELECT instrument_id,
@@ -45,6 +60,7 @@ WITH NO DATA;
 -- Populate once, then keep fresh daily (ingestion writes daily).
 CALL refresh_continuous_aggregate('cagg_eod_weekly',  NULL, NULL);
 CALL refresh_continuous_aggregate('cagg_eod_monthly', NULL, NULL);
+CALL refresh_continuous_aggregate('cagg_nav_daily',   NULL, NULL);
 CALL refresh_continuous_aggregate('cagg_nav_weekly',  NULL, NULL);
 
 SELECT add_continuous_aggregate_policy('cagg_eod_weekly',
@@ -52,6 +68,9 @@ SELECT add_continuous_aggregate_policy('cagg_eod_weekly',
   schedule_interval => INTERVAL '1 day', if_not_exists => true);
 SELECT add_continuous_aggregate_policy('cagg_eod_monthly',
   start_offset => INTERVAL '180 days', end_offset => INTERVAL '1 day',
+  schedule_interval => INTERVAL '1 day', if_not_exists => true);
+SELECT add_continuous_aggregate_policy('cagg_nav_daily',
+  start_offset => INTERVAL '90 days', end_offset => INTERVAL '1 day',
   schedule_interval => INTERVAL '1 day', if_not_exists => true);
 SELECT add_continuous_aggregate_policy('cagg_nav_weekly',
   start_offset => INTERVAL '90 days', end_offset => INTERVAL '1 day',

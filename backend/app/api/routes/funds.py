@@ -75,9 +75,9 @@ from app.services import funds_catalog as catalog
 from app.services._series import select_adj_ohlcv_rows as _select_adj_ohlcv_rows_impl
 from app.services.screener import render_csv
 from app.services.timeseries import (
+    FUND_NAV_INTERVAL,
     RangeKey,
     range_start,
-    resolve_interval,
     to_ms_pairs,
 )
 from app.services.timeseries import (
@@ -771,19 +771,18 @@ async def get_fund_timeseries(
         RangeKey, Query(alias="range", description="Visible range preset.")
     ] = "1Y",
 ) -> LineSeriesResponse:
-    """Fund NAV line in Highcharts arrays; granularity by range.
+    """Daily fund NAV line in Highcharts arrays.
 
-    <=1Y serves daily (raw nav_timeseries), 1-5Y weekly CAGG, >5Y monthly CAGG —
-    the downsample happens in the DB, never in Python.
+    Every range reads the same DB-first daily CAGG; the range only changes the
+    date floor.
     """
     today = dt.date.today()
-    interval = resolve_interval(range_)
     start = range_start(range_, today)
-    rows = await _select_nav_line(session, str(instrument_id), interval, start)
+    rows = await _select_nav_line(session, str(instrument_id), start)
     if not rows:
         raise HTTPException(
             status_code=404, detail=f"No NAV history for fund {instrument_id}."
         )
     return LineSeriesResponse(
-        id=str(instrument_id), interval=interval, series=to_ms_pairs(rows)
+        id=str(instrument_id), interval=FUND_NAV_INTERVAL, series=to_ms_pairs(rows)
     )
