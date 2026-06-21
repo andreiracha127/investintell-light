@@ -18,6 +18,12 @@ permanece como camada de renderização; nenhum cálculo de negócio novo é int
 Não-objetivo de produto: este trabalho não altera números nem a semântica das métricas.
 Cada resultado novo deve ter **paridade** com o cálculo atual antes da troca.
 
+**Exceção deliberada — `active-share`**: há uma mudança de produto já decidida que
+acompanha esta migração. O `active-share` deixa de aceitar seleção de benchmark e passa a
+ser computado **apenas contra o benchmark primário** da série. Isso **não** é paridade —
+é remoção intencional de capacidade (ver §6 A5 para o contrato e o cleanup). Todos os
+demais endpoints permanecem sob a regra de paridade acima.
+
 ## 2. Princípios e não-objetivos
 
 - Nenhum `pandas`/`numpy` no request path dos endpoints migrados.
@@ -32,11 +38,19 @@ Cada resultado novo deve ter **paridade** com o cálculo atual antes da troca.
 - Formato de materialização **híbrido**: escalares e listas chatas em colunas/linhas
   tipadas; estruturas de grafo/árvore em coluna `payload jsonb` com `schema_version`.
 
-Fora de escopo (permanecem como estão): séries cruas com downsample (`funds/timeseries`,
-`funds/history`, `stocks/prices`, `stocks/timeseries`), `macro/regime` (já DB-first),
-e o frontend (apenas formatação; `periodContributions` está inativo). As ferramentas
-analíticas interativas (`statistics/*`, `monte-carlo/*`, `backtest/walk-forward`,
-`correlation-regime`) **não** ganham MV universal, mas ganham aceleração (Grupo E).
+Já entregue (commit `38dbdb4`, "make historical market data db-first"): a leitura de
+**histórico de mercado** de `stocks`, `funds`, `portfolio`, `portfolios`, `statistics` e
+`monte_carlo` já é DB-first — o request path não chama mais o Tiingo (o
+`ensure_eod_or_http_error` foi removido; `eod_prices`/`nav_timeseries` são populados por
+backfill/warming worker out-of-band). `stocks/*` lê de `cagg_eod_daily` (continuous
+aggregate diário com policy de auto-refresh) em todos os ranges (1M/6M/1Y/5Y/MAX). DDL do
+DB principal passou a ser versionado em `backend/db/ddl/` (ex.:
+`2026-06-21_cagg_eod_daily_timeseries.sql`).
+
+Fora de escopo (permanecem como estão): `macro/regime` (já DB-first), e o frontend (apenas
+formatação; `periodContributions` está inativo). As ferramentas analíticas interativas
+(`statistics/*`, `monte-carlo/*`, `backtest/walk-forward`, `correlation-regime`) **não**
+ganham MV universal, mas ganham aceleração (Grupo E).
 
 ## 3. Estado atual (o que cada endpoint calcula hoje)
 
@@ -56,7 +70,7 @@ Referências de código (no momento do design):
 - `funds/{id}/institutional-reveal` → `fund_dossier_tier_b.py` (cruza N-PORT × 13F,
   monta rede). Sem params.
 - `funds/{id}/active-share` → `fund_dossier_tier_b.py` (`0.5·Σ|Δw|` vs benchmark).
-  Param: `benchmark_id`.
+  Param: `benchmark_id` (**será removido** — ver §6 A5: passa a só benchmark primário).
 - `funds/{id}/holdings/top` → `fund_analysis.py` (top holdings + sector breakdown).
   Param: `limit`.
 - `stocks/{ticker}/analysis` → `app/services/stock_analysis.py` (candles, rolling
@@ -82,7 +96,9 @@ Confirmado por inspeção do schema `public` (serviço `t83f4np6x4`, 2026-06-21)
 | `nport_holdings_history` | MV | pct_nav nos últimos 4 trimestres por holding | Base de `style-drift` |
 | `sec_13f_entry` | MV | (cik, cusip, entry_date) | `entry_date` de `stocks/holders` |
 | `nav_timeseries` | tabela | inclui `return_1d` | Daily returns de fundos (E1) |
-| `cagg_eod_weekly/monthly`, `cagg_nav_weekly/monthly` | caggs | downsample pronto | Séries longas no Grupo C |
+| `cagg_eod_daily` | cagg (continuous) | 10,1M linhas, 2.222 tickers, 1962→2026-06-18; auto-refresh por policy + real-time agg | Fonte db-first de séries diárias de `stocks/*` (já em uso, `38dbdb4`); **base do `price_latest_mv`** (Grupo D) |
+| `cagg_nav_daily` | cagg (continuous) | `instrument_id, bucket, nav, return_1d, n_obs, aum_usd`; auto-refresh por policy + real-time agg | Fonte db-first de séries diárias de `funds/*` (já em uso, `38dbdb4`); **base do `nav_latest_mv`** (Grupo D) |
+| `cagg_eod_weekly/monthly`, `cagg_nav_weekly/monthly` | caggs | downsample pronto | Séries longas no Grupo C (superados pelos CAGGs diários para `stocks/*`/`funds/*`) |
 | `sec_13f_holdings` | tabela | 10,1M, latest 2026-03-31 | Fonte de holders/reverse/institutional |
 | `sec_nport_holdings` | tabela | 96,4M, latest 2026-01-31 | Fonte de holdings/active-share/style-drift |
 | `fund_benchmark_candidates_v` | view | resolve benchmark primário por série | Benchmark de `active-share` |
@@ -92,7 +108,8 @@ Confirmado por inspeção do schema `public` (serviço `t83f4np6x4`, 2026-06-21)
 Descartar das premissas:
 - `sec_institutional_allocations` — **vazia** (0 linhas). Não usar; usar `sec_13f_holdings`.
 - `screener_metrics` — cobre só **136 tickers**; não serve de atalho para `stocks/analysis`
-  genérico. `stocks/analysis` fica SQL on-demand sobre `eod_prices`.
+  genérico. `stocks/analysis` lê db-first de `cagg_eod_daily` (já feito em `38dbdb4`); as
+  funções de janela/distribuição (Grupo C) compõem sobre essa fonte.
 
 ## 5. Fundação — padrão compartilhado
 
@@ -142,13 +159,26 @@ a data da fonte para o frontend exibir frescor (como `nav_staleness` já faz).
   MV fina `fund_top_holdings_mv` (top-50 por série, truncado por `limit` na leitura) +
   reuso do lookthrough para sector. Sem worker.
 
-### A5 — `active-share` (MV / SQL)
+### A5 — `active-share` (MV / SQL) — **mudança de produto, não paridade**
 - MV `fund_active_share_mv(series_id, benchmark_series_id, active_share, overlap,
   n_portfolio, n_benchmark, n_common, as_of)`: FULL OUTER JOIN por cusip entre holdings
   do fundo e do **benchmark primário** (`fund_benchmark_candidates_v` →
   `benchmark_proxy_instrument_id` → série do ETF em `sec_nport_holdings`),
-  `active_share = 0.5·Σ|w_fund - w_bench|`. **`benchmark_id` arbitrário sai do endpoint
-  e da UI** (decisão: só benchmark primário). Sem worker.
+  `active_share = 0.5·Σ|w_fund - w_bench|`. Sem worker.
+- **Decisão de produto (já tomada)**: o endpoint deixa de oferecer seleção de benchmark e
+  serve sempre o benchmark primário. Isto é remoção intencional de capacidade, não
+  paridade — por isso o teste de paridade (§12) compara apenas o caminho do benchmark
+  primário, e não o caminho de `benchmark_id` arbitrário (que deixa de existir).
+- **Tratamento do parâmetro `benchmark_id`**: o endpoint passa a **ignorar** um
+  `benchmark_id` recebido (sem erro), respondendo sempre com o benchmark primário, para
+  não quebrar clientes que ainda o enviem durante a transição. Em seguida o parâmetro é
+  removido do contrato. O response inclui `benchmark_series_id`/identificação do benchmark
+  efetivamente usado, para o cliente saber qual foi aplicado.
+- **Cleanup do contrato órfão** (parte do escopo desta mudança, não opcional): remover
+  `benchmark_id` do handler/serviço do backend, do schema/params do endpoint, dos tipos
+  gerados da API, dos query keys do frontend e da UI de seleção, e dos testes que exercem
+  o caminho por benchmark selecionado. Não deixar parâmetro aceito-mas-inerte no contrato
+  final.
 
 ## 7. Grupo B — Stock/holdings por entidade
 
@@ -183,7 +213,9 @@ Funções base (reutilizadas pelos três endpoints):
 
 Endpoints:
 - `funds/{id}/analysis`, `stocks/{ticker}/analysis` → compõem as funções acima sobre
-  `nav_timeseries`/`eod_prices` (caggs para 5Y/MAX).
+  `cagg_nav_daily` (fundos) e `cagg_eod_daily` (stocks) — ambos já db-first em todos os
+  ranges via `38dbdb4`. O que falta no Grupo C para esses endpoints são as **funções de
+  janela/distribuição** (rolling, drawdown, histograma, VaR/CVaR) — a fonte de série já migrou.
 - `funds/{id}/entity-analytics` → **escalares lidos de `fund_risk_metrics`**; apenas as
   séries (rolling returns, drawdown periods, distribuição) via funções SQL. Insiders
   continuam de `sec_insider_transactions` (leitura).
@@ -251,7 +283,11 @@ Total de workers Python novos: **`fund_factors`, `fund_institutional_reveal`,
 Para cada endpoint migrado:
 1. Construir o objeto novo (MV/worker/função SQL).
 2. **Teste de paridade**: comparar o output novo contra o cálculo atual em uma amostra
-   representativa de entidades, dentro de tolerância numérica documentada.
+   representativa de entidades, dentro de tolerância numérica documentada. **Exceção
+   `active-share`**: a paridade cobre apenas o caminho do benchmark primário (o caminho de
+   `benchmark_id` arbitrário é descontinuado por decisão de produto — §6 A5 —, não
+   comparado). O cleanup do contrato (`benchmark_id` fora de backend/tipos/frontend/testes)
+   faz parte do passo de troca, não de uma migração separada.
 3. **Dual-read** atrás de flag: a rota lê do caminho novo, com fallback ao antigo
    enquanto a flag estiver desligada; comparação registrada em ambiente de validação.
 4. Trocar o caminho default; remover o código de cálculo Python só após a troca estável.
