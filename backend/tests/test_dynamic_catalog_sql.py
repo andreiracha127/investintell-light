@@ -256,6 +256,7 @@ def test_fund_benchmark_candidates_sql_uses_all_resolution_paths() -> None:
     assert "'Crypto / Digital Assets', 'BITO'" in sql
     assert "'Leveraged', 'SSO'" in sql
     assert "'Inverse / Hedge', 'SH'" in sql
+    assert "'Long/Short Equity', 'FTLS'" in sql
     assert "strategy_overrides_declared" in sql
     assert "declared_overridden:" in sql
 

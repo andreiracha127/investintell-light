@@ -101,7 +101,7 @@ INSERT INTO fund_strategy_benchmark_proxy_map (
     ('Large Value', 'VOOV', 'equity', 0.9500, 'strategy_label_proxy', 'S&P 500 value ETF proxy.'),
     ('Inverse / Hedge', 'SH', 'alternatives', 0.8500, 'strategy_label_proxy', 'Short S&P 500 ETF proxy for inverse hedge strategies; preserves negative market exposure.'),
     ('Leveraged', 'SSO', 'alternatives', 0.8500, 'strategy_label_proxy', '2x S&P 500 ETF proxy for long leveraged equity exposure; declared benchmarks win when available.'),
-    ('Long/Short Equity', 'HFND', 'equity', 0.8500, 'strategy_label_proxy', 'Multi-strategy return tracker ETF proxy.'),
+    ('Long/Short Equity', 'FTLS', 'equity', 0.9500, 'strategy_label_proxy', 'Long/short equity ETF proxy with materially longer Tiingo/NAV history than HFND.'),
     ('Mid Blend', 'SCHM', 'equity', 0.9500, 'strategy_label_proxy', 'US mid-cap ETF proxy.'),
     ('Mid Growth', 'IWP', 'equity', 0.9800, 'strategy_label_proxy', 'Russell Midcap Growth ETF proxy.'),
     ('Mid Value', 'IWS', 'equity', 0.9800, 'strategy_label_proxy', 'Russell Midcap Value ETF proxy.'),
