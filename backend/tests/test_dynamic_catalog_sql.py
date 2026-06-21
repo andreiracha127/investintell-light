@@ -30,6 +30,12 @@ TECHNOLOGY_OVERRIDES_DDL_PATH = (
     / "ddl"
     / "2026-06-21_technology_strategy_overrides.sql"
 )
+INTERNATIONAL_OVERRIDES_DDL_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "db"
+    / "ddl"
+    / "2026-06-21_international_equity_strategy_overrides.sql"
+)
 
 
 def test_stage_labels_sql_prefers_manual_overrides() -> None:
@@ -71,6 +77,10 @@ def test_dynamic_catalog_knows_alternative_sublabels() -> None:
     assert "natural resources" in sql
     assert "THEN 'Sector Equity'" in sql
     assert "THEN 'Technology'" in sql
+    assert "all country asia ex japan" in sql
+    assert "global ex u s" in sql
+    assert "THEN 'European Equity'" in sql
+    assert "THEN 'Asian Equity'" in sql
 
 
 def test_alternative_override_migration_captures_reviewed_buckets() -> None:
@@ -130,6 +140,30 @@ def test_technology_override_migration_splits_tech_from_sector_equity() -> None:
     assert "THEN 'Large Blend'" in sql
     assert "THEN 'Defined Outcome / Option Income'" in sql
     assert "THEN 'Inverse / Hedge'" in sql
+    assert "public.asset_class_from_strategy(fv.strategy_label)" in sql
+
+
+def test_international_override_migration_splits_regional_equity() -> None:
+    sql = INTERNATIONAL_OVERRIDES_DDL_PATH.read_text(encoding="utf-8")
+
+    assert "'International Equity'" in sql
+    assert "'European Equity'" in sql
+    assert "'Asian Equity'" in sql
+    assert "'Emerging Markets Equity'" in sql
+    assert "'Global Equity'" in sql
+    assert "international_review_name_european" in sql
+    assert "international_review_name_asian" in sql
+    assert "international_review_name_emerging_markets" in sql
+    assert "international_review_name_global" in sql
+    assert "international_review_benchmark_international" in sql
+    assert "all country asia ex japan" in sql
+    assert "global ex u.s." in sql
+    assert "global ex u s" in sql
+    assert "THEN 'European Equity'" in sql
+    assert "THEN 'Asian Equity'" in sql
+    assert "THEN 'Emerging Markets Equity'" in sql
+    assert "THEN 'International Equity'" in sql
+    assert "THEN 'Global Equity'" in sql
     assert "public.asset_class_from_strategy(fv.strategy_label)" in sql
 
 
