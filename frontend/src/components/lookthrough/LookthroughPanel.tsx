@@ -76,10 +76,12 @@ function ExposureCharts({
   // Issuer renders a vertical Pareto (concentration curve) in a taller 21:9
   // card; asset class renders an animated donut in a tall, roomy area; the
   // other dimensions keep the compact horizontal bars.
+  const chartKind =
+    activeDim === "issuer" ? "pareto" : activeDim === "asset_class" ? "pie" : "bars";
   const chartClassName =
-    activeDim === "issuer"
+    chartKind === "pareto"
       ? "aspect-[21/9] w-full"
-      : activeDim === "asset_class"
+      : chartKind === "pie"
         ? "h-[460px] w-full"
         : "h-[320px] w-full";
 
@@ -114,7 +116,14 @@ function ExposureCharts({
       </div>
 
       {activeItems.length > 0 ? (
-        <HighchartsChart options={exposureOption} className={chartClassName} />
+        // Remount (not in-place update) when the chart shape changes so a prior
+        // chart's axes/series chrome can't bleed into a structurally different
+        // one (e.g. the Pareto's value axes leaking behind the asset-class pie).
+        <HighchartsChart
+          key={chartKind}
+          options={exposureOption}
+          className={chartClassName}
+        />
       ) : (
         <p className="py-8 text-center text-[13px] text-text-muted">
           No exposure data for this dimension.
