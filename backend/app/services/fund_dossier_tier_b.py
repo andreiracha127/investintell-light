@@ -1715,13 +1715,22 @@ async def fetch_fund_risk_timeseries(
         raise InsufficientFundDataError(
             f"Only {len(nav)} NAV rows available in risk-timeseries window."
         )
-    drawdown = _max_drawdown_series(nav) * 100.0
     returns = simple_returns(nav)
     vol, model = _conditional_volatility(returns)
     regimes, regime_empty = await _regime_bands(datalake, nav.index[0].date(), nav.index[-1].date())
+
+    if get_settings().use_series_db_first:
+        dd_pts = await series_sql.drawdown_points(
+            session, instrument_id=instrument_id,
+            start=nav.index[0].date(), end=nav.index[-1].date(),
+        )
+        drawdown_points_out = [(d, v * 100.0) for d, v in dd_pts]
+    else:
+        drawdown_points_out = _series_points(_max_drawdown_series(nav) * 100.0)
+
     return FundRiskTimeseriesResponse(
         instrument_id=instrument_id,
-        drawdown=_series_points(drawdown),
+        drawdown=drawdown_points_out,
         conditional_volatility=vol,
         volatility_model=model,
         regime_bands=regimes,
