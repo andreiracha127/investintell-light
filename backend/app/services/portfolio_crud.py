@@ -25,7 +25,7 @@ from app.models.eod_price import EodPrice
 from app.models.fund import Fund, FundClass, FundNav
 from app.models.instrument import Instrument
 from app.models.portfolio import Portfolio, Position
-from app.models.price_latest import PriceLatest
+from app.models.price_latest import NavLatest, PriceLatest
 from app.optimizer import data as optimizer_data
 from app.schemas.portfolios import (
     OverviewAggregates,
@@ -467,7 +467,7 @@ async def select_tickers_with_eod(
     return {row[0] for row in result.all()}
 
 
-async def select_last_two_navs(
+async def _select_last_two_navs_legacy(
     session: AsyncSession, tickers: Sequence[str]
 ) -> dict[str, list[tuple[dt.date, float]]]:
     """The two most recent (nav_date, nav) rows per FUND ticker, newest first.
@@ -512,6 +512,57 @@ async def select_last_two_navs(
     for instrument_id, nav_date, nav in result.all():
         for ticker in tickers_by_instrument[instrument_id]:
             navs.setdefault(ticker, []).append((nav_date, float(nav)))
+    return navs
+
+
+async def select_last_two_navs(
+    session: AsyncSession,
+    tickers: Sequence[str],
+    *,
+    use_mv: bool | None = None,
+) -> dict[str, list[tuple[dt.date, float]]]:
+    """Two most recent (nav_date, nav) per FUND ticker, newest first.
+
+    Same shape as ``select_last_two_closes`` (build_overview consumes both
+    transparently). DB-first: lê de nav_latest_mv quando habilitado; o MV é
+    keyed por instrument_id, então a resolução ticker→instrumento permanece —
+    instrumentos ausentes do MV caem para a tabela base.
+    """
+    if not tickers:
+        return {}
+    if use_mv is None:
+        use_mv = get_settings().use_latest_mv_prices
+    if not use_mv:
+        return await _select_last_two_navs_legacy(session, tickers)
+
+    instrument_by_ticker = await _fund_instrument_by_ticker(session, tickers)
+    if not instrument_by_ticker:
+        return {}
+    # Several class tickers may share one instrument — keep ALL of them.
+    tickers_by_instrument: dict[Any, list[str]] = {}
+    for ticker, instrument_id in instrument_by_ticker.items():
+        tickers_by_instrument.setdefault(instrument_id, []).append(ticker)
+
+    rows = await session.execute(
+        select(
+            NavLatest.instrument_id,
+            NavLatest.as_of,
+            NavLatest.last_nav,
+            NavLatest.prev_date,
+            NavLatest.prev_nav,
+        ).where(NavLatest.instrument_id.in_(list(instrument_by_ticker.values())))
+    )
+    navs: dict[str, list[tuple[dt.date, float]]] = {}
+    for instrument_id, as_of, last_nav, prev_date, prev_nav in rows.all():
+        series = [(as_of, float(last_nav))]
+        if prev_nav is not None and prev_date is not None:
+            series.append((prev_date, float(prev_nav)))
+        for ticker in tickers_by_instrument[instrument_id]:
+            navs[ticker] = list(series)
+
+    missing = [t for t in tickers if t not in navs]
+    if missing:
+        navs.update(await _select_last_two_navs_legacy(session, missing))
     return navs
 
 
