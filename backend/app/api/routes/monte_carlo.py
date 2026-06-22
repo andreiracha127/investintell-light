@@ -16,7 +16,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.db import get_session
+from app.core.result_cache import result_cache, result_cache_key
 from app.schemas.monte_carlo import (
     MonteCarloRequest,
     MonteCarloResponse,
@@ -41,8 +43,18 @@ async def project_monte_carlo(
     bootstrap percentile rank. All drawdown/return fields are decimal fractions
     (0.05 = 5%); sharpe is unitless.
     """
+    settings = get_settings()
+    cache_key = (
+        result_cache_key("monte_carlo", payload)
+        if settings.use_result_cache and payload.seed is not None
+        else None
+    )
+    if cache_key is not None:
+        hit = await result_cache.get(cache_key)
+        if hit is not None:
+            return MonteCarloResponse.model_validate_json(hit)
     try:
-        return await run_monte_carlo(
+        result = await run_monte_carlo(
             session,
             ticker=payload.ticker,
             statistic=payload.statistic,
@@ -59,6 +71,13 @@ async def project_monte_carlo(
         raise HTTPException(status_code=422, detail=message) from exc
     except StockAnalysisError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if cache_key is not None:
+        await result_cache.set(
+            cache_key,
+            result.model_dump_json().encode("utf-8"),
+            float(settings.result_cache_ttl_seconds),
+        )
+    return result
 
 
 @router.post("/portfolio", response_model=PortfolioMonteCarloResponse)
@@ -79,7 +98,24 @@ async def project_portfolio_monte_carlo(
     - insufficient common observations               -> 422
     - history too short for the requested horizon    -> 422
     """
+    settings = get_settings()
+    cache_key = (
+        result_cache_key("portfolio_mc", payload)
+        if settings.use_result_cache and payload.seed is not None
+        else None
+    )
+    if cache_key is not None:
+        hit = await result_cache.get(cache_key)
+        if hit is not None:
+            return PortfolioMonteCarloResponse.model_validate_json(hit)
     try:
-        return await run_portfolio_monte_carlo(session, payload)
+        result = await run_portfolio_monte_carlo(session, payload)
     except InsufficientDataError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if cache_key is not None:
+        await result_cache.set(
+            cache_key,
+            result.model_dump_json().encode("utf-8"),
+            float(settings.result_cache_ttl_seconds),
+        )
+    return result
