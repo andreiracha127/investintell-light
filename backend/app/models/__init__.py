@@ -38,6 +38,11 @@ from app.models.price_latest import NavLatest, PriceLatest
 from app.models.rebalance import RebalancePolicy
 from app.models.screen import Screen, ScreenFilter
 from app.models.screener_metrics import ScreenerMetrics
+from app.models.stock_holders_mv import (
+    HoldingReverseLookupRow,
+    StockFundHolderRow,
+    StockInstitutionalHolder,
+)
 from app.models.universe import FundamentalsSnapshot, UniverseConstituent
 
 __all__ = [
@@ -57,6 +62,7 @@ __all__ = [
     "FundStyleDriftRow",
     "FundTopHoldingRow",
     "FundamentalsSnapshot",
+    "HoldingReverseLookupRow",
     "Instrument",
     "NewsItem",
     "NavLatest",
@@ -69,5 +75,7 @@ __all__ = [
     "Screen",
     "ScreenFilter",
     "ScreenerMetrics",
+    "StockFundHolderRow",
+    "StockInstitutionalHolder",
     "UniverseConstituent",
 ]

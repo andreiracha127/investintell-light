@@ -110,6 +110,9 @@ class Settings(BaseSettings):
     # leem dos read-models db-first (MV/view/worker), com fallback ao caminho
     # legado por entidade ausente. Default off até validação em staging.
     use_fund_analytics_db_first: bool = False
+    # DB-first Grupo B: quando True, holders/holders-funds/reverse-lookup leem
+    # dos MVs pré-computados (com fallback ao SQL legado p/ entidades ausentes).
+    use_holders_db_first: bool = False
 
 
 @functools.lru_cache
