@@ -65,3 +65,19 @@ async def test_flag_off_uses_legacy_only():
     out = await portfolio_crud.select_last_two_closes(session, ["AAPL"], use_mv=False)
     assert out == {"AAPL": [(_LAST, 110.0), (_PREV, 105.0)]}
     assert all("price_latest_mv" not in q for q in session.executed)
+
+
+@pytest.mark.asyncio
+async def test_overview_payload_parity_mv_vs_legacy():
+    # Mesmos dados em ambas as fontes ⇒ payload idêntico (mesma aritmética P&L).
+    legacy = await portfolio_crud.select_last_two_closes(
+        _FakeSession(legacy_rows=[("AAPL", _LAST, 110.0), ("AAPL", _PREV, 105.0)]),
+        ["AAPL"],
+        use_mv=False,
+    )
+    mv = await portfolio_crud.select_last_two_closes(
+        _FakeSession(mv_rows=[("AAPL", _LAST, 110.0, _PREV, 105.0)]),
+        ["AAPL"],
+        use_mv=True,
+    )
+    assert legacy == mv

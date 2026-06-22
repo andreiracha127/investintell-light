@@ -334,6 +334,15 @@ async def select_last_two_closes(
     DB-first: lê de price_latest_mv quando habilitado; tickers ausentes do MV
     (ex.: recém-backfillados, ainda não capturados pelo matview_refresh) caem
     para a tabela base, então o shape de saída é idêntico ao legado.
+
+    Comportamento de frescor (lag do refresh): ``eod_prices`` é populado pelo
+    backfill/warming worker out-of-band e ``price_latest_mv`` é refrescado por
+    cron próprio (``matview_refresh``); há, portanto, um lag entre os dois — um
+    preço recém-backfillado pode aparecer no MV só após o próximo refresh.
+    Tickers ainda ausentes do MV usam o fallback à tabela base (sem regressão
+    funcional). Para um overview EOD isso é aceitável; a flag de dual-read
+    (``use_latest_mv_prices``) permite validar em staging antes de virar o
+    default em produção.
     """
     if not tickers:
         return {}
