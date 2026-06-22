@@ -11,7 +11,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.db import get_session
+from app.core.result_cache import result_cache, result_cache_key
 from app.optimizer import data as optimizer_data
 from app.schemas.builder import EquityRefIn, FundRefIn
 from app.schemas.correlation_regime import CorrelationRegimeOut, CorrelationRegimeRequest
@@ -37,6 +39,15 @@ async def correlation_regime(
     resolved fund universe. Decimal-fraction scale. Domain failures → 422.
     """
     try:
+        cache_key = (
+            result_cache_key("correlation_regime", payload)
+            if get_settings().use_result_cache
+            else None
+        )
+        if cache_key is not None:
+            hit = await result_cache.get(cache_key)
+            if hit is not None:
+                return CorrelationRegimeOut.model_validate_json(hit)
         if payload.assets is not None:
             refs = [_to_data_ref(ref) for ref in payload.assets]
         else:
@@ -58,8 +69,15 @@ async def correlation_regime(
                     "filters or widen the window (at least 2 are required)"
                 )
             refs = [optimizer_data.FundAssetRef(id=c.id) for c in candidates]
-        return await cr_service.run_correlation_regime(
+        result = await cr_service.run_correlation_regime(
             session, refs, window_days=payload.window_days
         )
+        if cache_key is not None:
+            await result_cache.set(
+                cache_key,
+                result.model_dump_json().encode("utf-8"),
+                float(get_settings().result_cache_ttl_seconds),
+            )
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

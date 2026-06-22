@@ -14,12 +14,15 @@ Error mapping (fail loud):
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
 from app.schemas.backtest import WalkForwardRequest, WalkForwardResponse
+from app.schemas.jobs import JobEnqueuedResponse
 from app.services import backtest as backtest_service
+from app.services import jobs as jobs_service
 from app.services.backtest import BacktestError
 
 router = APIRouter(prefix="/backtest", tags=["backtest"])
@@ -27,10 +30,8 @@ router = APIRouter(prefix="/backtest", tags=["backtest"])
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
-@router.post("/walk-forward", response_model=WalkForwardResponse)
-async def walk_forward(
-    payload: WalkForwardRequest, session: SessionDep
-) -> WalkForwardResponse:
+@router.post("/walk-forward")  # response_model removido: 202|200 polimórfico
+async def walk_forward(payload: WalkForwardRequest, session: SessionDep):
     """Walk-forward / out-of-sample backtest of a mu-free objective.
 
     Re-optimizes the objective on each expanding TimeSeriesSplit train fold and
@@ -38,8 +39,33 @@ async def walk_forward(
     one-way transaction cost on the L1 weight change vs the previous fold. The
     response reports per-fold metrics plus the ``positive_folds`` consistency
     count. All fractional fields are decimal fractions (0.05 = 5%).
+
+    When ``use_async_jobs`` is on and ``n_splits`` is large, the computation is
+    enqueued as a job (HTTP 202 + job id) and served via GET /jobs/{id}; the
+    synchronous path (cached) is otherwise unchanged.
     """
     try:
+        if jobs_service.should_run_async(n_splits=payload.n_splits):
+            async def _runner(job_session) -> WalkForwardResponse:
+                return await backtest_service.run_walk_forward_backtest(
+                    job_session, payload
+                )
+
+            job = await jobs_service.enqueue_job(
+                session,
+                kind=jobs_service.JOB_KIND_WALK_FORWARD,
+                params_hash=jobs_service.params_hash(
+                    jobs_service.JOB_KIND_WALK_FORWARD, payload
+                ),
+                portfolio_id=None,
+                runner=_runner,
+            )
+            return JSONResponse(
+                status_code=status.HTTP_202_ACCEPTED,
+                content=JobEnqueuedResponse(
+                    job_id=job.id, status=job.status, kind=job.kind
+                ).model_dump(mode="json"),
+            )
         return await backtest_service.run_walk_forward_backtest(session, payload)
     except BacktestError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

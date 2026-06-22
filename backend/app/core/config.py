@@ -48,6 +48,17 @@ class Settings(BaseSettings):
     # (fund-catalog-sync 09:00 UTC), so minutes-level TTL is conservative.
     catalog_cache_ttl_seconds: int = 900
 
+    # DB-first Grupo E2: cache de RESULTADO (respostas determinísticas das
+    # ferramentas interativas), separado do cache de catálogo. Fail-open.
+    use_result_cache: bool = False
+    # TTL de respostas cacheadas (estatística/backtest/correlation-regime/MC com seed).
+    result_cache_ttl_seconds: int = 3600
+
+    # DB-first Grupo E3: jobs assíncronos para cálculos pesados.
+    use_async_jobs: bool = False
+    async_job_threshold_n_simulations: int = 20000
+    async_job_threshold_n_splits: int = 12
+
     # --- API / CORS settings (F2) ---
     # Browser origins allowed to call the API. Dev = Next.js local server;
     # prod = the public site (www + apex). Em produção o InsForge compute

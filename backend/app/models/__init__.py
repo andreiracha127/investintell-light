@@ -28,6 +28,7 @@ from app.models.fund import (
 )
 from app.models.instrument import Instrument
 from app.models.news_item import NewsItem
+from app.models.optimize_jobs import OptimizeJob
 from app.models.portfolio import (
     Portfolio,
     PortfolioNavDaily,
@@ -43,6 +44,7 @@ from app.models.stock_holders_mv import (
     StockFundHolderRow,
     StockInstitutionalHolder,
 )
+from app.models.stock_daily_return import StockDailyReturn
 from app.models.universe import FundamentalsSnapshot, UniverseConstituent
 
 __all__ = [
@@ -66,6 +68,7 @@ __all__ = [
     "Instrument",
     "NewsItem",
     "NavLatest",
+    "OptimizeJob",
     "Portfolio",
     "PortfolioNavDaily",
     "PortfolioTransaction",
