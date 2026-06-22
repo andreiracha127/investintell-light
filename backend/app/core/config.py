@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     # TTL de respostas cacheadas (estatística/backtest/correlation-regime/MC com seed).
     result_cache_ttl_seconds: int = 3600
 
+    # DB-first Grupo E3: jobs assíncronos para cálculos pesados.
+    use_async_jobs: bool = False
+    async_job_threshold_n_simulations: int = 20000
+    async_job_threshold_n_splits: int = 12
+
     # --- API / CORS settings (F2) ---
     # Browser origins allowed to call the API. Dev = Next.js local server;
     # prod = the public site (www + apex). Em produção o InsForge compute
