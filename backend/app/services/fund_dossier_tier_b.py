@@ -364,14 +364,69 @@ async def _style_bias(
     return row["as_of"], biases, None
 
 
+async def _style_bias_db_first(
+    datalake: AsyncSession,
+    instrument_id: uuid.UUID,
+) -> tuple[dt.date | None, list[FundStyleBias], EmptyState | None]:
+    """Style-bias z-scores lidos de fund_style_bias_v (latest as_of do fundo).
+
+    Mesmo shape de _style_bias; o cálculo z = (value−avg)/stddev já vive na view.
+    """
+    try:
+        rows = (
+            await datalake.execute(
+                text(
+                    """
+                    WITH latest AS (
+                        SELECT max(as_of) AS as_of
+                        FROM fund_style_bias_v
+                        WHERE instrument_id = :iid
+                    )
+                    SELECT as_of, factor, value, z_score
+                    FROM fund_style_bias_v
+                    WHERE instrument_id = :iid
+                      AND as_of = (SELECT as_of FROM latest)
+                    """
+                ),
+                {"iid": str(instrument_id)},
+            )
+        ).mappings().all()
+    except SQLAlchemyError as exc:
+        raise _source_error("fund_style_bias_v", exc) from exc
+    if not rows:
+        return (
+            None,
+            [],
+            _empty(
+                "No equity_characteristics_monthly row for this fund.",
+                "fund_style_bias_v",
+            ),
+        )
+    as_of = rows[0]["as_of"]
+    biases = [
+        FundStyleBias(
+            factor=row["factor"],
+            value=_float(row["value"]),
+            z_score=_float(row["z_score"]),
+            as_of=row["as_of"],
+        )
+        for row in rows
+    ]
+    return as_of, biases, None
+
+
 async def fetch_fund_factors(
     session: AsyncSession,
     datalake: AsyncSession,
     instrument_id: uuid.UUID,
+    *,
+    use_db_first: bool | None = None,
 ) -> FundFactorsResponse | None:
     fund = await _fund_or_none(session, instrument_id)
     if fund is None:
         return None
+    if use_db_first is None:
+        use_db_first = get_settings().use_fund_analytics_db_first
 
     first_date, last_date = await select_nav_date_bounds(session, instrument_id)
     nav = pd.Series(dtype=float)
@@ -385,7 +440,11 @@ async def fetch_fund_factors(
 
     factor_as_of, factors = await _latest_factor_fit(datalake)
     sensitivities = _ols_market_sensitivities(monthly_returns, factors)
-    style_as_of, style_bias, style_empty = await _style_bias(datalake, instrument_id)
+
+    if use_db_first:
+        style_as_of, style_bias, style_empty = await _style_bias_db_first(datalake, instrument_id)
+    else:
+        style_as_of, style_bias, style_empty = await _style_bias(datalake, instrument_id)
 
     metadata = [
         FundSourceMetadata(
