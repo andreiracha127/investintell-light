@@ -428,22 +428,39 @@ async def fetch_fund_factors(
     if use_db_first is None:
         use_db_first = get_settings().use_fund_analytics_db_first
 
-    first_date, last_date = await select_nav_date_bounds(session, instrument_id)
-    nav = pd.Series(dtype=float)
-    if first_date is not None and last_date is not None:
-        nav = build_nav_series(await select_nav_rows(session, instrument_id, first_date, last_date))
-    monthly_returns = (
-        nav.resample("ME").last().pct_change().dropna()
-        if len(nav)
-        else pd.Series(dtype=float)
-    )
-
-    factor_as_of, factors = await _latest_factor_fit(datalake)
-    sensitivities = _ols_market_sensitivities(monthly_returns, factors)
-
     if use_db_first:
+        rows = (
+            await datalake.execute(
+                text(
+                    """
+                    SELECT factor, beta, t_stat, significance, as_of
+                    FROM fund_factor_exposures_latest_mv
+                    WHERE instrument_id = :iid
+                    ORDER BY factor
+                    """
+                ),
+                {"iid": str(instrument_id)},
+            )
+        ).mappings().all()
+        sensitivities = [
+            FundMarketSensitivity(
+                factor=r["factor"], beta=_float(r["beta"]),
+                t_stat=_float(r["t_stat"]), significance=r["significance"],
+            )
+            for r in rows
+        ]
+        factor_as_of = rows[0]["as_of"] if rows else None
         style_as_of, style_bias, style_empty = await _style_bias_db_first(datalake, instrument_id)
     else:
+        first_date, last_date = await select_nav_date_bounds(session, instrument_id)
+        nav = pd.Series(dtype=float)
+        if first_date is not None and last_date is not None:
+            nav = build_nav_series(await select_nav_rows(session, instrument_id, first_date, last_date))
+        monthly_returns = (
+            nav.resample("ME").last().pct_change().dropna() if len(nav) else pd.Series(dtype=float)
+        )
+        factor_as_of, factors = await _latest_factor_fit(datalake)
+        sensitivities = _ols_market_sensitivities(monthly_returns, factors)
         style_as_of, style_bias, style_empty = await _style_bias(datalake, instrument_id)
 
     metadata = [
