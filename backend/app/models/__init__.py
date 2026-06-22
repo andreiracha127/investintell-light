@@ -30,6 +30,7 @@ from app.models.price_latest import NavLatest, PriceLatest
 from app.models.rebalance import RebalancePolicy
 from app.models.screen import Screen, ScreenFilter
 from app.models.screener_metrics import ScreenerMetrics
+from app.models.stock_daily_return import StockDailyReturn
 from app.models.universe import FundamentalsSnapshot, UniverseConstituent
 
 __all__ = [
