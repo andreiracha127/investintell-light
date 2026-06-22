@@ -1,7 +1,7 @@
 # backend/tests/test_fund_analytics_db_first_models.py
 from app.core.config import get_settings
+from app.models.fund import FundRiskLatest
 from app.models.fund_analytics_db_first import (
-    FundActiveShareRow,
     FundFactorExposureLatest,
     FundInstitutionalRevealLatest,
     FundStyleBiasRow,
@@ -26,11 +26,31 @@ def test_top_holding_row_maps_mv():
     assert {"series_id", "report_date", "rank", "issuer_name", "cusip", "pct_of_nav"} <= cols
 
 
-def test_active_share_row_maps_mv():
-    assert FundActiveShareRow.__tablename__ == "fund_active_share_mv"
-    cols = set(FundActiveShareRow.__table__.columns.keys())
-    assert {"series_id", "benchmark_series_id", "active_share", "overlap", "as_of"} <= cols
-    assert "series_id" in FundActiveShareRow.__table__.primary_key.columns.keys()
+def test_active_share_columns_live_on_fund_risk_latest():
+    # Active share is no longer a standalone MV — its columns are projected onto
+    # fund_risk_latest_mv (FundRiskLatest) and read from there.
+    assert FundRiskLatest.__tablename__ == "fund_risk_latest_mv"
+    cols = set(FundRiskLatest.__table__.columns.keys())
+    assert {
+        "active_share_normalized",
+        "overlap_normalized",
+        "overlap_nav_raw",
+        "fund_cusip_coverage_nav",
+        "benchmark_cusip_coverage_nav",
+        "n_fund_holdings",
+        "n_benchmark_holdings",
+        "n_common_holdings",
+        "n_fund_only",
+        "n_benchmark_only",
+        "holdings_jaccard",
+        "fund_report_age_days",
+        "benchmark_report_age_days",
+        "report_date_gap_days",
+        "active_share_benchmark_instrument_id",
+        "active_share_benchmark_series_id",
+        "active_share_fund_report_date",
+        "active_share_benchmark_report_date",
+    } <= cols
 
 
 def test_style_bias_row_maps_view():

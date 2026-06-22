@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics import simple_returns
 from app.core.config import get_settings
-from app.models.fund import Fund, FundHolding
+from app.models.fund import Fund, FundHolding, FundListRow, FundRiskLatest
 from app.models.stock_holders_mv import HoldingReverseLookupRow
 from app.schemas.analysis import SeriesPoint
 from app.schemas.fund_analysis import (
@@ -2184,7 +2184,8 @@ async def fetch_fund_active_share(
     use_db_first: bool | None = None,
 ) -> FundActiveShareResponse | None:
     """Active share vs the fund's PRIMARY benchmark (spec §6 A5 — benchmark_id
-    removido). DB-first lê de fund_active_share_mv. Com a flag off, cai ao corpo
+    removido). DB-first lê as colunas active-share de fund_risk_latest_mv (não
+    há mais fund_active_share_mv standalone). Com a flag off, cai ao corpo
     legado (benchmark_id=None → empty-state), preservado só para a transição.
     """
     if use_db_first is None:
@@ -2197,39 +2198,68 @@ async def fetch_fund_active_share(
     fund = await _fund_or_none(session, instrument_id)
     if fund is None:
         return None
-    row = (
-        await datalake.execute(
-            text(
-                """
-                SELECT series_id, benchmark_series_id, benchmark_name,
-                       active_share, overlap, n_portfolio, n_benchmark,
-                       n_common, as_of
-                FROM fund_active_share_mv
-                WHERE series_id = :series_id
-                """
-            ),
-            {"series_id": fund.series_id},
+    try:
+        risk = await session.get(FundRiskLatest, instrument_id)
+        if risk is None or risk.active_share_normalized is None:
+            return FundActiveShareResponse(
+                instrument_id=instrument_id,
+                empty_state=_empty(
+                    "No active-share computed for this fund.",
+                    "fund_risk_latest_mv",
+                ),
+            )
+        benchmark_name = await _resolve_benchmark_name(
+            session,
+            series_id=risk.active_share_benchmark_series_id,
+            instrument_id=risk.active_share_benchmark_instrument_id,
         )
-    ).mappings().first()
-    if row is None:
-        return FundActiveShareResponse(
-            instrument_id=instrument_id,
-            empty_state=_empty(
-                "No primary benchmark with N-PORT holdings for this fund.",
-                "fund_active_share_mv",
-            ),
+    except SQLAlchemyError:
+        return await _fetch_fund_active_share_legacy(
+            session, datalake, instrument_id, benchmark_id=None
         )
     return FundActiveShareResponse(
         instrument_id=instrument_id,
-        benchmark_name=row["benchmark_name"],
-        benchmark_series_id=row["benchmark_series_id"],
-        active_share=_float(row["active_share"]),
-        overlap=_float(row["overlap"]),
-        n_portfolio_positions=row["n_portfolio"] or 0,
-        n_benchmark_positions=row["n_benchmark"] or 0,
-        n_common_positions=row["n_common"] or 0,
-        as_of_date=row["as_of"],
+        benchmark_name=benchmark_name,
+        benchmark_series_id=risk.active_share_benchmark_series_id,
+        active_share=_float(risk.active_share_normalized),
+        overlap=_float(risk.overlap_normalized),
+        n_portfolio_positions=risk.n_fund_holdings or 0,
+        n_benchmark_positions=risk.n_benchmark_holdings or 0,
+        n_common_positions=risk.n_common_holdings or 0,
+        as_of_date=risk.active_share_fund_report_date,
     )
+
+
+async def _resolve_benchmark_name(
+    session: AsyncSession,
+    *,
+    series_id: str | None,
+    instrument_id: uuid.UUID | None,
+) -> str | None:
+    """Human label for the benchmark proxy: prefer the fund name from
+    funds_list_mv (by series_id), then the proxy ETF ticker from
+    instruments_universe (by instrument_id), else the raw series_id."""
+    if series_id is not None:
+        name = (
+            await session.execute(
+                select(FundListRow.name).where(FundListRow.series_id == series_id)
+            )
+        ).scalar_one_or_none()
+        if name:
+            return name
+    if instrument_id is not None:
+        ticker = (
+            await session.execute(
+                text(
+                    "SELECT ticker FROM instruments_universe "
+                    "WHERE instrument_id = :iid LIMIT 1"
+                ),
+                {"iid": instrument_id},
+            )
+        ).scalar()
+        if ticker:
+            return str(ticker)
+    return series_id
 
 
 async def _fetch_fund_active_share_legacy(

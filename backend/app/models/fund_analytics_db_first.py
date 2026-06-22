@@ -1,8 +1,8 @@
 """Modelos ORM read-only sobre os read-models db-first do Grupo A.
 
 Todos vivem no DB principal e são alimentados por MV/view SQL
-(fund_style_drift_mv, fund_top_holdings_mv, fund_active_share_mv,
-fund_style_bias_v) ou pelos workers fund_factors / fund_institutional_reveal
+(fund_style_drift_mv, fund_top_holdings_mv, fund_style_bias_v) ou pelos
+workers fund_factors / fund_institutional_reveal
 (via *_latest_mv). Espelham o padrão de PriceLatest/NavLatest: mapeados via
 Base, lidos por chave/IN, nunca escritos pelo backend.
 """
@@ -41,21 +41,6 @@ class FundTopHoldingRow(Base):
     gics_sector: Mapped[str | None] = mapped_column(String, nullable=True)
     market_value: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     pct_of_nav: Mapped[float | None] = mapped_column(Numeric, nullable=True)
-
-
-class FundActiveShareRow(Base):
-    __tablename__ = "fund_active_share_mv"
-
-    series_id: Mapped[str] = mapped_column(String, primary_key=True)
-    benchmark_series_id: Mapped[str | None] = mapped_column(String, nullable=True)
-    benchmark_proxy_instrument_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
-    benchmark_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    active_share: Mapped[float | None] = mapped_column(Numeric, nullable=True)
-    overlap: Mapped[float | None] = mapped_column(Numeric, nullable=True)
-    n_portfolio: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    n_benchmark: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    n_common: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    as_of: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
 
 
 class FundStyleBiasRow(Base):
