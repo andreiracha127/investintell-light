@@ -80,3 +80,87 @@ async def test_get_returns_none_when_redis_not_configured(monkeypatch):
     monkeypatch.setattr(cache, "_redis_client", lambda: None)  # REDIS_URL ausente
     assert await cache.get("result:x:beta:abc") is None
     await cache.set("result:x:beta:abc", b"BODY", 60)  # no-op, não levanta
+
+
+class _Req(BaseModel):
+    ticker: str
+    seed: int | None = None
+
+
+class _Resp(BaseModel):
+    value: float
+
+
+@pytest.mark.asyncio
+async def test_decorator_caches_and_rehydrates_model(monkeypatch):
+    store: dict[str, bytes] = {}
+    calls = {"n": 0}
+
+    class _FakeRedis:
+        async def get(self, key):
+            return store.get(key)
+
+        async def set(self, key, value, ex=None):
+            store[key] = value
+
+    monkeypatch.setattr(rc.result_cache, "_redis_client", lambda: _FakeRedis())
+    monkeypatch.setattr(rc, "get_settings", lambda: type("S", (), {
+        "use_result_cache": True, "result_cache_ttl_seconds": 60})())
+
+    @rc.cached_result("beta")
+    async def _svc(session, payload: _Req) -> _Resp:
+        calls["n"] += 1
+        return _Resp(value=1.5)
+
+    r1 = await _svc(None, _Req(ticker="AAPL"))
+    r2 = await _svc(None, _Req(ticker="AAPL"))
+    assert isinstance(r1, _Resp) and r1.value == 1.5
+    assert r2.value == 1.5
+    assert calls["n"] == 1  # segunda chamada veio do cache
+
+
+@pytest.mark.asyncio
+async def test_decorator_bypasses_when_flag_off(monkeypatch):
+    calls = {"n": 0}
+    monkeypatch.setattr(rc, "get_settings", lambda: type("S", (), {
+        "use_result_cache": False, "result_cache_ttl_seconds": 60})())
+
+    @rc.cached_result("beta")
+    async def _svc(session, payload: _Req) -> _Resp:
+        calls["n"] += 1
+        return _Resp(value=2.0)
+
+    await _svc(None, _Req(ticker="AAPL"))
+    await _svc(None, _Req(ticker="AAPL"))
+    assert calls["n"] == 2  # sem cache, recomputa sempre
+
+
+@pytest.mark.asyncio
+async def test_decorator_skips_when_not_cacheable(monkeypatch):
+    store: dict[str, bytes] = {}
+    calls = {"n": 0}
+
+    class _FakeRedis:
+        async def get(self, key):
+            return store.get(key)
+
+        async def set(self, key, value, ex=None):
+            store[key] = value
+
+    monkeypatch.setattr(rc.result_cache, "_redis_client", lambda: _FakeRedis())
+    monkeypatch.setattr(rc, "get_settings", lambda: type("S", (), {
+        "use_result_cache": True, "result_cache_ttl_seconds": 60})())
+
+    # monte-carlo sem seed → não cacheável
+    @rc.cached_result("monte_carlo", cacheable=lambda p: p.seed is not None)
+    async def _svc(session, payload: _Req) -> _Resp:
+        calls["n"] += 1
+        return _Resp(value=3.0)
+
+    await _svc(None, _Req(ticker="AAPL", seed=None))
+    await _svc(None, _Req(ticker="AAPL", seed=None))
+    assert calls["n"] == 2          # sem seed nunca cacheia
+    assert store == {}              # nada gravado
+    await _svc(None, _Req(ticker="AAPL", seed=42))
+    await _svc(None, _Req(ticker="AAPL", seed=42))
+    assert calls["n"] == 3          # com seed: computou 1×, depois hit
