@@ -32,6 +32,7 @@ from app.analytics import (
     total_return,
 )
 from app.analytics._validation import to_date
+from app.core.config import get_settings
 from app.models.fund import Fund, FundHolding, FundNav, FundRiskLatest
 from app.schemas.analysis import DatedValue, DrawdownOut, HistogramOut, RangeKey
 from app.schemas.fund_analysis import (
@@ -414,6 +415,71 @@ async def _gics_sector_by_cusip(
 
 
 async def fetch_fund_holdings_top(
+    session: AsyncSession,
+    datalake: AsyncSession | None,
+    instrument_id: uuid.UUID,
+    *,
+    limit: int,
+    use_db_first: bool | None = None,
+) -> FundHoldingsTopResponse | None:
+    """Top holdings + sector breakdown. DB-first lê top holdings de
+    fund_top_holdings_mv (GICS já resolvido); sector breakdown continua de
+    nport_lookthrough_exposures. Fallback ao legado quando a flag está off.
+    """
+    if use_db_first is None:
+        use_db_first = get_settings().use_fund_analytics_db_first
+    if not use_db_first:
+        return await _fetch_fund_holdings_top_legacy(
+            session, datalake, instrument_id, limit=limit
+        )
+
+    fund = await session.get(Fund, instrument_id)
+    if fund is None:
+        return None
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT report_date, rank, issuer_name, cusip, isin,
+                       asset_class, sector, gics_sector, market_value, pct_of_nav
+                FROM fund_top_holdings_mv
+                WHERE series_id = :series_id
+                  AND rank <= :limit
+                ORDER BY rank
+                """
+            ),
+            {"series_id": fund.series_id, "limit": limit},
+        )
+    ).mappings().all()
+
+    report_date = rows[0]["report_date"] if rows else None
+    sector_breakdown = await _sector_breakdown_from_lookthrough(datalake, fund.series_id)
+    reported = [float(r["pct_of_nav"]) for r in rows if r["pct_of_nav"] is not None]
+    return FundHoldingsTopResponse(
+        instrument_id=instrument_id,
+        series_id=fund.series_id,
+        report_date=report_date,
+        top_holdings=[
+            FundTopHolding(
+                rank=r["rank"],
+                issuer_name=r["issuer_name"],
+                cusip=r["cusip"],
+                isin=r["isin"],
+                asset_class=r["asset_class"],
+                sector=r["sector"],
+                gics_sector=r["gics_sector"],
+                sector_label=r["gics_sector"] or r["sector"],
+                market_value=_float(r["market_value"]),
+                pct_of_nav=_float(r["pct_of_nav"]),
+            )
+            for r in rows
+        ],
+        sector_breakdown=sector_breakdown,
+        pct_of_nav_total=sum(reported) if reported else None,
+    )
+
+
+async def _fetch_fund_holdings_top_legacy(
     session: AsyncSession,
     datalake: AsyncSession | None,
     instrument_id: uuid.UUID,

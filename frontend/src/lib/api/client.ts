@@ -1216,11 +1216,10 @@ export function fetchFundRiskTimeseries(
 
 export function fetchFundActiveShare(
   instrumentId: string,
-  query: FundActiveShareQuery = {},
   signal?: AbortSignal,
 ): Promise<FundActiveShare> {
   return requestSameOrigin<FundActiveShare>(
-    buildFundProxyPath("active-share", instrumentId, query),
+    buildFundProxyPath("active-share", instrumentId),
     signal,
   );
 }

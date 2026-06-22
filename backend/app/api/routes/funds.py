@@ -402,15 +402,11 @@ async def get_fund_active_share(
     instrument_id: uuid.UUID,
     session: SessionDep,
     datalake: DatalakeDep,
-    benchmark_id: Annotated[
-        uuid.UUID | None,
-        Query(description="Benchmark fund UUID with N-PORT holdings."),
-    ] = None,
 ) -> FundActiveShareResponse:
-    """Tier B holdings-based active share against a benchmark fund."""
+    """Tier B holdings-based active share against the fund's primary benchmark."""
     try:
         payload = await fund_dossier_tier_b.fetch_fund_active_share(
-            session, datalake, instrument_id, benchmark_id=benchmark_id
+            session, datalake, instrument_id
         )
     except (
         fund_dossier_tier_b.InvalidBenchmarkError,

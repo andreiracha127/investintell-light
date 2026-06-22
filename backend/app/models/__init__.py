@@ -9,6 +9,14 @@ SQLAlchemy's metadata is populated before Alembic introspects it.
 
 from app.models.base import Base
 from app.models.eod_price import EodPrice
+from app.models.fund_analytics_db_first import (
+    FundActiveShareRow,
+    FundFactorExposureLatest,
+    FundInstitutionalRevealLatest,
+    FundStyleBiasRow,
+    FundStyleDriftRow,
+    FundTopHoldingRow,
+)
 from app.models.fund import (
     Fund,
     FundBenchmarkCandidate,
@@ -36,12 +44,18 @@ __all__ = [
     "Base",
     "EodPrice",
     "Fund",
+    "FundActiveShareRow",
     "FundBenchmarkCandidate",
     "FundClass",
+    "FundFactorExposureLatest",
     "FundHolding",
+    "FundInstitutionalRevealLatest",
     "FundListRow",
     "FundNav",
     "FundRiskLatest",
+    "FundStyleBiasRow",
+    "FundStyleDriftRow",
+    "FundTopHoldingRow",
     "FundamentalsSnapshot",
     "Instrument",
     "NewsItem",

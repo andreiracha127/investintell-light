@@ -20,6 +20,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics import simple_returns
+from app.core.config import get_settings
 from app.models.fund import Fund, FundHolding
 from app.schemas.analysis import SeriesPoint
 from app.schemas.fund_analysis import (
@@ -363,28 +364,104 @@ async def _style_bias(
     return row["as_of"], biases, None
 
 
+async def _style_bias_db_first(
+    datalake: AsyncSession,
+    instrument_id: uuid.UUID,
+) -> tuple[dt.date | None, list[FundStyleBias], EmptyState | None]:
+    """Style-bias z-scores lidos de fund_style_bias_v (latest as_of do fundo).
+
+    Mesmo shape de _style_bias; o cálculo z = (value−avg)/stddev já vive na view.
+    """
+    try:
+        rows = (
+            await datalake.execute(
+                text(
+                    """
+                    WITH latest AS (
+                        SELECT max(as_of) AS as_of
+                        FROM fund_style_bias_v
+                        WHERE instrument_id = :iid
+                    )
+                    SELECT as_of, factor, value, z_score
+                    FROM fund_style_bias_v
+                    WHERE instrument_id = :iid
+                      AND as_of = (SELECT as_of FROM latest)
+                    """
+                ),
+                {"iid": str(instrument_id)},
+            )
+        ).mappings().all()
+    except SQLAlchemyError as exc:
+        raise _source_error("fund_style_bias_v", exc) from exc
+    if not rows:
+        return (
+            None,
+            [],
+            _empty(
+                "No equity_characteristics_monthly row for this fund.",
+                "fund_style_bias_v",
+            ),
+        )
+    as_of = rows[0]["as_of"]
+    biases = [
+        FundStyleBias(
+            factor=row["factor"],
+            value=_float(row["value"]),
+            z_score=_float(row["z_score"]),
+            as_of=row["as_of"],
+        )
+        for row in rows
+    ]
+    return as_of, biases, None
+
+
 async def fetch_fund_factors(
     session: AsyncSession,
     datalake: AsyncSession,
     instrument_id: uuid.UUID,
+    *,
+    use_db_first: bool | None = None,
 ) -> FundFactorsResponse | None:
     fund = await _fund_or_none(session, instrument_id)
     if fund is None:
         return None
+    if use_db_first is None:
+        use_db_first = get_settings().use_fund_analytics_db_first
 
-    first_date, last_date = await select_nav_date_bounds(session, instrument_id)
-    nav = pd.Series(dtype=float)
-    if first_date is not None and last_date is not None:
-        nav = build_nav_series(await select_nav_rows(session, instrument_id, first_date, last_date))
-    monthly_returns = (
-        nav.resample("ME").last().pct_change().dropna()
-        if len(nav)
-        else pd.Series(dtype=float)
-    )
-
-    factor_as_of, factors = await _latest_factor_fit(datalake)
-    sensitivities = _ols_market_sensitivities(monthly_returns, factors)
-    style_as_of, style_bias, style_empty = await _style_bias(datalake, instrument_id)
+    if use_db_first:
+        rows = (
+            await datalake.execute(
+                text(
+                    """
+                    SELECT factor, beta, t_stat, significance, as_of
+                    FROM fund_factor_exposures_latest_mv
+                    WHERE instrument_id = :iid
+                    ORDER BY factor
+                    """
+                ),
+                {"iid": str(instrument_id)},
+            )
+        ).mappings().all()
+        sensitivities = [
+            FundMarketSensitivity(
+                factor=r["factor"], beta=_float(r["beta"]),
+                t_stat=_float(r["t_stat"]), significance=r["significance"],
+            )
+            for r in rows
+        ]
+        factor_as_of = rows[0]["as_of"] if rows else None
+        style_as_of, style_bias, style_empty = await _style_bias_db_first(datalake, instrument_id)
+    else:
+        first_date, last_date = await select_nav_date_bounds(session, instrument_id)
+        nav = pd.Series(dtype=float)
+        if first_date is not None and last_date is not None:
+            nav = build_nav_series(await select_nav_rows(session, instrument_id, first_date, last_date))
+        monthly_returns = (
+            nav.resample("ME").last().pct_change().dropna() if len(nav) else pd.Series(dtype=float)
+        )
+        factor_as_of, factors = await _latest_factor_fit(datalake)
+        sensitivities = _ols_market_sensitivities(monthly_returns, factors)
+        style_as_of, style_bias, style_empty = await _style_bias(datalake, instrument_id)
 
     metadata = [
         FundSourceMetadata(
@@ -411,6 +488,99 @@ async def fetch_fund_factors(
 
 
 async def fetch_fund_style_drift(
+    session: AsyncSession,
+    datalake: AsyncSession,
+    instrument_id: uuid.UUID,
+    *,
+    quarters: int,
+    use_db_first: bool | None = None,
+) -> FundStyleDriftResponse | None:
+    """Historical N-PORT sector drift. DB-first lê de fund_style_drift_mv
+    (mesma agregação, weight em percent-points → /100 aqui); fallback ao legado.
+    """
+    if use_db_first is None:
+        use_db_first = get_settings().use_fund_analytics_db_first
+    if not use_db_first:
+        return await _fetch_fund_style_drift_legacy(
+            session, datalake, instrument_id, quarters=quarters
+        )
+
+    fund = await _fund_or_none(session, instrument_id)
+    if fund is None:
+        return None
+    try:
+        rows = (
+            await datalake.execute(
+                text(
+                    """
+                    WITH q AS (
+                        SELECT DISTINCT report_date
+                        FROM fund_style_drift_mv
+                        WHERE series_id = :series_id
+                        ORDER BY report_date DESC
+                        LIMIT :quarters
+                    )
+                    SELECT m.report_date, m.sector, m.weight
+                    FROM fund_style_drift_mv m
+                    JOIN q ON q.report_date = m.report_date
+                    WHERE m.series_id = :series_id
+                    ORDER BY m.report_date ASC, m.weight DESC NULLS LAST
+                    """
+                ),
+                {"series_id": fund.series_id, "quarters": quarters},
+            )
+        ).mappings().all()
+    except SQLAlchemyError as exc:
+        raise _source_error("fund_style_drift_mv", exc) from exc
+
+    periods: list[FundStyleDriftPeriod] = []
+    current_date: dt.date | None = None
+    current_weights: list[FundStyleSectorWeight] = []
+    for row in rows:
+        report_date = row["report_date"]
+        if report_date != current_date:
+            if current_date is not None:
+                periods.append(
+                    FundStyleDriftPeriod(
+                        report_date=current_date,
+                        quarter=f"{current_date.year}Q{((current_date.month - 1) // 3) + 1}",
+                        sectors=current_weights,
+                    )
+                )
+            current_date = report_date
+            current_weights = []
+        current_weights.append(
+            FundStyleSectorWeight(
+                sector=row["sector"],
+                weight=(
+                    (_float(row["weight"]) or 0.0) / 100.0
+                    if row["weight"] is not None
+                    else None
+                ),
+            )
+        )
+    if current_date is not None:
+        periods.append(
+            FundStyleDriftPeriod(
+                report_date=current_date,
+                quarter=f"{current_date.year}Q{((current_date.month - 1) // 3) + 1}",
+                sectors=current_weights,
+            )
+        )
+
+    return FundStyleDriftResponse(
+        instrument_id=instrument_id,
+        series_id=fund.series_id,
+        periods=periods,
+        empty_state=(
+            None
+            if periods
+            else _empty("No historical N-PORT holdings for this fund series.", "fund_style_drift_mv")
+        ),
+    )
+
+
+async def _fetch_fund_style_drift_legacy(
     session: AsyncSession,
     datalake: AsyncSession,
     instrument_id: uuid.UUID,
@@ -1364,7 +1534,73 @@ _REVERSE_LOOKUP_SQL = """
                     """
 
 
+def _date_or_none(value: str | None) -> dt.date | None:
+    return dt.date.fromisoformat(value[:10]) if value else None
+
+
 async def fetch_fund_institutional_reveal(
+    session: AsyncSession,
+    datalake: AsyncSession,
+    instrument_id: uuid.UUID,
+    *,
+    use_db_first: bool | None = None,
+) -> FundInstitutionalRevealResponse | None:
+    if use_db_first is None:
+        use_db_first = get_settings().use_fund_analytics_db_first
+    if not use_db_first:
+        return await _fetch_fund_institutional_reveal_legacy(
+            session, datalake, instrument_id
+        )
+
+    fund = await _fund_or_none(session, instrument_id)
+    if fund is None:
+        return None
+    row = (
+        await datalake.execute(
+            text(
+                """
+                SELECT as_of, payload
+                FROM fund_institutional_reveal_latest_mv
+                WHERE series_id = :series_id
+                """
+            ),
+            {"series_id": fund.series_id},
+        )
+    ).mappings().first()
+    if row is None:
+        return FundInstitutionalRevealResponse(
+            instrument_id=fund.instrument_id,
+            series_id=fund.series_id,
+            fund_name=fund.name,
+            holdings_report_date=None,
+            period=None,
+            top_holders=[],
+            overlap=[],
+            holder_network=_empty_network(fund),
+            empty_state=_empty(
+                "No institutional-reveal artifact for this fund series.",
+                "fund_institutional_reveal_latest_mv",
+            ),
+        )
+    payload = row["payload"]
+    network = payload["holder_network"]
+    return FundInstitutionalRevealResponse(
+        instrument_id=fund.instrument_id,
+        series_id=fund.series_id,
+        fund_name=fund.name,
+        holdings_report_date=row["as_of"],
+        period=_date_or_none(payload.get("period")),
+        top_holders=[InstitutionalHolder(**h) for h in payload["top_holders"]],
+        overlap=[InstitutionalOverlapSecurity(**o) for o in payload["overlap"]],
+        holder_network=HolderNetwork(
+            nodes=[HolderNetworkNode(**n) for n in network["nodes"]],
+            edges=[HolderNetworkEdge(**e) for e in network["edges"]],
+        ),
+        empty_state=None,
+    )
+
+
+async def _fetch_fund_institutional_reveal_legacy(
     session: AsyncSession,
     datalake: AsyncSession,
     instrument_id: uuid.UUID,
@@ -1775,6 +2011,62 @@ async def fetch_fund_active_share(
     datalake: AsyncSession,
     instrument_id: uuid.UUID,
     *,
+    use_db_first: bool | None = None,
+) -> FundActiveShareResponse | None:
+    """Active share vs the fund's PRIMARY benchmark (spec §6 A5 — benchmark_id
+    removido). DB-first lê de fund_active_share_mv. Com a flag off, cai ao corpo
+    legado (benchmark_id=None → empty-state), preservado só para a transição.
+    """
+    if use_db_first is None:
+        use_db_first = get_settings().use_fund_analytics_db_first
+    if not use_db_first:
+        return await _fetch_fund_active_share_legacy(
+            session, datalake, instrument_id, benchmark_id=None
+        )
+
+    fund = await _fund_or_none(session, instrument_id)
+    if fund is None:
+        return None
+    row = (
+        await datalake.execute(
+            text(
+                """
+                SELECT series_id, benchmark_series_id, benchmark_name,
+                       active_share, overlap, n_portfolio, n_benchmark,
+                       n_common, as_of
+                FROM fund_active_share_mv
+                WHERE series_id = :series_id
+                """
+            ),
+            {"series_id": fund.series_id},
+        )
+    ).mappings().first()
+    if row is None:
+        return FundActiveShareResponse(
+            instrument_id=instrument_id,
+            empty_state=_empty(
+                "No primary benchmark with N-PORT holdings for this fund.",
+                "fund_active_share_mv",
+            ),
+        )
+    return FundActiveShareResponse(
+        instrument_id=instrument_id,
+        benchmark_name=row["benchmark_name"],
+        benchmark_series_id=row["benchmark_series_id"],
+        active_share=_float(row["active_share"]),
+        overlap=_float(row["overlap"]),
+        n_portfolio_positions=row["n_portfolio"] or 0,
+        n_benchmark_positions=row["n_benchmark"] or 0,
+        n_common_positions=row["n_common"] or 0,
+        as_of_date=row["as_of"],
+    )
+
+
+async def _fetch_fund_active_share_legacy(
+    session: AsyncSession,
+    datalake: AsyncSession,
+    instrument_id: uuid.UUID,
+    *,
     benchmark_id: uuid.UUID | None,
 ) -> FundActiveShareResponse | None:
     fund = await _fund_or_none(session, instrument_id)
@@ -1792,7 +2084,6 @@ async def fetch_fund_active_share(
     if benchmark_target is None or not benchmark_target.series_ids:
         return FundActiveShareResponse(
             instrument_id=instrument_id,
-            benchmark_id=benchmark_id,
             benchmark_name=benchmark_target.name if benchmark_target else None,
             empty_state=_empty(
                 "Benchmark instrument could not be resolved to N-PORT holdings.",
@@ -1808,7 +2099,6 @@ async def fetch_fund_active_share(
     if not portfolio.weights:
         return FundActiveShareResponse(
             instrument_id=instrument_id,
-            benchmark_id=benchmark_id,
             benchmark_name=benchmark_target.name,
             as_of_date=portfolio.as_of,
             empty_state=_empty("Portfolio fund has no N-PORT holdings.", "sec_nport_holdings"),
@@ -1816,7 +2106,6 @@ async def fetch_fund_active_share(
     if not benchmark_weights.weights:
         return FundActiveShareResponse(
             instrument_id=instrument_id,
-            benchmark_id=benchmark_id,
             benchmark_name=benchmark_target.name,
             n_portfolio_positions=len(portfolio.weights),
             as_of_date=portfolio.as_of,
@@ -1830,7 +2119,6 @@ async def fetch_fund_active_share(
     )
     return FundActiveShareResponse(
         instrument_id=instrument_id,
-        benchmark_id=benchmark_id,
         benchmark_name=benchmark_target.name,
         active_share=active_share,
         overlap=overlap,

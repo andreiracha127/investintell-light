@@ -105,6 +105,12 @@ class Settings(BaseSettings):
     # *_latest_mv (com fallback à tabela base p/ entidades ainda ausentes).
     use_latest_mv_prices: bool = False
 
+    # DB-first Grupo A: quando True, os endpoints de fund analytics estáveis
+    # (factors, style-drift, institutional-reveal, holdings/top, active-share)
+    # leem dos read-models db-first (MV/view/worker), com fallback ao caminho
+    # legado por entidade ausente. Default off até validação em staging.
+    use_fund_analytics_db_first: bool = False
+
 
 @functools.lru_cache
 def get_settings() -> Settings:
