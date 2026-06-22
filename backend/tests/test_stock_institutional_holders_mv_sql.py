@@ -17,7 +17,7 @@ def test_schema_defines_b1_mv_with_unique_index_and_name_resolution():
     assert "lpad(h.cik, 10, '0')" in sql
     assert "COALESCE(fn.filer_name, mgr.firm_name, 'CIK ' || h.cik)" in sql
     assert "sec_13f_filer_name" in sql
-    assert "ORDER BY m.aum_total DESC NULLS LAST" in sql
+    assert "ORDER BY mm.aum_total DESC NULLS LAST" in sql
     # entry_date vem da MV sec_13f_entry.
     assert "sec_13f_entry" in sql
     # entry_price/current_price ficam em eod_prices (price_latest_mv NÃO serve).
