@@ -913,7 +913,7 @@ export interface paths {
         };
         /**
          * Get Fund Active Share
-         * @description Tier B holdings-based active share against a benchmark fund.
+         * @description Tier B holdings-based active share against the fund's primary benchmark.
          */
         get: operations["get_fund_active_share_funds__instrument_id__active_share_get"];
         put?: never;
@@ -2291,7 +2291,7 @@ export interface components {
         };
         /**
          * FundActiveShareResponse
-         * @description Holdings-based active share versus a benchmark fund.
+         * @description Holdings-based active share versus the fund's PRIMARY benchmark.
          */
         FundActiveShareResponse: {
             /**
@@ -2299,10 +2299,10 @@ export interface components {
              * Format: uuid
              */
             instrument_id: string;
-            /** Benchmark Id */
-            benchmark_id?: string | null;
             /** Benchmark Name */
             benchmark_name?: string | null;
+            /** Benchmark Series Id */
+            benchmark_series_id?: string | null;
             /** Active Share */
             active_share?: number | null;
             /** Overlap */
@@ -7717,10 +7717,7 @@ export interface operations {
     };
     get_fund_active_share_funds__instrument_id__active_share_get: {
         parameters: {
-            query?: {
-                /** @description Benchmark fund UUID with N-PORT holdings. */
-                benchmark_id?: string | null;
-            };
+            query?: never;
             header?: never;
             path: {
                 instrument_id: string;

@@ -395,9 +395,8 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
   });
 
   const activeShareQuery = useQuery({
-    queryKey: dossierQueryKeys.activeShare(instrumentId, benchmarkQuery),
-    queryFn: ({ signal }) =>
-      fetchFundActiveShare(instrumentId, benchmarkQuery, signal),
+    queryKey: dossierQueryKeys.activeShare(instrumentId),
+    queryFn: ({ signal }) => fetchFundActiveShare(instrumentId, signal),
     staleTime: FUND_DOSSIER_STALE_TIME_MS["active-share"],
     enabled: isHoldingsTab,
     retry: retryPolicy,
