@@ -1534,7 +1534,73 @@ _REVERSE_LOOKUP_SQL = """
                     """
 
 
+def _date_or_none(value: str | None) -> dt.date | None:
+    return dt.date.fromisoformat(value[:10]) if value else None
+
+
 async def fetch_fund_institutional_reveal(
+    session: AsyncSession,
+    datalake: AsyncSession,
+    instrument_id: uuid.UUID,
+    *,
+    use_db_first: bool | None = None,
+) -> FundInstitutionalRevealResponse | None:
+    if use_db_first is None:
+        use_db_first = get_settings().use_fund_analytics_db_first
+    if not use_db_first:
+        return await _fetch_fund_institutional_reveal_legacy(
+            session, datalake, instrument_id
+        )
+
+    fund = await _fund_or_none(session, instrument_id)
+    if fund is None:
+        return None
+    row = (
+        await datalake.execute(
+            text(
+                """
+                SELECT as_of, payload
+                FROM fund_institutional_reveal_latest_mv
+                WHERE series_id = :series_id
+                """
+            ),
+            {"series_id": fund.series_id},
+        )
+    ).mappings().first()
+    if row is None:
+        return FundInstitutionalRevealResponse(
+            instrument_id=fund.instrument_id,
+            series_id=fund.series_id,
+            fund_name=fund.name,
+            holdings_report_date=None,
+            period=None,
+            top_holders=[],
+            overlap=[],
+            holder_network=_empty_network(fund),
+            empty_state=_empty(
+                "No institutional-reveal artifact for this fund series.",
+                "fund_institutional_reveal_latest_mv",
+            ),
+        )
+    payload = row["payload"]
+    network = payload["holder_network"]
+    return FundInstitutionalRevealResponse(
+        instrument_id=fund.instrument_id,
+        series_id=fund.series_id,
+        fund_name=fund.name,
+        holdings_report_date=row["as_of"],
+        period=_date_or_none(payload.get("period")),
+        top_holders=[InstitutionalHolder(**h) for h in payload["top_holders"]],
+        overlap=[InstitutionalOverlapSecurity(**o) for o in payload["overlap"]],
+        holder_network=HolderNetwork(
+            nodes=[HolderNetworkNode(**n) for n in network["nodes"]],
+            edges=[HolderNetworkEdge(**e) for e in network["edges"]],
+        ),
+        empty_state=None,
+    )
+
+
+async def _fetch_fund_institutional_reveal_legacy(
     session: AsyncSession,
     datalake: AsyncSession,
     instrument_id: uuid.UUID,
