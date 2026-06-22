@@ -20,6 +20,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics import simple_returns
+from app.core.config import get_settings
 from app.models.fund import Fund, FundHolding
 from app.schemas.analysis import SeriesPoint
 from app.schemas.fund_analysis import (
@@ -411,6 +412,99 @@ async def fetch_fund_factors(
 
 
 async def fetch_fund_style_drift(
+    session: AsyncSession,
+    datalake: AsyncSession,
+    instrument_id: uuid.UUID,
+    *,
+    quarters: int,
+    use_db_first: bool | None = None,
+) -> FundStyleDriftResponse | None:
+    """Historical N-PORT sector drift. DB-first lê de fund_style_drift_mv
+    (mesma agregação, weight em percent-points → /100 aqui); fallback ao legado.
+    """
+    if use_db_first is None:
+        use_db_first = get_settings().use_fund_analytics_db_first
+    if not use_db_first:
+        return await _fetch_fund_style_drift_legacy(
+            session, datalake, instrument_id, quarters=quarters
+        )
+
+    fund = await _fund_or_none(session, instrument_id)
+    if fund is None:
+        return None
+    try:
+        rows = (
+            await datalake.execute(
+                text(
+                    """
+                    WITH q AS (
+                        SELECT DISTINCT report_date
+                        FROM fund_style_drift_mv
+                        WHERE series_id = :series_id
+                        ORDER BY report_date DESC
+                        LIMIT :quarters
+                    )
+                    SELECT m.report_date, m.sector, m.weight
+                    FROM fund_style_drift_mv m
+                    JOIN q ON q.report_date = m.report_date
+                    WHERE m.series_id = :series_id
+                    ORDER BY m.report_date ASC, m.weight DESC NULLS LAST
+                    """
+                ),
+                {"series_id": fund.series_id, "quarters": quarters},
+            )
+        ).mappings().all()
+    except SQLAlchemyError as exc:
+        raise _source_error("fund_style_drift_mv", exc) from exc
+
+    periods: list[FundStyleDriftPeriod] = []
+    current_date: dt.date | None = None
+    current_weights: list[FundStyleSectorWeight] = []
+    for row in rows:
+        report_date = row["report_date"]
+        if report_date != current_date:
+            if current_date is not None:
+                periods.append(
+                    FundStyleDriftPeriod(
+                        report_date=current_date,
+                        quarter=f"{current_date.year}Q{((current_date.month - 1) // 3) + 1}",
+                        sectors=current_weights,
+                    )
+                )
+            current_date = report_date
+            current_weights = []
+        current_weights.append(
+            FundStyleSectorWeight(
+                sector=row["sector"],
+                weight=(
+                    (_float(row["weight"]) or 0.0) / 100.0
+                    if row["weight"] is not None
+                    else None
+                ),
+            )
+        )
+    if current_date is not None:
+        periods.append(
+            FundStyleDriftPeriod(
+                report_date=current_date,
+                quarter=f"{current_date.year}Q{((current_date.month - 1) // 3) + 1}",
+                sectors=current_weights,
+            )
+        )
+
+    return FundStyleDriftResponse(
+        instrument_id=instrument_id,
+        series_id=fund.series_id,
+        periods=periods,
+        empty_state=(
+            None
+            if periods
+            else _empty("No historical N-PORT holdings for this fund series.", "fund_style_drift_mv")
+        ),
+    )
+
+
+async def _fetch_fund_style_drift_legacy(
     session: AsyncSession,
     datalake: AsyncSession,
     instrument_id: uuid.UUID,
