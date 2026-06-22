@@ -105,6 +105,10 @@ class Settings(BaseSettings):
     # *_latest_mv (com fallback à tabela base p/ entidades ainda ausentes).
     use_latest_mv_prices: bool = False
 
+    # DB-first Grupo B: quando True, holders/holders-funds/reverse-lookup leem
+    # dos MVs pré-computados (com fallback ao SQL legado p/ entidades ausentes).
+    use_holders_db_first: bool = False
+
 
 @functools.lru_cache
 def get_settings() -> Settings:
