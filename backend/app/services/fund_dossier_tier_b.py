@@ -20,7 +20,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics import simple_returns
+from app.core.config import get_settings
 from app.models.fund import Fund, FundHolding
+from app.models.stock_holders_mv import HoldingReverseLookupRow
 from app.schemas.analysis import SeriesPoint
 from app.schemas.fund_analysis import (
     EmptyState,
@@ -1468,34 +1470,12 @@ async def _fund_exposures_for_cusip(
     ]
 
 
-async def fetch_holding_reverse_lookup(
-    session: AsyncSession,
-    datalake: AsyncSession,
-    cusip: str,
+def _build_reverse_lookup_response(
+    normalized: str,
+    institution_rows: Sequence[Mapping[str, Any]],
+    fund_exposures: list[ReverseLookupFundExposure],
+    source_empty_state: EmptyState | None,
 ) -> HoldingReverseLookupResponse:
-    normalized = _normalize_cusip(cusip)
-    if normalized is None:
-        raise ValueError(f"Invalid CUSIP {cusip!r}.")
-
-    fund_exposures = await _fund_exposures_for_cusip(session, normalized)
-    empty_state: EmptyState | None = None
-    try:
-        rows = (
-            await datalake.execute(
-                text(_REVERSE_LOOKUP_SQL),
-                {"cusip": normalized},
-            )
-        ).mappings().all()
-    except SQLAlchemyError as exc:
-        if _is_missing_relation(exc):
-            rows = []
-            empty_state = _empty(
-                "SEC 13F holdings tables are not deployed yet.",
-                "sec_13f_holdings",
-            )
-        else:
-            raise _source_error("sec_13f_holdings", exc) from exc
-
     institutions = [
         ReverseLookupInstitution(
             cik=row["cik"],
@@ -1505,18 +1485,23 @@ async def fetch_holding_reverse_lookup(
             period=row["period"],
             report_date=row["report_date"],
         )
-        for row in rows
+        for row in institution_rows
     ]
     security_name = (
-        rows[0]["name"]
-        if rows
+        institution_rows[0]["name"]
+        if institution_rows
         else (fund_exposures[0].issuer_name if fund_exposures else None)
     )
-    period = rows[0]["period"] if rows else None
+    period = institution_rows[0]["period"] if institution_rows else None
+    empty_state = source_empty_state
     if empty_state is None and not institutions:
-        empty_state = _empty("No 13F institutional holders matched this CUSIP.", "sec_13f_holdings")
+        empty_state = _empty(
+            "No 13F institutional holders matched this CUSIP.", "sec_13f_holdings"
+        )
     if not institutions and not fund_exposures:
-        empty_state = _empty("No fund exposure or 13F institutional holder matched this CUSIP.")
+        empty_state = _empty(
+            "No fund exposure or 13F institutional holder matched this CUSIP."
+        )
     return HoldingReverseLookupResponse(
         cusip=normalized,
         security_name=security_name,
@@ -1524,6 +1509,95 @@ async def fetch_holding_reverse_lookup(
         institutions=institutions,
         fund_exposures=fund_exposures,
         empty_state=empty_state,
+    )
+
+
+async def _reverse_lookup_institutions_legacy(
+    datalake: AsyncSession, normalized: str
+) -> tuple[list[Mapping[str, Any]], EmptyState | None]:
+    try:
+        rows = (
+            await datalake.execute(text(_REVERSE_LOOKUP_SQL), {"cusip": normalized})
+        ).mappings().all()
+    except SQLAlchemyError as exc:
+        if _is_missing_relation(exc):
+            return [], _empty(
+                "SEC 13F holdings tables are not deployed yet.", "sec_13f_holdings"
+            )
+        raise _source_error("sec_13f_holdings", exc) from exc
+    return list(rows), None
+
+
+async def fetch_holding_reverse_lookup(
+    session: AsyncSession,
+    datalake: AsyncSession,
+    cusip: str,
+    *,
+    use_db_first: bool | None = None,
+) -> HoldingReverseLookupResponse:
+    """Institutional + fund holders of a CUSIP (reverse lookup).
+
+    SPLIT: the fund-exposure side (fund_holdings/funds_v) is ALWAYS read
+    on-demand from the app DB — it is an org-scoped dynamic catalogue not
+    materialized in this migration. The 13F institutional side reads from
+    holding_reverse_lookup_mv (datalake) when use_holders_db_first is on, with a
+    fallback to the legacy hypertable SQL for CUSIPs absent from the MV (covers
+    refresh lag and the MV not yet being deployed). The MV is refreshed on a cron
+    by the matview_refresh worker, so a freshly-ingested 13F holding surfaces
+    only after the next refresh; the institution reshape is the same helper for
+    both paths, so payloads are identical. Freshness is exposed to the frontend
+    via the response period/report_date fields.
+    """
+    normalized = _normalize_cusip(cusip)
+    if normalized is None:
+        raise ValueError(f"Invalid CUSIP {cusip!r}.")
+    if use_db_first is None:
+        use_db_first = get_settings().use_holders_db_first
+
+    # Lado de exposições de fundo: SEMPRE on-demand no app DB (catálogo dinâmico,
+    # não materializado nesta migração — split documentado no plano/spec §7 B3).
+    fund_exposures = await _fund_exposures_for_cusip(session, normalized)
+
+    # Lado institucional: MV quando habilitado, com fallback ao SQL legado.
+    institution_rows: list[Mapping[str, Any]] = []
+    source_empty_state: EmptyState | None = None
+    if use_db_first:
+        try:
+            rows = (
+                await datalake.execute(
+                    select(
+                        HoldingReverseLookupRow.cik,
+                        HoldingReverseLookupRow.manager_name,
+                        HoldingReverseLookupRow.period,
+                        HoldingReverseLookupRow.report_date,
+                        HoldingReverseLookupRow.name,
+                        HoldingReverseLookupRow.value_usd,
+                        HoldingReverseLookupRow.shares,
+                    )
+                    .where(HoldingReverseLookupRow.cusip == normalized)
+                    .order_by(HoldingReverseLookupRow.value_usd.desc().nullslast())
+                    .limit(100)
+                )
+            ).mappings().all()
+        except SQLAlchemyError as exc:
+            if _is_missing_relation(exc):
+                rows = []
+            else:
+                raise _source_error("sec_13f_holdings", exc) from exc
+        if rows:
+            institution_rows = list(rows)
+        else:
+            # MV vazio/ausente → fallback ao SQL legado.
+            institution_rows, source_empty_state = (
+                await _reverse_lookup_institutions_legacy(datalake, normalized)
+            )
+    else:
+        institution_rows, source_empty_state = (
+            await _reverse_lookup_institutions_legacy(datalake, normalized)
+        )
+
+    return _build_reverse_lookup_response(
+        normalized, institution_rows, fund_exposures, source_empty_state
     )
 
 
