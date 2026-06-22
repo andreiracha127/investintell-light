@@ -47,7 +47,7 @@ from app.schemas.fund_analysis import (
     FundSectorExposure,
     FundTopHolding,
 )
-from app.services import lookthrough
+from app.services import lookthrough, series_sql
 from app.services._series import RANGE_DAYS, resample_weekly, series_points
 from app.services.funds_catalog import UNCLASSIFIED_LABEL
 from app.services.stock_analysis import lookback_pad_days
@@ -259,6 +259,106 @@ def assemble_fund_analysis(
     )
 
 
+SeriesPoint = tuple[dt.date, float]
+
+
+async def assemble_fund_analysis_sql(
+    session: AsyncSession,
+    *,
+    fund: FundIdentity,
+    range_key: RangeKey,
+    window: int,
+    start: dt.date,
+    end: dt.date,
+    last_nav: float,
+    prev_nav: float,
+    nav_visible_points: list[SeriesPoint],   # (date, nav) for date >= start, ascending
+    monthly_returns: list[SeriesPoint],      # computed in Python (kept)
+    ann_vol: float,
+    total_ret: float,
+    max_dd,                                  # DrawdownResult (kept, Python)
+    best_worst,                              # BestWorst (kept, Python)
+    max_points: int,
+) -> FundAnalysisResponse:
+    """Assemble the fund analysis payload using SQL series (no pandas math).
+
+    Moved to SQL (fn_*): drawdown series, rolling vol/sharpe, histogram, VaR-95,
+    CVaR-95. The Python-kept scalars/series (monthly returns, annualized_vol,
+    total_return, max_drawdown peak/trough dates, best/worst day, growth-of-100)
+    are intentionally NOT in the §8 series-function set; they remain pandas and
+    are passed in by the caller. growth-of-100 is plain list math here (no pandas).
+    """
+    weekly = range_key in _WEEKLY_DISPLAY_RANGES
+
+    # Growth-of-100 over visible NAV (cheap, Python list math, NOT pandas).
+    base = nav_visible_points[0][1]
+    growth = [(d, (v / base) * 100.0) for d, v in nav_visible_points]
+    growth = series_sql.week_downsample(growth) if weekly else growth
+
+    # Drawdown over the full visible NAV via fn_drawdown, sliced to date > start.
+    dd_full = await series_sql.drawdown_points(
+        session, instrument_id=fund.instrument_id, start=start, end=end
+    )
+    drawdown_pts = series_sql.slice_strict(dd_full, start)
+    drawdown_pts = series_sql.week_downsample(drawdown_pts) if weekly else drawdown_pts
+
+    vol_full, sharpe_full = await series_sql.rolling_metrics_points(
+        session, instrument_id=fund.instrument_id, window=window, start=start, end=end
+    )
+    rolling_vol = series_sql.slice_strict(vol_full, start)
+    rolling_sharpe = series_sql.slice_strict(sharpe_full, start)
+    if weekly:
+        rolling_vol = series_sql.week_downsample(rolling_vol)
+        rolling_sharpe = series_sql.week_downsample(rolling_sharpe)
+
+    histogram = await series_sql.histogram_out(
+        session, instrument_id=fund.instrument_id, bins=_HISTOGRAM_BINS,
+        start=start, end=end,
+    )
+    var_95, cvar_95 = await series_sql.var_cvar(
+        session, instrument_id=fund.instrument_id, level=0.95, start=start, end=end
+    )
+
+    _assert_series_budget(
+        max_points,
+        [
+            ("growth_of_100", growth),
+            ("drawdown", drawdown_pts),
+            ("monthly_returns", monthly_returns),
+            ("rolling_volatility", rolling_vol),
+            ("rolling_sharpe", rolling_sharpe),
+        ],
+    )
+
+    return FundAnalysisResponse(
+        params=FundAnalysisParams(
+            range=range_key, window=window, start_date=start, end_date=end
+        ),
+        header=FundAnalysisHeader(
+            instrument_id=fund.instrument_id, ticker=fund.ticker, name=fund.name,
+            last_nav=last_nav, prev_nav=prev_nav, change=last_nav - prev_nav,
+            change_pct=(last_nav - prev_nav) / prev_nav, as_of=end,
+        ),
+        growth_of_100=growth,
+        monthly_returns=monthly_returns,
+        rolling_volatility=rolling_vol,
+        rolling_sharpe=rolling_sharpe,
+        drawdown=drawdown_pts,
+        histogram=histogram,
+        stats=FundAnalysisStats(
+            annualized_volatility=ann_vol,
+            var_95=var_95,
+            cvar_95=cvar_95,
+            total_return=total_ret,
+            max_drawdown=DrawdownOut(
+                depth=max_dd.depth, peak_date=max_dd.peak_date, trough_date=max_dd.trough_date,
+            ),
+            best_day=DatedValue(date=best_worst.best_date, value=best_worst.best_return),
+            worst_day=DatedValue(date=best_worst.worst_date, value=best_worst.worst_return),
+        ),
+    )
+
+
 async def select_nav_date_bounds(
     session: AsyncSession, instrument_id: uuid.UUID
 ) -> tuple[dt.date | None, dt.date | None]:
@@ -310,13 +410,49 @@ async def fetch_fund_analysis(
     start = first_date if range_key == "MAX" else end - dt.timedelta(days=RANGE_DAYS[range_key])
     query_start = start - dt.timedelta(days=lookback_pad_days(window))
     nav = build_nav_series(await select_nav_rows(session, instrument_id, query_start, end))
-    return assemble_fund_analysis(
-        nav,
+
+    if not get_settings().use_series_db_first:
+        return assemble_fund_analysis(
+            nav,
+            fund=FundIdentity(fund.instrument_id, fund.ticker, fund.name),
+            range_key=range_key,
+            window=window,
+            start=start,
+            end=end,
+            max_points=max_points,
+        )
+
+    # SQL path: validate the same gates as the legacy assembler, compute the
+    # Python-kept scalars/series (monthly, ann_vol, total_return, max_dd,
+    # best_worst) from the in-range returns, and read the moved series via SQL.
+    if len(nav) < 2:
+        raise InsufficientFundDataError(
+            f"Only {len(nav)} NAV rows available for fund {instrument_id}."
+        )
+    start_ts = pd.Timestamp(start)
+    visible = nav[nav.index >= start_ts]
+    returns = simple_returns(nav)
+    in_range_returns = returns[returns.index > start_ts]
+    if (
+        len(visible) < 2
+        or len(in_range_returns) < MIN_IN_RANGE_RETURNS
+        or len(returns) < window
+    ):
+        raise InsufficientFundDataError(
+            f"Insufficient NAV history for fund {instrument_id} over range {range_key}."
+        )
+    nav_visible_points = [(idx.date(), float(v)) for idx, v in visible.items()]
+    return await assemble_fund_analysis_sql(
+        session,
         fund=FundIdentity(fund.instrument_id, fund.ticker, fund.name),
-        range_key=range_key,
-        window=window,
-        start=start,
-        end=end,
+        range_key=range_key, window=window, start=start, end=end,
+        last_nav=float(nav.iloc[-1]), prev_nav=float(nav.iloc[-2]),
+        nav_visible_points=nav_visible_points,
+        monthly_returns=_monthly_return_points(visible),
+        ann_vol=annualized_volatility(in_range_returns),
+        total_ret=total_return(in_range_returns),
+        max_dd=max_drawdown(visible),
+        best_worst=best_worst_day(in_range_returns),
         max_points=max_points,
     )
 

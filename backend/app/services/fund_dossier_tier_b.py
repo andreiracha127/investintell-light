@@ -57,6 +57,8 @@ from app.schemas.fund_analysis import (
     ReverseLookupFundExposure,
     ReverseLookupInstitution,
 )
+from app.core.config import get_settings
+from app.services import series_sql
 from app.services.fund_analysis import (
     FundAnalysisError,
     InsufficientFundDataError,
@@ -1185,6 +1187,81 @@ def assemble_entity_analytics(
     )
 
 
+async def assemble_entity_analytics_sql(
+    session: AsyncSession,
+    nav: pd.Series,
+    *,
+    fund: Fund,
+    window: WindowKey,
+    benchmark_nav: pd.Series | None = None,
+    benchmark_id: uuid.UUID | None = None,
+    benchmark_label: str | None = None,
+    insider_data: InsiderData | None = None,
+) -> FundEntityAnalyticsResponse:
+    """Series-only DB-first: drawdown SERIES (fn_drawdown) and distribution
+    var/cvar (fn_var_cvar) come from SQL; rolling_returns, FD histogram edges/
+    counts, skew/kurt and ALL scalars stay in Python (not in the §8 set).
+
+    The drawdown-PERIOD episode detection (_drawdown_periods) and the scalar
+    min/current drawdown stay pandas (episode extraction, not a series). The
+    distribution FD bins + skew/kurt also stay pandas; only var_95/cvar_95 are
+    replaced by the SQL fn_var_cvar over the exact visible window.
+    """
+    visible_nav = _window_nav(nav.dropna(), window)
+    if len(visible_nav) < 10:
+        raise InsufficientFundDataError(
+            f"Only {len(visible_nav)} NAV rows available for fund {fund.instrument_id}."
+        )
+    returns = simple_returns(visible_nav)
+    benchmark_returns = (
+        simple_returns(_window_nav(benchmark_nav.dropna(), window))
+        if benchmark_nav is not None and len(benchmark_nav) >= 2
+        else None
+    )
+    w_start = visible_nav.index[0].date()
+    w_end = visible_nav.index[-1].date()
+
+    dd_pts = await series_sql.drawdown_points(
+        session, instrument_id=fund.instrument_id, start=w_start, end=w_end
+    )
+    # legacy still needed for scalar min/current + drawdown-period episodes;
+    # reuse the SQL points for the emitted dates/values (parity-checked).
+    drawdown_series = _max_drawdown_series(visible_nav)  # for min/current/episodes
+
+    # Distribution: keep FD bins + skew/kurt in Python; replace var/cvar with SQL.
+    # When the legacy distribution early-returns empty (fewer than 10 in-window
+    # returns), keep it empty for parity rather than injecting SQL var/cvar.
+    base_dist = _distribution(returns)
+    if base_dist.bin_edges:
+        var_95, cvar_95 = await series_sql.var_cvar(
+            session, instrument_id=fund.instrument_id, level=0.95, start=w_start, end=w_end
+        )
+        distribution = base_dist.model_copy(update={"var_95": var_95, "cvar_95": cvar_95})
+    else:
+        distribution = base_dist
+
+    return FundEntityAnalyticsResponse(
+        instrument_id=fund.instrument_id,
+        name=fund.name,
+        as_of_date=w_end,
+        window=window,
+        risk_statistics=_risk_statistics(returns, drawdown_series, benchmark_returns),
+        drawdown=FundDrawdownAnalysis(
+            dates=[d for d, _ in dd_pts],
+            values=[v for _, v in dd_pts],
+            max_drawdown=float(drawdown_series.min()),
+            current_drawdown=float(drawdown_series.iloc[-1]),
+            worst_periods=_drawdown_periods(visible_nav),
+        ),
+        capture=_capture(returns, benchmark_returns, benchmark_id, benchmark_label),
+        rolling_returns=_rolling_returns(returns),
+        distribution=distribution,
+        return_statistics=_return_statistics(returns),
+        tail_risk=_tail_risk(returns),
+        insider_data=insider_data,
+    )
+
+
 async def _nav_for_window(
     session: AsyncSession,
     instrument_id: uuid.UUID,
@@ -1297,6 +1374,17 @@ async def fetch_fund_entity_analytics(
             session, benchmark_id, window
         )
     insider_data = await fetch_fund_insider_data(session, datalake, fund)
+    if get_settings().use_series_db_first:
+        return await assemble_entity_analytics_sql(
+            session,
+            nav,
+            fund=fund,
+            window=window,
+            benchmark_nav=benchmark_nav,
+            benchmark_id=benchmark_id,
+            benchmark_label=benchmark_label,
+            insider_data=insider_data,
+        )
     return assemble_entity_analytics(
         nav,
         fund=fund,
@@ -1936,13 +2024,22 @@ async def fetch_fund_risk_timeseries(
         raise InsufficientFundDataError(
             f"Only {len(nav)} NAV rows available in risk-timeseries window."
         )
-    drawdown = _max_drawdown_series(nav) * 100.0
     returns = simple_returns(nav)
     vol, model = _conditional_volatility(returns)
     regimes, regime_empty = await _regime_bands(datalake, nav.index[0].date(), nav.index[-1].date())
+
+    if get_settings().use_series_db_first:
+        dd_pts = await series_sql.drawdown_points(
+            session, instrument_id=instrument_id,
+            start=nav.index[0].date(), end=nav.index[-1].date(),
+        )
+        drawdown_points_out = [(d, v * 100.0) for d, v in dd_pts]
+    else:
+        drawdown_points_out = _series_points(_max_drawdown_series(nav) * 100.0)
+
     return FundRiskTimeseriesResponse(
         instrument_id=instrument_id,
-        drawdown=_series_points(drawdown),
+        drawdown=drawdown_points_out,
         conditional_volatility=vol,
         volatility_model=model,
         regime_bands=regimes,
