@@ -21,10 +21,14 @@ Error mapping (fail loud, never silently empty):
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.core.db import get_session
+from app.core.result_cache import portfolio_version_hash
+from app.models.portfolio import Portfolio
 from app.schemas.statistics import (
     BetaRequest,
     BetaResponse,
@@ -36,6 +40,12 @@ from app.schemas.statistics import (
     StockCorrelationResponse,
 )
 from app.services import statistics as statistics_service
+from app.services.statistics import (
+    _run_scenario_cached,
+    _run_stock_correlation_cached,
+    _VersionedScenario,
+    _VersionedStockCorrelation,
+)
 from app.services.stock_analysis import StockAnalysisError
 
 router = APIRouter(prefix="/statistics", tags=["statistics"])
@@ -54,10 +64,26 @@ async def scenario(
     (0.05 = 5%).
     """
     try:
+        settings = get_settings()
+        if settings.use_result_cache:
+            pf = (
+                await session.execute(
+                    select(Portfolio)
+                    .where(Portfolio.id == payload.portfolio_id)
+                    .options(selectinload(Portfolio.positions))
+                )
+            ).scalar_one_or_none()
+            if pf is not None:
+                versioned = _VersionedScenario(
+                    request=payload, portfolio_version=portfolio_version_hash(pf)
+                )
+                return await _run_scenario_cached(
+                    session, versioned, max_points=settings.price_series_max_points
+                )
         return await statistics_service.run_scenario(
             session,
             payload,
-            max_points=get_settings().price_series_max_points,
+            max_points=settings.price_series_max_points,
         )
     except StockAnalysisError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -99,6 +125,19 @@ async def stock_correlation(
 ) -> StockCorrelationResponse:
     """Pairwise correlation matrix of a portfolio's holdings (trailing window)."""
     try:
+        if get_settings().use_result_cache:
+            pf = (
+                await session.execute(
+                    select(Portfolio)
+                    .where(Portfolio.id == payload.portfolio_id)
+                    .options(selectinload(Portfolio.positions))
+                )
+            ).scalar_one_or_none()
+            if pf is not None:
+                versioned = _VersionedStockCorrelation(
+                    request=payload, portfolio_version=portfolio_version_hash(pf)
+                )
+                return await _run_stock_correlation_cached(session, versioned)
         return await statistics_service.run_stock_correlation(session, payload)
     except StockAnalysisError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

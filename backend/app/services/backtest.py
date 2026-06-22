@@ -21,6 +21,7 @@ import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.backtest import SolveFn, assemble_walk_forward_backtest
+from app.core.result_cache import cached_result
 from app.optimizer import black_litterman as bl
 from app.optimizer import data as optimizer_data
 from app.optimizer import engine
@@ -121,6 +122,7 @@ def _solve_fn_for(
     return solve
 
 
+@cached_result("backtest_walk_forward")
 async def run_walk_forward_backtest(
     session: AsyncSession, payload: WalkForwardRequest
 ) -> WalkForwardResponse:
