@@ -105,6 +105,12 @@ class Settings(BaseSettings):
     # *_latest_mv (com fallback à tabela base p/ entidades ainda ausentes).
     use_latest_mv_prices: bool = False
 
+    # DB-first Group C: when True, the interactive series endpoints
+    # (funds/stock analysis, entity-analytics series, risk-timeseries) compute
+    # rolling/distribution/drawdown/VaR-CVaR series via on-demand SQL functions
+    # instead of pandas. Legacy pandas path runs when False (default).
+    use_series_db_first: bool = False
+
 
 @functools.lru_cache
 def get_settings() -> Settings:
