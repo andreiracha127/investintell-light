@@ -1,0 +1,20 @@
+# Railway deploy config for the proxy-ETF EOD refresh CRON (not always-on).
+# A separate Railway service points at this file via `railway_config_file`
+# (like railway.api.toml for the API). Same image/repo as the API service
+# (deploys from backend/), but runs the curated proxy-ETF refresh once a day
+# instead of uvicorn. Needs the same env as the API: DATABASE_URL (the Tiger
+# data-lake DSN) and TIINGO_API_KEY.
+#
+# Schedule: 06:00 UTC — alongside the universe/instrument ingests, after the US
+# close has consolidated. The cagg_eod_daily continuous aggregate then
+# re-materialises via its own TimescaleDB refresh policy (daily) — no refresh
+# is issued here.
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# startCommand runs without a shell on Railway; no $PORT expansion needed here.
+startCommand = "uv run --no-sync python scripts/refresh_proxy_etf_eod.py"
+restartPolicyType = "never"
+cronSchedule = "0 6 * * *"

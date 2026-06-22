@@ -117,44 +117,22 @@ async def _try_ingest(
     return None
 
 
-async def run_backfill(
+async def process_ticker_list(
     session: AsyncSession,
     client: TiingoClient,
+    todo: list[str],
     *,
-    limit: int | None = None,
-    tickers: list[str] | None = None,
-    staleness_hours: float | None = None,
+    staleness_hours: float,
 ) -> BackfillReport:
-    """Backfill EOD prices for all active universe constituents.
+    """Ingest an explicit, ordered ticker list (shared backfill core).
 
-    Args:
-        session: Async DB session (per-ticker commit semantics live inside
-            ``ingest_one_ticker``; status marks commit immediately too).
-        client: The shared TiingoClient (rate limiter governs every request).
-        limit: Optional cap on the number of tickers processed (testing).
-        tickers: Optional explicit subset (testing); normalized to uppercase.
-        staleness_hours: Freshness window override; defaults to settings —
-            tickers fetched within the window are skipped, so re-running the
-            backfill is cheap and idempotent.
+    The same per-ticker incremental ingest, freshness skip, per-ticker failure
+    tolerance and one end-of-run retry pass used by both the universe warmer
+    (``run_backfill``) and the proxy-ETF refresh (``app.sync.proxy_etf``). The
+    caller decides *which* tickers (universe query vs curated list).
     """
-    if staleness_hours is None:
-        staleness_hours = get_settings().eod_staleness_hours
-
-    stmt = (
-        select(UniverseConstituent.ticker)
-        .where(UniverseConstituent.status == "active")
-        .order_by(UniverseConstituent.ticker)
-    )
-    if tickers:
-        wanted = [t.strip().upper() for t in tickers if t.strip()]
-        stmt = stmt.where(UniverseConstituent.ticker.in_(wanted))
-    if limit is not None:
-        stmt = stmt.limit(limit)
-    result = await session.execute(stmt)
-    todo: list[str] = list(result.scalars().all())
-
     report = BackfillReport(total_considered=len(todo))
-    logger.info("Backfill: %d active constituents to process", len(todo))
+    logger.info("Backfill: %d tickers to process", len(todo))
 
     today = dt.date.today()
     retry_queue: list[str] = []
@@ -212,3 +190,44 @@ async def run_backfill(
         select(func.count()).select_from(EodPrice)
     )
     return report
+
+
+async def run_backfill(
+    session: AsyncSession,
+    client: TiingoClient,
+    *,
+    limit: int | None = None,
+    tickers: list[str] | None = None,
+    staleness_hours: float | None = None,
+) -> BackfillReport:
+    """Backfill EOD prices for all active universe constituents.
+
+    Args:
+        session: Async DB session (per-ticker commit semantics live inside
+            ``ingest_one_ticker``; status marks commit immediately too).
+        client: The shared TiingoClient (rate limiter governs every request).
+        limit: Optional cap on the number of tickers processed (testing).
+        tickers: Optional explicit subset (testing); normalized to uppercase.
+        staleness_hours: Freshness window override; defaults to settings —
+            tickers fetched within the window are skipped, so re-running the
+            backfill is cheap and idempotent.
+    """
+    if staleness_hours is None:
+        staleness_hours = get_settings().eod_staleness_hours
+
+    stmt = (
+        select(UniverseConstituent.ticker)
+        .where(UniverseConstituent.status == "active")
+        .order_by(UniverseConstituent.ticker)
+    )
+    if tickers:
+        wanted = [t.strip().upper() for t in tickers if t.strip()]
+        stmt = stmt.where(UniverseConstituent.ticker.in_(wanted))
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    result = await session.execute(stmt)
+    todo: list[str] = list(result.scalars().all())
+
+    return await process_ticker_list(
+        session, client, todo, staleness_hours=staleness_hours
+    )
