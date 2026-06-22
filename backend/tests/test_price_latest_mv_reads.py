@@ -56,7 +56,7 @@ async def test_mv_path_falls_back_to_base_for_missing_ticker():
     )
     assert out["AAPL"] == [(_LAST, 110.0), (_PREV, 105.0)]
     assert out["MSFT"] == [(_LAST, 420.0), (_PREV, 410.0)]
-    assert any("eod_prices" in q or "price" in q for q in session.executed)
+    assert any("eod_prices" in q for q in session.executed)
 
 
 @pytest.mark.asyncio

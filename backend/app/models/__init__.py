@@ -26,6 +26,7 @@ from app.models.portfolio import (
     PortfolioTransaction,
     Position,
 )
+from app.models.price_latest import NavLatest, PriceLatest
 from app.models.rebalance import RebalancePolicy
 from app.models.screen import Screen, ScreenFilter
 from app.models.screener_metrics import ScreenerMetrics
@@ -44,9 +45,11 @@ __all__ = [
     "FundamentalsSnapshot",
     "Instrument",
     "NewsItem",
+    "NavLatest",
     "Portfolio",
     "PortfolioNavDaily",
     "PortfolioTransaction",
+    "PriceLatest",
     "RebalancePolicy",
     "Position",
     "Screen",
