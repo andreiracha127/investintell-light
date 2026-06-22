@@ -553,13 +553,13 @@ class FundRiskTimeseriesResponse(BaseModel):
 
 
 class FundActiveShareResponse(BaseModel):
-    """Holdings-based active share versus a benchmark fund."""
+    """Holdings-based active share versus the fund's PRIMARY benchmark."""
 
     model_config = ConfigDict(extra="forbid")
 
     instrument_id: uuid.UUID
-    benchmark_id: uuid.UUID | None = None
     benchmark_name: str | None = None
+    benchmark_series_id: str | None = None
     active_share: float | None = None
     overlap: float | None = None
     n_portfolio_positions: int = 0

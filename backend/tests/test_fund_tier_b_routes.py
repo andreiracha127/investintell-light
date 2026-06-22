@@ -164,8 +164,8 @@ def _risk_ts_payload() -> FundRiskTimeseriesResponse:
 def _active_share_payload() -> FundActiveShareResponse:
     return FundActiveShareResponse(
         instrument_id=_FUND_ID,
-        benchmark_id=_BENCH_ID,
         benchmark_name="Benchmark Fund",
+        benchmark_series_id="S000000999",
         active_share=0.42,
         overlap=0.58,
         n_portfolio_positions=10,
@@ -351,14 +351,13 @@ async def test_fund_risk_timeseries_success(monkeypatch: pytest.MonkeyPatch) -> 
     assert seen["from_date"] == dt.date(2026, 1, 1)
 
 
-async def test_fund_active_share_empty_without_benchmark(
+async def test_fund_active_share_empty_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_fetch(session, datalake, instrument_id, *, benchmark_id):
-        assert benchmark_id is None
+    async def fake_fetch(session, datalake, instrument_id, *, use_db_first=None):
         return FundActiveShareResponse(
             instrument_id=instrument_id,
-            empty_state=EmptyState(reason="benchmark_id is required"),
+            empty_state=EmptyState(reason="No primary benchmark with N-PORT holdings."),
         )
 
     monkeypatch.setattr(tier_b, "fetch_fund_active_share", fake_fetch)
@@ -366,22 +365,33 @@ async def test_fund_active_share_empty_without_benchmark(
         resp = await client.get(f"/funds/{_FUND_ID}/active-share")
     assert resp.status_code == 200
     assert resp.json()["active_share"] is None
-    assert "benchmark_id" in resp.json()["empty_state"]["reason"]
+    assert "benchmark_id" not in resp.json()
 
 
 async def test_fund_active_share_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_fetch(session, datalake, instrument_id, *, benchmark_id):
-        assert benchmark_id == _BENCH_ID
+    async def fake_fetch(session, datalake, instrument_id, *, use_db_first=None):
         return _active_share_payload()
 
     monkeypatch.setattr(tier_b, "fetch_fund_active_share", fake_fetch)
     async with _client() as client:
-        resp = await client.get(
-            f"/funds/{_FUND_ID}/active-share",
-            params={"benchmark_id": str(_BENCH_ID)},
-        )
+        resp = await client.get(f"/funds/{_FUND_ID}/active-share")
     assert resp.status_code == 200
     assert resp.json()["active_share"] == 0.42
+    assert resp.json()["benchmark_series_id"] == "S000000999"
+
+
+async def test_active_share_endpoint_ignores_benchmark_id_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # benchmark_id não é mais um query param declarado → é ignorado pelo FastAPI.
+    async def fake_fetch(session, datalake, instrument_id, *, use_db_first=None):
+        return FundActiveShareResponse(instrument_id=instrument_id, active_share=0.4)
+
+    monkeypatch.setattr(tier_b, "fetch_fund_active_share", fake_fetch)
+    async with _client() as client:
+        resp = await client.get(f"/funds/{_FUND_ID}/active-share?benchmark_id=whatever")
+    assert resp.status_code == 200
+    assert "benchmark_id" not in resp.json()
 
 
 async def test_fund_institutional_reveal_success(

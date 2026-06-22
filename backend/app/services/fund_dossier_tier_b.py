@@ -1869,6 +1869,62 @@ async def fetch_fund_active_share(
     datalake: AsyncSession,
     instrument_id: uuid.UUID,
     *,
+    use_db_first: bool | None = None,
+) -> FundActiveShareResponse | None:
+    """Active share vs the fund's PRIMARY benchmark (spec §6 A5 — benchmark_id
+    removido). DB-first lê de fund_active_share_mv. Com a flag off, cai ao corpo
+    legado (benchmark_id=None → empty-state), preservado só para a transição.
+    """
+    if use_db_first is None:
+        use_db_first = get_settings().use_fund_analytics_db_first
+    if not use_db_first:
+        return await _fetch_fund_active_share_legacy(
+            session, datalake, instrument_id, benchmark_id=None
+        )
+
+    fund = await _fund_or_none(session, instrument_id)
+    if fund is None:
+        return None
+    row = (
+        await datalake.execute(
+            text(
+                """
+                SELECT series_id, benchmark_series_id, benchmark_name,
+                       active_share, overlap, n_portfolio, n_benchmark,
+                       n_common, as_of
+                FROM fund_active_share_mv
+                WHERE series_id = :series_id
+                """
+            ),
+            {"series_id": fund.series_id},
+        )
+    ).mappings().first()
+    if row is None:
+        return FundActiveShareResponse(
+            instrument_id=instrument_id,
+            empty_state=_empty(
+                "No primary benchmark with N-PORT holdings for this fund.",
+                "fund_active_share_mv",
+            ),
+        )
+    return FundActiveShareResponse(
+        instrument_id=instrument_id,
+        benchmark_name=row["benchmark_name"],
+        benchmark_series_id=row["benchmark_series_id"],
+        active_share=_float(row["active_share"]),
+        overlap=_float(row["overlap"]),
+        n_portfolio_positions=row["n_portfolio"] or 0,
+        n_benchmark_positions=row["n_benchmark"] or 0,
+        n_common_positions=row["n_common"] or 0,
+        as_of_date=row["as_of"],
+    )
+
+
+async def _fetch_fund_active_share_legacy(
+    session: AsyncSession,
+    datalake: AsyncSession,
+    instrument_id: uuid.UUID,
+    *,
     benchmark_id: uuid.UUID | None,
 ) -> FundActiveShareResponse | None:
     fund = await _fund_or_none(session, instrument_id)
@@ -1886,7 +1942,6 @@ async def fetch_fund_active_share(
     if benchmark_target is None or not benchmark_target.series_ids:
         return FundActiveShareResponse(
             instrument_id=instrument_id,
-            benchmark_id=benchmark_id,
             benchmark_name=benchmark_target.name if benchmark_target else None,
             empty_state=_empty(
                 "Benchmark instrument could not be resolved to N-PORT holdings.",
@@ -1902,7 +1957,6 @@ async def fetch_fund_active_share(
     if not portfolio.weights:
         return FundActiveShareResponse(
             instrument_id=instrument_id,
-            benchmark_id=benchmark_id,
             benchmark_name=benchmark_target.name,
             as_of_date=portfolio.as_of,
             empty_state=_empty("Portfolio fund has no N-PORT holdings.", "sec_nport_holdings"),
@@ -1910,7 +1964,6 @@ async def fetch_fund_active_share(
     if not benchmark_weights.weights:
         return FundActiveShareResponse(
             instrument_id=instrument_id,
-            benchmark_id=benchmark_id,
             benchmark_name=benchmark_target.name,
             n_portfolio_positions=len(portfolio.weights),
             as_of_date=portfolio.as_of,
@@ -1924,7 +1977,6 @@ async def fetch_fund_active_share(
     )
     return FundActiveShareResponse(
         instrument_id=instrument_id,
-        benchmark_id=benchmark_id,
         benchmark_name=benchmark_target.name,
         active_share=active_share,
         overlap=overlap,

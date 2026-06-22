@@ -2906,7 +2906,7 @@
           "funds"
         ],
         "summary": "Get Fund Active Share",
-        "description": "Tier B holdings-based active share against a benchmark fund.",
+        "description": "Tier B holdings-based active share against the fund's primary benchmark.",
         "operationId": "get_fund_active_share_funds__instrument_id__active_share_get",
         "parameters": [
           {
@@ -2918,25 +2918,6 @@
               "format": "uuid",
               "title": "Instrument Id"
             }
-          },
-          {
-            "name": "benchmark_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Benchmark fund UUID with N-PORT holdings.",
-              "title": "Benchmark Id"
-            },
-            "description": "Benchmark fund UUID with N-PORT holdings."
           }
         ],
         "responses": {
@@ -5839,18 +5820,6 @@
             "format": "uuid",
             "title": "Instrument Id"
           },
-          "benchmark_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Benchmark Id"
-          },
           "benchmark_name": {
             "anyOf": [
               {
@@ -5861,6 +5830,17 @@
               }
             ],
             "title": "Benchmark Name"
+          },
+          "benchmark_series_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Series Id"
           },
           "active_share": {
             "anyOf": [
@@ -5928,7 +5908,7 @@
           "instrument_id"
         ],
         "title": "FundActiveShareResponse",
-        "description": "Holdings-based active share versus a benchmark fund."
+        "description": "Holdings-based active share versus the fund's PRIMARY benchmark."
       },
       "FundAnalysisHeader": {
         "properties": {
