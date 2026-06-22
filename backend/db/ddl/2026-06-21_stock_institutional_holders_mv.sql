@@ -72,4 +72,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS stock_institutional_holders_mv_pk
 CREATE INDEX IF NOT EXISTS stock_institutional_holders_mv_ticker
     ON stock_institutional_holders_mv (ticker);
 
+-- Supporting index (base table): the shares_outstanding subquery matches on
+-- upper(f.ticker); without a functional index this seq-scans fundamentals_snapshot
+-- once PER holder row (~770k rows in the latest 13F period => ~4B comparisons).
+-- This functional index turns that subquery into an index probe. Apply BEFORE the
+-- initial REFRESH or the populate runs for many minutes.
+CREATE INDEX IF NOT EXISTS fundamentals_snapshot_upper_ticker_idx
+    ON fundamentals_snapshot (upper(ticker));
+
 REFRESH MATERIALIZED VIEW stock_institutional_holders_mv;
