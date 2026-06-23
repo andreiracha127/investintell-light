@@ -304,6 +304,10 @@ class FundNav(Base):
     nav: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     return_1d: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     aum_usd: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    # Return convention for return_1d: 'log' (~99.8%) or 'arithmetic' (proxy ETFs).
+    # Read by the optimizer simple-frame loader (performance path); the covariance
+    # path ignores it and keeps log.
+    return_type: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class FundHolding(Base):
