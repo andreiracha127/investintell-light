@@ -224,6 +224,52 @@ async def _load_spy_signal(
     return closes_desc, returns_aligned
 
 
+# A proxy must cover at least ~1y so the 12-1 momentum signal (252d lookback) is
+# meaningful; below this the proxy is omitted (the sleeve falls back / drops out).
+_MIN_PROXY_OBS = 252
+
+
+async def _load_proxy_returns(
+    session: AsyncSession | None,
+    tickers: list[str],
+    frame_index: "pd.Index",
+    *,
+    min_obs: int = _MIN_PROXY_OBS,
+) -> dict[str, np.ndarray]:
+    """Load each category-proxy ETF's daily returns from ``eod_prices``, reindexed
+    onto ``frame_index`` (row-aligned with the scenario matrix) — the Level-1
+    instrument for the ``regime_aware`` two-level allocator.
+
+    Generalizes ``_load_spy_signal`` to N proxies: one indexed read per ticker
+    over the optimization window. Returns ``{ticker: returns_vector}`` (length ==
+    ``len(frame_index)``); a proxy is OMITTED when the session is absent, the read
+    fails, fewer than ``min_obs`` closes come back, or the reindexed returns are
+    non-finite. Degrade-safe (never raises): an empty result tells the caller to
+    fall back to the single-level S4a path.
+    """
+    if session is None or len(frame_index) == 0:
+        return {}
+    start = frame_index.min().date()
+    end = frame_index.max().date()
+    out: dict[str, np.ndarray] = {}
+    for ticker in tickers:
+        try:
+            rows = await select_adj_close_rows(session, ticker, start, end)
+        except Exception:
+            continue
+        if len(rows) < min_obs:
+            continue
+        series = pd.Series(
+            [float(c) for _d, c in rows],
+            index=pd.DatetimeIndex([pd.Timestamp(d) for d, _c in rows]),
+        ).sort_index()
+        rets = series.pct_change().reindex(frame_index).ffill().bfill()
+        vec = rets.to_numpy(dtype=float)
+        if vec.shape[0] == len(frame_index) and np.isfinite(vec).all():
+            out[ticker] = vec
+    return out
+
+
 def _build_views(
     views: list[ViewIn], index_of: dict[str, int]
 ) -> list[bl.View]:
