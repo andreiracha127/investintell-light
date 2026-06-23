@@ -6,6 +6,7 @@ data is fabricated when a source table is empty.
 """
 
 import datetime as dt
+import json
 import math
 import re
 import uuid
@@ -15,6 +16,7 @@ from typing import Any, Literal, cast
 
 import numpy as np
 import pandas as pd
+from pydantic import ValidationError
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -87,6 +89,9 @@ _STYLE_FACTORS = (
 _CUSIP_RE = re.compile(r"^[A-Z0-9]{6,12}$")
 _TIER_C_HOLDING_LIMIT = 100
 _TIER_C_13F_ROW_LIMIT = 500
+# Bump when the institutional-reveal payload shape changes so stale cached
+# artifacts (fund_institutional_reveal_artifacts) are ignored and recomputed.
+_REVEAL_SCHEMA_VERSION = 1
 
 
 class InvalidBenchmarkError(FundAnalysisError):
@@ -1364,14 +1369,64 @@ _REVERSE_LOOKUP_SQL = """
                     """
 
 
+async def _read_cached_reveal(
+    datalake: AsyncSession, series_id: str
+) -> FundInstitutionalRevealResponse | None:
+    """Latest precomputed reveal artifact for this series, or None (best-effort).
+
+    A cache miss, a missing table, or a payload that no longer matches the
+    current schema (``_REVEAL_SCHEMA_VERSION``) all fall through to a recompute —
+    the cache never breaks the endpoint.
+    """
+    try:
+        row = (
+            await datalake.execute(
+                text(
+                    "SELECT payload FROM fund_institutional_reveal_latest_mv "
+                    "WHERE series_id = :sid AND schema_version = :ver"
+                ),
+                {"sid": series_id, "ver": _REVEAL_SCHEMA_VERSION},
+            )
+        ).first()
+    except SQLAlchemyError:
+        return None
+    if row is None or row[0] is None:
+        return None
+    payload = row[0]
+    if isinstance(payload, str):  # asyncpg returns jsonb as a raw string
+        payload = json.loads(payload)
+    try:
+        return FundInstitutionalRevealResponse.model_validate(payload)
+    except ValidationError:
+        return None
+
+
 async def fetch_fund_institutional_reveal(
     session: AsyncSession,
     datalake: AsyncSession,
     instrument_id: uuid.UUID,
 ) -> FundInstitutionalRevealResponse | None:
+    """Cache-first Tier C institutional reveal.
+
+    Reads the precomputed artifact for the fund's series; on a miss (absent or
+    schema-incompatible cache) recomputes on-the-fly. The backfill
+    (``scripts/backfill_reveal_artifacts.py``) populates the cache by calling the
+    compute path directly.
+    """
     fund = await _fund_or_none(session, instrument_id)
     if fund is None:
         return None
+    cached = await _read_cached_reveal(datalake, fund.series_id)
+    if cached is not None:
+        return cached
+    return await _compute_fund_institutional_reveal(session, datalake, fund)
+
+
+async def _compute_fund_institutional_reveal(
+    session: AsyncSession,
+    datalake: AsyncSession,
+    fund: Fund,
+) -> FundInstitutionalRevealResponse:
     holdings_report_date, holdings = await _latest_fund_holdings(session, fund.series_id)
     cusips = _holding_cusips(holdings)
     if not cusips:
