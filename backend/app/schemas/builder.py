@@ -314,6 +314,10 @@ class DiagnosticsOut(BaseModel):
     combined_regime: str | None = None
     class_bands: dict[str, list[float]] | None = None
     haven_tilt: dict[str, float] | None = None
+    # Present only on the regime_aware TWO-LEVEL path (COMBO S4b): the Level-1
+    # per-sleeve category weights (book B), against which the fund-level weights
+    # (book A) are the selection bet — A−B is the selection alpha.
+    category_weights: dict[str, float] | None = None
 
 
 class OptimizeResponse(BaseModel):

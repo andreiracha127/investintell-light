@@ -6,12 +6,19 @@ sub-sprints add the Level-1 / Level-2 / integration tests. The loader mirrors
 scenario frame; degrade-safe (no session / short history -> omitted)."""
 
 import asyncio
+import datetime as dt
+import uuid
 from typing import Any
 
 import numpy as np
 import pandas as pd
 import pytest
+from httpx import ASGITransport, AsyncClient
 
+from app.core.datalake import get_optional_datalake_session
+from app.core.db import get_session
+from app.main import create_app
+from app.optimizer import data as optimizer_data
 from app.services import portfolio_builder as pb
 from app.services import taa_bands as tb
 
@@ -223,4 +230,139 @@ def test_level2_total_weight_is_conserved() -> None:
     total = float(fund_w.sum()) + sum(proxy_holdings.values())
     assert total == pytest.approx(1.0)
     assert proxy_holdings == {"GLD": pytest.approx(0.2), "FTLS": pytest.approx(0.1)}
+
+
+# ── S4b.4: two-level integration via the optimize route ──────────────────────
+
+# 5 funds: two equity (test equal-weight) + thematic + fixed_income + alternatives
+# (>=4 risk sleeves so the momentum view fires; gold/long_short are proxy-only).
+_TL_IDS = [uuid.UUID(f"00000000-0000-0000-0000-0000000002{i:02d}") for i in range(5)]
+_TL_STRATEGY = {
+    _TL_IDS[0]: "Large Blend", _TL_IDS[1]: "Large Growth",       # equity, equity
+    _TL_IDS[2]: "Technology",                                    # thematic
+    _TL_IDS[3]: "Government Bond",                               # fixed_income
+    _TL_IDS[4]: "Real Estate",                                  # alternatives
+}
+_TL_CLASS = {
+    _TL_IDS[0]: "equity", _TL_IDS[1]: "equity", _TL_IDS[2]: "equity",
+    _TL_IDS[3]: "fixed_income", _TL_IDS[4]: "alternatives",
+}
+
+
+def _gate(*, state: str = "risk_on", quadrant: str | None = None) -> tb.GateRegimeSnapshot:
+    return tb.GateRegimeSnapshot(
+        as_of=dt.date(2026, 6, 20), state=state,
+        vote_count=2 if state == "risk_off" else 0,
+        trend_vote=state == "risk_off", credit_vote=state == "risk_off",
+        drawdown_vote=False, dwell_days=30, last_flip=None,
+        growth_score=None, inflation_score=None, quadrant=quadrant,
+    )
+
+
+def _async(value: Any):
+    async def _f(*_a: Any, **_k: Any) -> Any:
+        return value
+    return _f
+
+
+def _client() -> AsyncClient:
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: None
+    app.dependency_overrides[get_optional_datalake_session] = lambda: object()
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+def _stub_two_level_world(monkeypatch: Any, *, state: str = "risk_on") -> None:
+    """Wire the 5-fund universe: aligned returns, taxonomy, gate, and a proxy
+    returns loader that serves every requested proxy (so the two-level activates)."""
+
+    async def fake_load(
+        session: Any, assets: list[Any], window_days: int = 730, today: Any = None
+    ) -> pd.DataFrame:
+        rng = np.random.default_rng(7)
+        index = pd.bdate_range("2024-01-02", periods=500)
+        return pd.DataFrame(
+            {ref.label: rng.normal(0.0004, 0.01, 500) for ref in assets}, index=index
+        )
+
+    async def fake_strategy(session: Any, fund_ids: list[uuid.UUID]) -> dict:
+        return {fid: _TL_STRATEGY.get(fid) for fid in fund_ids}
+
+    async def fake_class(session: Any, fund_ids: list[uuid.UUID]) -> dict:
+        return {fid: _TL_CLASS.get(fid) for fid in fund_ids}
+
+    async def fake_proxies(session: Any, tickers: list[str], frame_index: Any, **_k: Any) -> dict:
+        rng = np.random.default_rng(13)
+        return {t: rng.normal(0.0003, 0.01, len(frame_index)) for t in tickers}
+
+    monkeypatch.setattr(optimizer_data, "load_aligned_returns", fake_load)
+    monkeypatch.setattr(optimizer_data, "load_fund_strategy_label", fake_strategy)
+    monkeypatch.setattr(optimizer_data, "load_fund_asset_class", fake_class)
+    monkeypatch.setattr(pb, "_load_proxy_returns", fake_proxies)
+    monkeypatch.setattr(tb, "fetch_gate_regime", _async(_gate(state=state)))
+
+
+def _tl_payload(mandate: str = "moderate") -> dict[str, Any]:
+    return {
+        "assets": [{"kind": "fund", "id": str(fid)} for fid in _TL_IDS],
+        "objective": "regime_aware",
+        "mandate": mandate,
+        "constraints": {"cap": 1.0},
+    }
+
+
+async def test_two_level_activates_and_exposes_category_weights(monkeypatch: Any) -> None:
+    """With live proxies the two-level runs: category_weights (book B) is exposed
+    and the class_bands surface the 7-sleeve envelope (gold present)."""
+    _stub_two_level_world(monkeypatch)
+    async with _client() as client:
+        resp = await client.post("/builder/optimize", json=_tl_payload())
+    assert resp.status_code == 200, resp.text
+    diag = resp.json()["diagnostics"]
+    assert diag["category_weights"] is not None
+    # 7-sleeve envelope (not the 4-class one) -> gold/thematic appear.
+    assert "gold" in diag["class_bands"]
+    assert "thematic" in diag["class_bands"]
+
+
+async def test_two_level_injects_gold_proxy_holding(monkeypatch: Any) -> None:
+    """gold has no fund (no label maps to GLD) -> the two-level injects GLD as a
+    proxy-only holding with positive weight; the book sums to 1."""
+    _stub_two_level_world(monkeypatch)
+    async with _client() as client:
+        resp = await client.post("/builder/optimize", json=_tl_payload())
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    tickers = {w["asset"].get("ticker") for w in body["weights"]}
+    assert "GLD" in tickers
+    gld_w = next(w["weight"] for w in body["weights"] if w["asset"].get("ticker") == "GLD")
+    assert gld_w > 0.0
+    assert abs(sum(w["weight"] for w in body["weights"]) - 1.0) < 1e-6
+
+
+async def test_two_level_funds_in_same_sleeve_are_equal_weight(monkeypatch: Any) -> None:
+    """The two equity funds split the equity sleeve weight equally (Level-2 is
+    equal-weight, no re-optimization)."""
+    _stub_two_level_world(monkeypatch)
+    async with _client() as client:
+        resp = await client.post("/builder/optimize", json=_tl_payload())
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    w0 = next(w["weight"] for w in body["weights"] if w["asset"].get("id") == str(_TL_IDS[0]))
+    w1 = next(w["weight"] for w in body["weights"] if w["asset"].get("id") == str(_TL_IDS[1]))
+    assert w0 == pytest.approx(w1)
+    assert w0 > 0.0
+
+
+async def test_two_level_falls_back_to_single_level_without_proxies(monkeypatch: Any) -> None:
+    """No live proxies (loader returns {}) -> the single-level S4a path runs:
+    category_weights stays None and class_bands is the 4-class envelope."""
+    _stub_two_level_world(monkeypatch)
+    monkeypatch.setattr(pb, "_load_proxy_returns", _async({}))  # no proxies
+    async with _client() as client:
+        resp = await client.post("/builder/optimize", json=_tl_payload())
+    assert resp.status_code == 200, resp.text
+    diag = resp.json()["diagnostics"]
+    assert diag["category_weights"] is None
+    assert "gold" not in (diag["class_bands"] or {})  # 4-class envelope only
 

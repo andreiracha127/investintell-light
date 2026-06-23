@@ -30,6 +30,7 @@ are rejected with the explicit list. The caller decides what to exclude.
 """
 
 import uuid
+from dataclasses import dataclass
 from typing import cast
 
 import numpy as np
@@ -41,7 +42,12 @@ from app.optimizer import black_litterman as bl
 from app.optimizer import data as optimizer_data
 from app.optimizer import engine, momentum_view, sleeves
 from app.optimizer import selection as optimizer_selection
-from app.optimizer.mandate import resolve_cvar_limit, resolve_delta, resolve_gamma
+from app.optimizer.mandate import (
+    normalise_mandate,
+    resolve_cvar_limit,
+    resolve_delta,
+    resolve_gamma,
+)
 from app.schemas.builder import (
     AbsoluteViewIn,
     AssetRefIn,
@@ -617,6 +623,136 @@ def _solve_regime_level2(
     return fund_w, proxy_holdings
 
 
+@dataclass
+class _RegimeTwoLevel:
+    """Result of the COMBO S4b two-level ``regime_aware`` solve."""
+
+    fund_weights: np.ndarray              # length len(labels): the universe funds
+    proxy_holdings: dict[str, float]      # proxy-only sleeves (gold/long_short): ticker→w
+    proxy_returns: dict[str, np.ndarray]  # frame-aligned returns for those holdings
+    category_weights: dict[str, float]    # sleeve → Level-1 weight (book B; A−B base)
+    sleeve_bands: dict[str, list[float]]  # sleeve → [lo, hi] enforced (diagnostics)
+
+
+# Mandate label → one of the 3 PROFILE_CENTERS profiles for the sleeve bands.
+_REGIME_PROFILES = {
+    "conservative": "conservative", "defensive": "conservative",
+    "moderate_conservative": "conservative",
+    "moderate": "moderate", "balanced": "moderate",
+    "moderate_aggressive": "aggressive", "aggressive": "aggressive", "growth": "aggressive",
+}
+
+
+def _regime_profile(mandate: str | None) -> str:
+    """Resolve a mandate to one of {aggressive, moderate, conservative} (default
+    moderate) — the per-profile sleeve-band selector for the two-level allocator."""
+    if mandate:
+        key = normalise_mandate(mandate)
+        if key in _REGIME_PROFILES:
+            return _REGIME_PROFILES[key]
+    return "moderate"
+
+
+async def _solve_regime_two_level(
+    session: AsyncSession,
+    assets: list[AssetRefIn],
+    labels: list[str],
+    frame_index: "pd.Index",
+    quadrant: str | None,
+    gate_state: str | None,
+    payload: "OptimizeRequest",
+) -> "_RegimeTwoLevel | None":
+    """COMBO S4b: two-level ``regime_aware`` solve (proxy → fund equal-weight).
+
+    Maps each fund to a 7-sleeve via ``strategy_label`` (``asset_class`` fallback),
+    optimizes per-sleeve CATEGORY weights over the canonical ``GROUP_BENCHMARK``
+    proxies inside the per-profile band envelope (Level-1, BL max-utility + CVaR +
+    momentum), then implements each sleeve with its selected funds EQUAL-WEIGHT
+    (Level-2); a floored sleeve with no fund (gold via GLD, long_short via FTLS)
+    keeps its authorized proxy as a holding.
+
+    Band-state comes from the QUADRANT (the gate only tightens CVaR + the goldfix
+    is routed upstream). Returns ``None`` to signal the caller to fall back to the
+    single-level S4a path: no fund maps to a base sleeve, <2 live proxies, or the
+    Level-1 solve is infeasible even after its min-CVaR fallback. Degrade-safe: the
+    proxy-returns loader returns ``{}`` without a DB session, so no-DB/tests drop
+    to S4a.
+    """
+    profile = _regime_profile(payload.mandate)
+    band_state = taa_bands.band_state_from_quadrant(quadrant)
+    bands = taa_bands.profile_sleeve_bands(profile, band_state)
+
+    # 1. fund → sleeve (strategy_label finest; asset_class fallback; raw equities
+    # via the proxy ticker, else equity). 'hedge' (SH) is excluded from the book.
+    fund_ids = [ref.id for ref in assets if isinstance(ref, FundRefIn)]
+    strat = await optimizer_data.load_fund_strategy_label(session, fund_ids)
+    cls = await optimizer_data.load_fund_asset_class(session, fund_ids)
+    index_of = {label: i for i, label in enumerate(labels)}
+    funds_by_sleeve: dict[str, list[int]] = {}
+    for ref in assets:
+        col = index_of.get(_ref_key(ref))
+        if col is None:
+            continue
+        if isinstance(ref, FundRefIn):
+            sleeve = sleeves.fund_sleeve_group(strat.get(ref.id), cls.get(ref.id))
+        else:
+            sleeve = sleeves.PROXY_TO_GROUP.get(ref.ticker.upper(), "equity")
+        if sleeve in sleeves.SLEEVE_GROUPS:
+            funds_by_sleeve.setdefault(sleeve, []).append(col)
+    if not funds_by_sleeve:
+        return None
+
+    # 2. live proxies = one canonical benchmark per present sleeve, plus authorized
+    # fills for a FLOORED sleeve with no fund (gold/long_short).
+    proxy_to_sleeve: dict[str, str] = {
+        sleeves.GROUP_BENCHMARK[g]: g for g in funds_by_sleeve
+    }
+    for g in sleeves.SLEEVE_GROUPS:
+        if bands[g][0] > 0 and g not in funds_by_sleeve:
+            for px in sleeves.GROUP_PROXY_FILL.get(g, []):
+                proxy_to_sleeve[px] = g
+    proxy_rets = await _load_proxy_returns(session, list(proxy_to_sleeve), frame_index)
+    proxies_live = [p for p in proxy_to_sleeve if p in proxy_rets]
+    if len(proxies_live) < 2:
+        return None
+    proxy_to_sleeve = {p: proxy_to_sleeve[p] for p in proxies_live}
+    proxy_groups = [proxy_to_sleeve[p] for p in proxies_live]
+    proxy_returns = np.column_stack([proxy_rets[p] for p in proxies_live])
+
+    # 3. per-mandate dials: gamma decoupled from the equilibrium delta; CVaR
+    # tightened by the live gate (same factor as the single-level path).
+    gamma = resolve_gamma(None, payload.mandate)
+    cvar_cap = resolve_cvar_limit(payload.cvar_limit, payload.mandate)
+    if (gate_state or "").lower() == "risk_off":
+        cvar_cap *= DEFAULT_RISK_OFF_CVAR_FACTOR
+
+    # 4. Level-1: category weights over the proxies.
+    try:
+        wcat = _solve_regime_level1(
+            proxies_live, proxy_returns, proxy_groups, profile, band_state,
+            gamma, cvar_cap, gate_state,
+        )
+    except engine.OptimizerError:
+        return None
+
+    # 5. Level-2: funds equal-weight; a proxy-only sleeve keeps its proxy holding.
+    fund_weights, proxy_holdings = _solve_regime_level2(
+        wcat, proxy_to_sleeve, funds_by_sleeve, len(labels)
+    )
+    category_weights = {proxy_to_sleeve[p]: w for p, w in wcat.items()}
+    present = set(funds_by_sleeve) | set(category_weights)
+    sleeve_bands = {
+        g: [bands[g][0], bands[g][1]] for g in sleeves.SLEEVE_GROUPS if g in present
+    }
+    return _RegimeTwoLevel(
+        fund_weights=fund_weights,
+        proxy_holdings=proxy_holdings,
+        proxy_returns={t: proxy_rets[t] for t in proxy_holdings},
+        category_weights=category_weights,
+        sleeve_bands=sleeve_bands,
+    )
+
+
 async def _solve_regime_motor(
     session: AsyncSession,
     assets: list[AssetRefIn],
@@ -1011,6 +1147,10 @@ async def run_optimize(
     regime_combined: str | None = None
     regime_class_bands: dict[str, list[float]] | None = None
     regime_haven_tilt: dict[str, float] | None = None
+    # COMBO S4b two-level diagnostics + proxy-only holdings (gold/long_short).
+    regime_category_weights: dict[str, float] | None = None
+    regime_proxy_holdings: dict[str, float] = {}
+    regime_proxy_returns: dict[str, np.ndarray] = {}
     w_mkt: np.ndarray | None = None
     if needs_bl:
         w_mkt = await _market_weights_for(session, assets, labels)
@@ -1107,61 +1247,80 @@ async def run_optimize(
                 status = "goldfix"
                 regime_haven_tilt = dict(target)
             else:
-                # Band route — min-CVaR inside the regime envelope with the vol/
-                # (beta in RISK_OFF) graduated per-asset cap vector. Surface the
-                # per-class (min, max) bands actually enforced for transparency
-                # (only the classes PRESENT as a BlockBudget).
-                present_classes = await _fund_class_columns(session, assets, labels)
-                _band_map, _ = taa_bands.effective_class_bands(regime_combined)
-                regime_class_bands = {
-                    cls: [_band_map[cls][0], _band_map[cls][1]]
-                    for cls in _COMBO_BAND_CLASSES
-                    if present_classes.get(cls)
-                }
-                base_cap = cap if cap is not None else engine.DEFAULT_CAP
-                return_cols = [scenarios[:, j] for j in range(scenarios.shape[1])]
-                # SPY is loaded as a SIGNAL series from eod_prices over the
-                # optimization window — decoupled from the traded universe — so
-                # the vol/beta overlays activate for ANY universe (Sprint 5). The
-                # in-universe synthetic proxy is the fallback when the DB read
-                # yields too little history (degrade-safe: flat cap, no crash).
-                spy_desc, spy_rets_aligned = await _load_spy_signal(
-                    session, frame.index
+                # COMBO S4b: try the TWO-LEVEL (proxy→fund equal-weight) allocator
+                # first — per-sleeve category weights (BL max-utility + momentum)
+                # over the canonical proxies, implemented by the selected funds
+                # equal-weight. Band-state from the QUADRANT; the gate tightens CVaR.
+                # Falls back to the single-level S4a path when it can't be built
+                # (no live proxies / infeasible) — worst case == the prior behaviour.
+                two_level = await _solve_regime_two_level(
+                    session, assets, labels, frame.index,
+                    regime_quadrant, gate_state, payload,
                 )
-                if not spy_desc:
-                    spy_desc = _spy_closes_from_frame(frame)
-                graduated_caps = taa_bands.vol_graduated_caps(
-                    base_cap, return_cols, spy_desc
-                )
-                if regime_combined == "RISK_OFF":
-                    # Prefer the loaded SPY returns (aligned to the scenario
-                    # rows); fall back to in-universe SPY if the loader was empty.
-                    spy_rets = spy_rets_aligned
-                    if spy_rets is None:
-                        spy_col = index_of.get("equity:SPY")
-                        if spy_col is not None and spy_desc:
-                            spy_rets = scenarios[:, spy_col]
-                    if spy_rets is not None and spy_desc:
-                        betas = taa_bands.asset_betas(
-                            {labels[j]: scenarios[:, j] for j in range(len(labels))},
-                            spy_rets,
-                        )
-                        graduated_caps = taa_bands.beta_graduated_caps(
-                            graduated_caps, [betas[labels[j]] for j in range(len(labels))]
-                        )
-                cvar_bounds_regime = engine.BoundsBundle(
-                    cap_vec=graduated_caps,
-                    min_vec=np.full(n, min_weight) if min_weight is not None else None,
-                    blocks=regime_blocks or None,
-                )
-                # COMBO S4a: return-aware motor — BL max-utility + hard CVaR with
-                # the per-mandate gamma and μ = equilibrium π + category momentum
-                # view, inside this same regime envelope. Replaces the return-blind
-                # min-CVaR; falls back to it on infeasibility (envelope preserved).
-                weights, status = await _solve_regime_motor(
-                    session, assets, labels, scenarios, sigma, cvar_bounds_regime,
-                    gate_state, payload, cap, min_weight, current_vec, linear,
-                )
+                if two_level is not None:
+                    weights = two_level.fund_weights
+                    status = "regime_two_level"
+                    regime_proxy_holdings = two_level.proxy_holdings
+                    regime_proxy_returns = two_level.proxy_returns
+                    regime_category_weights = two_level.category_weights
+                    regime_class_bands = two_level.sleeve_bands
+                else:
+                    # ── Single-level S4a fallback: min-CVaR / BL max-utility inside
+                    # the 4-class regime envelope with the vol/(beta) graduated caps.
+                    # Surface the per-class (min, max) bands actually enforced (only
+                    # the classes PRESENT as a BlockBudget).
+                    present_classes = await _fund_class_columns(session, assets, labels)
+                    _band_map, _ = taa_bands.effective_class_bands(regime_combined)
+                    regime_class_bands = {
+                        cls: [_band_map[cls][0], _band_map[cls][1]]
+                        for cls in _COMBO_BAND_CLASSES
+                        if present_classes.get(cls)
+                    }
+                    base_cap = cap if cap is not None else engine.DEFAULT_CAP
+                    return_cols = [scenarios[:, j] for j in range(scenarios.shape[1])]
+                    # SPY is loaded as a SIGNAL series from eod_prices over the
+                    # optimization window — decoupled from the traded universe — so
+                    # the vol/beta overlays activate for ANY universe (Sprint 5). The
+                    # in-universe synthetic proxy is the fallback when the DB read
+                    # yields too little history (degrade-safe: flat cap, no crash).
+                    spy_desc, spy_rets_aligned = await _load_spy_signal(
+                        session, frame.index
+                    )
+                    if not spy_desc:
+                        spy_desc = _spy_closes_from_frame(frame)
+                    graduated_caps = taa_bands.vol_graduated_caps(
+                        base_cap, return_cols, spy_desc
+                    )
+                    if regime_combined == "RISK_OFF":
+                        # Prefer the loaded SPY returns (aligned to the scenario
+                        # rows); fall back to in-universe SPY if the loader was empty.
+                        spy_rets = spy_rets_aligned
+                        if spy_rets is None:
+                            spy_col = index_of.get("equity:SPY")
+                            if spy_col is not None and spy_desc:
+                                spy_rets = scenarios[:, spy_col]
+                        if spy_rets is not None and spy_desc:
+                            betas = taa_bands.asset_betas(
+                                {labels[j]: scenarios[:, j] for j in range(len(labels))},
+                                spy_rets,
+                            )
+                            graduated_caps = taa_bands.beta_graduated_caps(
+                                graduated_caps,
+                                [betas[labels[j]] for j in range(len(labels))],
+                            )
+                    cvar_bounds_regime = engine.BoundsBundle(
+                        cap_vec=graduated_caps,
+                        min_vec=np.full(n, min_weight) if min_weight is not None else None,
+                        blocks=regime_blocks or None,
+                    )
+                    # COMBO S4a: return-aware motor — BL max-utility + hard CVaR with
+                    # the per-mandate gamma and μ = equilibrium π + category momentum
+                    # view, inside this same regime envelope. Falls back to min-CVaR
+                    # on infeasibility (envelope preserved).
+                    weights, status = await _solve_regime_motor(
+                        session, assets, labels, scenarios, sigma, cvar_bounds_regime,
+                        gate_state, payload, cap, min_weight, current_vec, linear,
+                    )
         elif payload.objective == "bl_utility":
             assert mu_equilibrium is not None  # needs_bl guarantees it
             mu_for_utility = mu_posterior if mu_posterior is not None else mu_equilibrium
@@ -1251,6 +1410,33 @@ async def run_optimize(
     except engine.OptimizerError as exc:
         raise BuilderError(str(exc)) from exc
 
+    # COMBO S4b: the two-level solve may hold a sleeve via its authorized PROXY
+    # (gold→GLD, long_short→FTLS) that the client never listed. Splice those
+    # proxy-only holdings into the universe AFTER the solve — as equity refs with
+    # their frame-aligned returns — so the response, the vol/CVaR figures, and the
+    # weight vector all account for them (the book sums to 1 over funds+proxies).
+    if regime_proxy_holdings:
+        n_add = len(regime_proxy_holdings)
+        for ticker, w in regime_proxy_holdings.items():
+            ref = EquityRefIn(kind="equity", ticker=ticker)
+            key = _ref_key(ref)
+            if key in index_of:  # already in the universe → just add the weight
+                weights[index_of[key]] += w
+                continue
+            assets.append(ref)
+            labels.append(key)
+            label_map[key] = (ticker, ticker)
+            scenarios = np.column_stack([scenarios, regime_proxy_returns[ticker]])
+            weights = np.append(weights, w)
+        index_of = {label: i for i, label in enumerate(labels)}
+        # Recompute Σ over the extended universe for the reported vol (telemetry —
+        # the two-level solve used its own per-category Σ, not this one).
+        sigma = engine.sigma_ledoit_wolf(scenarios)
+        if mu_equilibrium is not None:
+            mu_equilibrium = np.append(mu_equilibrium, np.zeros(n_add))
+        if mu_posterior is not None:
+            mu_posterior = np.append(mu_posterior, np.zeros(n_add))
+
     vol_ann = float(np.sqrt(weights @ sigma @ weights))
     # In-sample CVaR on RAW scenarios using the EXACT Rockafellar–Uryasev
     # estimator (app.analytics.realized_cvar) — the same objective the
@@ -1304,5 +1490,6 @@ async def run_optimize(
             combined_regime=regime_combined,
             class_bands=regime_class_bands,
             haven_tilt=regime_haven_tilt,
+            category_weights=regime_category_weights,
         ),
     )
