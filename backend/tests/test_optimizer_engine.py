@@ -350,6 +350,66 @@ def test_max_return_cvar_capped_rejects_nonpositive_limit() -> None:
         engine.solve_max_return_cvar_capped(scen, mu=mu, cvar_limit=0.0)
 
 
+# ── COMBO port S0: BL max-utility + hard CVaR cap (regime_aware motor) ────────
+
+
+def test_bl_utility_cvar_optimal_and_caps() -> None:
+    mu, scen = _mu_and_scenarios()
+    sigma = engine.sigma_ledoit_wolf(scen)
+    w, status = engine.solve_bl_utility_cvar(
+        mu, sigma, scen, gamma=5.0, cvar_limit=0.05, alpha=0.95, cap=0.5
+    )
+    _assert_valid(w, status, cap=0.5)
+
+
+def test_bl_utility_cvar_lower_gamma_raises_return() -> None:
+    # With a slack CVaR cap, gamma is the return/risk dial: a smaller gamma
+    # penalises variance less -> tilts toward the higher-return assets.
+    mu, scen = _mu_and_scenarios()
+    sigma = engine.sigma_ledoit_wolf(scen)
+    w_hi, _ = engine.solve_bl_utility_cvar(
+        mu, sigma, scen, gamma=25.0, cvar_limit=0.08, alpha=0.95, cap=None
+    )
+    w_lo, _ = engine.solve_bl_utility_cvar(
+        mu, sigma, scen, gamma=2.0, cvar_limit=0.08, alpha=0.95, cap=None
+    )
+    assert float(mu @ w_lo) >= float(mu @ w_hi) - 1e-6
+
+
+def test_bl_utility_cvar_hard_cap_binds() -> None:
+    # The hard CVaR cap actually binds: tightening it lowers the realized CVaR.
+    mu, scen = _mu_and_scenarios()
+    sigma = engine.sigma_ledoit_wolf(scen)
+    w_loose, _ = engine.solve_bl_utility_cvar(
+        mu, sigma, scen, gamma=2.0, cvar_limit=0.08, cap=None
+    )
+    w_tight, _ = engine.solve_bl_utility_cvar(
+        mu, sigma, scen, gamma=2.0, cvar_limit=0.025, cap=None
+    )
+    assert (
+        engine._realized_cvar(w_tight, scen, 0.95)
+        <= engine._realized_cvar(w_loose, scen, 0.95) + 1e-6
+    )
+
+
+def test_bl_utility_cvar_realized_cvar_within_limit() -> None:
+    mu, scen = _mu_and_scenarios()
+    sigma = engine.sigma_ledoit_wolf(scen)
+    limit = 0.025
+    w, _ = engine.solve_bl_utility_cvar(
+        mu, sigma, scen, gamma=2.0, cvar_limit=limit, alpha=0.95, cap=None
+    )
+    realized = engine._realized_cvar(w, scen, alpha=0.95)
+    assert realized <= limit + 1e-3
+
+
+def test_bl_utility_cvar_rejects_nonpositive_gamma() -> None:
+    mu, scen = _mu_and_scenarios()
+    sigma = engine.sigma_ledoit_wolf(scen)
+    with pytest.raises(engine.OptimizerError, match="gamma"):
+        engine.solve_bl_utility_cvar(mu, sigma, scen, gamma=0.0, cvar_limit=0.05)
+
+
 def test_max_return_cvar_capped_with_bounds_bundle_binds() -> None:
     """Engine-side dispatch: BoundsBundle path is exercised end-to-end."""
     mu, scen = _mu_and_scenarios(n=4, t=600)

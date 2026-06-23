@@ -1049,3 +1049,92 @@ def solve_max_return_cvar_capped(
             f"{cvar_limit} (tol {cvar_tol}) — the solver returned an inaccurate point"
         )
     return weights, status
+
+
+def solve_bl_utility_cvar(
+    mu: np.ndarray,
+    sigma: np.ndarray,
+    scenarios: np.ndarray,
+    gamma: float,
+    cvar_limit: float,
+    alpha: float = DEFAULT_CVAR_ALPHA,
+    cap: float | None = None,
+    min_weight: float | None = None,
+    bounds: "BoundsBundle | None" = None,
+    blocks: "list[BlockBudget] | None" = None,
+    linear: "list[LinearConstraint] | None" = None,
+    cvar_tol: float = 1e-3,
+) -> tuple[np.ndarray, str]:
+    """BL max-utility WITH a hard Rockafellar-Uryasev CVaR cap — the regime_aware motor.
+
+        max  μᵀw − (γ/2)·wᵀΣw
+        s.t. CVaR_α(w) ≤ cvar_limit, long-only, sum(w)=1, caps/min/blocks/linear.
+
+    This is the calibrated COMBO Level-1 objective (BL max-utility, not min-CVaR):
+    ``gamma`` (the per-mandate risk aversion ladder) shapes the return/risk tilt
+    while the CVaR constraint is the hard tail cap. ``gamma`` is unit-invariant as
+    long as ``mu`` and ``sigma`` share units (both daily OR both annual — the
+    first-order weights are identical); ``cvar_limit`` and ``scenarios`` are in the
+    SAME daily-return units, exactly like ``solve_max_return_cvar_capped`` — the
+    caller owns that contract, the engine never rescales.
+
+    Gate G5: ``mu`` is REQUIRED (by contract the BL posterior / equilibrium π —
+    historical means are never estimated here). The in-LP CVaR auxiliaries only
+    upper-bound the realized CVaR, so the solved weights are re-verified with
+    ``_realized_cvar``; a breach beyond ``cvar_tol`` fails loud (mirrors
+    ``solve_max_return_cvar_capped``). On infeasibility/non-convergence raises
+    ``OptimizerError`` so the caller can fall back to ``solve_min_cvar``. Solver
+    ladder: CLARABEL then SCS.
+    """
+    sigma = _validate_sigma(sigma, "bl_utility_cvar")
+    scenarios = np.asarray(scenarios, dtype=float)
+    if scenarios.ndim != 2:
+        raise OptimizerError(f"scenarios must be T×n, got ndim={scenarios.ndim}")
+    if not np.isfinite(scenarios).all():
+        raise OptimizerError("scenarios contain NaN/inf")
+    t, n = scenarios.shape
+    if t < 10:
+        raise OptimizerError(f"bl_utility_cvar requires at least 10 scenarios, got {t}")
+    if sigma.shape != (n, n):
+        raise OptimizerError(
+            f"bl_utility_cvar: sigma is {sigma.shape}, expected ({n}, {n})"
+        )
+    if not 0 < alpha < 1:
+        raise OptimizerError(f"alpha must be in (0, 1), got {alpha}")
+    mu_arr = np.asarray(mu, dtype=float).ravel()
+    if mu_arr.shape != (n,):
+        raise OptimizerError(
+            f"bl_utility_cvar: mu has shape {mu_arr.shape}, expected ({n},)"
+        )
+    if not np.isfinite(mu_arr).all():
+        raise OptimizerError("bl_utility_cvar: mu contains NaN/inf — BL posterior is invalid")
+    if gamma <= 0:
+        raise OptimizerError(f"bl_utility_cvar: gamma must be > 0, got {gamma}")
+    if cvar_limit <= 0:
+        raise OptimizerError(f"bl_utility_cvar: cvar_limit must be > 0, got {cvar_limit}")
+
+    w = cp.Variable(n)
+    z = cp.Variable()
+    losses = -scenarios @ w
+    cvar_expr = z + cp.sum(cp.pos(losses - z)) / ((1 - alpha) * t)
+    if bounds is not None:
+        merged_blocks = (bounds.blocks or []) + (blocks or []) or None
+        cons = bounds_constraints(
+            w, bounds.cap_vec, bounds.min_vec, merged_blocks, linear=linear
+        )
+    else:
+        _check_constraint_params(n, cap, min_weight)
+        cons = base_constraints(w, cap, min_weight, blocks=blocks, linear=linear)
+    cons.append(cvar_expr <= cvar_limit)
+    objective = cp.Maximize(
+        mu_arr @ w - (gamma / 2.0) * cp.quad_form(w, cp.psd_wrap(sigma))
+    )
+    problem = cp.Problem(objective, cons)
+    weights, status = _solve_with_ladder(problem, w, "bl_utility_cvar")
+    realized = _realized_cvar(weights, scenarios, alpha)
+    if realized > cvar_limit + cvar_tol:
+        raise OptimizerError(
+            f"bl_utility_cvar: solved weights realize CVaR {realized:.6f} > limit "
+            f"{cvar_limit} (tol {cvar_tol}) — the solver returned an inaccurate point"
+        )
+    return weights, status
