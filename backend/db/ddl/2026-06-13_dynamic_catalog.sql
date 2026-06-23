@@ -126,7 +126,8 @@ SELECT DISTINCT ON (instrument_id)
        peer_sharpe_pctl, peer_sortino_pctl, peer_return_pctl, peer_drawdown_pctl,
        manager_score, downside_capture_1y, upside_capture_1y,
        equity_correlation_252d, peer_strategy_label, peer_count, elite_flag,
-       empirical_duration, credit_beta, inflation_beta, crisis_alpha_score
+       empirical_duration, credit_beta, inflation_beta, crisis_alpha_score,
+       nav_quality_ok, nav_glitch_count
 FROM fund_risk_metrics
 WHERE organization_id IS NULL
 ORDER BY instrument_id, calc_date DESC;

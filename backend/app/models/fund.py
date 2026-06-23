@@ -227,6 +227,11 @@ class FundRiskLatest(Base):
     credit_beta: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     inflation_beta: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     crisis_alpha_score: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    # NAV data-quality eligibility (Bug 2): computed by the risk_metrics worker.
+    # nav_quality_ok=False excludes the fund from the optimizer universe; NULL is
+    # fail-open (kept) until the worker populates the column.
+    nav_quality_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    nav_glitch_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class FundListRow(Base):
