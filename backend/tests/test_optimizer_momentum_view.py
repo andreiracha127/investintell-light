@@ -90,6 +90,16 @@ def test_momentum_mu_too_few_risk_categories_is_equilibrium() -> None:
     assert np.allclose(mu, pi)
 
 
+def test_momentum_mu_accepts_precomputed_sigma() -> None:
+    # The builder passes ONE sigma for both the equilibrium mu and the utility
+    # penalty (harness parity). risk_off -> mu == equilibrium with that sigma.
+    r = _returns_with_momentum()
+    prior = _flat_prior(len(_GROUPS))
+    sig = engine.sigma_ledoit_wolf(np.nan_to_num(r[-504:], nan=0.0))
+    mu = mv.category_momentum_mu(r, _GROUPS, prior, gate_state="risk_off", sigma=sig)
+    assert np.allclose(mu, bl.equilibrium(sig, prior, delta=DELTA_MARKET))
+
+
 def test_momentum_mu_rejects_shape_mismatch() -> None:
     r = _returns_with_momentum()
     with pytest.raises(ValueError, match="match"):

@@ -104,3 +104,33 @@ def resolve_gamma(gamma: float | None, mandate: str | None) -> float:
         if key in MANDATE_GAMMA:
             return MANDATE_GAMMA[key]
     return MANDATE_GAMMA["moderate"]
+
+
+# Per-mandate hard 95% daily-CVaR SAFETY cap for the regime_aware BL max-utility
+# solve (calibrated harness CVAR_LIMIT). Note: per the calibration, CVaR is the
+# SAFETY wall, not the active lever — gamma + the regime bands usually bind first.
+# In daily-return units, matching the scenario rows. Tightened in risk_off states
+# by the caller (apply_regime_cvar_limit). Intermediate rungs interpolate linearly.
+MANDATE_CVAR_LIMIT: dict[str, float] = {
+    "conservative": 0.016,
+    "defensive": 0.016,
+    "moderate_conservative": 0.019,
+    "moderate": 0.022,
+    "balanced": 0.022,
+    "moderate_aggressive": 0.026,
+    "aggressive": 0.030,
+    "growth": 0.030,
+}
+
+
+def resolve_cvar_limit(cvar_limit: float | None, mandate: str | None) -> float:
+    """Resolve the per-mandate daily-CVaR safety cap for regime_aware. A finite
+    positive ``cvar_limit`` override wins; otherwise the mandate ladder; otherwise
+    the moderate rung. Never returns NaN/Inf or a non-positive value."""
+    if cvar_limit is not None and math.isfinite(cvar_limit) and cvar_limit > 0:
+        return float(cvar_limit)
+    if mandate:
+        key = normalise_mandate(mandate)
+        if key in MANDATE_CVAR_LIMIT:
+            return MANDATE_CVAR_LIMIT[key]
+    return MANDATE_CVAR_LIMIT["moderate"]

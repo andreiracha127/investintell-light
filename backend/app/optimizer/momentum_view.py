@@ -80,6 +80,7 @@ def category_momentum_mu(
     window: int = DEFAULT_WINDOW,
     delta_market: float = DELTA_MARKET,
     use_views: bool = True,
+    sigma: np.ndarray | None = None,
 ) -> np.ndarray:
     """Per-proxy BL posterior μ over the category proxies (annualized-consistent
     with ``returns``' Σ — the caller keeps μ and Σ in the same units).
@@ -103,8 +104,13 @@ def category_momentum_mu(
             f"groups ({len(groups)}) / prior ({prior.shape}) must match returns "
             f"columns ({n})"
         )
-    win = np.nan_to_num(returns[-window:], nan=0.0)
-    sigma = engine.sigma_ledoit_wolf(win)
+    if sigma is None:
+        win = np.nan_to_num(returns[-window:], nan=0.0)
+        sigma = engine.sigma_ledoit_wolf(win)
+    else:
+        sigma = np.asarray(sigma, dtype=float)
+        if sigma.shape != (n, n):
+            raise ValueError(f"sigma is {sigma.shape}, expected ({n}, {n})")
     pi = np.asarray(bl.equilibrium(sigma, prior, delta=delta_market), dtype=float)
     if not use_views or (gate_state or "").lower() == "risk_off":
         return pi

@@ -108,3 +108,31 @@ def test_gamma_aliases_and_normalisation() -> None:
     assert resolve_gamma(None, "growth") == 1.90
     assert resolve_gamma(None, "Defensive") == 13.50
     assert resolve_gamma(None, "moderate-aggressive") == 3.0  # interpolated rung
+
+
+# ── regime_aware per-mandate CVaR safety cap ─────────────────────────────────
+from app.optimizer.mandate import (  # noqa: E402
+    MANDATE_CVAR_LIMIT,
+    resolve_cvar_limit,
+)
+
+
+def test_cvar_limit_ladder_maps_calibrated_trio() -> None:
+    assert resolve_cvar_limit(None, "aggressive") == 0.030
+    assert resolve_cvar_limit(None, "moderate") == 0.022
+    assert resolve_cvar_limit(None, "conservative") == 0.016
+
+
+def test_cvar_limit_explicit_override_wins() -> None:
+    assert resolve_cvar_limit(0.05, "conservative") == 0.05
+
+
+def test_cvar_limit_unknown_or_absent_uses_moderate() -> None:
+    assert resolve_cvar_limit(None, None) == MANDATE_CVAR_LIMIT["moderate"]
+    assert resolve_cvar_limit(None, "wildly_unknown") == MANDATE_CVAR_LIMIT["moderate"]
+
+
+def test_cvar_limit_rejects_nonpositive_override() -> None:
+    # A non-positive override is discarded, falling back to the mandate ladder.
+    assert resolve_cvar_limit(0.0, "aggressive") == 0.030
+    assert resolve_cvar_limit(-0.1, None) == MANDATE_CVAR_LIMIT["moderate"]
