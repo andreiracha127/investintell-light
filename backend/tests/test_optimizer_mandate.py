@@ -67,3 +67,44 @@ def test_non_finite_override_discarded_then_mandate() -> None:
 
 def test_non_positive_override_discarded_then_default() -> None:
     assert resolve_delta(-1.0, None) == bl.DEFAULT_DELTA
+
+
+# ── COMBO regime_aware: per-mandate GAMMA (utility risk-aversion), DECOUPLED ──
+# from the equilibrium delta. The calibrated trio is the return/risk dial.
+from app.optimizer.mandate import (  # noqa: E402
+    DELTA_MARKET,
+    GAMMA_MAX,
+    GAMMA_MIN,
+    MANDATE_GAMMA,
+    resolve_gamma,
+)
+
+
+def test_gamma_ladder_maps_calibrated_trio() -> None:
+    assert resolve_gamma(None, "aggressive") == 1.90
+    assert resolve_gamma(None, "moderate") == 4.75
+    assert resolve_gamma(None, "conservative") == 13.50
+
+
+def test_gamma_decoupled_from_equilibrium_delta() -> None:
+    # The whole point of the port: the per-mandate UTILITY gamma is NOT the
+    # equilibrium delta. Conservative: gamma 13.5 (utility curvature) vs the
+    # market delta 2.5 that generates pi for every profile.
+    assert resolve_gamma(None, "conservative") != resolve_delta(None, "conservative")
+    assert DELTA_MARKET == 2.5
+
+
+def test_gamma_override_clamped() -> None:
+    assert resolve_gamma(100.0, None) == GAMMA_MAX
+    assert resolve_gamma(0.0001, None) == GAMMA_MIN
+
+
+def test_gamma_unknown_or_absent_uses_moderate() -> None:
+    assert resolve_gamma(None, None) == MANDATE_GAMMA["moderate"]
+    assert resolve_gamma(None, "wildly_unknown") == MANDATE_GAMMA["moderate"]
+
+
+def test_gamma_aliases_and_normalisation() -> None:
+    assert resolve_gamma(None, "growth") == 1.90
+    assert resolve_gamma(None, "Defensive") == 13.50
+    assert resolve_gamma(None, "moderate-aggressive") == 3.0  # interpolated rung

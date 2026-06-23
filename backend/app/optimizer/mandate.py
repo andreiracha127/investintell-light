@@ -61,3 +61,46 @@ def resolve_delta(delta: float | None, mandate: str | None) -> float:
         if key in MANDATE_DELTA:
             return MANDATE_DELTA[key]
     return float(DEFAULT_DELTA)
+
+
+# ── regime_aware (COMBO) per-mandate GAMMA + single market delta ─────────────
+# The BL max-utility motor uses TWO decoupled deltas (harness design,
+# combo-bl-utility-calibration): a single market-wide DELTA_MARKET generates the
+# equilibrium prior π = DELTA_MARKET·Σ·w_mkt (identical for every profile), while
+# GAMMA is the PER-MANDATE utility curvature — the calibrated COMBO return/risk
+# dial. Conflating them (e.g. setting MANDATE_DELTA to the GAMMA trio) would
+# wrongly scale the conservative's equilibrium return by 13.5. Calibrated trio:
+# aggressive 1.90 / moderate 4.75 / conservative 13.50 (beta ladder 0.80/0.50/0.21).
+# The two intermediate rungs are GEOMETRIC interpolations of the adjacent
+# calibrated rungs (√(4.75·13.50)≈8.0, √(1.90·4.75)≈3.0) — not separately tuned.
+DELTA_MARKET = 2.5
+MANDATE_GAMMA: dict[str, float] = {
+    "conservative": 13.50,
+    "defensive": 13.50,
+    "moderate_conservative": 8.0,
+    "moderate": 4.75,
+    "balanced": 4.75,
+    "moderate_aggressive": 3.0,
+    "aggressive": 1.90,
+    "growth": 1.90,
+}
+GAMMA_MIN = 0.5     # return-tilted lower bound
+GAMMA_MAX = 30.0    # beyond this the utility solve degenerates toward min-variance
+
+
+def resolve_gamma(gamma: float | None, mandate: str | None) -> float:
+    """Resolve the per-mandate UTILITY risk-aversion (GAMMA) for the regime_aware
+    BL max-utility objective — DECOUPLED from the equilibrium ``delta``.
+
+    Priority mirrors :func:`resolve_delta`: a finite positive ``gamma`` override
+    wins (clamped to [GAMMA_MIN, GAMMA_MAX]); a mandate label maps through
+    ``MANDATE_GAMMA``; unknown/absent falls back to the moderate rung. Never
+    returns NaN/Inf.
+    """
+    if gamma is not None and math.isfinite(gamma) and gamma > 0:
+        return float(max(GAMMA_MIN, min(GAMMA_MAX, gamma)))
+    if mandate:
+        key = normalise_mandate(mandate)
+        if key in MANDATE_GAMMA:
+            return MANDATE_GAMMA[key]
+    return MANDATE_GAMMA["moderate"]
