@@ -369,6 +369,63 @@ def test_load_spy_signal_degrades_without_session() -> None:
     assert closes_desc == [] and spy_rets is None
 
 
+# ── COMBO S4a: return-aware motor (BL max-utility) wiring ────────────────────
+
+
+async def test_regime_uses_bl_utility_motor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The regime_aware band route invokes the BL max-utility + CVaR motor with the
+    per-mandate gamma/CVaR (not the return-blind min-CVaR), inside the regime bands."""
+    _stub_returns(monkeypatch)
+    monkeypatch.setattr(tb, "fetch_gate_regime", _async(_gate_snapshot(state="risk_on")))
+    calls: list[dict[str, float]] = []
+    real = pb.engine.solve_bl_utility_cvar
+
+    def spy(mu: Any, sigma: Any, scenarios: Any, gamma: float, cvar_limit: float, **kw: Any):
+        calls.append({"gamma": gamma, "cvar_limit": cvar_limit})
+        return real(mu, sigma, scenarios, gamma, cvar_limit, **kw)
+
+    monkeypatch.setattr(pb.engine, "solve_bl_utility_cvar", spy)
+    payload = {
+        "assets": [{"kind": "fund", "id": str(fid)} for fid in _FUND_IDS],
+        "objective": "regime_aware",
+        "mandate": "aggressive",
+        "constraints": {"cap": 1.0},
+    }
+    async with _client() as client:
+        resp = await client.post("/builder/optimize", json=payload)
+    assert resp.status_code == 200, resp.text
+    assert calls, "BL max-utility motor was not invoked on the regime_aware path"
+    assert calls[0]["gamma"] == pytest.approx(1.90)        # aggressive gamma
+    assert calls[0]["cvar_limit"] == pytest.approx(0.030)  # aggressive CVaR cap
+    body = resp.json()
+    eq_w = next(w["weight"] for w in body["weights"] if w["asset"]["id"] == str(_FUND_IDS[0]))
+    assert eq_w >= 0.40 - 1e-6  # RISK_ON equity band still enforced under the new motor
+
+
+async def test_regime_falls_back_to_min_cvar(monkeypatch: pytest.MonkeyPatch) -> None:
+    """If the BL-utility solve is infeasible, the regime envelope is still honoured
+    via the min-CVaR fallback — valid weights, bands respected."""
+    _stub_returns(monkeypatch)
+    monkeypatch.setattr(tb, "fetch_gate_regime", _async(_gate_snapshot(state="risk_on")))
+
+    def boom(*_a: Any, **_k: Any):
+        raise pb.engine.OptimizerError("forced infeasible")
+
+    monkeypatch.setattr(pb.engine, "solve_bl_utility_cvar", boom)
+    payload = {
+        "assets": [{"kind": "fund", "id": str(fid)} for fid in _FUND_IDS],
+        "objective": "regime_aware",
+        "constraints": {"cap": 1.0},
+    }
+    async with _client() as client:
+        resp = await client.post("/builder/optimize", json=payload)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert abs(sum(w["weight"] for w in body["weights"]) - 1.0) < 1e-6
+    eq_w = next(w["weight"] for w in body["weights"] if w["asset"]["id"] == str(_FUND_IDS[0]))
+    assert 0.40 - 1e-6 <= eq_w <= 0.64 + 1e-6  # RISK_ON equity band still enforced
+
+
 def test_load_spy_signal_degrades_on_short_history(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fewer than the stress window of closes => degrade (flat-cap fallback)."""
     import asyncio

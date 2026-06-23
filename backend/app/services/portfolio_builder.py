@@ -40,8 +40,9 @@ from app.analytics import realized_cvar
 from app.optimizer import black_litterman as bl
 from app.optimizer import data as optimizer_data
 from app.optimizer import engine
+from app.optimizer import momentum_view
 from app.optimizer import selection as optimizer_selection
-from app.optimizer.mandate import resolve_delta
+from app.optimizer.mandate import resolve_cvar_limit, resolve_delta, resolve_gamma
 from app.schemas.builder import (
     AbsoluteViewIn,
     AssetRefIn,
@@ -445,6 +446,105 @@ async def _resolve_regime_block_budgets(
         lo, hi = bands[cls]
         blocks.append(engine.BlockBudget(indices=idxs, lo=lo, hi=hi))
     return blocks, regime, quadrant
+
+
+async def _regime_sleeve_groups(
+    session: AsyncSession,
+    assets: list[AssetRefIn],
+    labels: list[str],
+) -> list[str]:
+    """Per-asset group label (one per ``labels`` column) for the regime_aware
+    momentum view. Inverts ``_fund_class_columns`` (the lenient 4-class mapping:
+    equity/fixed_income/alternatives/cash); equities and unknown-class funds get
+    ``''`` (a non-risk category). NOTE: the momentum view fires only with
+    ``>= MIN_RISK`` risk categories, so this 4-class granularity leaves it DORMANT
+    (μ = equilibrium π); the finer 7-sleeve grouping that activates it arrives with
+    the two-level proxy model (S4b).
+    """
+    columns = await _fund_class_columns(session, assets, labels)
+    groups = ["" for _ in labels]
+    for cls, idxs in columns.items():
+        for j in idxs:
+            if 0 <= j < len(groups):
+                groups[j] = cls
+    return groups
+
+
+# Fixed group prior for the regime_aware equilibrium (harness GROUP_PRIOR). The
+# strategic anchor is a FIXED mix (not market-cap weights) — the regime bands do
+# the regime work; this prior is just the BL equilibrium/momentum anchor. Pure +
+# DB-free (faithful to the calibrated _category_prior, and keeps the regime path
+# independent of the AUM loader).
+_REGIME_GROUP_PRIOR: dict[str, float] = {
+    "cash": 0.04, "equity": 0.45, "fixed_income": 0.22, "thematic": 0.06,
+    "alternatives": 0.08, "gold": 0.07, "long_short": 0.05,
+}
+
+
+def _regime_prior(groups: list[str]) -> np.ndarray:
+    """Per-asset equilibrium prior (sum 1) from the fixed group prior, split EVENLY
+    across each group's members (so a group's total = its prior regardless of how
+    many assets it holds — fixes a count-driven tilt). Unknown-group assets (raw
+    equities / unclassified) are treated as equity-like; a fully degenerate prior
+    falls back to equal-weight."""
+    eff = [g if g in _REGIME_GROUP_PRIOR else "equity" for g in groups]
+    counts: dict[str, int] = {}
+    for g in eff:
+        counts[g] = counts.get(g, 0) + 1
+    raw = np.array([_REGIME_GROUP_PRIOR[g] / counts[g] for g in eff], dtype=float)
+    s = float(raw.sum())
+    if s <= 0:
+        n = len(groups)
+        return np.full(n, 1.0 / n) if n else np.zeros(0, dtype=float)
+    return raw / s
+
+
+async def _solve_regime_motor(
+    session: AsyncSession,
+    assets: list[AssetRefIn],
+    labels: list[str],
+    scenarios: np.ndarray,
+    sigma: np.ndarray,
+    cvar_bounds_regime: engine.BoundsBundle,
+    gate_state: str | None,
+    payload: "OptimizeRequest",
+    cap: float | None,
+    min_weight: float | None,
+    current_vec: np.ndarray | None,
+    linear: "list[engine.LinearConstraint] | None",
+) -> tuple[np.ndarray, str]:
+    """Return-aware regime_aware solve (COMBO S4a): BL max-utility + hard CVaR with
+    the per-mandate gamma and μ = equilibrium π (DELTA_MARKET) + category momentum
+    view, INSIDE the same regime envelope (graduated caps + class bands carried by
+    ``cvar_bounds_regime``). Replaces the return-blind min-CVaR motor.
+
+    On ANY ``OptimizerError`` falls back to ``solve_min_cvar`` so the regime
+    envelope is always honoured (worst case == the prior behaviour). gamma is
+    DECOUPLED from the equilibrium delta; the CVaR safety cap is the per-mandate
+    ladder, tightened in risk_off. The one sigma is reused for both the equilibrium
+    μ and the utility penalty (harness parity). Turnover damping is not applied on
+    the BL path (the calibrated category solve has none); only the fallback keeps it.
+    """
+    gamma = resolve_gamma(None, payload.mandate)
+    cvar_cap = resolve_cvar_limit(payload.cvar_limit, payload.mandate)
+    if (gate_state or "").lower() == "risk_off":
+        cvar_cap *= DEFAULT_RISK_OFF_CVAR_FACTOR
+    try:
+        groups = await _regime_sleeve_groups(session, assets, labels)
+        prior = _regime_prior(groups)
+        mu = momentum_view.category_momentum_mu(
+            scenarios, groups, prior, gate_state, sigma=sigma,
+        )
+        return engine.solve_bl_utility_cvar(
+            mu, sigma, scenarios, gamma, cvar_cap,
+            cap=cap, min_weight=min_weight, bounds=cvar_bounds_regime, linear=linear,
+        )
+    except engine.OptimizerError:
+        return engine.solve_min_cvar(
+            scenarios, cap=cap, min_weight=min_weight, bounds=cvar_bounds_regime,
+            current_weights=current_vec, turnover_lambda=payload.turnover_lambda,
+            linear=linear,
+        )
 
 
 def _filters_from_spec(spec: UniverseSpecIn) -> funds_catalog.FundFilters:
@@ -936,14 +1036,13 @@ async def run_optimize(
                     min_vec=np.full(n, min_weight) if min_weight is not None else None,
                     blocks=regime_blocks or None,
                 )
-                weights, status = engine.solve_min_cvar(
-                    scenarios,
-                    cap=cap,
-                    min_weight=min_weight,
-                    bounds=cvar_bounds_regime,
-                    current_weights=current_vec,
-                    turnover_lambda=payload.turnover_lambda,
-                    linear=linear,
+                # COMBO S4a: return-aware motor — BL max-utility + hard CVaR with
+                # the per-mandate gamma and μ = equilibrium π + category momentum
+                # view, inside this same regime envelope. Replaces the return-blind
+                # min-CVaR; falls back to it on infeasibility (envelope preserved).
+                weights, status = await _solve_regime_motor(
+                    session, assets, labels, scenarios, sigma, cvar_bounds_regime,
+                    gate_state, payload, cap, min_weight, current_vec, linear,
                 )
         elif payload.objective == "bl_utility":
             assert mu_equilibrium is not None  # needs_bl guarantees it
