@@ -1,0 +1,18 @@
+diff --git a/es-modules/Grid/Core/Table/Actions/ColumnsResizer.js b/es-modules/Grid/Core/Table/Actions/ColumnsResizer.js
+index a269374d5df878bfe98895832d40df846e99eec7..9e13df10e1ab0204ea63744e9745663a2cd39ae7 100644
+--- a/es-modules/Grid/Core/Table/Actions/ColumnsResizer.js
++++ b/es-modules/Grid/Core/Table/Actions/ColumnsResizer.js
+@@ -201,7 +201,12 @@ class ColumnsResizer {
+                 listener: onHandleMouseOut
+             }];
+         for (const { eventName, listener } of handleListeners) {
+-            handle.addEventListener(eventName, listener);
++            // Declare the touch listener as explicitly non-passive: the handler
++            // calls preventDefault to stop the page scrolling while dragging the
++            // resize handle. Stating { passive: false } preserves that behaviour
++            // and silences Chrome's "non-passive scroll-blocking touchstart"
++            // violation, which it emits only when passivity is left implicit.
++            handle.addEventListener(eventName, listener, eventName === 'touchstart' ? { passive: false } : undefined);
+         }
+         this.handles.push([handle, handleListeners]);
+     }

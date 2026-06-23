@@ -1,2 +1,5 @@
 packages:
-  - "frontend"
+  - frontend
+
+patchedDependencies:
+  '@highcharts/grid-pro@3.0.0': patches/@highcharts__grid-pro@3.0.0.patch
