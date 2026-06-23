@@ -126,8 +126,15 @@ async def run_walk_forward_backtest(
 ) -> WalkForwardResponse:
     refs = [_to_data_ref(ref) for ref in payload.assets]
     try:
+        # LOG frame for the per-fold solve (covariance is standard in log) and a
+        # SIMPLE frame for the OOS composition (Bug 1: prod(1+r) is a true
+        # portfolio return only on simple returns). Both dropna the same rows in
+        # the loader, so they share the index; the analytics layer asserts it.
         frame: pd.DataFrame = await optimizer_data.load_aligned_returns(
-            session, refs, window_days=payload.window_days
+            session, refs, window_days=payload.window_days, convention="log"
+        )
+        perf_frame: pd.DataFrame = await optimizer_data.load_aligned_returns(
+            session, refs, window_days=payload.window_days, convention="simple"
         )
     except ValueError as exc:
         raise BacktestError(str(exc)) from exc
@@ -157,6 +164,7 @@ async def run_walk_forward_backtest(
         result = assemble_walk_forward_backtest(
             frame,
             solve_fn,
+            perf_returns=perf_frame,
             n_splits=payload.n_splits,
             gap=payload.gap,
             test_size=payload.test_size,
