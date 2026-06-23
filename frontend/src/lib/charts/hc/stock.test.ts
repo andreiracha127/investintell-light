@@ -76,6 +76,17 @@ describe("buildStockOptions", () => {
     expect((main as { type?: string }).type).toBe("candlestick");
   });
 
+  it("maps the chart type to the native main-series type", () => {
+    const mainTypeFor = (type: "ohlc" | "line" | "area") => {
+      const opt = buildStockOptions(baseInput({ type }));
+      const main = (opt.series ?? []).find((s) => (s as { id?: string }).id === "price-main");
+      return (main as { type?: string }).type;
+    };
+    expect(mainTypeFor("ohlc")).toBe("ohlc");
+    expect(mainTypeFor("line")).toBe("line");
+    expect(mainTypeFor("area")).toBe("area");
+  });
+
   it("includes a native SMA20 indicator linked to the price series when sma20=true", () => {
     const opt = buildStockOptions(baseInput({ sma20: true }));
     const sma = (opt.series ?? []).find((s) => (s as { type?: string }).type === "sma");

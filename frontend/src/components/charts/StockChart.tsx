@@ -105,6 +105,13 @@ export function StockChart({
   onRangeChangeRef.current = onRangeChange;
   const initialRangeRef = useRef(initialRange);
 
+  // Highstock applies `rangeSelector.selected` during init, which fires
+  // `afterSetExtremes` with `e.rangeSelectorButton` populated → one synthetic
+  // onRangeButtonClick on every mount. Swallow that first emission so we don't
+  // emit a redundant router.replace on load; genuine user clicks (all later
+  // emissions) pass through unchanged.
+  const mountedRef = useRef(false);
+
   // Coalesce live-tick redraws to one incremental update per animation frame.
   const rafRef = useRef<number | null>(null);
   const pendingTickRef = useRef<{ bar: HistoryBar; appended: boolean } | null>(null);
@@ -144,7 +151,15 @@ export function StockChart({
           compares: [],
           colors,
           selectedRangeIndex: rangeButtonIndexForPreset(initialRangeRef.current),
-          onRangeButtonClick: (preset) => onRangeChangeRef.current(preset),
+          onRangeButtonClick: (preset) => {
+            // Ignore the first (on-mount) emission from applying the initial
+            // rangeSelector selection; forward all later user clicks.
+            if (!mountedRef.current) {
+              mountedRef.current = true;
+              return;
+            }
+            onRangeChangeRef.current(preset);
+          },
         }),
       );
       if (disposed) {
