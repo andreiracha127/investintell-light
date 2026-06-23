@@ -39,8 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.analytics import realized_cvar
 from app.optimizer import black_litterman as bl
 from app.optimizer import data as optimizer_data
-from app.optimizer import engine
-from app.optimizer import momentum_view
+from app.optimizer import engine, momentum_view
 from app.optimizer import selection as optimizer_selection
 from app.optimizer.mandate import resolve_cvar_limit, resolve_delta, resolve_gamma
 from app.schemas.builder import (
