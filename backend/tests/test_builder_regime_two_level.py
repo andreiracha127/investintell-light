@@ -366,3 +366,21 @@ async def test_two_level_falls_back_to_single_level_without_proxies(monkeypatch:
     assert diag["category_weights"] is None
     assert "gold" not in (diag["class_bands"] or {})  # 4-class envelope only
 
+
+async def test_two_level_band_state_comes_from_quadrant_not_gate(monkeypatch: Any) -> None:
+    """The two-level sleeve bands key off the QUADRANT (the gate only tightens
+    CVaR): a risk_off gate with an EXPANSION quadrant uses the INFLATION sleeve
+    bands, not the 4-class RISK_OFF envelope."""
+    _stub_two_level_world(monkeypatch)
+    monkeypatch.setattr(
+        tb, "fetch_gate_regime", _async(_gate(state="risk_off", quadrant="expansion"))
+    )
+    async with _client() as client:
+        resp = await client.post("/builder/optimize", json=_tl_payload("moderate"))
+    assert resp.status_code == 200, resp.text
+    diag = resp.json()["diagnostics"]
+    assert diag["combined_regime"] == "RISK_OFF"   # the gate drives combined_regime
+    assert diag["category_weights"] is not None     # but the two-level still ran
+    expected = tb.profile_sleeve_bands("moderate", "INFLATION")  # quadrant -> INFLATION
+    assert diag["class_bands"]["equity"] == pytest.approx(list(expected["equity"]))
+
