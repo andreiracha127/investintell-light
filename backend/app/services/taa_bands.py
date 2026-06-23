@@ -131,6 +131,93 @@ def compute_effective_band(
     return effective_min, effective_max
 
 
+# ── COMBO per-profile 7-sleeve mandate centers + bands (S3) ──────────────────
+# Ported from the calibrated harness (local_fund_backtest.py:122-154). The
+# regime_aware Level-1 envelope is per-PROFILE (7 sleeves × 4 band-states), unlike
+# the legacy single 4-class DEFAULT_TAA_BANDS. Effective band = center ±
+# half_width·HW_SCALE, IPS-clamped via compute_effective_band (parity: the harness
+# _effective_band pre-scales the half-width by HW_SCALE before the same clamp).
+# Band-state comes from the QUADRANT only; the gate drives the overlay/CVaR tighten,
+# not these bands. SH/hedge is NOT a standard sleeve (research-only overlay).
+SLEEVE_GROUPS: list[str] = [
+    "cash", "equity", "fixed_income", "thematic", "alternatives", "gold", "long_short",
+]
+
+PROFILE_CENTERS: dict[str, dict[str, dict[str, float]]] = {
+    "aggressive": {
+        "RISK_ON":     {"cash": 0.05, "equity": 0.33, "fixed_income": 0.31, "thematic": 0.08, "alternatives": 0.05, "gold": 0.10, "long_short": 0.08},
+        "INFLATION":   {"cash": 0.08, "equity": 0.26, "fixed_income": 0.22, "thematic": 0.07, "alternatives": 0.12, "gold": 0.13, "long_short": 0.09},
+        "SLOWDOWN":    {"cash": 0.10, "equity": 0.24, "fixed_income": 0.33, "thematic": 0.02, "alternatives": 0.05, "gold": 0.10, "long_short": 0.10},
+        "CONTRACTION": {"cash": 0.18, "equity": 0.11, "fixed_income": 0.35, "thematic": 0.00, "alternatives": 0.04, "gold": 0.10, "long_short": 0.10},
+    },
+    "moderate": {
+        "RISK_ON":     {"cash": 0.10, "equity": 0.23, "fixed_income": 0.38, "thematic": 0.06, "alternatives": 0.05, "gold": 0.10, "long_short": 0.08},
+        "INFLATION":   {"cash": 0.13, "equity": 0.16, "fixed_income": 0.29, "thematic": 0.05, "alternatives": 0.12, "gold": 0.13, "long_short": 0.09},
+        "SLOWDOWN":    {"cash": 0.15, "equity": 0.14, "fixed_income": 0.40, "thematic": 0.00, "alternatives": 0.05, "gold": 0.10, "long_short": 0.10},
+        "CONTRACTION": {"cash": 0.23, "equity": 0.05, "fixed_income": 0.42, "thematic": 0.00, "alternatives": 0.04, "gold": 0.10, "long_short": 0.10},
+    },
+    "conservative": {
+        "RISK_ON":     {"cash": 0.15, "equity": 0.05, "fixed_income": 0.45, "thematic": 0.03, "alternatives": 0.05, "gold": 0.18, "long_short": 0.16},
+        "INFLATION":   {"cash": 0.18, "equity": 0.05, "fixed_income": 0.36, "thematic": 0.02, "alternatives": 0.12, "gold": 0.21, "long_short": 0.17},
+        "SLOWDOWN":    {"cash": 0.20, "equity": 0.05, "fixed_income": 0.47, "thematic": 0.00, "alternatives": 0.05, "gold": 0.18, "long_short": 0.18},
+        "CONTRACTION": {"cash": 0.28, "equity": 0.05, "fixed_income": 0.49, "thematic": 0.00, "alternatives": 0.04, "gold": 0.18, "long_short": 0.18},
+    },
+}
+
+SLEEVE_HALF_WIDTHS: dict[str, float] = {
+    "cash": 0.05, "equity": 0.08, "fixed_income": 0.06, "thematic": 0.05,
+    "alternatives": 0.05, "gold": 0.05, "long_short": 0.03,
+}
+SLEEVE_IPS_BOUNDS: dict[str, tuple[float, float]] = {
+    "cash": (0.0, 1.0), "equity": (0.0, 1.0), "fixed_income": (0.0, 1.0),
+    "thematic": (0.0, 0.30), "alternatives": (0.0, 0.40), "gold": (0.0, 0.40),
+    "long_short": (0.0, 0.25),
+}
+
+
+def band_state_from_quadrant(quadrant: str | None) -> str:
+    """Macro band-state from the growth×inflation QUADRANT only (harness _macro_state).
+
+    RECOVERY/'' → RISK_ON; EXPANSION → INFLATION; SLOWDOWN → SLOWDOWN;
+    CONTRACTION → CONTRACTION; unknown → SLOWDOWN (mildly defensive). The gate
+    (risk_on/risk_off) is a SEPARATE input driving the SH overlay + CVaR tighten,
+    not the base bands.
+    """
+    q = (quadrant or "").upper()
+    if q in ("", "RECOVERY"):
+        return "RISK_ON"
+    if q == "EXPANSION":
+        return "INFLATION"
+    if q == "CONTRACTION":
+        return "CONTRACTION"
+    return "SLOWDOWN"
+
+
+def normalized_profile_centers(profile: str, band_state: str) -> dict[str, float]:
+    """Per-profile sleeve centers normalized to sum 1 over the 7 ``SLEEVE_GROUPS``
+    (raw ``PROFILE_CENTERS`` rows sum ~1.0–1.07). Raises ``KeyError`` on an unknown
+    profile/band_state, ``ValueError`` on a degenerate (non-positive) total."""
+    raw = PROFILE_CENTERS[profile][band_state]
+    total = sum(raw[g] for g in SLEEVE_GROUPS)
+    if total <= 0:
+        raise ValueError(f"invalid mandate centers for {profile}/{band_state}")
+    return {g: raw[g] / total for g in SLEEVE_GROUPS}
+
+
+def profile_sleeve_bands(profile: str, band_state: str) -> dict[str, tuple[float, float]]:
+    """Effective per-sleeve (lo, hi) bands for the regime_aware Level-1 envelope:
+    normalized center ± half_width·HW_SCALE, IPS-clamped. Reuses
+    ``compute_effective_band`` by pre-scaling the half-width (harness parity)."""
+    centers = normalized_profile_centers(profile, band_state)
+    bands: dict[str, tuple[float, float]] = {}
+    for g in SLEEVE_GROUPS:
+        ips_lo, ips_hi = SLEEVE_IPS_BOUNDS[g]
+        bands[g] = compute_effective_band(
+            ips_lo, ips_hi, centers[g], SLEEVE_HALF_WIDTHS[g] * HW_SCALE
+        )
+    return bands
+
+
 def smooth_regime_centers(
     current_centers: dict[str, float],
     previous_smoothed: dict[str, float] | None,
