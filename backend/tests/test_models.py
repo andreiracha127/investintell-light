@@ -9,6 +9,13 @@ from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 
 # Importing Base triggers __init__.py which registers all ORM models.
 from app.models import Base, Portfolio, Position
+from app.models.fund import FundRiskLatest
+
+
+def test_fund_risk_latest_has_nav_quality_columns() -> None:
+    cols = {c.name for c in FundRiskLatest.__table__.columns}
+    assert "nav_quality_ok" in cols
+    assert "nav_glitch_count" in cols
 
 # ---------------------------------------------------------------------------
 # Helpers

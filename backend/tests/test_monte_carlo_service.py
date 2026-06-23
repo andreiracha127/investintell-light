@@ -205,6 +205,8 @@ async def test_run_builds_weight_vector_aligned_to_frame_columns(
         assets: Any,
         window_days: int | None = None,
         today: dt.date | None = None,
+        *,
+        convention: str = "log",
     ) -> pd.DataFrame:
         # Return columns in a different order than positions to prove alignment.
         return frame[list(reversed(frame.columns))]
@@ -251,3 +253,38 @@ async def test_run_insufficient_common_history_maps_to_422(
     )
     with pytest.raises(InsufficientDataError, match="insufficient common history"):
         await run_portfolio_monte_carlo(None, payload)
+
+
+async def test_portfolio_mc_uses_simple_frame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The portfolio Monte-Carlo must request the SIMPLE frame: frame @ w is a
+    # true portfolio simple-return series only when the frame is simple (Bug 1).
+    seen: dict[str, str] = {}
+    frame = _aligned_frame()
+
+    async def fake_load(
+        session: Any,
+        assets: Any,
+        window_days: int | None = None,
+        today: dt.date | None = None,
+        *,
+        convention: str = "log",
+    ) -> pd.DataFrame:
+        seen["convention"] = convention
+        return frame
+
+    monkeypatch.setattr(optimizer_data, "load_aligned_returns", fake_load)
+    payload = PortfolioMonteCarloRequest.model_validate(
+        {
+            "positions": [
+                {"asset": _pmc_fund(0), "weight": 0.5},
+                {"asset": _pmc_fund(1), "weight": 0.5},
+            ],
+            "statistic": "return",
+            "n_simulations": 2000,
+            "seed": 3,
+        }
+    )
+    await run_portfolio_monte_carlo(None, payload)
+    assert seen["convention"] == "simple"

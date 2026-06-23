@@ -31,6 +31,8 @@ def _stub_returns(monkeypatch: pytest.MonkeyPatch, n_obs: int = 600) -> None:
         assets: list[optimizer_data.AssetRef],
         window_days: int | None = None,
         today: dt.date | None = None,
+        *,
+        convention: str = "log",
     ) -> pd.DataFrame:
         rng = np.random.default_rng(5)
         index = pd.bdate_range("2018-01-02", periods=n_obs)
@@ -193,3 +195,64 @@ async def test_run_max_return_cvar_equities_fail_loud(
     )
     with pytest.raises(backtest_service.BacktestError, match="equities"):
         await backtest_service.run_walk_forward_backtest(None, payload)
+
+
+async def test_service_passes_simple_perf_returns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The service must load a SIMPLE perf frame and pass it through, aligned to
+    # the LOG solve frame. Spy on assemble_walk_forward_backtest.
+    _stub_returns(monkeypatch)
+    captured: dict[str, bool] = {}
+    real = backtest_service.assemble_walk_forward_backtest
+
+    def spy(returns: pd.DataFrame, solve_fn: Any, *, perf_returns: Any = None, **kw: Any) -> Any:
+        captured["perf_is_set"] = perf_returns is not None
+        captured["aligned"] = (
+            perf_returns is not None
+            and perf_returns.index.equals(returns.index)
+            and list(perf_returns.columns) == list(returns.columns)
+        )
+        return real(returns, solve_fn, perf_returns=perf_returns, **kw)
+
+    monkeypatch.setattr(backtest_service, "assemble_walk_forward_backtest", spy)
+    payload = WalkForwardRequest.model_validate(
+        {"assets": [_fund(0), _fund(1), _fund(2)], "objective": "min_cvar",
+         "constraints": {"cap": 0.5}}
+    )
+    await backtest_service.run_walk_forward_backtest(None, payload)
+    assert captured["perf_is_set"] is True
+    assert captured["aligned"] is True
+
+
+class _NavQualityResult:
+    def __init__(self, rows: list[tuple[Any, ...]]) -> None:
+        self._rows = rows
+
+    def all(self) -> list[tuple[Any, ...]]:
+        return self._rows
+
+
+class _NavQualitySession:
+    def __init__(self, flagged: list[Any]) -> None:
+        self._flagged = flagged
+
+    async def execute(self, stmt: Any) -> _NavQualityResult:
+        return _NavQualityResult([(fid,) for fid in self._flagged])
+
+
+async def test_reject_flagged_funds_raises_on_nav_quality_false() -> None:
+    bad = _FUND_IDS[0]
+    session = _NavQualitySession([bad])
+    with pytest.raises(backtest_service.BacktestError, match="NAV data quality"):
+        await backtest_service._reject_flagged_funds(
+            session, [optimizer_data.FundAssetRef(id=bad)]  # type: ignore[arg-type]
+        )
+
+
+async def test_reject_flagged_funds_keeps_unflagged() -> None:
+    session = _NavQualitySession([])  # no fund flagged -> no raise (NULL fail-open)
+    await backtest_service._reject_flagged_funds(
+        session,  # type: ignore[arg-type]
+        [optimizer_data.FundAssetRef(id=_FUND_IDS[0])],
+    )

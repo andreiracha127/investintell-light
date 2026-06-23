@@ -247,8 +247,11 @@ async def run_portfolio_monte_carlo(
     """
     refs = [_to_data_ref(pos.asset) for pos in payload.positions]
     try:
+        # SIMPLE frame (Bug 1): portfolio_returns = frame @ w is a true portfolio
+        # simple-return series only on simple returns; the bootstrap then composes
+        # prod(1+r) correctly. The covariance path is not used here.
         frame = await optimizer_data.load_aligned_returns(
-            session, refs, window_days=payload.window_days
+            session, refs, window_days=payload.window_days, convention="simple"
         )
     except ValueError as exc:
         raise InsufficientDataError(str(exc)) from exc

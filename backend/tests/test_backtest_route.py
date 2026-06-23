@@ -36,6 +36,8 @@ def _stub_returns(monkeypatch: pytest.MonkeyPatch, n_obs: int = 600) -> None:
         assets: list[optimizer_data.AssetRef],
         window_days: int | None = None,
         today: dt.date | None = None,
+        *,
+        convention: str = "log",
     ) -> pd.DataFrame:
         rng = np.random.default_rng(9)
         index = pd.bdate_range("2018-01-02", periods=n_obs)

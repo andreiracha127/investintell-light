@@ -14,10 +14,11 @@ import datetime as dt
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import ColumnElement, func, select
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.eod_price import EodPrice
@@ -82,28 +83,78 @@ def _fund_return_series(rows: list[tuple[dt.date, float | None, float | None]]) 
     return pd.Series(values, index=pd.Index(dates), dtype=float)
 
 
-async def _load_fund_returns(
-    session: AsyncSession, ref: FundAssetRef, since: dt.date | None
+def _fund_simple_return_series(
+    rows: list[tuple[dt.date, float | None, float | None, str | None]],
 ) -> pd.Series:
-    stmt = select(FundNav.nav_date, FundNav.nav, FundNav.return_1d).where(
-        FundNav.instrument_id == ref.id
-    )
+    """SIMPLE daily returns from (nav_date, nav, return_1d, return_type) rows.
+
+    Builds the per-fund series honoring ``return_type`` and the glitch guard via
+    ``to_simple_returns`` (PERFORMANCE path). Where ``return_1d`` is NULL, falls
+    back to ``log(navₜ/navₜ₋₁)`` (then converted to simple). The COVARIANCE path
+    keeps log and uses ``_fund_return_series`` instead.
+    """
+    from app.analytics.return_convention import to_simple_returns
+
+    dates: list[dt.date] = []
+    log_values: list[float] = []
+    types: list[str] = []
+    prev_nav: float | None = None
+    for nav_date, nav, return_1d, return_type in rows:
+        if return_1d is not None:
+            dates.append(nav_date)
+            log_values.append(float(return_1d))
+            types.append(return_type or "log")
+        elif nav is not None and nav > 0 and prev_nav is not None and prev_nav > 0:
+            dates.append(nav_date)
+            log_values.append(float(np.log(nav / prev_nav)))
+            types.append("log")
+        if nav is not None and nav > 0:
+            prev_nav = float(nav)
+    simple = to_simple_returns(np.asarray(log_values, dtype=float), types)
+    return pd.Series(simple, index=pd.Index(dates), dtype=float)
+
+
+async def _load_fund_returns(
+    session: AsyncSession,
+    ref: FundAssetRef,
+    since: dt.date | None,
+    *,
+    convention: Literal["log", "simple"] = "log",
+) -> pd.Series:
+    cols = [FundNav.nav_date, FundNav.nav, FundNav.return_1d]
+    if convention == "simple":
+        cols.append(FundNav.return_type)
+    stmt = select(*cols).where(FundNav.instrument_id == ref.id)
     if since is not None:
         stmt = stmt.where(FundNav.nav_date >= since)
     result = await session.execute(stmt.order_by(FundNav.nav_date))
-    rows = [
-        (nav_date, float(nav) if nav is not None else None, float(r1d) if r1d is not None else None)
-        for nav_date, nav, r1d in result.all()
-    ]
-    if not rows:
+    raw = result.all()
+    if not raw:
         raise ValueError(f"unknown asset or no NAV history in window: {ref.label}")
-    return _fund_return_series(rows)
+    if convention == "simple":
+        rows = [
+            (
+                nav_date,
+                float(nav) if nav is not None else None,
+                float(r1d) if r1d is not None else None,
+                rtype,
+            )
+            for nav_date, nav, r1d, rtype in raw
+        ]
+        return _fund_simple_return_series(rows)
+    rows3 = [
+        (nav_date, float(nav) if nav is not None else None, float(r1d) if r1d is not None else None)
+        for nav_date, nav, r1d in raw
+    ]
+    return _fund_return_series(rows3)
 
 
 async def _load_fund_returns_batch(
     session: AsyncSession,
     fund_refs: list[FundAssetRef],
     since: dt.date | None,
+    *,
+    convention: Literal["log", "simple"] = "log",
 ) -> dict[str, pd.Series]:
     """Daily-return Series per fund, loaded in ONE query (no N+1).
 
@@ -119,14 +170,37 @@ async def _load_fund_returns_batch(
     if not fund_refs:
         return {}
     ids = [ref.id for ref in fund_refs]
-    stmt = select(
-        FundNav.instrument_id, FundNav.nav_date, FundNav.nav, FundNav.return_1d
-    ).where(FundNav.instrument_id.in_(ids))
+    cols = [FundNav.instrument_id, FundNav.nav_date, FundNav.nav, FundNav.return_1d]
+    if convention == "simple":
+        cols.append(FundNav.return_type)
+    stmt = select(*cols).where(FundNav.instrument_id.in_(ids))
     if since is not None:
         stmt = stmt.where(FundNav.nav_date >= since)
     result = await session.execute(
         stmt.order_by(FundNav.instrument_id, FundNav.nav_date)
     )
+    if convention == "simple":
+        rows_by_id_s: dict[
+            uuid.UUID, list[tuple[dt.date, float | None, float | None, str | None]]
+        ] = {}
+        for iid, nav_date, nav, r1d, rtype in result.all():
+            rows_by_id_s.setdefault(iid, []).append(
+                (
+                    nav_date,
+                    float(nav) if nav is not None else None,
+                    float(r1d) if r1d is not None else None,
+                    rtype,
+                )
+            )
+        out: dict[str, pd.Series] = {}
+        for ref in fund_refs:
+            rows_s = rows_by_id_s.get(ref.id)
+            if not rows_s:
+                raise ValueError(
+                    f"unknown asset or no NAV history in window: {ref.label}"
+                )
+            out[ref.label] = _fund_simple_return_series(rows_s)
+        return out
     rows_by_id: dict[uuid.UUID, list[tuple[dt.date, float | None, float | None]]] = {}
     for iid, nav_date, nav, r1d in result.all():
         rows_by_id.setdefault(iid, []).append(
@@ -136,7 +210,7 @@ async def _load_fund_returns_batch(
                 float(r1d) if r1d is not None else None,
             )
         )
-    out: dict[str, pd.Series] = {}
+    out = {}
     for ref in fund_refs:
         rows = rows_by_id.get(ref.id)
         if not rows:
@@ -148,7 +222,11 @@ async def _load_fund_returns_batch(
 
 
 async def _load_equity_returns(
-    session: AsyncSession, ref: EquityAssetRef, since: dt.date | None
+    session: AsyncSession,
+    ref: EquityAssetRef,
+    since: dt.date | None,
+    *,
+    convention: Literal["log", "simple"] = "log",
 ) -> pd.Series:
     stmt = select(EodPrice.date, EodPrice.adj_close).where(EodPrice.ticker == ref.ticker)
     if since is not None:
@@ -164,7 +242,12 @@ async def _load_equity_returns(
     )
     prices = prices[prices > 0]
     log_prices = pd.Series(np.log(prices.to_numpy()), index=prices.index, dtype=float)
-    return log_prices.diff().dropna()
+    log_returns = log_prices.diff().dropna()
+    if convention == "simple":
+        from app.analytics.return_convention import to_simple_returns
+
+        return to_simple_returns(log_returns)
+    return log_returns
 
 
 async def load_aligned_returns(
@@ -172,8 +255,15 @@ async def load_aligned_returns(
     assets: list[AssetRef],
     window_days: int | None = DEFAULT_WINDOW_DAYS,
     today: dt.date | None = None,
+    *,
+    convention: Literal["log", "simple"] = "log",
 ) -> pd.DataFrame:
     """T×n daily-return frame (columns = asset labels, index = common dates).
+
+    ``convention="log"`` (default) is byte-identical to the legacy behavior and
+    feeds the covariance path. ``convention="simple"`` returns ``expm1`` of the
+    log returns honoring ``return_type`` and the glitch guard — the PERFORMANCE
+    frame for the backtest OOS curve and the portfolio Monte-Carlo.
 
     Raises ValueError (→ 422 at the route) on: duplicate assets, an unknown
     asset / empty window, or fewer than ``MIN_COMMON_OBS`` common dates.
@@ -192,9 +282,13 @@ async def load_aligned_returns(
     series: dict[str, pd.Series] = {}
     for ref in assets:
         if isinstance(ref, FundAssetRef):
-            series[ref.label] = await _load_fund_returns(session, ref, since)
+            series[ref.label] = await _load_fund_returns(
+                session, ref, since, convention=convention
+            )
         else:
-            series[ref.label] = await _load_equity_returns(session, ref, since)
+            series[ref.label] = await _load_equity_returns(
+                session, ref, since, convention=convention
+            )
 
     frame = pd.DataFrame(series).dropna()
     if len(frame) < MIN_COMMON_OBS:
@@ -212,6 +306,8 @@ async def load_returns_matrix(
     assets: list[AssetRef],
     window_days: int | None = DEFAULT_WINDOW_DAYS,
     today: dt.date | None = None,
+    *,
+    convention: Literal["log", "simple"] = "log",
 ) -> pd.DataFrame:
     """T×N daily-return frame over the UNION of dates — NaN preserved.
 
@@ -241,14 +337,19 @@ async def load_returns_matrix(
     # Column order MUST follow ``assets`` — the broad orchestrator maps kept
     # indices back to assets by column position.
     fund_series = await _load_fund_returns_batch(
-        session, [ref for ref in assets if isinstance(ref, FundAssetRef)], since
+        session,
+        [ref for ref in assets if isinstance(ref, FundAssetRef)],
+        since,
+        convention=convention,
     )
     series: dict[str, pd.Series] = {}
     for ref in assets:
         if isinstance(ref, FundAssetRef):
             series[ref.label] = fund_series[ref.label]
         else:
-            series[ref.label] = await _load_equity_returns(session, ref, since)
+            series[ref.label] = await _load_equity_returns(
+                session, ref, since, convention=convention
+            )
 
     # Union index, NO dropna — the pairwise estimator handles the NaN mask.
     frame = pd.DataFrame(series)
@@ -500,6 +601,15 @@ async def select_universe_funds(
     # of the optimizable universe (too few to reclassify), mirroring the same
     # exclusion baked into funds_list_mv.
     conditions.append(Fund.strategy_label != "Unclassified")
+    # NAV data-quality gate (Bug 2): exclude funds the risk worker flagged as
+    # irreparable (dead / scale-step / residual glitch). NULL is fail-open so the
+    # universe is never emptied before the worker populates the column.
+    conditions.append(
+        or_(
+            FundRiskLatest.nav_quality_ok.is_(None),
+            FundRiskLatest.nav_quality_ok.is_(True),
+        )
+    )
     if require_aum:
         conditions.append(Fund.aum_usd > 0)
     if include_ids:

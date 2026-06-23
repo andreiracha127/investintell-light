@@ -18,9 +18,11 @@ from typing import cast
 
 import numpy as np
 import pandas as pd
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics.backtest import SolveFn, assemble_walk_forward_backtest
+from app.models.fund import FundRiskLatest
 from app.optimizer import black_litterman as bl
 from app.optimizer import data as optimizer_data
 from app.optimizer import engine
@@ -36,6 +38,35 @@ from app.services.portfolio_builder import _market_weights_for, _to_data_ref
 
 class BacktestError(ValueError):
     """Domain failure in the backtest — mapped verbatim to HTTP 422."""
+
+
+async def _reject_flagged_funds(
+    session: AsyncSession, refs: list[optimizer_data.AssetRef]
+) -> None:
+    """Fail loud if any requested fund is flagged ``nav_quality_ok = False`` (Bug 2).
+
+    NULL is fail-open (kept). With no DB session (unit tests stub the loaders),
+    the check is skipped — the stubbed data already controls the inputs.
+    """
+    if session is None:
+        return
+    fund_ids = [
+        ref.id for ref in refs if isinstance(ref, optimizer_data.FundAssetRef)
+    ]
+    if not fund_ids:
+        return
+    result = await session.execute(
+        select(FundRiskLatest.instrument_id).where(
+            FundRiskLatest.instrument_id.in_(fund_ids),
+            FundRiskLatest.nav_quality_ok.is_(False),
+        )
+    )
+    bad = [str(row[0]) for row in result.all()]
+    if bad:
+        raise BacktestError(
+            "fund(s) excluded for poor NAV data quality "
+            "(dead / scale-step / residual glitch): " + ", ".join(bad)
+        )
 
 
 def _solve_fn_for(
@@ -125,9 +156,17 @@ async def run_walk_forward_backtest(
     session: AsyncSession, payload: WalkForwardRequest
 ) -> WalkForwardResponse:
     refs = [_to_data_ref(ref) for ref in payload.assets]
+    await _reject_flagged_funds(session, refs)
     try:
+        # LOG frame for the per-fold solve (covariance is standard in log) and a
+        # SIMPLE frame for the OOS composition (Bug 1: prod(1+r) is a true
+        # portfolio return only on simple returns). Both dropna the same rows in
+        # the loader, so they share the index; the analytics layer asserts it.
         frame: pd.DataFrame = await optimizer_data.load_aligned_returns(
-            session, refs, window_days=payload.window_days
+            session, refs, window_days=payload.window_days, convention="log"
+        )
+        perf_frame: pd.DataFrame = await optimizer_data.load_aligned_returns(
+            session, refs, window_days=payload.window_days, convention="simple"
         )
     except ValueError as exc:
         raise BacktestError(str(exc)) from exc
@@ -157,6 +196,7 @@ async def run_walk_forward_backtest(
         result = assemble_walk_forward_backtest(
             frame,
             solve_fn,
+            perf_returns=perf_frame,
             n_splits=payload.n_splits,
             gap=payload.gap,
             test_size=payload.test_size,
