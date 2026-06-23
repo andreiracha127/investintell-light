@@ -18,7 +18,7 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
-from sqlalchemy import ColumnElement, func, select
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.eod_price import EodPrice
@@ -601,6 +601,15 @@ async def select_universe_funds(
     # of the optimizable universe (too few to reclassify), mirroring the same
     # exclusion baked into funds_list_mv.
     conditions.append(Fund.strategy_label != "Unclassified")
+    # NAV data-quality gate (Bug 2): exclude funds the risk worker flagged as
+    # irreparable (dead / scale-step / residual glitch). NULL is fail-open so the
+    # universe is never emptied before the worker populates the column.
+    conditions.append(
+        or_(
+            FundRiskLatest.nav_quality_ok.is_(None),
+            FundRiskLatest.nav_quality_ok.is_(True),
+        )
+    )
     if require_aum:
         conditions.append(Fund.aum_usd > 0)
     if include_ids:

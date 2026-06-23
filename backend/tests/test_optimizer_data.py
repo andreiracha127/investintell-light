@@ -204,6 +204,24 @@ async def test_select_universe_funds_always_applies_quality_gates() -> None:
     assert "Unclassified" in session.bound_params.values()
 
 
+async def test_select_universe_funds_applies_nav_quality_gate_fail_open() -> None:
+    from app.services import funds_catalog
+
+    session = _CaptureSession([(_FUND_A, "AAA", "Alpha Fund")])
+    await optimizer_data.select_universe_funds(
+        session,  # type: ignore[arg-type]
+        funds_catalog.FundFilters(),
+        rank_by="sharpe_1y",
+        rank_dir="asc",
+        max_assets=5,
+        today=_TODAY,
+    )
+    # NAV data-quality gate (Bug 2): fail-open — a NULL (unscored) fund is KEPT,
+    # only an explicit False is excluded.
+    assert "nav_quality_ok is null" in session.sql
+    assert "nav_quality_ok is true" in session.sql
+
+
 async def test_select_universe_funds_include_ids_restricts_candidates() -> None:
     from app.services import funds_catalog
 

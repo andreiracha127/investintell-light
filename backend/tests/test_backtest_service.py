@@ -223,3 +223,36 @@ async def test_service_passes_simple_perf_returns(
     await backtest_service.run_walk_forward_backtest(None, payload)
     assert captured["perf_is_set"] is True
     assert captured["aligned"] is True
+
+
+class _NavQualityResult:
+    def __init__(self, rows: list[tuple[Any, ...]]) -> None:
+        self._rows = rows
+
+    def all(self) -> list[tuple[Any, ...]]:
+        return self._rows
+
+
+class _NavQualitySession:
+    def __init__(self, flagged: list[Any]) -> None:
+        self._flagged = flagged
+
+    async def execute(self, stmt: Any) -> _NavQualityResult:
+        return _NavQualityResult([(fid,) for fid in self._flagged])
+
+
+async def test_reject_flagged_funds_raises_on_nav_quality_false() -> None:
+    bad = _FUND_IDS[0]
+    session = _NavQualitySession([bad])
+    with pytest.raises(backtest_service.BacktestError, match="NAV data quality"):
+        await backtest_service._reject_flagged_funds(
+            session, [optimizer_data.FundAssetRef(id=bad)]  # type: ignore[arg-type]
+        )
+
+
+async def test_reject_flagged_funds_keeps_unflagged() -> None:
+    session = _NavQualitySession([])  # no fund flagged -> no raise (NULL fail-open)
+    await backtest_service._reject_flagged_funds(
+        session,  # type: ignore[arg-type]
+        [optimizer_data.FundAssetRef(id=_FUND_IDS[0])],
+    )
