@@ -434,3 +434,54 @@ def test_load_spy_signal_handles_object_date_index(monkeypatch: Any) -> None:
         assert isinstance(start, dt.date) and not isinstance(start, dt.datetime)
         assert isinstance(end, dt.date) and not isinstance(end, dt.datetime)
 
+
+async def test_two_level_reached_with_production_object_date_index(monkeypatch: Any) -> None:
+    """P0 acceptance: with the REAL session shape (session != None) and the
+    REAL index type (datetime.date / object dtype), the dispatch reaches the
+    two-level solve instead of dying in _load_proxy_returns. Stubs only the DB
+    edge (select_adj_close_rows) and the fund taxonomy."""
+    from app.schemas.builder import FundRefIn, OptimizeRequest
+
+    dates = [dt.date(2024, 1, 2) + dt.timedelta(days=i) for i in range(500)]
+    index = pd.Index(dates)
+    assert index.dtype == object
+
+    assets = [FundRefIn(kind="fund", id=fid) for fid in _TL_IDS]
+    labels = [pb._ref_key(a) for a in assets]  # derive, never hardcode the format
+
+    def _ticker_levels(ticker: str) -> list[float]:
+        # Distinct price path per ticker -> well-conditioned proxy covariance.
+        # Identical series would make sigma_ledoit_wolf rank-deficient and the
+        # Level-1 solve degenerate. Deterministic seed (no PYTHONHASHSEED dep).
+        rng = np.random.default_rng(sum(ord(c) for c in ticker))
+        lvl, out = 100.0, []
+        for r in rng.normal(0.0003, 0.01, len(index)):
+            lvl *= 1.0 + r
+            out.append(lvl)
+        return out
+
+    async def fake_rows(session: Any, ticker: str, start: Any, end: Any) -> list[tuple]:
+        # Type contract is covered by Task 2; here we only prove the dispatch
+        # reaches the solve, so no isinstance assertion inside the loader.
+        return [(d, float(p)) for d, p in zip(dates, _ticker_levels(ticker), strict=True)]
+
+    async def fake_strategy(session: Any, fund_ids: list) -> dict:
+        return {fid: _TL_STRATEGY.get(fid) for fid in fund_ids}
+
+    async def fake_class(session: Any, fund_ids: list) -> dict:
+        return {fid: _TL_CLASS.get(fid) for fid in fund_ids}
+
+    monkeypatch.setattr(pb, "select_adj_close_rows", fake_rows)
+    monkeypatch.setattr(optimizer_data, "load_fund_strategy_label", fake_strategy)
+    monkeypatch.setattr(optimizer_data, "load_fund_asset_class", fake_class)
+
+    payload = OptimizeRequest(
+        assets=assets, objective="regime_aware", mandate="moderate"
+    )
+    result = await pb._solve_regime_two_level(
+        object(), assets, labels, index, "expansion", "risk_on", payload
+    )
+    assert result is not None  # would be None (or raise) before the P0 fix
+    total = float(result.fund_weights.sum()) + sum(result.proxy_holdings.values())
+    assert abs(total - 1.0) < 1e-6
+
