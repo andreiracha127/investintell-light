@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from app.services import portfolio_builder as pb
 from app.services import taa_bands as tb
@@ -168,4 +169,58 @@ def test_level1_falls_back_to_min_cvar(monkeypatch: Any) -> None:
         lo, hi = bands[group]
         assert wcat.get(proxy, 0.0) <= hi + 1e-6
         assert wcat.get(proxy, 0.0) >= lo - 1e-6
+
+
+# ── S4b.3: Level-2 (funds equal-weight per sleeve; proxy-only -> holding) ─────
+
+
+def test_level2_distributes_category_weight_equal_weight() -> None:
+    """Each sleeve's category weight is split EQUALLY across its selected funds —
+    no re-optimization, no conviction tilt."""
+    wcat = {"IVV": 0.6, "GOVT": 0.4}
+    proxy_to_sleeve = {"IVV": "equity", "GOVT": "fixed_income"}
+    funds_by_sleeve = {"equity": [0, 1], "fixed_income": [2]}
+    fund_w, proxy_holdings = pb._solve_regime_level2(
+        wcat, proxy_to_sleeve, funds_by_sleeve, n_assets=4
+    )
+    assert proxy_holdings == {}
+    assert fund_w == pytest.approx([0.3, 0.3, 0.4, 0.0])
+
+
+def test_level2_three_funds_split_in_thirds() -> None:
+    """A sleeve with three funds splits its weight in equal thirds."""
+    wcat = {"IVV": 0.9}
+    fund_w, proxy_holdings = pb._solve_regime_level2(
+        wcat, {"IVV": "equity"}, {"equity": [0, 1, 2]}, n_assets=3
+    )
+    assert fund_w == pytest.approx([0.3, 0.3, 0.3])
+    assert proxy_holdings == {}
+
+
+def test_level2_proxy_only_sleeve_becomes_a_holding() -> None:
+    """A floored sleeve with no fund (gold via GLD) keeps the proxy as a holding,
+    not folded into the funds."""
+    wcat = {"IVV": 0.7, "GLD": 0.3}
+    proxy_to_sleeve = {"IVV": "equity", "GLD": "gold"}
+    funds_by_sleeve = {"equity": [0, 1]}  # no gold fund
+    fund_w, proxy_holdings = pb._solve_regime_level2(
+        wcat, proxy_to_sleeve, funds_by_sleeve, n_assets=2
+    )
+    assert fund_w == pytest.approx([0.35, 0.35])
+    assert proxy_holdings == {"GLD": pytest.approx(0.3)}
+
+
+def test_level2_total_weight_is_conserved() -> None:
+    """Funds + proxy-only holdings together sum to the Level-1 total (1.0)."""
+    wcat = {"IVV": 0.5, "GOVT": 0.2, "GLD": 0.2, "FTLS": 0.1}
+    proxy_to_sleeve = {
+        "IVV": "equity", "GOVT": "fixed_income", "GLD": "gold", "FTLS": "long_short"
+    }
+    funds_by_sleeve = {"equity": [0], "fixed_income": [1]}  # gold/long_short proxy-only
+    fund_w, proxy_holdings = pb._solve_regime_level2(
+        wcat, proxy_to_sleeve, funds_by_sleeve, n_assets=2
+    )
+    total = float(fund_w.sum()) + sum(proxy_holdings.values())
+    assert total == pytest.approx(1.0)
+    assert proxy_holdings == {"GLD": pytest.approx(0.2), "FTLS": pytest.approx(0.1)}
 

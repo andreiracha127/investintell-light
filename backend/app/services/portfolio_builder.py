@@ -591,6 +591,32 @@ def _solve_regime_level1(
     return {proxies[k]: float(wcat[k]) for k in range(len(proxies)) if wcat[k] > 1e-9}
 
 
+def _solve_regime_level2(
+    wcat: dict[str, float],
+    proxy_to_sleeve: dict[str, str],
+    funds_by_sleeve: dict[str, list[int]],
+    n_assets: int,
+) -> tuple[np.ndarray, dict[str, float]]:
+    """COMBO S4b Level-2: implement each sleeve's Level-1 category weight with its
+    SELECTED FUNDS EQUAL-WEIGHT (track the proxy, do NOT re-optimize — no low-vol
+    or conviction tilt; the IC overlay was rejected). A floored sleeve with no fund
+    (an authorized proxy fill — gold via GLD, long_short via FTLS) keeps the proxy
+    itself as a holding. Returns ``(fund_weights[n_assets], proxy_holdings{ticker:
+    weight})``; together they sum to ``sum(wcat)`` (= 1)."""
+    fund_w = np.zeros(n_assets, dtype=float)
+    proxy_holdings: dict[str, float] = {}
+    for proxy, w in wcat.items():
+        sleeve = proxy_to_sleeve[proxy]
+        cols = funds_by_sleeve.get(sleeve, [])
+        if cols:
+            share = w / len(cols)
+            for c in cols:
+                fund_w[c] += share
+        else:
+            proxy_holdings[proxy] = proxy_holdings.get(proxy, 0.0) + w
+    return fund_w, proxy_holdings
+
+
 async def _solve_regime_motor(
     session: AsyncSession,
     assets: list[AssetRefIn],
