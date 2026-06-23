@@ -19,6 +19,25 @@ export type StatusHandler = (status: FeedStatus) => void;
 const URL = process.env.NEXT_PUBLIC_LIVEFEED_WS_URL ?? "";
 const MAX_BACKOFF_MS = 30_000;
 
+/**
+ * Fecha o socket sem disparar o aviso do navegador "WebSocket is closed before
+ * the connection is established": fechar enquanto ainda em CONNECTING gera esse
+ * ruído (o StrictMode do dev monta→desmonta→remonta e fecha o socket recém-
+ * criado antes do handshake). Se ainda conectando, neutraliza os handlers e
+ * adia o close() para quando a conexão abrir; caso contrário fecha na hora.
+ */
+function closeSocket(ws: WebSocket): void {
+  ws.onmessage = null;
+  ws.onerror = null;
+  ws.onclose = null;
+  if (ws.readyState === WebSocket.CONNECTING) {
+    ws.onopen = () => ws.close();
+  } else {
+    ws.onopen = null;
+    ws.close();
+  }
+}
+
 export function parseTick(raw: string): Tick | null {
   try {
     const m = JSON.parse(raw) as Record<string, unknown>;
@@ -124,7 +143,7 @@ class SharedFeed {
   private teardown(): void {
     clearTimeout(this.reconnectT);
     this.closedByUs = true;
-    this.ws?.close();
+    if (this.ws) closeSocket(this.ws);
     this.ws = null;
     this.setStatus("off");
   }

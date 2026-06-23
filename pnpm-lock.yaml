@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@highcharts/grid-pro@3.0.0':
+    hash: b890d172bbc0a005bcc515b3c49121248841584aef434ad17dd3b666f75afb2d
+    path: patches/@highcharts__grid-pro@3.0.0.patch
+
 importers:
 
   .: {}
@@ -21,7 +26,7 @@ importers:
         version: 1.108.0(sass@1.101.0)
       '@highcharts/grid-pro':
         specifier: ^3.0.0
-        version: 3.0.0
+        version: 3.0.0(patch_hash=b890d172bbc0a005bcc515b3c49121248841584aef434ad17dd3b666f75afb2d)
       '@insforge/sdk':
         specifier: ^1.4.0
         version: 1.4.0
@@ -3302,7 +3307,7 @@ snapshots:
 
   '@floating-ui/utils@0.2.11': {}
 
-  '@highcharts/grid-pro@3.0.0': {}
+  '@highcharts/grid-pro@3.0.0(patch_hash=b890d172bbc0a005bcc515b3c49121248841584aef434ad17dd3b666f75afb2d)': {}
 
   '@humanfs/core@0.19.2':
     dependencies:
