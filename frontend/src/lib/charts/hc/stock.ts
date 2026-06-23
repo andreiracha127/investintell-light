@@ -146,6 +146,7 @@ export function buildStockOptions(input: StockOptionsInput): Options {
       gui: {
         enabled: true,
         buttons: [
+          "typeChange", "separator",
           "simpleShapes", "lines", "crookedLines", "measure", "advanced",
           "toggleAnnotations", "separator", "verticalLabels", "flags",
           "separator", "indicators", "currentPriceIndicator", "fullScreen",
