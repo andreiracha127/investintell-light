@@ -92,5 +92,28 @@ def test_cache_key_orders_query_params() -> None:
     assert a == b
 
 
+def test_stocks_family_is_cached() -> None:
+    """Endpoints DB-first de /stocks (EOD) servem do cache na repetição."""
+    assert any(
+        "/stocks/AAPL/analysis".startswith(p) for p in CACHED_GET_PREFIXES
+    )
+    calls = {"n": 0}
+    app = FastAPI()
+    app.add_middleware(CatalogCacheMiddleware)
+
+    @app.get("/stocks/{ticker}/analysis")
+    async def analysis(ticker: str, range: str = "1Y") -> dict[str, str | int]:
+        calls["n"] += 1
+        return {"ticker": ticker, "range": range, "calls": calls["n"]}
+
+    with TestClient(app) as client:
+        first = client.get("/stocks/AAPL/analysis?range=5Y")
+        second = client.get("/stocks/AAPL/analysis?range=5Y")
+    assert first.headers["x-cache"] == "miss"
+    assert second.headers["x-cache"] == "hit"
+    assert first.json() == second.json()
+    assert calls["n"] == 1  # handler rodou 1x; 2ª veio do cache
+
+
 def test_active_backend_is_memory_without_redis_url() -> None:
     assert asyncio.run(catalog_cache.active_backend()) == "memory"

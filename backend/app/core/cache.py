@@ -40,12 +40,17 @@ logger = logging.getLogger(__name__)
 _CACHE_SCHEMA_VERSION = "2"
 _CACHE_VERSION = f"{_CACHE_SCHEMA_VERSION}.{(os.getenv('RAILWAY_DEPLOYMENT_ID') or 'base')[:20]}"
 
-# Rotas GET cacheáveis — catálogo público, espelho atualizado 1×/dia.
+# Rotas GET cacheáveis — dados PÚBLICOS, somente leitura. Fundos e regime macro
+# são espelho atualizado 1×/dia; os endpoints sob /stocks são DB-first EOD
+# (preço/análise/holders mudam 1×/dia — ver o "DB-first contract" em
+# stocks.py), então a resposta é estável durante o dia. /stocks/{t}/news também
+# cai aqui: aceita-se até `catalog_cache_ttl_seconds` (15min) de atraso nas
+# notícias em troca de cortar a latência de toda a família de stocks.
 # NUNCA adicionar aqui rotas de portfólio/usuário/screener.
 CACHED_GET_PREFIXES: tuple[str, ...] = (
     "/funds",
     "/macro/regime",
-    "/stocks/overview",
+    "/stocks",
 )
 
 # Limite do cache em memória (entradas) — descarta o mais antigo ao exceder.
