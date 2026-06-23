@@ -153,3 +153,52 @@ def test_oos_curve_values_are_finite_and_positive() -> None:
     )
     navs = [v for _, v in result.oos_curve]
     assert all(np.isfinite(v) and v > 0 for v in navs)
+
+
+def test_perf_returns_used_for_oos_not_returns() -> None:
+    # returns = log frame; perf = simple frame (expm1). The OOS curve must be
+    # built from perf_returns. Build enough history for one fold.
+    idx = pd.bdate_range("2018-01-01", periods=400)
+    rng = np.random.default_rng(0)
+    log = pd.DataFrame(
+        rng.normal(0, 0.01, size=(400, 2)), index=idx, columns=["a", "b"]
+    )
+    perf = np.expm1(log)
+
+    res_log = assemble_walk_forward_backtest(
+        log, _equal_weight_solver, n_splits=2, min_train_size=200, test_size=50, gap=2
+    )
+    res_dual = assemble_walk_forward_backtest(
+        log,
+        _equal_weight_solver,
+        perf_returns=perf,
+        n_splits=2,
+        min_train_size=200,
+        test_size=50,
+        gap=2,
+    )
+    # The dual curve differs from the all-log curve and equals the simple-frame curve.
+    res_simple = assemble_walk_forward_backtest(
+        perf, _equal_weight_solver, n_splits=2, min_train_size=200, test_size=50, gap=2
+    )
+    dual_navs = [v for _, v in res_dual.oos_curve]
+    simple_navs = [v for _, v in res_simple.oos_curve]
+    np.testing.assert_allclose(dual_navs, simple_navs, rtol=1e-9)
+    log_navs = [v for _, v in res_log.oos_curve]
+    assert dual_navs != log_navs  # composition convention actually changed the curve
+
+
+def test_perf_returns_must_align() -> None:
+    idx = pd.bdate_range("2018-01-01", periods=400)
+    log = pd.DataFrame(0.001, index=idx, columns=["a", "b"])
+    bad = pd.DataFrame(0.001, index=idx[:399], columns=["a", "b"])
+    with pytest.raises(ValueError, match="perf_returns"):
+        assemble_walk_forward_backtest(
+            log,
+            _equal_weight_solver,
+            perf_returns=bad,
+            n_splits=2,
+            min_train_size=200,
+            test_size=50,
+            gap=2,
+        )

@@ -99,6 +99,7 @@ def assemble_walk_forward_backtest(
     returns: pd.DataFrame,
     solve_fn: SolveFn,
     *,
+    perf_returns: pd.DataFrame | None = None,
     n_splits: int = DEFAULT_N_SPLITS,
     gap: int = DEFAULT_GAP,
     test_size: int = DEFAULT_TEST_SIZE,
@@ -133,6 +134,23 @@ def assemble_walk_forward_backtest(
     matrix = returns.to_numpy(dtype=float)
     if not np.isfinite(matrix).all():
         raise ValueError("returns contain NaN/inf — refusing to backtest")
+    # Dual representation (Bug 1): solve on ``returns`` (LOG → covariance is
+    # standard in log) but compose the OOS curve on ``perf_returns`` (SIMPLE).
+    # A weighted sum of asset returns is the portfolio return only for SIMPLE
+    # returns; composing log as simple is wrong. perf_returns defaults to
+    # ``returns`` (back-compatible) and must be index/column aligned.
+    if perf_returns is None:
+        perf_matrix = matrix
+    else:
+        if not perf_returns.index.equals(returns.index) or list(
+            perf_returns.columns
+        ) != list(returns.columns):
+            raise ValueError(
+                "perf_returns must be index- and column-aligned to returns"
+            )
+        perf_matrix = perf_returns.to_numpy(dtype=float)
+        if not np.isfinite(perf_matrix).all():
+            raise ValueError("perf_returns contain NaN/inf — refusing to backtest")
     if not 0 < cvar_confidence < 1:
         raise ValueError(f"cvar_confidence must be in (0, 1), got {cvar_confidence}")
     if cost_bps < 0:
@@ -166,7 +184,9 @@ def assemble_walk_forward_backtest(
         weights = np.asarray(solve_fn(matrix[train_idx]), dtype=float).ravel()
         turnover = float(np.abs(weights - w_prev).sum())
 
-        test_block = matrix[test_idx]
+        # Solve uses the LOG train block (above); the OOS holding period composes
+        # the SIMPLE perf block so prod(1+r) is a true portfolio return.
+        test_block = perf_matrix[test_idx]
         gross_daily = test_block @ weights
         # Charge the one-way cost on the first OOS day (research-script model:
         # _gate_vs_full_backtest.py:123 sr[0] -= turn * COST_BPS / 1e4).
