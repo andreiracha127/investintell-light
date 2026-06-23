@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from app.services import portfolio_builder as pb
+from app.services import taa_bands as tb
 
 
 def _ascending_levels(n: int, start: float = 100.0, drift: float = 0.05) -> list[float]:
@@ -82,3 +83,89 @@ def test_load_proxy_returns_skips_failed_read(monkeypatch: Any) -> None:
     monkeypatch.setattr(pb, "select_adj_close_rows", fake_rows)
     out = asyncio.run(pb._load_proxy_returns(object(), ["IVV", "BAD"], index))
     assert set(out) == {"IVV"}
+
+
+# ── S4b.2: Level-1 (category weights over proxies) ───────────────────────────
+
+# 5 proxies spanning cash + the 4 risk sleeves (so the momentum view can fire).
+_L1_PROXIES = ["BIL", "IVV", "GOVT", "XLK", "QAI"]
+_L1_GROUPS = ["cash", "equity", "fixed_income", "thematic", "alternatives"]
+
+
+def _proxy_matrix(seed: int, n: int = 300, n_cols: int = 5) -> np.ndarray:
+    """Plain Gaussian daily-return matrix (T×n_cols), finite, low-vol."""
+    return np.random.default_rng(seed).normal(0.0002, 0.01, (n, n_cols))
+
+
+def test_level1_weights_sum_to_one_within_sleeve_bands() -> None:
+    """Level-1 category weights sum to 1 and each sleeve lies within its
+    per-profile band (the regime envelope is honoured)."""
+    returns = _proxy_matrix(seed=1)
+    wcat = pb._solve_regime_level1(
+        _L1_PROXIES, returns, _L1_GROUPS, "moderate", "RISK_ON",
+        gamma=4.75, cvar_cap=0.022, gate_state="risk_on",
+    )
+    assert abs(sum(wcat.values()) - 1.0) < 1e-6
+    bands = tb.profile_sleeve_bands("moderate", "RISK_ON")
+    for proxy, group in zip(_L1_PROXIES, _L1_GROUPS, strict=True):
+        lo, hi = bands[group]
+        assert wcat.get(proxy, 0.0) <= hi + 1e-6
+        assert wcat.get(proxy, 0.0) >= lo - 1e-6
+
+
+def test_level1_momentum_tilts_the_winner() -> None:
+    """With >=4 risk sleeves the momentum view fires: a sleeve with strong 12-1
+    momentum gets MORE weight than the same sleeve with weak momentum (the only
+    difference is the trailing trend, not the covariance)."""
+    base = _proxy_matrix(seed=2)
+    thematic = 3  # the non-saturating risk sleeve under test
+    winner = base.copy()
+    winner[:, thematic] += 0.003   # strong uptrend -> top of the cross-section
+    loser = base.copy()
+    loser[:, thematic] -= 0.003    # downtrend -> bottom of the cross-section
+    w_win = pb._solve_regime_level1(
+        _L1_PROXIES, winner, _L1_GROUPS, "aggressive", "RISK_ON",
+        gamma=1.90, cvar_cap=0.030, gate_state="risk_on",
+    )
+    w_lose = pb._solve_regime_level1(
+        _L1_PROXIES, loser, _L1_GROUPS, "aggressive", "RISK_ON",
+        gamma=1.90, cvar_cap=0.030, gate_state="risk_on",
+    )
+    assert w_win.get("XLK", 0.0) > w_lose.get("XLK", 0.0) + 1e-3
+
+
+def test_level1_gate_riskoff_zeros_the_view() -> None:
+    """The momentum tilt is subordinate to the gate: in risk_off the view is
+    zeroed (mu = equilibrium), so the winner's tilt shrinks vs risk_on."""
+    base = _proxy_matrix(seed=2)
+    base[:, 3] += 0.003  # thematic is the momentum winner
+    w_on = pb._solve_regime_level1(
+        _L1_PROXIES, base, _L1_GROUPS, "aggressive", "RISK_ON",
+        gamma=1.90, cvar_cap=0.030, gate_state="risk_on",
+    )
+    w_off = pb._solve_regime_level1(
+        _L1_PROXIES, base, _L1_GROUPS, "aggressive", "RISK_ON",
+        gamma=1.90, cvar_cap=0.030, gate_state="risk_off",
+    )
+    assert w_on.get("XLK", 0.0) > w_off.get("XLK", 0.0) + 1e-3
+
+
+def test_level1_falls_back_to_min_cvar(monkeypatch: Any) -> None:
+    """If the BL-utility solve is infeasible, Level-1 still returns valid weights
+    inside the sleeve bands via the min-CVaR fallback."""
+    def boom(*_a: Any, **_k: Any):
+        raise pb.engine.OptimizerError("forced infeasible")
+
+    monkeypatch.setattr(pb.engine, "solve_bl_utility_cvar", boom)
+    returns = _proxy_matrix(seed=3)
+    wcat = pb._solve_regime_level1(
+        _L1_PROXIES, returns, _L1_GROUPS, "moderate", "RISK_ON",
+        gamma=4.75, cvar_cap=0.022, gate_state="risk_on",
+    )
+    assert abs(sum(wcat.values()) - 1.0) < 1e-6
+    bands = tb.profile_sleeve_bands("moderate", "RISK_ON")
+    for proxy, group in zip(_L1_PROXIES, _L1_GROUPS, strict=True):
+        lo, hi = bands[group]
+        assert wcat.get(proxy, 0.0) <= hi + 1e-6
+        assert wcat.get(proxy, 0.0) >= lo - 1e-6
+

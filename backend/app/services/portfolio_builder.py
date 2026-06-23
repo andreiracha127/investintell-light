@@ -39,7 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.analytics import realized_cvar
 from app.optimizer import black_litterman as bl
 from app.optimizer import data as optimizer_data
-from app.optimizer import engine, momentum_view
+from app.optimizer import engine, momentum_view, sleeves
 from app.optimizer import selection as optimizer_selection
 from app.optimizer.mandate import resolve_cvar_limit, resolve_delta, resolve_gamma
 from app.schemas.builder import (
@@ -542,6 +542,53 @@ def _regime_prior(groups: list[str]) -> np.ndarray:
         n = len(groups)
         return np.full(n, 1.0 / n) if n else np.zeros(0, dtype=float)
     return raw / s
+
+
+def _solve_regime_level1(
+    proxies: list[str],
+    proxy_returns: np.ndarray,
+    proxy_groups: list[str],
+    profile: str,
+    band_state: str,
+    gamma: float,
+    cvar_cap: float,
+    gate_state: str | None,
+) -> dict[str, float]:
+    """COMBO S4b Level-1: per-sleeve CATEGORY weights over the canonical proxies.
+
+    BL max-utility + hard CVaR inside the per-profile ``taa_bands`` sleeve
+    envelope: μ = equilibrium π (DELTA_MARKET) + the 12-1 momentum view (fires
+    with ≥4 risk sleeves, zeroed by a risk_off gate); ``gamma``/``cvar_cap`` are
+    the per-mandate ladder (the caller already tightened ``cvar_cap`` in risk_off).
+    One annualized Ledoit-Wolf Σ feeds both the equilibrium and the utility penalty
+    (harness parity); ``proxy_returns`` are the daily scenarios for the CVaR cap.
+    On ``OptimizerError`` falls back to min-CVaR inside the same bands (the
+    structural envelope is never silently relaxed). Returns ``{proxy: weight}``
+    (sum 1; proxies at ~0 dropped). Raises ``OptimizerError`` if even the fallback
+    is infeasible — the caller then drops to the single-level S4a path.
+    """
+    sigma = engine.sigma_ledoit_wolf(proxy_returns)
+    prior = _regime_prior(proxy_groups)
+    mu = momentum_view.category_momentum_mu(
+        proxy_returns, proxy_groups, prior, gate_state, sigma=sigma,
+    )
+    bands = taa_bands.profile_sleeve_bands(profile, band_state)
+    blocks: list[engine.BlockBudget] = []
+    for g in sleeves.SLEEVE_GROUPS:
+        idx = [k for k, gg in enumerate(proxy_groups) if gg == g]
+        if idx:
+            lo, hi = bands[g]
+            blocks.append(engine.BlockBudget(indices=idx, lo=lo, hi=min(hi, 1.0)))
+    bounds = engine.BoundsBundle(blocks=blocks or None)
+    try:
+        wcat, _status = engine.solve_bl_utility_cvar(
+            mu, sigma, proxy_returns, gamma, cvar_cap, bounds=bounds,
+        )
+    except engine.OptimizerError:
+        wcat, _status = engine.solve_min_cvar(
+            proxy_returns, bounds=bounds, cvar_limit=cvar_cap,
+        )
+    return {proxies[k]: float(wcat[k]) for k in range(len(proxies)) if wcat[k] > 1e-9}
 
 
 async def _solve_regime_motor(
