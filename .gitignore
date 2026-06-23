@@ -49,3 +49,6 @@ lean-research/
 
 # Local git worktrees
 .worktrees/
+
+# local research scratch (downloaded datasets, samples)
+.local-research/
