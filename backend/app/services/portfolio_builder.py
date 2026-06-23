@@ -41,6 +41,7 @@ from app.analytics import realized_cvar
 from app.optimizer import black_litterman as bl
 from app.optimizer import data as optimizer_data
 from app.optimizer import engine, momentum_view, sleeves
+from app.optimizer.dates import coerce_date
 from app.optimizer import selection as optimizer_selection
 from app.optimizer.mandate import (
     normalise_mandate,
@@ -206,8 +207,8 @@ async def _load_spy_signal(
     """
     if session is None or len(frame_index) == 0:
         return [], None
-    start = frame_index.min().date()
-    end = frame_index.max().date()
+    start = coerce_date(frame_index.min())
+    end = coerce_date(frame_index.max())
     try:
         rows = await select_adj_close_rows(session, "SPY", start, end)
     except Exception:
@@ -255,8 +256,8 @@ async def _load_proxy_returns(
     """
     if session is None or len(frame_index) == 0:
         return {}
-    start = frame_index.min().date()
-    end = frame_index.max().date()
+    start = coerce_date(frame_index.min())
+    end = coerce_date(frame_index.max())
     out: dict[str, np.ndarray] = {}
     for ticker in tickers:
         try:

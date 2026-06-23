@@ -384,3 +384,41 @@ async def test_two_level_band_state_comes_from_quadrant_not_gate(monkeypatch: An
     expected = tb.profile_sleeve_bands("moderate", "INFLATION")  # quadrant -> INFLATION
     assert diag["class_bands"]["equity"] == pytest.approx(list(expected["equity"]))
 
+
+def test_load_proxy_returns_handles_object_date_index(monkeypatch: Any) -> None:
+    """The real datalake frame indexes on datetime.date (object dtype), not
+    Timestamp. The loader must not choke on .date() (P0 regression — the
+    pd.bdate_range fixtures masked this AttributeError)."""
+    dates = [dt.date(2024, 1, 2) + dt.timedelta(days=i) for i in range(300)]
+    index = pd.Index(dates)  # object dtype, exactly like load_aligned_returns
+    assert index.dtype == object
+    levels = _ascending_levels(len(index))
+
+    async def fake_rows(session: Any, ticker: str, start: Any, end: Any) -> list[tuple]:
+        # the loader must hand the DB layer a plain datetime.date, not a datetime
+        assert isinstance(start, dt.date) and not isinstance(start, dt.datetime)
+        assert isinstance(end, dt.date) and not isinstance(end, dt.datetime)
+        return [(d, float(p)) for d, p in zip(dates, levels, strict=True)]
+
+    monkeypatch.setattr(pb, "select_adj_close_rows", fake_rows)
+    out = asyncio.run(pb._load_proxy_returns(object(), ["IVV"], index))
+    assert set(out) == {"IVV"}
+    assert np.isfinite(out["IVV"]).all()
+
+
+def test_load_spy_signal_handles_object_date_index(monkeypatch: Any) -> None:
+    """Same P0 regression for the S4a SPY-signal loader."""
+    dates = [dt.date(2024, 1, 2) + dt.timedelta(days=i) for i in range(300)]
+    index = pd.Index(dates)
+    assert index.dtype == object
+    levels = _ascending_levels(len(index))
+
+    async def fake_rows(session: Any, ticker: str, start: Any, end: Any) -> list[tuple]:
+        assert isinstance(start, dt.date) and not isinstance(start, dt.datetime)
+        return [(d, float(p)) for d, p in zip(dates, levels, strict=True)]
+
+    monkeypatch.setattr(pb, "select_adj_close_rows", fake_rows)
+    closes_desc, rets = asyncio.run(pb._load_spy_signal(object(), index))
+    assert len(closes_desc) == len(index)
+    assert rets is not None and np.isfinite(rets).all()
+
