@@ -41,8 +41,8 @@ from app.analytics import realized_cvar
 from app.optimizer import black_litterman as bl
 from app.optimizer import data as optimizer_data
 from app.optimizer import engine, momentum_view, sleeves
-from app.optimizer.dates import coerce_date
 from app.optimizer import selection as optimizer_selection
+from app.optimizer.dates import coerce_date
 from app.optimizer.mandate import (
     normalise_mandate,
     resolve_cvar_limit,

@@ -394,16 +394,22 @@ def test_load_proxy_returns_handles_object_date_index(monkeypatch: Any) -> None:
     assert index.dtype == object
     levels = _ascending_levels(len(index))
 
+    seen: list[tuple[Any, Any]] = []
+
     async def fake_rows(session: Any, ticker: str, start: Any, end: Any) -> list[tuple]:
-        # the loader must hand the DB layer a plain datetime.date, not a datetime
-        assert isinstance(start, dt.date) and not isinstance(start, dt.datetime)
-        assert isinstance(end, dt.date) and not isinstance(end, dt.datetime)
+        seen.append((start, end))
         return [(d, float(p)) for d, p in zip(dates, levels, strict=True)]
 
     monkeypatch.setattr(pb, "select_adj_close_rows", fake_rows)
     out = asyncio.run(pb._load_proxy_returns(object(), ["IVV"], index))
     assert set(out) == {"IVV"}
     assert np.isfinite(out["IVV"]).all()
+    # Assert the date contract OUTSIDE the loader's try/except, so a regression
+    # fails loudly here instead of being swallowed into an empty result.
+    assert seen, "loader never queried the DB"
+    for start, end in seen:
+        assert isinstance(start, dt.date) and not isinstance(start, dt.datetime)
+        assert isinstance(end, dt.date) and not isinstance(end, dt.datetime)
 
 
 def test_load_spy_signal_handles_object_date_index(monkeypatch: Any) -> None:
@@ -413,12 +419,18 @@ def test_load_spy_signal_handles_object_date_index(monkeypatch: Any) -> None:
     assert index.dtype == object
     levels = _ascending_levels(len(index))
 
+    seen: list[tuple[Any, Any]] = []
+
     async def fake_rows(session: Any, ticker: str, start: Any, end: Any) -> list[tuple]:
-        assert isinstance(start, dt.date) and not isinstance(start, dt.datetime)
+        seen.append((start, end))
         return [(d, float(p)) for d, p in zip(dates, levels, strict=True)]
 
     monkeypatch.setattr(pb, "select_adj_close_rows", fake_rows)
     closes_desc, rets = asyncio.run(pb._load_spy_signal(object(), index))
     assert len(closes_desc) == len(index)
     assert rets is not None and np.isfinite(rets).all()
+    assert seen, "loader never queried the DB"
+    for start, end in seen:
+        assert isinstance(start, dt.date) and not isinstance(start, dt.datetime)
+        assert isinstance(end, dt.date) and not isinstance(end, dt.datetime)
 
