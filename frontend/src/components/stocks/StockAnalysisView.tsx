@@ -12,9 +12,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ApiError,
   fetchStockAnalysis,
-  fetchStockTimeseries,
+  fetchStockHistory,
   isRangePreset,
-  stockTimeseriesToHistoryBars,
   type HistoryBar,
   type RangePreset,
   type StockAnalysis,
@@ -29,7 +28,7 @@ import {
   formatPercent,
 } from "@/lib/format";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
-import { InteractiveChart } from "@/components/charts/InteractiveChart";
+import { StockChart } from "@/components/charts/StockChart";
 import { AddToPortfolio } from "@/components/stocks/AddToPortfolio";
 import { HoldersTab } from "@/components/stocks/HoldersTab";
 import { NewsPanel } from "@/components/stocks/NewsPanel";
@@ -68,9 +67,12 @@ export function StockAnalysisView({
       failureCount < 2,
     });
 
-  const timeseries = useQuery({
-    queryKey: ["stock-timeseries", ticker, range],
-    queryFn: ({ signal }) => fetchStockTimeseries(ticker, range, signal),
+  // Full daily history, NOT keyed on range: the native StockChart zooms
+  // client-side over the whole window, so changing the range preset must not
+  // refetch bars (only the `analysis` KPIs above are range-scoped).
+  const history = useQuery({
+    queryKey: ["stock-history-full", ticker],
+    queryFn: ({ signal }) => fetchStockHistory(ticker, 2520, signal),
     staleTime: 60 * 60 * 1000,
     retry: (failureCount, err) =>
       !(err instanceof ApiError && err.status >= 400 && err.status < 500) &&
@@ -134,9 +136,7 @@ export function StockAnalysisView({
         colors={colors}
         range={range}
         onRangeChange={selectRange}
-        historyBars={
-          timeseries.data ? stockTimeseriesToHistoryBars(timeseries.data) : []
-        }
+        historyBars={history.data?.bars ?? []}
       />
     </div>
   );
@@ -269,14 +269,16 @@ function AnalysisContent({
         </div>
       ) : (
       <>
-      {/* ── Interactive chart (Highcharts Stock + livefeed) ── */}
+      {/* ── Interactive chart (native Highstock + livefeed) ── */}
       <div className="mb-px">
-        <InteractiveChart
+        <StockChart
           symbol={header.ticker}
           bars={historyBars}
-          range={range}
+          initialRange={range}
           onRangeChange={onRangeChange}
-          chartAreaClassName="w-full aspect-[16/10] min-h-[380px] max-h-[70vh]"
+          className="w-full aspect-[16/10] min-h-[380px] max-h-[70vh]"
+          isEmpty={historyBars.length === 0}
+          emptyMessage="No price history in the synced window."
         />
       </div>
 
