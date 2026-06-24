@@ -66,8 +66,8 @@ class MacroQuadrantOut(BaseModel):
     the per-sleeve ``policy_bands`` of ``QUADRANT_POLICIES["moderate"][quadrant]``
     (the display profile; informational, not the builder mandate), and the gate is
     reported in ``gate`` but does not fold into the bands here. ``bands`` is empty
-    when the quadrant is not consumable. ``haven_tilt`` is always ``None``
-    (goldfix retired with ``combined_regime`` in Task 8).
+    when the quadrant is not consumable. ``haven_tilt`` is a legacy field that is
+    always ``None`` (the goldfix haven was retired with the orthogonal model).
     """
 
     as_of: dt.date | None
@@ -76,8 +76,8 @@ class MacroQuadrantOut(BaseModel):
     inflation_state: str | None  # up|down
     growth_score: float | None
     inflation_score: float | None
-    bands: list[ClassBandOut]  # 7 sleeves (empty when quadrant not consumable)
-    haven_tilt: dict[str, float] | None  # always None (goldfix retired, Task 8)
+    bands: list[ClassBandOut]  # per-sleeve bands (empty when quadrant not consumable)
+    haven_tilt: dict[str, float] | None  # legacy; always None (goldfix retired)
     gate: GateBlockOut | None  # None when regime_gate_daily empty
 
 

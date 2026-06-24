@@ -404,7 +404,7 @@ async def test_two_level_band_state_comes_from_quadrant_not_gate(monkeypatch: An
     diag = resp.json()["diagnostics"]
     assert diag["quadrant"] == "expansion"          # the quadrant drives the bands
     assert diag["regime_state"] == "risk_off"       # the gate is surfaced separately
-    assert diag["combined_regime"] is None          # combined_regime retired (Task 7)
+    assert "combined_regime" not in diag            # combined_regime field retired (Task 9)
     assert diag["category_weights"] is not None     # the two-level still ran
     expected = qp.policy_bands(qp.QUADRANT_POLICIES["moderate"]["expansion"])
     assert diag["class_bands"]["equity"] == pytest.approx(list(expected["equity"]))

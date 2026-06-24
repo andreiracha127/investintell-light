@@ -39,11 +39,20 @@ def test_unknown_everything_defaults_to_equity() -> None:
     assert sleeves.fund_sleeve_group(None, "multi_asset") == "equity"
 
 
-def test_hedge_label_is_not_a_base_sleeve() -> None:
-    """Inverse/Hedge maps to 'hedge' (SH research-only) — distinct from the 7
-    base sleeves so the two-level can exclude it."""
-    assert sleeves.fund_sleeve_group("Inverse / Hedge", None) == "hedge"
+def test_hedge_label_not_in_proxy_map() -> None:
+    """SH/hedge are NOT structural sleeves (freeze §13: the 7 structural sleeves are
+    cash/equity/fixed_income/thematic/alternatives/gold/long_short). The Inverse/Hedge
+    label and the SH proxy are retired from the sleeve map (research-only)."""
+    assert "Inverse / Hedge" not in sleeves.LABEL_TO_PROXY
+    assert "SH" not in sleeves.PROXY_TO_GROUP
     assert "hedge" not in sleeves.SLEEVE_GROUPS
+
+
+def test_inverse_fund_does_not_resolve_to_hedge() -> None:
+    """An inverse/hedge labelled fund now falls through to the asset_class/equity
+    default, never the removed 'hedge' sleeve."""
+    sleeve = sleeves.fund_sleeve_group("Inverse / Hedge", None)
+    assert sleeve != "hedge"
 
 
 def test_sleeve_groups_match_quadrant_policy() -> None:

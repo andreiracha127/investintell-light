@@ -43,12 +43,12 @@ LABEL_TO_PROXY: dict[str, str] = {
     "Real Estate": "VNQ", "Commodities": "GCC", "Alternative": "QAI",
     "Multi-Asset": "AOR", "Precious Metals": "RING",
     "Long/Short Equity": "FTLS",
-    "Inverse / Hedge": "SH",
 }
 
-# proxy ETF -> base sleeve. 'hedge' is NOT a base sleeve (SH is research-only,
-# excluded from the standard book); GLD is the gold sleeve (no fund label maps to
-# it — gold enters only via GROUP_PROXY_FILL).
+# proxy ETF -> base sleeve. SH/'hedge' are NOT structural sleeves and are retired
+# from the map (research-only, excluded from the standard book — freeze §13); GLD
+# is the gold sleeve (no fund label maps to it — gold enters only via
+# GROUP_PROXY_FILL).
 PROXY_TO_GROUP: dict[str, str] = {
     "BIL": "cash",
     "IVV": "equity", "QQQ": "equity", "VOOV": "equity", "SCHM": "equity",
@@ -66,7 +66,7 @@ PROXY_TO_GROUP: dict[str, str] = {
     "TIP": "fixed_income", "BIZD": "fixed_income",
     "VNQ": "alternatives", "GCC": "alternatives", "QAI": "alternatives",
     "AOR": "alternatives", "RING": "alternatives",
-    "FTLS": "long_short", "SH": "hedge", "GLD": "gold",
+    "FTLS": "long_short", "GLD": "gold",
 }
 
 LABEL_TO_GROUP: dict[str, str] = {
@@ -99,9 +99,10 @@ def fund_sleeve_group(strategy_label: str | None, asset_class: str | None) -> st
     Precedence: the fine-grained ``strategy_label`` (via ``LABEL_TO_GROUP``) wins;
     else the 4-class ``asset_class`` (equity/fixed_income/alternatives/cash); else
     ``"equity"`` (raw equities carry no asset_class; unknown labels are equity-like).
-    ``"Inverse / Hedge"`` resolves to ``"hedge"`` — NOT one of the 7 base sleeves,
-    so the two-level excludes it (SH research-only). ``"gold"`` is never produced
-    here (no label maps to GLD); it enters only via ``GROUP_PROXY_FILL``.
+    ``"Inverse / Hedge"`` is no longer mapped (SH/hedge retired — research-only,
+    freeze §13), so it falls through to the asset_class/equity default and never
+    produces a ``"hedge"`` sleeve. ``"gold"`` is never produced here (no label maps
+    to GLD); it enters only via ``GROUP_PROXY_FILL``.
     """
     if strategy_label and strategy_label in LABEL_TO_GROUP:
         return LABEL_TO_GROUP[strategy_label]

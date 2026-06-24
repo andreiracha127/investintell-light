@@ -306,12 +306,11 @@ class DiagnosticsOut(BaseModel):
     cvar_limit_effective: float | None = None
     regime_state: str | None = None
     # Present only on the regime_aware path (Regime-Aware allocator, research
-    # codename COMBO): the growth×inflation quadrant read from the gate, the
-    # resolved band-state, the per-class (min, max) envelope actually enforced,
-    # and — when SLOWDOWN routed the goldfix haven — the imposed haven target
-    # (ticker -> weight).
+    # codename COMBO): the growth×inflation quadrant read from the gate and the
+    # per-sleeve (min, max) envelope actually enforced. ``haven_tilt`` is legacy
+    # (goldfix retired with the orthogonal model — always None now). The legacy
+    # ``combined_regime`` field was retired in Task 9 (quadrant/gate are orthogonal).
     quadrant: str | None = None
-    combined_regime: str | None = None
     class_bands: dict[str, list[float]] | None = None
     haven_tilt: dict[str, float] | None = None
     # AGGREGATE portfolio-beta cap TARGET (β_portfolio ≤ beta_cap) from the

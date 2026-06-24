@@ -5743,17 +5743,6 @@
             ],
             "title": "Quadrant"
           },
-          "combined_regime": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Combined Regime"
-          },
           "class_bands": {
             "anyOf": [
               {
@@ -10728,7 +10717,7 @@
           "gate"
         ],
         "title": "MacroQuadrantOut",
-        "description": "COMBO macro block: growth\u00d7inflation quadrant + gate + per-sleeve bands.\n\nADDITIVE to the vote2of3 detector (decision O3 \u2014 the composite stays the\nheadline). The quadrant + growth/inflation scores are READ from\n``regime_gate_daily`` (decision A \u2014 worker-materialized; the backend lacks\nTIP/IEF). The quadrant and the gate are ORTHOGONAL (spec \u00a712): ``bands`` are\nthe per-sleeve ``policy_bands`` of ``QUADRANT_POLICIES[\"moderate\"][quadrant]``\n(the display profile; informational, not the builder mandate), and the gate is\nreported in ``gate`` but does not fold into the bands here. ``bands`` is empty\nwhen the quadrant is not consumable. ``haven_tilt`` is always ``None``\n(goldfix retired with ``combined_regime`` in Task 8)."
+        "description": "COMBO macro block: growth\u00d7inflation quadrant + gate + per-sleeve bands.\n\nADDITIVE to the vote2of3 detector (decision O3 \u2014 the composite stays the\nheadline). The quadrant + growth/inflation scores are READ from\n``regime_gate_daily`` (decision A \u2014 worker-materialized; the backend lacks\nTIP/IEF). The quadrant and the gate are ORTHOGONAL (spec \u00a712): ``bands`` are\nthe per-sleeve ``policy_bands`` of ``QUADRANT_POLICIES[\"moderate\"][quadrant]``\n(the display profile; informational, not the builder mandate), and the gate is\nreported in ``gate`` but does not fold into the bands here. ``bands`` is empty\nwhen the quadrant is not consumable. ``haven_tilt`` is a legacy field that is\nalways ``None`` (the goldfix haven was retired with the orthogonal model)."
       },
       "MacroRegimeResponse": {
         "properties": {
