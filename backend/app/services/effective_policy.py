@@ -38,10 +38,12 @@ class _QuadrantSource(Protocol):
     @property
     def as_of(self) -> _dt.date: ...
 
-# The worker materializes EXACTLY these two literals on the regime_gate_daily row.
-# Anything else (absent, drifted "stale"/"unknown", or a hyphenated/cased/padded
-# "risk-off") is non-consumable and must fail loud — NOT be coerced into validity
-# (coercion would re-hide the very drift the boundary exists to catch).
+# The gate worker materializes EXACTLY these two literals on the regime_gate_daily
+# row (gate state only — the quadrant is read separately from regime_quadrant_snapshot
+# via the consumable quadrant reader). Anything else in the gate state (absent,
+# drifted "stale"/"unknown", or a hyphenated/cased/padded "risk-off") is
+# non-consumable and must fail loud — NOT be coerced into validity (coercion would
+# re-hide the very drift the boundary exists to catch).
 _CONSUMABLE_GATE_STATES: frozenset[str] = frozenset({"risk_on", "risk_off"})
 
 

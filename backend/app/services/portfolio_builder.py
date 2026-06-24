@@ -1124,13 +1124,10 @@ async def run_optimize(
             # QUADRANT_UNAVAILABLE (freeze §6/§8/§36). The payload's ``block_budgets``
             # are IGNORED here — bands derive from the policy.
             _profile = _regime_profile(payload.mandate)
-            gate_state = _OVERRIDE_REGIME_STATE
             gate_snap = (
                 await taa_bands.fetch_gate_regime(datalake)
                 if datalake is not None else None
             )
-            if gate_state is None:
-                gate_state = gate_snap.state if gate_snap is not None else None
             # §6 consumable quadrant read (production decision time = now). A None
             # row means NO consumable snapshot → build_effective_policy raises
             # QUADRANT_UNAVAILABLE below. ``datalake is None`` (test seam) likewise
