@@ -439,6 +439,21 @@ async def test_regime_aware_no_quadrant_fails_loud(monkeypatch: Any) -> None:
     assert "QUADRANT_UNAVAILABLE" in resp.text
 
 
+async def test_regime_aware_malformed_gate_state_fails_loud(monkeypatch: Any) -> None:
+    """A gate row carrying a MALFORMED state (e.g. ``risk-off`` with a hyphen, or a
+    drifted ``stale``) must fail loud as a structured 422 GATE_UNAVAILABLE — NEVER a
+    silent fall-through to the risk_on identity overlay (full risk envelope). This is
+    the §2/§11/§23 fail-loud boundary: the gate never silently increases risk."""
+    _stub_two_level_world(monkeypatch)
+    monkeypatch.setattr(
+        tb, "fetch_gate_regime", _async(_gate(state="risk-off", quadrant="recovery"))
+    )
+    async with _client() as client:
+        resp = await client.post("/builder/optimize", json=_tl_payload())
+    assert resp.status_code == 422, resp.text
+    assert "GATE_UNAVAILABLE" in resp.text
+
+
 def test_load_proxy_returns_handles_object_date_index(monkeypatch: Any) -> None:
     """The real datalake frame indexes on datetime.date (object dtype), not
     Timestamp. The loader must not choke on .date() (P0 regression — the

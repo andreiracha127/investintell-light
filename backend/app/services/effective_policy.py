@@ -17,6 +17,12 @@ from app.optimizer import gate_overlay
 from app.services import quadrant_policy as qp
 from app.services.taa_bands import GateRegimeSnapshot
 
+# The worker materializes EXACTLY these two literals on the regime_gate_daily row.
+# Anything else (absent, drifted "stale"/"unknown", or a hyphenated/cased/padded
+# "risk-off") is non-consumable and must fail loud — NOT be coerced into validity
+# (coercion would re-hide the very drift the boundary exists to catch).
+_CONSUMABLE_GATE_STATES: frozenset[str] = frozenset({"risk_on", "risk_off"})
+
 
 class EffectivePolicyError(ValueError):
     """A snapshot is non-consumable or an input is missing (spec §31).
@@ -62,7 +68,9 @@ def build_effective_policy(
 
     Fail-loud on a non-consumable quadrant/gate or a missing policy. The quadrant
     snapshot is consumable iff it carries a known ``quadrant``; the gate snapshot is
-    consumable iff it carries a ``state``. The gate overlay (``apply_gate_overlay``)
+    consumable iff its ``state`` is one of the EXACT literals ``risk_on``/``risk_off``
+    (a missing, drifted, or malformed value fails loud as ``GATE_UNAVAILABLE`` rather
+    than silently downgrading safety). The gate overlay (``apply_gate_overlay``)
     tightens cvar/beta/risk-assets in ``risk_off`` and is the identity in ``risk_on``.
     """
     if profile not in qp.PROFILES:
@@ -77,8 +85,13 @@ def build_effective_policy(
             f"QUADRANT_UNAVAILABLE: non-consumable quadrant {quadrant!r}"
         )
     gate_state = gate_snapshot.state
-    if not gate_state:
-        raise EffectivePolicyError("GATE_UNAVAILABLE: non-consumable gate state")
+    if gate_state not in _CONSUMABLE_GATE_STATES:
+        # Fail-loud on a missing OR malformed/drifted gate value (spec §2/§11/§23):
+        # gate absent does NOT become risk_on, and the gate never silently increases
+        # risk. Compared against the EXACT literals — no .lower()/.strip() coercion.
+        raise EffectivePolicyError(
+            f"GATE_UNAVAILABLE: non-consumable gate state {gate_state!r}"
+        )
     by_quadrant = qp.QUADRANT_POLICIES.get(profile)
     if by_quadrant is None or quadrant not in by_quadrant:
         raise EffectivePolicyError(

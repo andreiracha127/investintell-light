@@ -1210,6 +1210,10 @@ async def run_optimize(
             )
             if gate_state is None:
                 gate_state = gate_snap.state if gate_snap is not None else None
+            # v1 gate-proxy: quadrant taken from the gate row WITHOUT the §6
+            # consumability filters; A5 atomic activation MUST wire
+            # quadrant_reader.fetch_quadrant_snapshot here before regime_aware is
+            # exposed in production (freeze §2/§36).
             quadrant = gate_snap.quadrant if gate_snap is not None else None
             # ONE policy build (fail-loud on a non-consumable quadrant/gate → 422).
             eff_policy = _effective_policy_from(

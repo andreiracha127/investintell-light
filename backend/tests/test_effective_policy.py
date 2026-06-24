@@ -126,6 +126,20 @@ def test_risk_off_tightens_relative_to_risk_on() -> None:
     assert off.sleeve_budgets == on.sleeve_budgets
 
 
+@pytest.mark.parametrize("bad_state", ["stale", "unknown", "risk-off", "RISK_OFF", " risk_off "])
+def test_build_raises_on_malformed_gate_state(bad_state: str) -> None:
+    # Adversarial: any gate state other than the exact literals risk_on/risk_off is
+    # malformed (drift). It must fail loud as GATE_UNAVAILABLE, NOT silently fall
+    # through to the risk_on identity overlay (a silent safety downgrade). Hyphenated
+    # / cased / whitespace-padded values are NOT coerced into validity.
+    with pytest.raises(ep.EffectivePolicyError) as exc:
+        ep.build_effective_policy(
+            _snap("risk_on", "recovery"), _snap(bad_state, "recovery"),
+            "moderate", base_cvar_limit=0.05,
+        )
+    assert "GATE_UNAVAILABLE" in str(exc.value)
+
+
 def test_profile_ladder_preserved_in_risk_off() -> None:
     # the per-profile intensity ladder → more aggressive admits a higher beta cap
     def beta_off(profile: str) -> float:

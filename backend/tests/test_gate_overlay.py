@@ -82,6 +82,17 @@ def test_unknown_profile_raises() -> None:
         )
 
 
+@pytest.mark.parametrize("bad_state", ["stale", "unknown", "risk-off", "RISK_OFF", " risk_off "])
+def test_malformed_state_raises(bad_state: str) -> None:
+    # Defense in depth: a non-empty state that is neither risk_on nor risk_off is
+    # drift — the overlay must NOT treat it as the risk_on identity (the unsafe
+    # fall-through the adversarial review caught). It raises GateError instead.
+    with pytest.raises(go.GateError, match="gate state"):
+        go.apply_gate_overlay(
+            "moderate", bad_state, base_risk_assets_cap=0.34, base_portfolio_beta_cap=0.80
+        )
+
+
 def test_effective_risk_assets_cap_never_negative() -> None:
     eff = go.apply_gate_overlay(
         "conservative", "risk_off", base_risk_assets_cap=0.05, base_portfolio_beta_cap=0.40

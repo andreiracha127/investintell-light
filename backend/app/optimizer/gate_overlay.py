@@ -99,7 +99,8 @@ def apply_gate_overlay(
 ) -> EffectiveGate:
     """Effective risk envelope after the gate (spec §22).
 
-    risk_on / None / unknown-state → identity (no tightening). risk_off →
+    risk_on / None → identity (no tightening); a non-empty UNRECOGNIZED state raises
+    ``GateError`` (drift is fail-loud, never the identity). risk_off →
     cvar_mult = 1 − intensity·cvar_tightening; beta_mult = 1 − intensity·
     beta_tightening; risk_assets_cap = base − intensity·risk_assets_reduction
     (floored at 0); beta_cap = base_portfolio_beta_cap · beta_mult (the AGGREGATE
@@ -108,7 +109,14 @@ def apply_gate_overlay(
     """
     if profile not in PROFILES:
         raise GateError(f"unknown profile {profile!r}")
-    if (state or "").lower() != "risk_off":
+    # Defense in depth (the policy core already rejects a malformed state before we
+    # get here): None is the documented safe default (→ identity), risk_off tightens,
+    # risk_on is the identity. ANYTHING else is drift — a non-empty unrecognized
+    # state must RAISE rather than silently fall through to the risk_on identity
+    # (the unsafe path the adversarial review caught). No .lower()/.strip() coercion.
+    if state is not None and state not in ("risk_on", "risk_off"):
+        raise GateError(f"unknown gate state {state!r}")
+    if state != "risk_off":
         return EffectiveGate(
             cvar_mult=1.0,
             beta_mult=1.0,
