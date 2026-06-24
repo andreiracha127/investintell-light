@@ -6,6 +6,7 @@ No live network, no live DB.
 """
 
 import datetime as dt
+import uuid
 from types import SimpleNamespace
 from typing import Any
 
@@ -475,6 +476,7 @@ def _install_put_stubs(
     existing: SimpleNamespace | None,
     portfolio_found: bool = True,
     fund_tickers: set[str] | None = None,
+    fund_types: dict[str, str] | None = None,
 ) -> dict[str, list[Any]]:
     calls: dict[str, list[Any]] = {"insert": [], "update": []}
 
@@ -484,7 +486,19 @@ def _install_put_stubs(
     async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
         return (fund_tickers or set()) & set(tickers)
 
+    async def fake_taxonomy(session: Any, tickers: Any) -> dict[str, Any]:
+        return {
+            ticker: portfolio_crud.PositionTaxonomy(
+                None,
+                None,
+                uuid.UUID(int=abs(hash(ticker)) % (2**128)),
+                (fund_types or {}).get(ticker, "mutual_fund"),
+            )
+            for ticker in tickers
+        }
+
     monkeypatch.setattr(portfolio_crud, "select_fund_tickers", fake_fund_tickers)
+    monkeypatch.setattr(portfolio_crud, "resolve_position_taxonomy", fake_taxonomy)
 
     async def fake_get_position(
         session: Any, portfolio_id: int, ticker: str
@@ -590,6 +604,26 @@ async def test_put_position_fund_ticker_insert_skips_eod_coverage_check(
     assert response.json() == _position_json("VFIAX", 10.0, 450.0)
     assert ensure_calls == []  # fund ticker — EOD coverage not required
     assert calls["insert"] == [(1, "VFIAX", 10.0, 450.0, "reference", None, None)]
+
+
+async def test_put_position_etf_fund_ticker_insert_still_checks_eod_coverage(
+    monkeypatch: pytest.MonkeyPatch, ensure_calls: list[list[str]]
+) -> None:
+    calls = _install_put_stubs(
+        monkeypatch,
+        existing=None,
+        fund_tickers={"VTI"},
+        fund_types={"VTI": "etf"},
+    )
+    async with _client() as ac:
+        response = await ac.put(
+            "/portfolios/1/positions/vti", json={"quantity": 2, "acq_price": 200}
+        )
+
+    assert response.status_code == 200
+    assert response.json() == _position_json("VTI", 2.0, 200.0)
+    assert ensure_calls == [["VTI"]]
+    assert calls["insert"] == [(1, "VTI", 2.0, 200.0, "reference", None, None)]
 
 
 async def test_put_position_executed_fill_fields_pass_through(

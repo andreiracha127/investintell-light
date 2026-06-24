@@ -16,7 +16,7 @@ Error mapping (fail loud, never silently empty):
 
 import datetime as dt
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -81,8 +81,8 @@ async def _require_local_trade_tickers(
     if not tickers:
         return
     symbols = sorted(set(tickers))
-    fund_tickers = await portfolio_crud.select_fund_tickers(session, symbols)
-    eod_candidates = [ticker for ticker in symbols if ticker not in fund_tickers]
+    nav_fund_tickers = await _select_nav_priced_fund_tickers(session, symbols)
+    eod_candidates = [ticker for ticker in symbols if ticker not in nav_fund_tickers]
     if not eod_candidates:
         return
     eod_tickers = await portfolio_crud.select_tickers_with_eod(session, eod_candidates)
@@ -95,6 +95,30 @@ async def _require_local_trade_tickers(
                 f"{', '.join(missing)}. Run the EOD backfill before using these tickers."
             ),
         )
+
+
+def _is_etf_taxonomy(
+    taxonomy: Mapping[str, portfolio_crud.PositionTaxonomy], ticker: str
+) -> bool:
+    tax = taxonomy.get(ticker)
+    return bool(tax and (tax.fund_type or "").lower() == "etf")
+
+
+async def _select_nav_priced_fund_tickers(
+    session: AsyncSession, tickers: Sequence[str]
+) -> set[str]:
+    """Fund tickers that should use NAV snapshots instead of traded closes."""
+    if not tickers:
+        return set()
+    fund_tickers = await portfolio_crud.select_fund_tickers(session, tickers)
+    if not fund_tickers:
+        return set()
+    taxonomy = await portfolio_crud.resolve_position_taxonomy(session, list(fund_tickers))
+    return {
+        ticker
+        for ticker in fund_tickers
+        if not _is_etf_taxonomy(taxonomy, ticker)
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -210,11 +234,10 @@ async def put_position(
     provided = payload.model_fields_set
     position = await portfolio_crud.get_position(session, portfolio_id, symbol)
     if position is None:
-        # Fund tickers (synced funds/fund_classes tables) are valid positions
-        # priced from fund_nav — they do not require local EOD coverage
-        # (F8.5; class tickers use the series NAV as a proxy, F8.6b).
-        is_fund = bool(await portfolio_crud.select_fund_tickers(session, [symbol]))
-        if not is_fund:
+        # NAV-priced funds/classes are valid local positions. ETFs remain
+        # traded tickers, so they still require local EOD closes.
+        nav_fund_tickers = await _select_nav_priced_fund_tickers(session, [symbol])
+        if symbol not in nav_fund_tickers:
             await _require_local_trade_tickers(session, [symbol])
         position = await portfolio_crud.insert_position(
             session,
@@ -356,8 +379,9 @@ async def get_portfolio_overview(
 ) -> PortfolioOverviewResponse:
     """Render-ready position table with P&L and column-header aggregates (D6).
 
-    Last/prev closes come from the two most recent eod_prices rows per ticker;
-    stale/missing tickers must be handled by the out-of-band backfill. An empty
+    Baseline prices come from the two most recent local eod_prices rows per
+    traded ticker, or fund NAV rows for NAV-priced holdings. The payload also
+    marks positions that may receive a frontend live-tick overlay. An empty
     portfolio is a legitimate 200 with zeroed/null aggregates.
     """
     portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
@@ -366,20 +390,25 @@ async def get_portfolio_overview(
 
     tickers = [position.ticker for position in portfolio.positions]
     fund_tickers: set[str] = set()
+    nav_fund_tickers: set[str] = set()
+    taxonomy = await portfolio_crud.resolve_position_taxonomy(session, tickers)
     if tickers:
-        # Fund-aware pricing (F8.5): tickers known to the synced funds table
-        # are priced from fund_nav. Equity/ETF positions are priced only from
-        # local eod_prices rows already populated by the backfill.
+        # NAV-priced funds/classes use fund_nav. ETFs remain traded tickers:
+        # if their local EOD rows are cold, they should fail like stocks.
         fund_tickers = await portfolio_crud.select_fund_tickers(session, tickers)
+        nav_fund_tickers = {
+            ticker
+            for ticker in fund_tickers
+            if not _is_etf_taxonomy(taxonomy, ticker)
+        }
 
     closes = await portfolio_crud.select_last_two_closes(session, tickers)
     names = await portfolio_crud.select_instrument_names(session, tickers)
-    nav_tickers = [t for t in fund_tickers if t not in closes]
+    nav_tickers = [t for t in nav_fund_tickers if t not in closes]
     if nav_tickers:
         closes.update(await portfolio_crud.select_last_two_navs(session, nav_tickers))
         fund_names = await portfolio_crud.select_fund_names(session, nav_tickers)
         names = {**fund_names, **names}
-    taxonomy = await portfolio_crud.resolve_position_taxonomy(session, tickers)
     try:
         rows, aggregates = portfolio_crud.build_overview(
             portfolio.positions,
@@ -387,6 +416,7 @@ async def get_portfolio_overview(
             names,
             cash=portfolio.cash,
             taxonomy_by_ticker=taxonomy,
+            nav_tickers=set(nav_tickers),
         )
     except portfolio_crud.MissingPriceDataError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

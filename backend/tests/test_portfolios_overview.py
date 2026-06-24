@@ -5,6 +5,7 @@ exercise the actual P&L math. No live network, no live DB.
 """
 
 import datetime as dt
+import uuid
 from types import SimpleNamespace
 from typing import Any
 
@@ -68,6 +69,7 @@ def _install_stubs(
     closes: ClosesMap,
     names: dict[str, str | None] | None = None,
     fund_tickers: set[str] | None = None,
+    fund_types: dict[str, str] | None = None,
     navs: ClosesMap | None = None,
     fund_names: dict[str, str | None] | None = None,
 ) -> list[list[str]]:
@@ -95,7 +97,20 @@ def _install_stubs(
         return fund_names or {}
 
     async def fake_taxonomy(session: Any, tickers: Any) -> dict[str, Any]:
-        return {t: portfolio_crud.PositionTaxonomy(None, None, None) for t in tickers}
+        fund_set = fund_tickers or set()
+        return {
+            t: (
+                portfolio_crud.PositionTaxonomy(
+                    None,
+                    None,
+                    uuid.UUID(int=abs(hash(t)) % (2**128)),
+                    (fund_types or {}).get(t, "mutual_fund"),
+                )
+                if t in fund_set
+                else portfolio_crud.PositionTaxonomy("equity", None, None)
+            )
+            for t in tickers
+        }
 
     monkeypatch.setattr(portfolio_crud, "get_portfolio", fake_get)
     monkeypatch.setattr(portfolio_crud, "select_last_two_closes", fake_closes)
@@ -129,6 +144,9 @@ async def test_overview_pnl_math(monkeypatch: pytest.MonkeyPatch) -> None:
     (row,) = body["positions"]
     assert row["ticker"] == "AAPL"
     assert row["name"] == "Apple Inc"
+    assert row["fund_type"] is None
+    assert row["price_source"] == "eod"
+    assert row["live_price_eligible"] is True
     assert row["last_close"] == 110.0
     assert row["prev_close"] == 105.0
     assert row["change"] == pytest.approx(5.0)
@@ -260,6 +278,9 @@ async def test_overview_fund_position_priced_via_nav(
     assert coverage_checks == []
     fund_row = next(r for r in body["positions"] if r["ticker"] == "VFIAX")
     assert fund_row["name"] == "Vanguard 500 Index Admiral"
+    assert fund_row["fund_type"] == "mutual_fund"
+    assert fund_row["price_source"] == "nav"
+    assert fund_row["live_price_eligible"] is False
     assert fund_row["last_close"] == 450.0
     assert fund_row["prev_close"] == 445.0
     assert fund_row["change"] == pytest.approx(5.0)
@@ -287,6 +308,31 @@ async def test_overview_fund_only_portfolio_skips_ensure_entirely(
     (row,) = response.json()["positions"]
     assert row["last_close"] == 450.0
     assert row["prev_close"] is None
+    assert row["price_source"] == "nav"
+    assert row["live_price_eligible"] is False
+
+
+async def test_overview_etf_fund_ticker_uses_eod_and_live(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_stubs(
+        monkeypatch,
+        _portfolio([_position("VTI", 2.0, 200.0)]),
+        closes={"VTI": [(_LAST, 220.0), (_PREV, 219.0)]},
+        fund_tickers={"VTI"},
+        fund_types={"VTI": "etf"},
+        navs={"VTI": [(_LAST, 215.0), (_PREV, 214.0)]},
+    )
+    async with _client() as ac:
+        response = await ac.get("/portfolios/1/overview")
+
+    assert response.status_code == 200, response.text
+    (row,) = response.json()["positions"]
+    assert row["fund_type"] == "etf"
+    assert row["price_source"] == "eod"
+    assert row["live_price_eligible"] is True
+    assert row["last_close"] == 220.0
+    assert row["prev_close"] == 219.0
 
 
 async def test_overview_missing_portfolio_404(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -346,6 +392,9 @@ async def test_overview_class_ticker_priced_via_series_nav_proxy(
     assert ensure_calls == []
     (row,) = response.json()["positions"]
     assert row["name"] == "Growth Fund of America — Class R-6"
+    assert row["fund_type"] == "mutual_fund"
+    assert row["price_source"] == "nav"
+    assert row["live_price_eligible"] is False
     assert row["last_close"] == 80.0  # series NAV proxies the class NAV
     assert row["basis"] == "executed"
     assert row["commission"] == 5.0
@@ -408,17 +457,22 @@ def test_build_overview_populates_taxonomy_from_map() -> None:
         names_by_ticker={},
         cash=0.0,
         taxonomy_by_ticker={
-            "VTI": PositionTaxonomy("equity", "Large-Cap Blend", iid),
+            "VTI": PositionTaxonomy("equity", "Large-Cap Blend", iid, "etf"),
         },
     )
     by_ticker = {r.ticker: r for r in rows}
     assert by_ticker["VTI"].asset_class == "equity"
     assert by_ticker["VTI"].strategy_label == "Large-Cap Blend"
     assert by_ticker["VTI"].instrument_id == iid
+    assert by_ticker["VTI"].fund_type == "etf"
+    assert by_ticker["VTI"].price_source == "eod"
+    assert by_ticker["VTI"].live_price_eligible is True
     # Ticker absent from the map -> all-None taxonomy (default).
     assert by_ticker["AAPL"].asset_class is None
     assert by_ticker["AAPL"].strategy_label is None
     assert by_ticker["AAPL"].instrument_id is None
+    assert by_ticker["AAPL"].fund_type is None
+    assert by_ticker["AAPL"].live_price_eligible is True
 
 
 def test_build_overview_taxonomy_defaults_none_when_map_omitted() -> None:
@@ -430,6 +484,29 @@ def test_build_overview_taxonomy_defaults_none_when_map_omitted() -> None:
     )
     assert rows[0].asset_class is None
     assert rows[0].instrument_id is None
+    assert rows[0].price_source == "eod"
+    assert rows[0].live_price_eligible is True
+
+
+def test_build_overview_nav_source_disables_live_overlay() -> None:
+    rows, _ = build_overview(
+        [_position("VFIAX", 1.0, 10.0)],
+        closes_by_ticker={"VFIAX": [(_LAST, 10.0)]},
+        names_by_ticker={},
+        cash=0.0,
+        taxonomy_by_ticker={
+            "VFIAX": portfolio_crud.PositionTaxonomy(
+                "equity",
+                "Large-Cap Blend",
+                uuid.UUID(int=9),
+                "mutual_fund",
+            )
+        },
+        nav_tickers={"VFIAX"},
+    )
+    assert rows[0].fund_type == "mutual_fund"
+    assert rows[0].price_source == "nav"
+    assert rows[0].live_price_eligible is False
 
 
 async def test_resolve_position_taxonomy_funds_vs_equities(
@@ -451,13 +528,17 @@ async def test_resolve_position_taxonomy_funds_vs_equities(
     async def fake_strategy(session: Any, fund_ids: Any) -> dict[Any, str]:
         return {iid: "Large-Cap Blend"}
 
+    async def fake_fund_type(session: Any, fund_ids: Any) -> dict[Any, str]:
+        return {iid: "etf"}
+
     monkeypatch.setattr(portfolio_crud, "_fund_instrument_by_ticker", fake_instr)
     monkeypatch.setattr(optimizer_data, "load_fund_asset_class", fake_class)
     monkeypatch.setattr(optimizer_data, "load_fund_strategy_label", fake_strategy)
+    monkeypatch.setattr(portfolio_crud, "_fund_type_by_instrument", fake_fund_type)
 
     out = await portfolio_crud.resolve_position_taxonomy(None, ["VTI", "AAPL"])  # type: ignore[arg-type]
     assert out["VTI"] == portfolio_crud.PositionTaxonomy(
-        "equity", "Large-Cap Blend", iid
+        "equity", "Large-Cap Blend", iid, "etf"
     )
     assert out["AAPL"] == portfolio_crud.PositionTaxonomy("equity", None, None)
 
@@ -475,7 +556,11 @@ async def test_overview_response_includes_position_taxonomy(
     iid = _uuid.UUID(int=11)
 
     async def fake_taxonomy(session: Any, tickers: Any) -> dict[str, Any]:
-        return {"VTI": portfolio_crud.PositionTaxonomy("equity", "Large-Cap Blend", iid)}
+        return {
+            "VTI": portfolio_crud.PositionTaxonomy(
+                "equity", "Large-Cap Blend", iid, "etf"
+            )
+        }
 
     monkeypatch.setattr(portfolio_crud, "resolve_position_taxonomy", fake_taxonomy)
     async with _client() as ac:
@@ -485,3 +570,6 @@ async def test_overview_response_includes_position_taxonomy(
     assert pos["asset_class"] == "equity"
     assert pos["strategy_label"] == "Large-Cap Blend"
     assert pos["instrument_id"] == str(iid)
+    assert pos["fund_type"] == "etf"
+    assert pos["price_source"] == "eod"
+    assert pos["live_price_eligible"] is True

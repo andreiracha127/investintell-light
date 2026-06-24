@@ -4,10 +4,9 @@
  * Portfolio Overview — persisted-portfolio CRUD plus the render-ready position
  * table from `GET /portfolios/{id}/overview`.
  *
- * The frontend computes NO finance: every P&L/aggregate number comes from the
- * backend overview payload (the only client-side arithmetic is chart/legend
- * proportions of values the backend already provided). The dense table puts
- * the portfolio aggregates directly in the column headers (P&L and Mkt Value).
+ * The backend overview payload is the EOD/NAV baseline. When real ticks arrive
+ * for live-eligible stocks/ETFs, the frontend applies a display-only live
+ * overlay to price, P&L and aggregate values; NAV-priced funds stay EOD.
  *
  * Visual language: Investintell Cockpit (Carbon-inspired) — flat square
  * panels stacked with 1px separation, hairline borders, tabular numerals.
@@ -47,6 +46,10 @@ import {
 } from "@/lib/grid/positionsGridOptions";
 import type { TickDir } from "@/lib/grid/liveFlash";
 import { useLiveTicks } from "@/lib/livefeed/useLiveTicks";
+import {
+  applyLiveTicksToOverview,
+  liveEligibleTickers,
+} from "@/lib/portfolio/liveOverview";
 import { Card, InfoDot, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
 import { retryPolicy } from "@/components/screener/shared";
 import { PortfolioNewsPanel } from "@/components/portfolio/PortfolioNewsPanel";
@@ -796,6 +799,19 @@ function OverviewSection({
     staleTime: 60_000,
     retry: retryPolicy,
   });
+  const baseOverview = overviewQuery.data;
+  const liveTickers = useMemo(
+    () => (baseOverview ? liveEligibleTickers(baseOverview) : []),
+    [baseOverview],
+  );
+  const { ticks: liveTicks, status: feedStatus } = useLiveTicks(liveTickers);
+  const liveOverview = useMemo(
+    () =>
+      baseOverview
+        ? applyLiveTicksToOverview(baseOverview, liveTicks)
+        : undefined,
+    [baseOverview, liveTicks],
+  );
 
   if (overviewQuery.isPending) {
     return (
@@ -816,7 +832,7 @@ function OverviewSection({
     );
   }
 
-  const overview = overviewQuery.data;
+  const overview = liveOverview!;
   return (
     <div className="flex flex-col gap-px">
       <KpiStrip
@@ -832,7 +848,12 @@ function OverviewSection({
           <NavPanel portfolioId={portfolioId} colors={colors} />
         </div>
       )}
-      <PositionsTable overview={overview} portfolioId={portfolioId} />
+      <PositionsTable
+        overview={overview}
+        portfolioId={portfolioId}
+        liveTicks={liveTicks}
+        feedStatus={feedStatus}
+      />
     </div>
   );
 }
@@ -1112,9 +1133,13 @@ function AllocationPanel({
 function PositionsTable({
   overview,
   portfolioId,
+  liveTicks,
+  feedStatus,
 }: {
   overview: PortfolioOverview;
   portfolioId: number;
+  liveTicks: ReturnType<typeof useLiveTicks>["ticks"];
+  feedStatus: ReturnType<typeof useLiveTicks>["status"];
 }) {
   const queryClient = useQueryClient();
   const { aggregates, positions } = overview;
@@ -1222,25 +1247,19 @@ function PositionsTable({
     ],
   );
 
-  // ── Live price ticks (path: targeted DOM flash) ──────────────────────────
-  // Subscribe to the rendered positions' tickers. The hook degrades to a no-op
-  // ("off") without a configured feed, so this is silent when no WS is set.
-  const tickers = useMemo(() => positions.map((p) => p.ticker), [positions]);
-  const { ticks, status: feedStatus } = useLiveTicks(tickers);
-
   // The live Grid instance, captured via DataGrid's onReady. We update the
-  // "Last" cell DOM directly instead of re-running positionsToGridOptions +
-  // grid.update(), which would clobber an in-progress Pro cell edit (cost /
-  // shares). Positions render NON-virtualized, so every row is in viewport.rows.
+  // "Last" cell flash directly after the live overlay re-renders values through
+  // gridOptions. Positions render NON-virtualized, so every row is in
+  // viewport.rows.
   const gridRef = useRef<Grid | null>(null);
   // Bumped whenever DataGrid re-fires onReady (after create AND after every
   // update()). Adding it to the live-tick effect deps re-flushes the current
   // ticks onto a (re)built viewport — otherwise grid.update() (overview
   // refetch, or a cost/shares edit re-memoizing gridOptions) rebuilds the
-  // cells and lastFormatter reverts "Last" to the EOD close until the next
-  // tick. It also covers the case where the grid becomes ready after the first
-  // tick batch arrives. setGridEpoch only fires inside onReady (a grid-lib
-  // callback), never during render, so there's no render loop.
+  // cells; this replays the flash against the rebuilt viewport. It also covers
+  // the case where the grid becomes ready after the first tick batch arrives.
+  // setGridEpoch only fires inside onReady (a grid-lib callback), never during
+  // render, so there's no render loop.
   const [gridEpoch, setGridEpoch] = useState(0);
 
   useEffect(() => {
@@ -1248,11 +1267,10 @@ function PositionsTable({
     if (!vp) return;
     for (const row of vp.rows) {
       const sym = String(row.getCell(POSITION_COLS.ticker)?.value ?? "");
-      const tick = ticks[sym];
+      const tick = liveTicks[sym];
       if (!tick) continue;
       const el = row.getCell(POSITION_COLS.last)?.htmlElement;
       if (!el) continue;
-      el.textContent = formatCurrency(tick.price);
       const tint = flashTintForDir(tick.dir);
       if (!tint) continue;
       // Re-trigger the gain/loss flash without touching layout. The old path
@@ -1267,9 +1285,12 @@ function PositionsTable({
         { duration: 600, easing: "ease-out" },
       );
     }
-  }, [ticks, gridEpoch]);
+  }, [liveTicks, gridEpoch]);
 
-  const liveActive = feedStatus === "live" && Object.keys(ticks).length > 0;
+  const liveActive = feedStatus === "live" && Object.keys(liveTicks).length > 0;
+  const hasEodOnlyPositions = positions.some(
+    (position) => !position.live_price_eligible,
+  );
 
   return (
     <section className="border border-border bg-surface-2">
@@ -1383,10 +1404,15 @@ function PositionsTable({
         {(liveActive || aggregates.as_of) && (
           <span className="border border-border bg-field px-[7px] py-[2px] text-[10px] text-text-muted">
             {liveActive ? (
-              <span className="text-gain">● LIVE</span>
+              <span className="text-gain">● LIVE · stocks/ETFs</span>
             ) : (
               <>End of day · {formatDate(aggregates.as_of!)}</>
             )}
+          </span>
+        )}
+        {liveActive && hasEodOnlyPositions && (
+          <span className="border border-border bg-field px-[7px] py-[2px] text-[10px] text-text-muted">
+            Funds/NAV EOD
           </span>
         )}
         <span className="tabular-nums">Cash: {formatCurrency(aggregates.cash)}</span>

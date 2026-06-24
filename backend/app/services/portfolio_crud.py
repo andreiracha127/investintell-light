@@ -30,6 +30,7 @@ from app.schemas.portfolios import (
     PortfolioCreate,
     PositionBasis,
     PositionOverview,
+    PositionPriceSource,
 )
 
 # Hard cap on GET /portfolios — single-tenant, so no pagination, just a bound.
@@ -346,6 +347,7 @@ class PositionTaxonomy(NamedTuple):
     asset_class: str | None
     strategy_label: str | None
     instrument_id: uuid.UUID | None
+    fund_type: str | None = None
 
 
 async def _fund_instrument_by_ticker(
@@ -384,6 +386,20 @@ async def _fund_instrument_by_ticker(
     return instrument_by_ticker
 
 
+async def _fund_type_by_instrument(
+    session: AsyncSession, instrument_ids: Sequence[Any]
+) -> dict[Any, str]:
+    """instrument_id -> fund_type for resolved fund holdings."""
+    if not instrument_ids:
+        return {}
+    result = await session.execute(
+        select(Fund.instrument_id, Fund.fund_type).where(
+            Fund.instrument_id.in_(instrument_ids)
+        )
+    )
+    return {instrument_id: fund_type for instrument_id, fund_type in result.all()}
+
+
 async def resolve_position_taxonomy(
     session: AsyncSession, tickers: Sequence[str]
 ) -> dict[str, PositionTaxonomy]:
@@ -400,6 +416,7 @@ async def resolve_position_taxonomy(
     instrument_ids = list({iid for iid in instrument_by_ticker.values()})
     asset_class_of = await optimizer_data.load_fund_asset_class(session, instrument_ids)
     strategy_of = await optimizer_data.load_fund_strategy_label(session, instrument_ids)
+    fund_type_of = await _fund_type_by_instrument(session, instrument_ids)
     out: dict[str, PositionTaxonomy] = {}
     for ticker in tickers:
         iid = instrument_by_ticker.get(ticker)
@@ -407,7 +424,10 @@ async def resolve_position_taxonomy(
             out[ticker] = PositionTaxonomy("equity", None, None)
         else:
             out[ticker] = PositionTaxonomy(
-                asset_class_of.get(iid), strategy_of.get(iid), iid
+                asset_class_of.get(iid),
+                strategy_of.get(iid),
+                iid,
+                fund_type_of.get(iid),
             )
     return out
 
@@ -555,6 +575,7 @@ def build_overview(
     names_by_ticker: dict[str, str | None],
     cash: float,
     taxonomy_by_ticker: Mapping[str, PositionTaxonomy] | None = None,
+    nav_tickers: set[str] | None = None,
 ) -> tuple[list[PositionOverview], OverviewAggregates]:
     """Assemble the render-ready overview rows + aggregates (no I/O).
 
@@ -586,6 +607,13 @@ def build_overview(
         tax = (taxonomy_by_ticker or {}).get(
             position.ticker, PositionTaxonomy(None, None, None)
         )
+        fund_type = tax.fund_type.lower() if tax.fund_type else None
+        price_source: PositionPriceSource = (
+            "nav" if position.ticker in (nav_tickers or set()) else "eod"
+        )
+        live_price_eligible = price_source == "eod" and (
+            tax.instrument_id is None or fund_type == "etf"
+        )
         rows.append(
             PositionOverview(
                 ticker=position.ticker,
@@ -593,6 +621,9 @@ def build_overview(
                 asset_class=tax.asset_class,
                 strategy_label=tax.strategy_label,
                 instrument_id=tax.instrument_id,
+                fund_type=fund_type,
+                price_source=price_source,
+                live_price_eligible=live_price_eligible,
                 quantity=position.quantity,
                 acq_price=position.acq_price,
                 basis=cast("PositionBasis", position.basis),
