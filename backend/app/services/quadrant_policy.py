@@ -75,11 +75,35 @@ def policy_bands(policy: QuadrantPolicy) -> dict[str, tuple[float, float]]:
 
 # Final symmetric half-widths per sleeve (spec §19 seed, collapsed to the SMALLER
 # side so lo/hi never escape [0,1] given these centers). Same across quadrants in
-# v1 (per-quadrant variation is a calibration degree of freedom, spec §33).
+# v1 (per-quadrant variation is a calibration degree of freedom, spec §33). These
+# are RESEARCH widths — they are NOT guaranteed to fit every center (e.g. the §18
+# seed sets conservative/contraction thematic center = 0%, but this width is 1pp).
 _HALF_WIDTHS: dict[str, float] = {
     "cash": 0.04, "equity": 0.04, "fixed_income": 0.06, "thematic": 0.01,
     "alternatives": 0.03, "gold": 0.03, "long_short": 0.03,
 }
+
+
+def _materialize_half_widths(center: dict[str, float]) -> dict[str, float]:
+    """Clamp each §19 seed half-width to the achievable band for this policy's center.
+
+    `hw_eff[g] = min(seed_half_width[g], center[g], 1 − center[g])` so that the raw
+    relationship `0 ≤ center[g] − hw_eff[g]` and `center[g] + hw_eff[g] ≤ 1` hold for
+    EVERY sleeve — i.e. spec §15 (`0 ≤ lo_g ≤ center_g ≤ hi_g ≤ 1`) is satisfied on
+    the MATERIALIZED policy, not merely after clamping inside ``policy_bands``.
+
+    This is a deterministic STRUCTURAL-consistency rule applied once when building
+    ``QUADRANT_POLICIES`` — NOT a runtime multiplier (no HW_SCALE is reintroduced).
+    The §17/§18 center seeds and the §19 seed widths remain the source values; only
+    the materialized per-policy half-width changes, and only where a seed width
+    exceeds ``center`` or ``1 − center`` (today that is exactly one sleeve:
+    conservative/contraction thematic, center = 0 → hw = 0, band [0, 0], meaning the
+    policy allocates 0% thematic). A4 (parameter freeze) may recalibrate the seeds.
+    """
+    return {
+        g: min(_HALF_WIDTHS[g], center[g], 1.0 - center[g])
+        for g in STRUCTURAL_SLEEVES
+    }
 
 
 def _policy(
@@ -87,7 +111,7 @@ def _policy(
 ) -> QuadrantPolicy:
     return QuadrantPolicy(
         center=dict(center),
-        half_width=dict(_HALF_WIDTHS),
+        half_width=_materialize_half_widths(center),
         risk_assets_cap=risk_assets_cap,
         defensive_floor=defensive_floor,
         fixed_income_sub_budgets={},
