@@ -182,3 +182,111 @@ QUADRANT_POLICIES: dict[str, dict[str, QuadrantPolicy]] = {
             risk_assets_cap=0.10, defensive_floor=0.72),
     },
 }
+
+
+# --- Invariant validator (spec §15/§37). Fail-loud at startup (Task 10). ---------
+_CENTER_TOL = 1e-6
+_BAND_TOL = 1e-9
+
+
+class PolicyError(ValueError):
+    """A QuadrantPolicy invariant is violated (spec §15). Fail-loud at startup.
+
+    Raised by ``validate_quadrant_policies`` on the FIRST violated invariant. The
+    service must refuse to start if this is raised. The validator only CHECKS — it
+    never normalizes or mutates the policies (spec §15 forbids runtime
+    normalization), so the message names the offending profile/quadrant/sleeve and
+    the violated invariant for an operator to fix the seed.
+    """
+
+
+def _validate_one(profile: str, quadrant: str, pol: QuadrantPolicy) -> None:
+    """Check the §15 invariants for ONE materialized policy. Raises PolicyError.
+
+    Bands are computed from the RAW ``center ± half_width`` (NOT ``policy_bands``,
+    which clamps to [0,1]): the §15 invariant ``0 ≤ center − half_width`` must hold
+    on the raw relationship, so a half_width that pushes ``lo`` negative is a
+    violation even though ``policy_bands`` would clamp it back to 0.
+    """
+    where = f"{profile}/{quadrant}"
+    if set(pol.center) != set(STRUCTURAL_SLEEVES):
+        raise PolicyError(
+            f"{where}: center sleeves must be exactly STRUCTURAL_SLEEVES, "
+            f"got {sorted(pol.center)}"
+        )
+    if set(pol.half_width) != set(STRUCTURAL_SLEEVES):
+        raise PolicyError(
+            f"{where}: half_width sleeves must be exactly STRUCTURAL_SLEEVES, "
+            f"got {sorted(pol.half_width)}"
+        )
+    total = sum(pol.center.values())
+    if abs(total - 1.0) > _CENTER_TOL:
+        raise PolicyError(f"{where}: centers must sum to 1, got {total}")
+    sum_lo = 0.0
+    sum_hi = 0.0
+    for g in STRUCTURAL_SLEEVES:
+        c = pol.center[g]
+        hw = pol.half_width[g]
+        lo = c - hw
+        hi = c + hw
+        if not (0.0 <= c <= 1.0):
+            raise PolicyError(f"{where}: center[{g}]={c} outside [0,1]")
+        if not (-_BAND_TOL <= lo <= c + _BAND_TOL <= hi + _BAND_TOL <= 1.0 + _BAND_TOL):
+            raise PolicyError(
+                f"{where}: band[{g}] violates 0<=lo<=center<=hi<=1 "
+                f"(center={c}, half_width={hw}, lo={lo}, hi={hi})"
+            )
+        sum_lo += lo
+        sum_hi += hi
+    if sum_lo > 1.0 + _BAND_TOL:
+        raise PolicyError(f"{where}: Σlo={sum_lo} must be <= 1")
+    if sum_hi < 1.0 - _BAND_TOL:
+        raise PolicyError(f"{where}: Σhi={sum_hi} must be >= 1")
+    risk_assets = pol.center["equity"] + pol.center["thematic"]
+    if risk_assets > pol.risk_assets_cap + _BAND_TOL:
+        raise PolicyError(
+            f"{where}: equity+thematic={risk_assets} exceeds "
+            f"risk_assets_cap={pol.risk_assets_cap}"
+        )
+    defensive = (
+        pol.center["cash"] + pol.center["fixed_income"]
+        + pol.center["gold"] + pol.center["long_short"]
+    )
+    if defensive < pol.defensive_floor - _BAND_TOL:
+        raise PolicyError(
+            f"{where}: cash+fixed_income+gold+long_short={defensive} below "
+            f"defensive_floor={pol.defensive_floor}"
+        )
+    if pol.policy_version != POLICY_VERSION:
+        raise PolicyError(
+            f"{where}: policy_version {pol.policy_version!r} != {POLICY_VERSION!r}"
+        )
+
+
+def validate_quadrant_policies(
+    policies: dict[str, dict[str, QuadrantPolicy]] = QUADRANT_POLICIES,
+) -> None:
+    """Validate all 12 profile×quadrant policies (spec §15/§37).
+
+    Raises :class:`PolicyError` on a violated invariant; returns ``None`` when every
+    policy is valid AND all 12 profile×quadrant combinations are present. Intended to
+    be called at service startup (Task 10): the service must not start if this raises.
+    The validator only CHECKS — it never normalizes or mutates the policies (spec §15:
+    no runtime normalization).
+
+    Each policy that IS present is validated first, then completeness is checked. This
+    ordering lets a caller pass a single deliberately-broken policy and get the
+    specific invariant error (not a generic "missing the other 11") — while a complete
+    set still fails loud if any of the 12 combinations is absent.
+    """
+    for profile in PROFILES:
+        for quadrant in QUADRANTS:
+            pol = policies.get(profile, {}).get(quadrant)
+            if pol is not None:
+                _validate_one(profile, quadrant, pol)
+    for profile in PROFILES:
+        if profile not in policies:
+            raise PolicyError(f"missing policies for profile {profile!r}")
+        for quadrant in QUADRANTS:
+            if quadrant not in policies[profile]:
+                raise PolicyError(f"missing policy for {profile}/{quadrant}")

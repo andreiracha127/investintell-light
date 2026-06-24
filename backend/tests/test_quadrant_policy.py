@@ -1,3 +1,4 @@
+import dataclasses
 import math
 
 import pytest
@@ -114,3 +115,89 @@ def test_section15_band_invariants_on_materialized_policies() -> None:
                 f"{tag} cash+fixed_income+gold+long_short={defensive} "
                 f"< defensive_floor={pol.defensive_floor}"
             )
+
+
+def test_validate_passes_on_shipped_policies() -> None:
+    qp.validate_quadrant_policies()  # must not raise
+
+
+def test_validate_rejects_center_not_summing_one() -> None:
+    pol = qp.QUADRANT_POLICIES["moderate"]["recovery"]
+    bad_center = dict(pol.center)
+    bad_center["cash"] += 0.05  # now sums to 1.05
+    bad = dataclasses.replace(pol, center=bad_center)
+    policies = {"moderate": {"recovery": bad}}
+    with pytest.raises(qp.PolicyError, match="sum to 1"):
+        qp.validate_quadrant_policies(policies)
+
+
+def test_validate_rejects_band_out_of_unit_interval() -> None:
+    pol = qp.QUADRANT_POLICIES["aggressive"]["recovery"]
+    bad_hw = dict(pol.half_width)
+    bad_hw["equity"] = 0.50  # center 0.33 → lo = -0.17
+    bad = dataclasses.replace(pol, half_width=bad_hw)
+    policies = {"aggressive": {"recovery": bad}}
+    with pytest.raises(qp.PolicyError, match="lo"):
+        qp.validate_quadrant_policies(policies)
+
+
+def test_validate_rejects_risk_assets_cap_breach() -> None:
+    pol = qp.QUADRANT_POLICIES["aggressive"]["recovery"]  # equity .33 + thematic .08 = .41
+    bad = dataclasses.replace(pol, risk_assets_cap=0.30)  # < .41
+    policies = {"aggressive": {"recovery": bad}}
+    with pytest.raises(qp.PolicyError, match="risk_assets_cap"):
+        qp.validate_quadrant_policies(policies)
+
+
+def test_validate_rejects_defensive_floor_breach() -> None:
+    pol = qp.QUADRANT_POLICIES["moderate"]["recovery"]
+    # cash+fi+gold+ls = .10+.38+.10+.08 = .66; demand .80 → breach
+    bad = dataclasses.replace(pol, defensive_floor=0.80)
+    policies = {"moderate": {"recovery": bad}}
+    with pytest.raises(qp.PolicyError, match="defensive_floor"):
+        qp.validate_quadrant_policies(policies)
+
+
+def test_validate_rejects_missing_policy() -> None:
+    policies = {"moderate": {"recovery": qp.QUADRANT_POLICIES["moderate"]["recovery"]}}
+    with pytest.raises(qp.PolicyError, match="missing"):
+        qp.validate_quadrant_policies(policies)
+
+
+def test_validate_rejects_missing_sleeve() -> None:
+    pol = qp.QUADRANT_POLICIES["moderate"]["recovery"]
+    bad_center = dict(pol.center)
+    del bad_center["gold"]  # drop a structural sleeve from center
+    bad = dataclasses.replace(pol, center=bad_center)
+    policies = {"moderate": {"recovery": bad}}
+    with pytest.raises(qp.PolicyError, match="STRUCTURAL_SLEEVES"):
+        qp.validate_quadrant_policies(policies)
+
+
+def test_validate_accepts_sum_lo_at_boundary() -> None:
+    # Build a policy whose Σlo == 1 (boundary, must pass). center is valid (sum 1),
+    # half_widths 0 so lo == center for every sleeve → Σlo == Σcenter == 1.0.
+    # The caps must also be consistent with these uniform centers, so the ONLY thing
+    # under test is the Σlo boundary (not risk_assets_cap / defensive_floor).
+    pol = qp.QUADRANT_POLICIES["conservative"]["contraction"]
+    bad_center = {g: 1.0 / 7 for g in qp.STRUCTURAL_SLEEVES}
+    bad_hw = {g: 0.0 for g in qp.STRUCTURAL_SLEEVES}
+    bad_center["fixed_income"] = 1.0 / 7 + 1e-3
+    bad_center["cash"] = 1.0 / 7 - 1e-3  # keep sum 1
+    bad = dataclasses.replace(
+        pol,
+        center=bad_center,
+        half_width=bad_hw,
+        risk_assets_cap=1.0,    # uniform equity+thematic = 2/7 ≈ 0.286, allow it
+        defensive_floor=0.0,    # uniform defensive sum is fine; don't constrain it
+    )
+    # Σlo == 1.0 (lo == center, Σcenter == 1) → boundary must PASS (no raise). Tested
+    # via the per-policy validator: validate_quadrant_policies enforces all-12-present,
+    # so a single-policy dict would (correctly) raise "missing" before we could observe
+    # the Σlo boundary in isolation.
+    qp._validate_one("conservative", "contraction", bad)  # must not raise
+
+
+def test_validate_full_default_set_is_complete_and_valid() -> None:
+    # The startup call (no args) validates the real 12 and enforces completeness.
+    qp.validate_quadrant_policies(qp.QUADRANT_POLICIES)
