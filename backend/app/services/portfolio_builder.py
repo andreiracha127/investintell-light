@@ -72,9 +72,15 @@ from app.services import (
     funds_catalog,
     lookthrough_exposure,
     quadrant_policy,
+    quadrant_reader,
     taa_bands,
 )
 from app.services._series import select_adj_close_rows
+
+# The macro-quadrant model the A2 worker materializes into ``regime_quadrant_snapshot``
+# (worker ``MODEL_VERSION_MACRO``). The §6 consumable read filters on this version, so
+# regime_aware only ever consumes the OFFICIAL quadrant model (freeze §6/§8).
+QUADRANT_MODEL_VERSION = "macro_quadrant_us_v1"
 
 # Test seam: when set, overrides the regime state read (bypasses the data-lake).
 _OVERRIDE_REGIME_STATE: str | None = None
@@ -195,48 +201,6 @@ def _resolve_quadrant_policy(
     return by_quadrant[quadrant]
 
 
-def _snapshot_from(quadrant: str | None, gate_state: str | None) -> taa_bands.GateRegimeSnapshot:
-    """Wrap a (quadrant, gate_state) pair into a minimal ``GateRegimeSnapshot`` so the
-    solve path can feed ``build_effective_policy`` even when it received the regime
-    fields directly (e.g. the standalone two-level call) rather than a DB row.
-
-    v1: quadrant and gate are materialized on ONE ``regime_gate_daily`` row, so the
-    single synthetic snapshot stands in for both the quadrant_snapshot and the
-    gate_snapshot (spec note in ``effective_policy._snapshot_id``). Only ``as_of`` /
-    ``state`` / ``quadrant`` are consumed by ``build_effective_policy``; the vote
-    fields are lineage placeholders.
-    """
-    return taa_bands.GateRegimeSnapshot(
-        as_of=dt.date.today(),
-        state=gate_state or "",
-        vote_count=0,
-        trend_vote=False,
-        credit_vote=False,
-        drawdown_vote=False,
-        dwell_days=0,
-        last_flip=None,
-        growth_score=None,
-        inflation_score=None,
-        quadrant=quadrant,
-    )
-
-
-def _effective_policy_from(
-    quadrant: str | None, gate_state: str | None, profile: str, *, base_cvar_limit: float
-) -> effective_policy.EffectiveRegimePolicy:
-    """Build the cohesive ``EffectiveRegimePolicy`` ONCE (decision B) from a
-    (quadrant, gate_state) pair, re-raising ``EffectivePolicyError`` as the matching
-    structured ``BuilderError`` (→ 422). The gate overlay is applied INSIDE
-    ``build_effective_policy`` — the caller reads the FINAL numbers off the result."""
-    snap = _snapshot_from(quadrant, gate_state)
-    try:
-        return effective_policy.build_effective_policy(
-            snap, snap, profile, base_cvar_limit=base_cvar_limit
-        )
-    except effective_policy.EffectivePolicyError as exc:
-        raise _as_builder_error(exc) from exc
-
-
 def _to_data_ref(ref: FundRefIn | EquityRefIn) -> optimizer_data.AssetRef:
     if isinstance(ref, FundRefIn):
         return optimizer_data.FundAssetRef(id=ref.id)
@@ -245,44 +209,6 @@ def _to_data_ref(ref: FundRefIn | EquityRefIn) -> optimizer_data.AssetRef:
 
 def _ref_key(ref: FundRefIn | EquityRefIn) -> str:
     return _to_data_ref(ref).label
-
-
-def _available_tickers(assets: list[AssetRefIn], label_map: _LabelMap) -> dict[str, int]:
-    """Map an UPPER-cased ticker → its column index, for the goldfix haven.
-
-    Equities expose their ticker directly; funds expose it via the universe
-    ``label_map`` (the explicit-list path leaves fund tickers unknown, so a fund
-    only participates in the haven when its ticker is known). The index is the
-    asset's position in ``assets`` (== its column once labels are built in the
-    same order).
-    """
-    out: dict[str, int] = {}
-    for i, ref in enumerate(assets):
-        if isinstance(ref, EquityRefIn):
-            out[ref.ticker.upper()] = i
-        else:
-            ticker = label_map.get(_ref_key(ref), (None, None))[0]
-            if ticker:
-                out[ticker.upper()] = i
-    return out
-
-
-def _spy_closes_from_frame(frame: "pd.DataFrame") -> list[float]:
-    """Reconstruct a NEWEST-FIRST synthetic SPY close series for the vol/beta
-    market-stress overlay, IF the universe contains ``equity:SPY``.
-
-    The builder has no SPY closes loader on the request path, so the overlay is
-    sourced opportunistically from the returns frame: a cumulative product of
-    (1 + r) gives a price proxy whose drawdown shape (what ``market_stress``
-    reads) matches SPY's. When SPY is absent the overlay degrades to the flat
-    ``cap`` (``vol_graduated_caps``' no-stress branch) — documented, degrade-safe.
-    """
-    col = "equity:SPY"
-    if col not in frame.columns:
-        return []
-    rets = frame[col].to_numpy(dtype=float)
-    closes = np.cumprod(1.0 + rets)  # oldest→newest price proxy
-    return [float(x) for x in closes[::-1]]  # newest-first for market_stress
 
 
 # Minimum SPY closes for a usable market-stress signal: ``market_stress`` reads
@@ -654,7 +580,7 @@ class _RegimeTwoLevel:
     beta_cap: float
 
 
-# Mandate label → one of the 3 PROFILE_CENTERS profiles for the sleeve bands.
+# Mandate label → one of the 3 QUADRANT_POLICIES profiles for the sleeve bands.
 _REGIME_PROFILES = {
     "conservative": "conservative", "defensive": "conservative",
     "moderate_conservative": "conservative",
@@ -678,8 +604,7 @@ async def _solve_regime_two_level(
     assets: list[AssetRefIn],
     labels: list[str],
     frame_index: "pd.Index",
-    quadrant: str | None,
-    gate_state: str | None,
+    eff_policy: effective_policy.EffectiveRegimePolicy,
     payload: "OptimizeRequest",
 ) -> "_RegimeTwoLevel | None":
     """COMBO S4b: two-level ``regime_aware`` solve (proxy → fund equal-weight).
@@ -691,24 +616,17 @@ async def _solve_regime_two_level(
     (Level-2); a floored sleeve with no fund (gold via GLD, long_short via FTLS)
     keeps its authorized proxy as a holding.
 
-    Sleeve bands + the gate-tightened CVaR/beta/view-confidence come from ONE
-    ``EffectiveRegimePolicy`` (decision B): ``build_effective_policy`` composes the
-    ``QUADRANT_POLICIES[profile][quadrant]`` bands with the gate overlay. A
-    non-consumable quadrant/gate raises a structured ``BuilderError`` (→ 422; spec
-    §31) — regime_aware NEVER returns weights-with-warnings. Returns ``None`` ONLY
-    for a feasibility shortfall the caller treats as no-trade (no fund maps to a base
-    sleeve, <2 live proxies, or the Level-1 solve is infeasible even after its
+    The cohesive ``eff_policy`` is built ONCE by the caller (the dispatch) from the
+    §6 consumable quadrant + the live gate; this solve READS its sleeve bands and the
+    gate-tightened CVaR/beta/view-confidence off it (no second
+    ``build_effective_policy`` here — exactly one build per request). Returns ``None``
+    ONLY for a feasibility shortfall the caller treats as no-trade (no fund maps to a
+    base sleeve, <2 live proxies, or the Level-1 solve is infeasible even after its
     min-CVaR fallback). Degrade-safe: the proxy-returns loader returns ``{}`` without
     a DB session.
     """
-    profile = _regime_profile(payload.mandate)
-    # ONE EffectiveRegimePolicy (decision B): bands from QUADRANT_POLICIES, with the
-    # gate overlay tightening cvar/beta/view-confidence INSIDE build_effective_policy
-    # (fail-loud on a non-consumable quadrant/gate — spec §31).
-    base_cvar = resolve_cvar_limit(payload.cvar_limit, payload.mandate)
-    eff_policy = _effective_policy_from(
-        quadrant, gate_state, profile, base_cvar_limit=base_cvar
-    )
+    profile = eff_policy.profile
+    gate_state = eff_policy.gate_state
     bands = {s: (b.lo, b.hi) for s, b in eff_policy.sleeve_budgets.items()}
 
     # 1. fund → sleeve (strategy_label finest; asset_class fallback; raw equities
@@ -1195,13 +1113,16 @@ async def run_optimize(
     try:
         if payload.objective == "regime_aware":
             # Regime-Aware allocator (research codename COMBO): ORTHOGONAL model
-            # (decision B, Task 7). Build ONE EffectiveRegimePolicy from the live
-            # gate (quadrant + gate state, both materialized on the same row in v1 →
-            # quadrant_snapshot == gate_snapshot) and route directly to the two-level
-            # proxy→fund solve. ``combined_regime``/``band_state_from_quadrant`` and
-            # the STAG_GOLD goldfix + S4a single-level fallback are retired (the
-            # legacy helpers remain for the macro route / Task 8). The payload's
-            # ``block_budgets`` are IGNORED here — bands derive from the policy.
+            # (decision B, Task 7). Build ONE EffectiveRegimePolicy from TWO separate
+            # reads — the gate state from ``fetch_gate_regime`` and the quadrant from
+            # the §6 CONSUMABLE read ``quadrant_reader.fetch_quadrant_snapshot``
+            # (status/confidence/point-in-time/staleness filtered) — then route
+            # directly to the two-level proxy→fund solve. The gate-proxy quadrant
+            # (the last-non-null ``regime_gate_daily.quadrant``) is GONE: a stale /
+            # low-confidence / future-leaked quadrant on the gate row can no longer
+            # drive sleeve bands; a non-consumable quadrant fails loud as
+            # QUADRANT_UNAVAILABLE (freeze §6/§8/§36). The payload's ``block_budgets``
+            # are IGNORED here — bands derive from the policy.
             _profile = _regime_profile(payload.mandate)
             gate_state = _OVERRIDE_REGIME_STATE
             gate_snap = (
@@ -1210,25 +1131,37 @@ async def run_optimize(
             )
             if gate_state is None:
                 gate_state = gate_snap.state if gate_snap is not None else None
-            # v1 gate-proxy: quadrant taken from the gate row WITHOUT the §6
-            # consumability filters; A5 atomic activation MUST wire
-            # quadrant_reader.fetch_quadrant_snapshot here before regime_aware is
-            # exposed in production (freeze §2/§36).
-            quadrant = gate_snap.quadrant if gate_snap is not None else None
-            # ONE policy build (fail-loud on a non-consumable quadrant/gate → 422).
-            eff_policy = _effective_policy_from(
-                quadrant, gate_state, _profile,
-                base_cvar_limit=resolve_cvar_limit(payload.cvar_limit, payload.mandate),
+            # §6 consumable quadrant read (production decision time = now). A None
+            # row means NO consumable snapshot → build_effective_policy raises
+            # QUADRANT_UNAVAILABLE below. ``datalake is None`` (test seam) likewise
+            # yields None and fails loud rather than guessing.
+            quadrant_row = (
+                await quadrant_reader.fetch_quadrant_snapshot(
+                    datalake,
+                    model_version=QUADRANT_MODEL_VERSION,
+                    decision_time=dt.datetime.now(dt.UTC),
+                )
+                if datalake is not None else None
             )
+            # ONE policy build from the REAL quadrant + REAL gate (fail-loud on a
+            # non-consumable quadrant/gate → structured BuilderError → 422).
+            try:
+                eff_policy = effective_policy.build_effective_policy(
+                    quadrant_row, gate_snap, _profile,
+                    base_cvar_limit=resolve_cvar_limit(
+                        payload.cvar_limit, payload.mandate
+                    ),
+                )
+            except effective_policy.EffectivePolicyError as exc:
+                raise _as_builder_error(exc) from exc
             regime_quadrant = eff_policy.quadrant
-            regime_state = gate_state
+            regime_state = eff_policy.gate_state
             cvar_limit_effective = eff_policy.cvar_limit
             # eff_policy.beta_cap is the AGGREGATE portfolio-beta cap — EXPOSED for
             # telemetry ONLY, NOT compiled into a constraint (RELEASE GATE; Plan C).
             regime_beta_cap = eff_policy.beta_cap
             two_level = await _solve_regime_two_level(
-                session, assets, labels, frame.index,
-                regime_quadrant, gate_state, payload,
+                session, assets, labels, frame.index, eff_policy, payload,
             )
             if two_level is None:
                 # Fail-loud: regime_aware that can't be produced is a no-trade

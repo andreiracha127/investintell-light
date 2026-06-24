@@ -11,11 +11,32 @@ LinearConstraint; this module only exposes the number (release-gate aware).
 """
 from __future__ import annotations
 
+import datetime as _dt
 from dataclasses import dataclass
+from typing import Protocol
 
 from app.optimizer import gate_overlay
 from app.services import quadrant_policy as qp
 from app.services.taa_bands import GateRegimeSnapshot
+
+
+class _QuadrantSource(Protocol):
+    """The minimal surface ``build_effective_policy`` reads off the quadrant input.
+
+    Both the §6 consumable ``QuadrantSnapshotRow`` (the production read) and the v1
+    synthetic ``GateRegimeSnapshot`` satisfy this: each carries a ``.quadrant`` (the
+    classified quadrant or ``None``) and an ``.as_of`` date (for the lineage id). The
+    quadrant and gate are now DISTINCT objects — the quadrant comes from
+    ``quadrant_reader.fetch_quadrant_snapshot`` (status/confidence/stale filtered),
+    the gate from ``taa_bands.fetch_gate_regime`` — so this no longer requires the
+    full ``GateRegimeSnapshot`` shape.
+    """
+
+    @property
+    def quadrant(self) -> str | None: ...
+
+    @property
+    def as_of(self) -> _dt.date: ...
 
 # The worker materializes EXACTLY these two literals on the regime_gate_daily row.
 # Anything else (absent, drifted "stale"/"unknown", or a hyphenated/cased/padded
@@ -51,20 +72,28 @@ class EffectiveRegimePolicy:
     bl_view_confidence_multiplier: float
 
 
-def _snapshot_id(snap: GateRegimeSnapshot, kind: str) -> str:
-    # v1: quadrant + gate are materialized on one regime_gate_daily row, so both ids
-    # derive from as_of. Track A will split them into independent snapshot ids.
+def _snapshot_id(snap: _QuadrantSource | GateRegimeSnapshot, kind: str) -> str:
+    # Each snapshot carries its own ``as_of``; the quadrant and gate ids now derive
+    # from their OWN reads (the quadrant from the §6 consumable snapshot, the gate
+    # from regime_gate_daily) rather than a single shared row.
     return f"{kind}:{snap.as_of.isoformat()}"
 
 
 def build_effective_policy(
-    quadrant_snapshot: GateRegimeSnapshot | None,
+    quadrant_snapshot: _QuadrantSource | None,
     gate_snapshot: GateRegimeSnapshot | None,
     profile: str,
     *,
     base_cvar_limit: float,
 ) -> EffectiveRegimePolicy:
     """Produce the cohesive ``EffectiveRegimePolicy`` (decision B).
+
+    The quadrant and gate snapshots come from SEPARATE reads — the quadrant from
+    ``quadrant_reader.fetch_quadrant_snapshot`` (the §6 consumable read: status,
+    confidence, point-in-time and staleness filtered) and the gate from
+    ``taa_bands.fetch_gate_regime``. A ``None`` quadrant_snapshot means there is no
+    consumable quadrant and fails loud as ``QUADRANT_UNAVAILABLE`` (never the
+    last-non-null gate-proxy quadrant).
 
     Fail-loud on a non-consumable quadrant/gate or a missing policy. The quadrant
     snapshot is consumable iff it carries a known ``quadrant``; the gate snapshot is

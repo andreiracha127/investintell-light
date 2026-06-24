@@ -20,7 +20,9 @@ from app.core.db import get_session
 from app.main import create_app
 from app.optimizer import data as optimizer_data
 from app.services import portfolio_builder as pb
+from app.services import quadrant_reader as qr
 from app.services import taa_bands as tb
+from app.services.quadrant_reader import QuadrantSnapshotRow
 
 
 def _ascending_levels(n: int, start: float = 100.0, drift: float = 0.05) -> list[float]:
@@ -273,10 +275,43 @@ def _gate(*, state: str = "risk_on", quadrant: str | None = None) -> tb.GateRegi
     )
 
 
+def _quad_snapshot(quadrant: str | None) -> QuadrantSnapshotRow | None:
+    """A consumable §6 QuadrantSnapshotRow (or None for the no-snapshot case).
+
+    The orthogonal model (Task 7 + reader-wiring) reads the quadrant from
+    ``quadrant_reader.fetch_quadrant_snapshot`` — NOT from the gate row — so the
+    two-level fixtures must supply a consumable snapshot here. ``None`` models the
+    'no consumable snapshot' boundary the dispatch turns into QUADRANT_UNAVAILABLE."""
+    if quadrant is None:
+        return None
+    return QuadrantSnapshotRow(
+        quadrant=quadrant, candidate_quadrant=quadrant, candidate_confidence=0.85,
+        as_of=dt.date(2026, 6, 19),
+        available_at=dt.datetime(2026, 6, 19, 12, tzinfo=dt.UTC),
+        stale_after=dt.datetime(2026, 6, 30, tzinfo=dt.UTC),
+        status_at_compute="valid", model_version=pb.QUADRANT_MODEL_VERSION,
+        growth_score=0.3, inflation_score=0.3, transition_pending=False,
+    )
+
+
 def _async(value: Any):
     async def _f(*_a: Any, **_k: Any) -> Any:
         return value
     return _f
+
+
+def _eff_policy(
+    profile: str, quadrant: str, *, state: str = "risk_on", base_cvar: float = 0.025
+):
+    """Build the cohesive EffectiveRegimePolicy the dispatch now threads into
+    ``_solve_regime_two_level`` (one build per request). Mirrors the production wiring:
+    a consumable §6 quadrant snapshot + the live gate."""
+    from app.services import effective_policy as ep
+
+    return ep.build_effective_policy(
+        _quad_snapshot(quadrant), _gate(state=state, quadrant=quadrant),
+        profile, base_cvar_limit=base_cvar,
+    )
 
 
 def _client() -> AsyncClient:
@@ -287,13 +322,16 @@ def _client() -> AsyncClient:
 
 
 def _stub_two_level_world(
-    monkeypatch: Any, *, state: str = "risk_on", quadrant: str = "recovery"
+    monkeypatch: Any, *, state: str = "risk_on", quadrant: str | None = "recovery"
 ) -> None:
-    """Wire the 5-fund universe: aligned returns, taxonomy, gate, and a proxy
-    returns loader that serves every requested proxy (so the two-level activates).
+    """Wire the 5-fund universe: aligned returns, taxonomy, gate, the §6 quadrant
+    reader, and a proxy returns loader that serves every requested proxy (so the
+    two-level activates).
 
-    The gate now carries a consumable QUADRANT (orthogonal model, Task 7): a None
-    quadrant fails loud (422), so every two-level fixture supplies one."""
+    The quadrant now comes from ``quadrant_reader.fetch_quadrant_snapshot`` (the §6
+    consumable read), NOT the gate row — so the fixture mocks the reader with a
+    consumable snapshot for ``quadrant``. ``quadrant=None`` models 'no consumable
+    snapshot' (the dispatch fails loud QUADRANT_UNAVAILABLE → 422)."""
 
     async def fake_load(
         session: Any, assets: list[Any], window_days: int = 730, today: Any = None
@@ -320,6 +358,10 @@ def _stub_two_level_world(
     monkeypatch.setattr(pb, "_load_proxy_returns", fake_proxies)
     monkeypatch.setattr(
         tb, "fetch_gate_regime", _async(_gate(state=state, quadrant=quadrant))
+    )
+    # The quadrant is sourced from the §6 consumable reader, not the gate row.
+    monkeypatch.setattr(
+        qr, "fetch_quadrant_snapshot", _async(_quad_snapshot(quadrant))
     )
 
 
@@ -390,14 +432,13 @@ async def test_two_level_without_proxies_fails_loud(monkeypatch: Any) -> None:
 async def test_two_level_band_state_comes_from_quadrant_not_gate(monkeypatch: Any) -> None:
     """The two-level sleeve bands key off the QUADRANT (the gate only tightens
     CVaR): a risk_off gate with an EXPANSION quadrant uses the EXPANSION sleeve
-    bands. The quadrant + gate_state are surfaced orthogonally (combined_regime
-    retired)."""
+    bands. The quadrant comes from the §6 reader (gate quadrant is now irrelevant),
+    and quadrant + gate_state are surfaced orthogonally (combined_regime retired)."""
     from app.services import quadrant_policy as qp
 
-    _stub_two_level_world(monkeypatch)
-    monkeypatch.setattr(
-        tb, "fetch_gate_regime", _async(_gate(state="risk_off", quadrant="expansion"))
-    )
+    # quadrant=expansion drives BOTH the reader (band source) and the gate row;
+    # the risk_off state still only tightens CVaR, never the band selection.
+    _stub_two_level_world(monkeypatch, state="risk_off", quadrant="expansion")
     async with _client() as client:
         resp = await client.post("/builder/optimize", json=_tl_payload("moderate"))
     assert resp.status_code == 200, resp.text
@@ -408,6 +449,28 @@ async def test_two_level_band_state_comes_from_quadrant_not_gate(monkeypatch: An
     assert diag["category_weights"] is not None     # the two-level still ran
     expected = qp.policy_bands(qp.QUADRANT_POLICIES["moderate"]["expansion"])
     assert diag["class_bands"]["equity"] == pytest.approx(list(expected["equity"]))
+
+
+async def test_two_level_ignores_payload_block_budgets(monkeypatch: Any) -> None:
+    """regime_aware DERIVES its sleeve bands from the EffectiveRegimePolicy and
+    IGNORES the payload's ``block_budgets``: a payload that demands an equity band of
+    [0.0, 0.05] is overridden — the realized class_bands follow the QUADRANT_POLICIES
+    policy (recovery/moderate), not the payload. (Re-pins the dropped guard.)"""
+    _stub_two_level_world(monkeypatch, state="risk_on", quadrant="recovery")
+    payload = _tl_payload("moderate")
+    # A payload block budget that would starve equity to [0, 0.05] if regime_aware
+    # honoured it (it must NOT — bands come from the policy).
+    payload["constraints"]["block_budgets"] = [
+        {"asset_class": "equity", "lo": 0.0, "hi": 0.05}
+    ]
+    async with _client() as client:
+        resp = await client.post("/builder/optimize", json=payload)
+    assert resp.status_code == 200, resp.text
+    diag = resp.json()["diagnostics"]
+    expected = qp.policy_bands(qp.QUADRANT_POLICIES["moderate"]["recovery"])
+    # The policy band wins (NOT the payload's [0.0, 0.05]).
+    assert diag["class_bands"]["equity"] == pytest.approx(list(expected["equity"]))
+    assert expected["equity"][1] > 0.05  # sanity: the policy band genuinely differs
 
 
 async def test_two_level_exposes_beta_cap_not_enforced(monkeypatch: Any) -> None:
@@ -426,13 +489,31 @@ async def test_two_level_exposes_beta_cap_not_enforced(monkeypatch: Any) -> None
     assert diag["beta_cap"] == pytest.approx(go.PROFILE_PORTFOLIO_BETA_CAPS["moderate"])
 
 
-async def test_regime_aware_no_quadrant_fails_loud(monkeypatch: Any) -> None:
-    """A gate with NO consumable quadrant fails loud (422 structured error) — the
-    orthogonal model NEVER returns weights-with-warnings (spec §31)."""
+async def test_regime_aware_no_consumable_snapshot_fails_loud(monkeypatch: Any) -> None:
+    """No consumable §6 quadrant snapshot fails loud (422 structured error) — the
+    orthogonal model NEVER returns weights-with-warnings (spec §31). The reader (not
+    the gate row) is the quadrant source, so its None is the no-trade boundary."""
     _stub_two_level_world(monkeypatch)
+    monkeypatch.setattr(qr, "fetch_quadrant_snapshot", _async(None))
+    async with _client() as client:
+        resp = await client.post("/builder/optimize", json=_tl_payload())
+    assert resp.status_code == 422, resp.text
+    assert "QUADRANT_UNAVAILABLE" in resp.text
+
+
+async def test_regime_aware_stale_gate_quadrant_does_not_leak(monkeypatch: Any) -> None:
+    """THE adversarial finding: a quadrant populated on the latest ``regime_gate_daily``
+    row (the gate-proxy quadrant) must NOT drive sleeve bands when the §6 consumable
+    read finds no snapshot. With the gate carrying a quadrant ('expansion') but the
+    reader returning None (stale / low-confidence / future-leaked → non-consumable),
+    the builder MUST fail loud QUADRANT_UNAVAILABLE (422) — NOT produce weights off the
+    bypassed gate quadrant."""
+    _stub_two_level_world(monkeypatch)
+    # Gate row HAS a quadrant; the §6 read rejects it as non-consumable.
     monkeypatch.setattr(
-        tb, "fetch_gate_regime", _async(_gate(state="risk_on", quadrant=None))
+        tb, "fetch_gate_regime", _async(_gate(state="risk_on", quadrant="expansion"))
     )
+    monkeypatch.setattr(qr, "fetch_quadrant_snapshot", _async(None))
     async with _client() as client:
         resp = await client.post("/builder/optimize", json=_tl_payload())
     assert resp.status_code == 422, resp.text
@@ -548,7 +629,7 @@ async def test_two_level_reached_with_production_object_date_index(monkeypatch: 
         assets=assets, objective="regime_aware", mandate="moderate"
     )
     result = await pb._solve_regime_two_level(
-        object(), assets, labels, index, "expansion", "risk_on", payload
+        object(), assets, labels, index, _eff_policy("moderate", "expansion"), payload
     )
     assert result is not None  # would be None (or raise) before the P0 fix
     total = float(result.fund_weights.sum()) + sum(result.proxy_holdings.values())
@@ -610,7 +691,7 @@ def test_two_level_uses_quadrant_policy_bands(monkeypatch: Any) -> None:
     payload = OptimizeRequest(assets=assets, objective="regime_aware", mandate="moderate")
     result = asyncio.run(
         pb._solve_regime_two_level(
-            object(), assets, labels, index, "recovery", "risk_on", payload
+            object(), assets, labels, index, _eff_policy("moderate", "recovery"), payload
         )
     )
     assert result is not None
