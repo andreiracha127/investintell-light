@@ -117,6 +117,23 @@ def test_section15_band_invariants_on_materialized_policies() -> None:
             )
 
 
+def test_conservative_risk_assets_progression_is_monotone_after_seed_v01() -> None:
+    """calibration_seed_v0.1: conservative slowdown must not be riskier than
+    expansion/recovery, and contraction must sit below slowdown."""
+    risk = {
+        q: (
+            qp.QUADRANT_POLICIES["conservative"][q].center["equity"]
+            + qp.QUADRANT_POLICIES["conservative"][q].center["thematic"]
+        )
+        for q in qp.QUADRANTS
+    }
+    assert risk["recovery"] == pytest.approx(0.0747)
+    assert risk["expansion"] == pytest.approx(0.0630)
+    assert risk["slowdown"] == pytest.approx(0.0600)
+    assert risk["contraction"] == pytest.approx(0.0300)
+    assert risk["recovery"] > risk["expansion"] >= risk["slowdown"] > risk["contraction"]
+
+
 def test_validate_passes_on_shipped_policies() -> None:
     qp.validate_quadrant_policies()  # must not raise
 

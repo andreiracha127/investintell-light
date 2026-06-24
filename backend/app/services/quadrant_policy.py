@@ -173,13 +173,13 @@ QUADRANT_POLICIES: dict[str, dict[str, QuadrantPolicy]] = {
              "long_short": 0.1532},
             risk_assets_cap=0.18, defensive_floor=0.67),
         "slowdown": _policy(
-            {"cash": 0.20, "equity": 0.07, "fixed_income": 0.34, "thematic": 0.01,
-             "alternatives": 0.10, "gold": 0.15, "long_short": 0.13},
-            risk_assets_cap=0.15, defensive_floor=0.62),
+            {"cash": 0.21, "equity": 0.05, "fixed_income": 0.34, "thematic": 0.01,
+             "alternatives": 0.10, "gold": 0.16, "long_short": 0.13},
+            risk_assets_cap=0.12, defensive_floor=0.68),
         "contraction": _policy(
-            {"cash": 0.27, "equity": 0.04, "fixed_income": 0.45, "thematic": 0.00,
+            {"cash": 0.28, "equity": 0.03, "fixed_income": 0.45, "thematic": 0.00,
              "alternatives": 0.04, "gold": 0.10, "long_short": 0.10},
-            risk_assets_cap=0.10, defensive_floor=0.72),
+            risk_assets_cap=0.08, defensive_floor=0.74),
     },
 }
 

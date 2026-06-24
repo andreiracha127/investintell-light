@@ -75,6 +75,28 @@ def test_ladder_preserved_across_profiles() -> None:
     assert len(set(round(v, 6) for v in caps.values())) == 3
 
 
+def test_seed_v01_aggressive_recovery_risk_off_has_geometric_slack() -> None:
+    """The old gate seed made aggressive/recovery/risk_off infeasible by 1pp.
+
+    calibration_seed_v0.1 cuts the risk-assets cap by 7pp instead of 10pp, so the
+    effective cap is 38% against the 36% aggregate floor.
+    """
+    from app.services import quadrant_policy as qp
+
+    pol = qp.QUADRANT_POLICIES["aggressive"]["recovery"]
+    bands = qp.policy_bands(pol)
+    risk_floor = bands["equity"][0] + bands["thematic"][0]
+    eff = go.apply_gate_overlay(
+        "aggressive",
+        "risk_off",
+        base_risk_assets_cap=pol.risk_assets_cap,
+        base_portfolio_beta_cap=go.PROFILE_PORTFOLIO_BETA_CAPS["aggressive"],
+    )
+    assert risk_floor == pytest.approx(0.36)
+    assert eff.risk_assets_cap == pytest.approx(0.38)
+    assert eff.risk_assets_cap - risk_floor >= 0.02 - 1e-12
+
+
 def test_unknown_profile_raises() -> None:
     with pytest.raises(go.GateError, match="unknown profile"):
         go.apply_gate_overlay(

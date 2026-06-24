@@ -40,12 +40,15 @@ class EffectiveGate:
     bl_view_confidence_multiplier: float
 
 
-# Common v1 shape (seed; calibrated by ablation in A5). At intensity 1: CVaR cap
-# ×0.5, aggregate portfolio-beta cap ×0.7, equity+thematic cap −0.10.
+# Common v1 shape (calibration_seed_v0.1; to be validated by A4 ablation). At
+# intensity 1: CVaR cap ×0.65, aggregate portfolio-beta cap ×0.75,
+# equity+thematic cap −0.07. This keeps risk_off hard enough to brake risk while
+# preserving profile separation and avoiding the old aggressive/recovery 1pp
+# geometric infeasibility.
 GATE_OVERLAY_SHAPE = GateOverlayShape(
-    cvar_tightening=0.50,
-    beta_tightening=0.30,
-    risk_assets_reduction=0.10,
+    cvar_tightening=0.35,
+    beta_tightening=0.25,
+    risk_assets_reduction=0.07,
 )
 
 # Per-profile intensity ladder (seed): the more aggressive the profile, the

@@ -924,13 +924,11 @@ def _riskasset_momentum_matrix(seed: int, groups: list[str], n: int = 400) -> np
 
 def test_level1_enforces_risk_assets_cap_aggregate() -> None:
     """N1: in risk_off the equity+thematic per-sleeve band-his (aggressive/expansion:
-    0.288 + 0.082 = 0.39) EXCEED the overlay risk_assets_cap (0.32), while the
+    0.308 + 0.082 = 0.39) EXCEED the overlay risk_assets_cap (0.35), while the
     band-LOWS (0.29) are below it (feasible). The Level-1 solve MUST honour the
     AGGREGATE cap equity+thematic ≤ risk_assets_cap, not just the per-sleeve bands —
     even when momentum wants the risk sleeves at their highs.
-
-    (aggressive/recovery risk_off is the ONE seed-infeasible edge — band-low 0.36 >
-    cap 0.35; that combo is exercised by the deliberately-infeasible tests below.)"""
+    """
     from app.services import effective_policy as ep
 
     groups = list(qp.STRUCTURAL_SLEEVES)
@@ -940,7 +938,7 @@ def test_level1_enforces_risk_assets_cap_aggregate() -> None:
         _quad_snapshot("expansion"), _gate(state="risk_off", quadrant="expansion"),
         "aggressive", base_cvar_limit=0.030,
     )
-    assert eff.risk_assets_cap == pytest.approx(0.32)  # 0.42 base − 0.10 risk_off
+    assert eff.risk_assets_cap == pytest.approx(0.35)  # 0.42 base - 0.07 risk_off
     wcat = pb._solve_regime_level1(
         proxies, returns, groups, "aggressive", "expansion",
         gamma=1.90, cvar_cap=eff.cvar_limit, gate_state="risk_off",
@@ -959,7 +957,7 @@ def test_level1_enforces_risk_assets_cap_aggregate() -> None:
 
 async def test_two_level_realized_weights_honour_risk_assets_cap(monkeypatch: Any) -> None:
     """N1 end-to-end: a risk_off aggressive/expansion request returns realized
-    category weights with equity+thematic ≤ risk_assets_cap (0.32), NOT the
+    category weights with equity+thematic ≤ risk_assets_cap (0.35), NOT the
     per-sleeve-band sum (0.39). The endpoint no longer advertises a cap it does
     not enforce."""
     _stub_two_level_world(monkeypatch, state="risk_off", quadrant="expansion")
@@ -970,7 +968,7 @@ async def test_two_level_realized_weights_honour_risk_assets_cap(monkeypatch: An
     cw = diag["category_weights"]
     assert cw is not None
     risk = cw.get("equity", 0.0) + cw.get("thematic", 0.0)
-    assert risk <= 0.32 + 1e-6, f"equity+thematic {risk} breached risk_assets_cap 0.32"
+    assert risk <= 0.35 + 1e-6, f"equity+thematic {risk} breached risk_assets_cap 0.35"
 
 
 def test_level1_infeasible_policy_caps_fail_loud() -> None:
