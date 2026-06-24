@@ -81,6 +81,7 @@ def category_momentum_mu(
     delta_market: float = DELTA_MARKET,
     use_views: bool = True,
     sigma: np.ndarray | None = None,
+    view_confidence_multiplier: float = 1.0,
 ) -> np.ndarray:
     """Per-proxy BL posterior μ over the category proxies (annualized-consistent
     with ``returns``' Σ — the caller keeps μ and Σ in the same units).
@@ -91,6 +92,12 @@ def category_momentum_mu(
     momentum view fires only when the gate is NOT ``risk_off``, ``use_views`` is
     True, and at least ``MIN_RISK`` proxies are in ``MOM_GROUPS``; otherwise μ = π.
     Returns a length-n vector (empty input -> empty).
+
+    ``view_confidence_multiplier`` (spec §24) scales the regime BL view confidence:
+    ``<= 0.0`` omits the view entirely (μ = π; ``omega_idzorek`` is NOT called with
+    a non-positive confidence), and ``0 < m <= 1`` uses an Idzorek confidence of
+    ``min(1.0, VIEW_CONF * m)`` so it stays in ``omega_idzorek``'s ``(0, 1]`` domain.
+    Default ``1.0`` preserves the calibrated harness behavior.
     """
     returns = np.asarray(returns, dtype=float)
     if returns.ndim != 2:
@@ -112,7 +119,11 @@ def category_momentum_mu(
         if sigma.shape != (n, n):
             raise ValueError(f"sigma is {sigma.shape}, expected ({n}, {n})")
     pi = np.asarray(bl.equilibrium(sigma, prior, delta=delta_market), dtype=float)
-    if not use_views or (gate_state or "").lower() == "risk_off":
+    if (
+        not use_views
+        or (gate_state or "").lower() == "risk_off"
+        or view_confidence_multiplier <= 0.0
+    ):
         return pi
     risk = [k for k, g in enumerate(groups) if g in MOM_GROUPS]
     if len(risk) < MIN_RISK:
@@ -122,6 +133,7 @@ def category_momentum_mu(
     p_sub, q_vec = _top_bottom_view(pi[np.array(risk)], z, VIEW_FRAC, VIEW_SPREAD)
     p_mat = np.zeros((1, n))
     p_mat[0, risk] = p_sub[0]
-    omega = bl.omega_idzorek(p_mat, sigma, [VIEW_CONF], tau=TAU)
+    effective_conf = min(1.0, VIEW_CONF * view_confidence_multiplier)
+    omega = bl.omega_idzorek(p_mat, sigma, [effective_conf], tau=TAU)
     mu_bl, _ = bl.posterior(sigma, pi, p_mat, q_vec, omega, tau=TAU)
     return np.asarray(mu_bl, dtype=float)
