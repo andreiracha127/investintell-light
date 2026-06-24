@@ -17,16 +17,18 @@ Error mapping (fail loud, never silently empty):
 """
 
 import datetime as dt
+import hashlib
 import logging
 from collections.abc import Sequence
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._shared import ensure_eod_or_http_error, raise_news_fetch_error
-from app.core.auth import get_current_user
+from app.core.auth import CurrentUser, get_current_user
+from app.core.cache import portfolio_response_cache, response_cache_version
 from app.core.config import get_settings
 from app.core.datalake import get_datalake_session
 from app.core.db import get_session
@@ -98,6 +100,56 @@ def _normalize_ticker_or_422(ticker: str) -> str:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _owner_cache_token(owner_sub: str) -> str:
+    return hashlib.sha256(owner_sub.encode("utf-8")).hexdigest()[:16]
+
+
+def _portfolio_cache_prefix(owner_sub: str, portfolio_id: int) -> str:
+    return (
+        f"portfolio:{response_cache_version()}:"
+        f"{_owner_cache_token(owner_sub)}:{portfolio_id}:"
+    )
+
+
+def _portfolio_cache_key(
+    request: Request, owner_sub: str, portfolio_id: int, suffix: str
+) -> str:
+    query = "&".join(sorted(request.url.query.split("&"))) if request.url.query else ""
+    return f"{_portfolio_cache_prefix(owner_sub, portfolio_id)}{suffix}:{request.url.path}?{query}"
+
+
+async def _cached_private_response(key: str) -> Response | None:
+    cached = await portfolio_response_cache.get(key)
+    if cached is None:
+        return None
+    body, media_type = cached
+    return Response(
+        content=body,
+        media_type=media_type,
+        headers={"x-cache-private": "hit", "Cache-Control": "private, no-store"},
+    )
+
+
+async def _store_private_response(key: str, body: bytes) -> Response:
+    await portfolio_response_cache.set(
+        key,
+        body,
+        "application/json",
+        get_settings().portfolio_cache_ttl_seconds,
+    )
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={"x-cache-private": "miss", "Cache-Control": "private, no-store"},
+    )
+
+
+async def _invalidate_portfolio_cache(owner_sub: str, portfolio_id: int) -> None:
+    await portfolio_response_cache.delete_prefix(
+        _portfolio_cache_prefix(owner_sub, portfolio_id)
+    )
+
+
 async def _ensure_trade_tickers(
     session: AsyncSession,
     client: TiingoClient,
@@ -123,6 +175,7 @@ async def create_portfolio(
     payload: PortfolioCreate,
     session: Annotated[AsyncSession, Depends(get_session)],
     client: Annotated[TiingoClient, Depends(get_tiingo_client)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PortfolioOut:
     """Create a portfolio with optional initial positions.
 
@@ -136,7 +189,9 @@ async def create_portfolio(
             session, client, [p.ticker for p in payload.positions], start, end
         )
     try:
-        portfolio = await portfolio_crud.create_portfolio(session, payload)
+        portfolio = await portfolio_crud.create_portfolio(
+            session, payload, user.sub, user.org_id
+        )
     except portfolio_crud.DuplicatePortfolioNameError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return PortfolioOut.model_validate(portfolio)
@@ -145,9 +200,10 @@ async def create_portfolio(
 @router.get("", response_model=list[PortfolioListItem])
 async def list_portfolios(
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> list[PortfolioListItem]:
     """List portfolios (id order), hard-capped at the service's LIST_HARD_CAP."""
-    rows = await portfolio_crud.list_portfolios(session)
+    rows = await portfolio_crud.list_portfolios(session, user.sub)
     return [PortfolioListItem.model_validate(row) for row in rows]
 
 
@@ -155,9 +211,10 @@ async def list_portfolios(
 async def get_portfolio(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PortfolioOut:
     """One portfolio with its positions (sorted by ticker)."""
-    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, user.sub)
     if portfolio is None:
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
     return PortfolioOut.model_validate(portfolio)
@@ -168,6 +225,7 @@ async def patch_portfolio(
     portfolio_id: int,
     payload: PortfolioPatch,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PortfolioOut:
     """Partially update name and/or cash."""
     try:
@@ -175,6 +233,7 @@ async def patch_portfolio(
         portfolio = await portfolio_crud.update_portfolio(
             session,
             portfolio_id,
+            user.sub,
             name=payload.name,
             cash=payload.cash,
             inception_date=(
@@ -194,11 +253,13 @@ async def patch_portfolio(
 async def delete_portfolio(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> None:
     """Delete a portfolio; its positions cascade away at the DB level."""
-    deleted = await portfolio_crud.delete_portfolio(session, portfolio_id)
+    deleted = await portfolio_crud.delete_portfolio(session, portfolio_id, user.sub)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
+    await _invalidate_portfolio_cache(user.sub, portfolio_id)
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +271,7 @@ async def delete_portfolio(
 async def get_portfolio_constraints(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> ConstraintsView:
     """Return the persisted construction constraints for a portfolio.
 
@@ -217,7 +279,7 @@ async def get_portfolio_constraints(
     never saved with constraints renders as nulls + an empty class-limit list
     (a legitimate 200), not a 404.
     """
-    if not await portfolio_crud.portfolio_exists(session, portfolio_id):
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id, user.sub):
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
     constraints = await portfolio_constraints.get_constraints(session, portfolio_id)
     if constraints is None:
@@ -245,6 +307,7 @@ async def put_portfolio_constraints(
     portfolio_id: int,
     payload: ConstraintsPut,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> ConstraintsView:
     """Validate and upsert the construction constraints for a portfolio.
 
@@ -253,7 +316,7 @@ async def put_portfolio_constraints(
     by the request schema and surfaces as 422. 404 when the portfolio is
     missing. The persisted class-limit set is replaced wholesale.
     """
-    if not await portfolio_crud.portfolio_exists(session, portfolio_id):
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id, user.sub):
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
     await portfolio_constraints.upsert_constraints(
         session,
@@ -267,6 +330,7 @@ async def put_portfolio_constraints(
         ],
     )
     await session.commit()
+    await _invalidate_portfolio_cache(user.sub, portfolio_id)
     return ConstraintsView(
         portfolio_id=portfolio_id,
         cap=payload.cap,
@@ -285,6 +349,7 @@ async def put_portfolio_constraints(
 async def get_portfolio_alerts(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> AlertsView:
     """Return the latest persisted drift status for a portfolio.
 
@@ -292,7 +357,7 @@ async def get_portfolio_alerts(
     never been evaluated renders as ``worst_status="ok"``, ``evaluated_at=null``
     and empty breach lists (a legitimate 200), not a 404.
     """
-    if not await portfolio_crud.portfolio_exists(session, portfolio_id):
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id, user.sub):
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
     status = await portfolio_drift.get_drift_status(session, portfolio_id)
     if status is None:
@@ -316,6 +381,7 @@ async def put_position(
     payload: PositionBody,
     session: Annotated[AsyncSession, Depends(get_session)],
     client: Annotated[TiingoClient, Depends(get_tiingo_client)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PositionOut:
     """Upsert one position.
 
@@ -328,7 +394,7 @@ async def put_position(
     on UPDATE; on INSERT basis defaults to 'reference'.
     """
     symbol = _normalize_ticker_or_422(ticker)
-    if not await portfolio_crud.portfolio_exists(session, portfolio_id):
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id, user.sub):
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
     provided = payload.model_fields_set
     position = await portfolio_crud.get_position(session, portfolio_id, symbol)
@@ -368,6 +434,7 @@ async def put_position(
                 else portfolio_crud.UNSET
             ),
         )
+    await _invalidate_portfolio_cache(user.sub, portfolio_id)
     return PositionOut.model_validate(position)
 
 
@@ -376,15 +443,19 @@ async def delete_position(
     portfolio_id: int,
     ticker: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> None:
     """Delete one position; 404 covers both a missing portfolio and a missing ticker."""
     symbol = _normalize_ticker_or_422(ticker)
-    deleted = await portfolio_crud.delete_position(session, portfolio_id, symbol)
+    deleted = await portfolio_crud.delete_position(
+        session, portfolio_id, symbol, user.sub
+    )
     if not deleted:
         raise HTTPException(
             status_code=404,
             detail=f"Position {symbol} not found in portfolio {portfolio_id}.",
         )
+    await _invalidate_portfolio_cache(user.sub, portfolio_id)
 
 
 # ---------------------------------------------------------------------------
@@ -399,9 +470,10 @@ async def delete_position(
 async def list_portfolio_transactions(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> list[PortfolioTransactionOut]:
     """List immutable buy/sell ledger events for a portfolio."""
-    if not await portfolio_crud.portfolio_exists(session, portfolio_id):
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id, user.sub):
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
     rows = await portfolio_ledger.list_transactions(session, portfolio_id)
     return [PortfolioTransactionOut.model_validate(row) for row in rows]
@@ -417,9 +489,10 @@ async def create_portfolio_transaction(
     payload: PortfolioTransactionCreate,
     session: Annotated[AsyncSession, Depends(get_session)],
     client: Annotated[TiingoClient, Depends(get_tiingo_client)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PortfolioTransactionOut:
     """Append a real buy/sell event and update the current position snapshot."""
-    if not await portfolio_crud.portfolio_exists(session, portfolio_id):
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id, user.sub):
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
     await _ensure_trade_tickers(session, client, [payload.ticker])
     try:
@@ -435,6 +508,7 @@ async def create_portfolio_transaction(
     except portfolio_ledger.PortfolioNotFoundError as exc:
         await session.rollback()
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _invalidate_portfolio_cache(user.sub, portfolio_id)
     return PortfolioTransactionOut.model_validate(row)
 
 
@@ -442,10 +516,17 @@ async def create_portfolio_transaction(
 async def get_portfolio_nav(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    request: Request,
     end_date: Annotated[dt.date | None, Query(description="Last NAV date.")] = None,
-) -> PortfolioNavResponse:
+) -> PortfolioNavResponse | Response:
     """Persisted transaction-aware NAV index, rebased to 100 at inception."""
-    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    key = _portfolio_cache_key(request, user.sub, portfolio_id, "nav")
+    hit = await _cached_private_response(key)
+    if hit is not None:
+        return hit
+
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, user.sub)
     if portfolio is None:
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
     rows = await portfolio_ledger.list_materialized_nav(
@@ -453,7 +534,7 @@ async def get_portfolio_nav(
         portfolio_id,
         end_date=end_date,
     )
-    return PortfolioNavResponse(
+    payload = PortfolioNavResponse(
         portfolio_id=portfolio_id,
         inception_date=rows[0].nav_date if rows else portfolio.inception_date,
         points=[
@@ -467,6 +548,9 @@ async def get_portfolio_nav(
             for row in rows
         ],
     )
+    return await _store_private_response(
+        key, payload.model_dump_json().encode("utf-8")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -479,34 +563,43 @@ async def get_portfolio_overview(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
     client: Annotated[TiingoClient, Depends(get_tiingo_client)],
-) -> PortfolioOverviewResponse:
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    request: Request,
+) -> PortfolioOverviewResponse | Response:
     """Render-ready position table with P&L and column-header aggregates (D6).
 
     Last/prev closes come from the two most recent eod_prices rows per ticker;
     the EOD ensure runs first so stale tickers are refreshed.  An empty
     portfolio is a legitimate 200 with zeroed/null aggregates.
     """
-    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    key = _portfolio_cache_key(request, user.sub, portfolio_id, "overview")
+    hit = await _cached_private_response(key)
+    if hit is not None:
+        return hit
+
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, user.sub)
     if portfolio is None:
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
 
     tickers = [position.ticker for position in portfolio.positions]
     fund_tickers: set[str] = set()
+    closes = await portfolio_crud.select_last_two_closes(session, tickers)
     if tickers:
         # Fund-aware pricing (F8.5): tickers known to the synced funds table
-        # are priced from fund_nav and skipped by the Tiingo ensure — UNLESS
-        # they already have eod_prices rows (pre-existing equity/ETF positions
-        # keep their refresh + EOD pricing unchanged).
+        # are priced from fund_nav and skipped by the Tiingo ensure. Miss
+        # performance is local-first: existing local rows are used as-is, and
+        # only truly cold non-fund tickers trigger a synchronous ensure.
         fund_tickers = await portfolio_crud.select_fund_tickers(session, tickers)
-        eod_known = await portfolio_crud.select_tickers_with_eod(session, tickers)
         ensure_tickers = [
-            t for t in tickers if t not in fund_tickers or t in eod_known
+            t for t in tickers if t not in fund_tickers and not closes.get(t)
         ]
         if ensure_tickers:
             start, end = _ensure_window()
             await ensure_eod_or_http_error(session, client, ensure_tickers, start, end)
+            closes.update(
+                await portfolio_crud.select_last_two_closes(session, ensure_tickers)
+            )
 
-    closes = await portfolio_crud.select_last_two_closes(session, tickers)
     names = await portfolio_crud.select_instrument_names(session, tickers)
     nav_tickers = [t for t in fund_tickers if t not in closes]
     if nav_tickers:
@@ -524,11 +617,14 @@ async def get_portfolio_overview(
         )
     except portfolio_crud.MissingPriceDataError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return PortfolioOverviewResponse(
+    payload = PortfolioOverviewResponse(
         id=portfolio.id,
         name=portfolio.name,
         positions=rows,
         aggregates=aggregates,
+    )
+    return await _store_private_response(
+        key, payload.model_dump_json().encode("utf-8")
     )
 
 
@@ -559,8 +655,10 @@ async def get_portfolio_news(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
     client: Annotated[TiingoClient, Depends(get_tiingo_client)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    request: Request,
     limit: Annotated[int, Query(ge=1, le=50, description="Max articles returned.")] = 20,
-) -> PortfolioNewsResponse:
+) -> PortfolioNewsResponse | Response:
     """Aggregated news across all portfolio tickers, newest first.
 
     Staleness is checked per ticker but all stale tickers are refreshed with
@@ -568,14 +666,22 @@ async def get_portfolio_news(
     GET /stocks/{ticker}/news exactly: refresh failure with cached articles
     serves them with ``stale=true``; with an empty cache it fails loud.
     """
-    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    key = _portfolio_cache_key(request, user.sub, portfolio_id, "news")
+    hit = await _cached_private_response(key)
+    if hit is not None:
+        return hit
+
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, user.sub)
     if portfolio is None:
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
 
     symbols = [position.ticker for position in portfolio.positions]
     if not symbols:
-        return PortfolioNewsResponse(
+        payload = PortfolioNewsResponse(
             portfolio_id=portfolio.id, tickers=[], count=0, stale=False, items=[]
+        )
+        return await _store_private_response(
+            key, payload.model_dump_json().encode("utf-8")
         )
 
     stale = False
@@ -598,12 +704,15 @@ async def get_portfolio_news(
     else:
         rows = await _select_portfolio_news_rows(session, symbols, limit)
 
-    return PortfolioNewsResponse(
+    payload = PortfolioNewsResponse(
         portfolio_id=portfolio.id,
         tickers=symbols,
         count=len(rows),
         stale=stale,
         items=[NewsArticle.model_validate(row) for row in rows],
+    )
+    return await _store_private_response(
+        key, payload.model_dump_json().encode("utf-8")
     )
 
 
@@ -619,6 +728,8 @@ async def get_portfolio_lookthrough(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
     datalake: Annotated[AsyncSession, Depends(get_datalake_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    request: Request,
     dimension: str | None = Query(
         default=None,
         description="Optional exposure dimension filter.",
@@ -627,7 +738,7 @@ async def get_portfolio_lookthrough(
         default=False,
         description="Include bounded asset-class/issuer/security drilldown nodes.",
     ),
-) -> PortfolioLookthroughResponse:
+) -> PortfolioLookthroughResponse | Response:
     """Exposição consolidada do portfólio atravessando os fundos (Frente C).
 
     DB-first: pesos vêm dos preços/NAVs já sincronizados localmente (sem
@@ -636,7 +747,12 @@ async def get_portfolio_lookthrough(
     data-lake. Posições não atravessadas (ações, fundos sem materialização)
     ficam EXPLÍCITAS em ``unexpanded`` — nunca somem silenciosamente.
     """
-    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    key = _portfolio_cache_key(request, user.sub, portfolio_id, "lookthrough")
+    hit = await _cached_private_response(key)
+    if hit is not None:
+        return hit
+
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, user.sub)
     if portfolio is None:
         raise HTTPException(
             status_code=404, detail=f"Portfolio {portfolio_id} not found."
@@ -810,7 +926,7 @@ async def get_portfolio_lookthrough(
             + cash_weight_pct,
         ),
     )
-    return PortfolioLookthroughResponse(
+    payload = PortfolioLookthroughResponse(
         portfolio_id=portfolio.id,
         total_value=total_value,
         cash_weight_pct=cash_weight_pct,
@@ -831,4 +947,7 @@ async def get_portfolio_lookthrough(
             )
             for node in tree
         ],
+    )
+    return await _store_private_response(
+        key, payload.model_dump_json().encode("utf-8")
     )

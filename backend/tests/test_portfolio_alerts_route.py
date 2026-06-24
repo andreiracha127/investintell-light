@@ -50,7 +50,9 @@ def _install_store(
     store: dict[int, DriftStatus] = {}
     ids = {1} if existing_ids is None else existing_ids
 
-    async def fake_exists(session: Any, portfolio_id: int) -> bool:
+    async def fake_exists(
+        session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> bool:
         return portfolio_id in ids
 
     async def fake_get(session: Any, portfolio_id: int) -> DriftStatus | None:

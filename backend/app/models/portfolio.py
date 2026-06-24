@@ -2,9 +2,10 @@
 ORM models for the `portfolios` and `positions` tables (F4).
 
 A portfolio is a named, persisted collection of positions plus an uninvested
-cash balance. Single-tenant: no owner column. Position tickers are validated
-against Tiingo at the API layer (fail loud on typos) — deliberately NOT an FK
-to `instruments` so a position never blocks instrument-cache maintenance.
+cash balance, scoped by the authenticated user's subject. Position tickers are
+validated against Tiingo at the API layer (fail loud on typos) — deliberately
+NOT an FK to `instruments` so a position never blocks instrument-cache
+maintenance.
 """
 
 from datetime import date, datetime
@@ -31,8 +32,14 @@ class Portfolio(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
-    # Display name — unique across the (single-tenant) installation.
-    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    # Display name — unique per owner, not globally.
+    name: Mapped[str] = mapped_column(String, nullable=False)
+
+    # Auth tenant boundary. owner_sub is the stable JWT subject used for reads
+    # and writes; org_id is stored for future organization-aware policy, but
+    # current access checks remain user-sub scoped.
+    owner_sub: Mapped[str] = mapped_column(String, nullable=False)
+    org_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Uninvested cash balance, in currency units.
     cash: Mapped[float] = mapped_column(nullable=False, server_default="0")
@@ -93,6 +100,10 @@ class Portfolio(Base):
     # The Base naming convention expands "origin" to "ck_portfolios_origin"
     # (matches migration 0007).
     __table_args__ = (
+        UniqueConstraint(
+            "owner_sub", "name", name="uq_portfolios_owner_sub_name"
+        ),
+        Index("ix_portfolios_owner_sub", "owner_sub"),
         CheckConstraint("origin IN ('manual', 'builder')", name="origin"),
     )
 

@@ -75,7 +75,12 @@ def _stub_create(
     origins: list[str] = []
 
     async def fake_create(
-        session: Any, payload: PortfolioCreate, *, origin: str = "manual"
+        session: Any,
+        payload: PortfolioCreate,
+        owner_sub: str,
+        org_id: str | None,
+        *,
+        origin: str = "manual",
     ) -> SimpleNamespace:
         if raise_duplicate:
             raise portfolio_crud.DuplicatePortfolioNameError(
@@ -83,6 +88,7 @@ def _stub_create(
             )
         created.append(payload)
         origins.append(origin)
+        assert (owner_sub, org_id) == ("u-1", None)
         return SimpleNamespace(id=7, name=payload.name, positions=payload.positions)
 
     monkeypatch.setattr(portfolio_crud, "create_portfolio", fake_create)

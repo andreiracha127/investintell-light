@@ -893,7 +893,7 @@ async def test_portfolio_lookthrough_consolidates_and_reports_unexpanded(
         positions=[_position("FUNDX", 100.0), _position("AAPL", 100.0)],
     )
 
-    async def fake_get_portfolio(session, portfolio_id):
+    async def fake_get_portfolio(session, portfolio_id, owner_sub=None):
         assert portfolio_id == 7
         return portfolio
 
@@ -950,7 +950,7 @@ async def test_portfolio_lookthrough_tree_can_request_only_asset_class(
         id=7, name="P", cash=0.0, positions=[_position("FUNDX", 100.0)],
     )
 
-    async def fake_get_portfolio(session, portfolio_id):
+    async def fake_get_portfolio(session, portfolio_id, owner_sub=None):
         return portfolio
 
     async def fake_fund_series_by_ticker(session, tickers):
@@ -1025,7 +1025,7 @@ async def test_portfolio_lookthrough_tree_includes_direct_stocks_as_leaf_holding
         positions=[_position("FUNDX", 100.0), _position("AAPL", 10.0)],
     )
 
-    async def fake_get_portfolio(session, portfolio_id):
+    async def fake_get_portfolio(session, portfolio_id, owner_sub=None):
         return portfolio
 
     async def fake_fund_series_by_ticker(session, tickers):
@@ -1121,7 +1121,7 @@ async def test_portfolio_lookthrough_tree_includes_cash_as_final_leaf(
 ) -> None:
     portfolio = SimpleNamespace(id=7, name="P", cash=1000.0, positions=[])
 
-    async def fake_get_portfolio(session, portfolio_id):
+    async def fake_get_portfolio(session, portfolio_id, owner_sub=None):
         return portfolio
 
     async def fake_fund_series_by_ticker(session, tickers):
@@ -1187,7 +1187,7 @@ async def test_portfolio_lookthrough_tree_includes_cash_as_final_leaf(
 async def test_portfolio_lookthrough_unknown_portfolio_404(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_get_portfolio(session, portfolio_id):
+    async def fake_get_portfolio(session, portfolio_id, owner_sub=None):
         return None
 
     monkeypatch.setattr(portfolio_crud, "get_portfolio", fake_get_portfolio)
@@ -1204,7 +1204,7 @@ async def test_portfolio_lookthrough_fund_without_materialization_is_unexpanded(
         id=7, name="P", cash=0.0, positions=[_position("FUNDX", 100.0)],
     )
 
-    async def fake_get_portfolio(session, portfolio_id):
+    async def fake_get_portfolio(session, portfolio_id, owner_sub=None):
         return portfolio
 
     async def fake_fund_series_by_ticker(session, tickers):
@@ -1245,7 +1245,7 @@ async def test_portfolio_lookthrough_tree_keeps_unmaterialized_fund_as_final_lea
         id=7, name="P", cash=0.0, positions=[_position("FUNDX", 100.0)],
     )
 
-    async def fake_get_portfolio(session, portfolio_id):
+    async def fake_get_portfolio(session, portfolio_id, owner_sub=None):
         return portfolio
 
     async def fake_fund_series_by_ticker(session, tickers):
@@ -1317,7 +1317,7 @@ async def test_portfolio_lookthrough_missing_price_is_loud(
         id=7, name="P", cash=0.0, positions=[_position("GHOST", 1.0)],
     )
 
-    async def fake_get_portfolio(session, portfolio_id):
+    async def fake_get_portfolio(session, portfolio_id, owner_sub=None):
         return portfolio
 
     async def fake_fund_series_by_ticker(session, tickers):

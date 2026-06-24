@@ -152,19 +152,27 @@ def _stub_reads(monkeypatch: pytest.MonkeyPatch, session: FakeSession) -> None:
     monkeypatch.setattr(builder_save, "load_fund_classes", fake_classes)
 
     async def fake_create(
-        _session: Any, payload: Any, *, origin: str = "manual"
+        _session: Any,
+        payload: Any,
+        owner_sub: str,
+        org_id: str | None,
+        *,
+        origin: str = "manual",
     ) -> Any:
         # The portfolio "exists" with the requested inception date; positions are
         # not needed by the persistence path under test.
         from types import SimpleNamespace
 
+        assert (owner_sub, org_id, origin) == ("u-1", None, "builder")
         return SimpleNamespace(
             id=42, name=payload.name, inception_date=payload.inception_date
         )
 
     monkeypatch.setattr(portfolio_crud, "create_portfolio", fake_create)
 
-    async def fake_get_portfolio(_session: Any, portfolio_id: int) -> Any:
+    async def fake_get_portfolio(
+        _session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> Any:
         from types import SimpleNamespace
 
         return SimpleNamespace(id=portfolio_id, inception_date=_INCEPTION)
@@ -209,7 +217,9 @@ async def test_run_save_materializes_nav_and_persists_constraints(
         }
     )
 
-    response = await builder_save.run_save(session, payload)  # type: ignore[arg-type]
+    response = await builder_save.run_save(
+        session, payload, "u-1", None
+    )  # type: ignore[arg-type]
     assert response.portfolio_id == 42
 
     # (c) NAV materialized: at least one portfolio_nav_daily row, dated at the
@@ -247,7 +257,9 @@ async def test_run_save_without_constraints_still_materializes_nav(
         }
     )
 
-    response = await builder_save.run_save(session, payload)  # type: ignore[arg-type]
+    response = await builder_save.run_save(
+        session, payload, "u-1", None
+    )  # type: ignore[arg-type]
     assert response.portfolio_id == 42
     assert len(session.nav_rows) >= 1
     assert await portfolio_constraints.get_constraints(session, 42) is None  # type: ignore[arg-type]

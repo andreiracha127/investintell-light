@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import datalake as datalake_module
-from app.core.auth import get_current_user
+from app.core.auth import CurrentUser, get_current_user
 from app.core.config import get_settings
 from app.core.datalake import get_optional_datalake_session
 from app.core.db import AsyncSessionLocal, get_session
@@ -160,7 +160,11 @@ async def optimize_job_status(
     status_code=201,
     dependencies=[Depends(get_current_user)],
 )
-async def save(payload: SaveRequest, session: SessionDep) -> SaveResponse:
+async def save(
+    payload: SaveRequest,
+    session: SessionDep,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> SaveResponse:
     """Persist a builder proposal as a real portfolio (F8.5 + F8.6b).
 
     Each weight is sized at the asset's REFERENCE price (equities: latest
@@ -174,6 +178,6 @@ async def save(payload: SaveRequest, session: SessionDep) -> SaveResponse:
     the notional — are 422 verbatim.
     """
     try:
-        return await builder_save.run_save(session, payload)
+        return await builder_save.run_save(session, payload, user.sub, user.org_id)
     except BuilderError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

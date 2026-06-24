@@ -134,13 +134,21 @@ def test_news_items_published_at_index_exists() -> None:
 # portfolios / positions (F4)
 # ---------------------------------------------------------------------------
 
-def test_portfolios_name_is_unique() -> None:
-    name_constraints = {
-        c.name
+def test_portfolios_name_is_unique_per_owner() -> None:
+    unique = next(
+        c
         for c in _table("portfolios").constraints
         if isinstance(c, UniqueConstraint)
-    }
-    assert "uq_portfolios_name" in name_constraints
+        and c.name == "uq_portfolios_owner_sub_name"
+    )
+    assert [col.name for col in unique.columns] == ["owner_sub", "name"]
+
+
+def test_portfolios_owner_columns_and_index() -> None:
+    assert _col("portfolios", "owner_sub").nullable is False
+    assert _col("portfolios", "org_id").nullable is True
+    index_names = {idx.name for idx in _table("portfolios").indexes}
+    assert "ix_portfolios_owner_sub" in index_names
 
 
 def test_portfolios_cash_has_server_default() -> None:

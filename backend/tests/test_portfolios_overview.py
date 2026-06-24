@@ -83,7 +83,9 @@ def _install_stubs(
         ensure_calls.append(list(tickers))
         return EnsureReport()
 
-    async def fake_get(session: Any, portfolio_id: int) -> SimpleNamespace | None:
+    async def fake_get(
+        session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> SimpleNamespace | None:
         return portfolio
 
     async def fake_closes(session: Any, tickers: Any) -> ClosesMap:
@@ -133,10 +135,15 @@ async def test_overview_pnl_math(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     async with _client() as ac:
         response = await ac.get("/portfolios/1/overview")
+        second = await ac.get("/portfolios/1/overview")
 
     assert response.status_code == 200
+    assert response.headers["x-cache-private"] == "miss"
+    assert second.status_code == 200
+    assert second.headers["x-cache-private"] == "hit"
     body = response.json()
-    assert ensure_calls == [["AAPL"]]  # staleness refresh ran first
+    assert second.json() == body
+    assert ensure_calls == []  # local price rows avoid synchronous refresh
     (row,) = body["positions"]
     assert row["ticker"] == "AAPL"
     assert row["name"] == "Apple Inc"
@@ -268,8 +275,8 @@ async def test_overview_fund_position_priced_via_nav(
 
     assert response.status_code == 200, response.text
     body = response.json()
-    # Only the equity is refreshed via Tiingo — the fund ticker is skipped.
-    assert ensure_calls == [["AAPL"]]
+    # Existing local equity rows and fund NAV both skip synchronous Tiingo work.
+    assert ensure_calls == []
     fund_row = next(r for r in body["positions"] if r["ticker"] == "VFIAX")
     assert fund_row["name"] == "Vanguard 500 Index Admiral"
     assert fund_row["last_close"] == 450.0
