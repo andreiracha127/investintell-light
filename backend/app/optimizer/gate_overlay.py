@@ -135,3 +135,15 @@ def apply_gate_overlay(
         beta_cap=beta_cap,
         bl_view_confidence_multiplier=pol.bl_view_confidence_multiplier,
     )
+
+
+def bl_confidence_multiplier(effective_gate: EffectiveGate) -> float:
+    """Single source for the BL view-confidence multiplier (spec §24).
+
+    0.0 → μ = π (views OMITTED entirely); the consumer must NEVER pass
+    confidence=0 to omega_idzorek. 0.5 → half confidence; 1.0 → normal (risk_on
+    identity). The aggregate portfolio-beta cap is EffectiveGate.beta_cap,
+    compiled into a LinearConstraint by Plan C — there is deliberately NO
+    per-asset effective_beta_coef throttle here.
+    """
+    return effective_gate.bl_view_confidence_multiplier

@@ -87,3 +87,24 @@ def test_effective_risk_assets_cap_never_negative() -> None:
         "conservative", "risk_off", base_risk_assets_cap=0.05, base_portfolio_beta_cap=0.40
     )
     assert eff.risk_assets_cap >= 0.0
+
+
+def test_bl_confidence_multiplier_is_zero_in_risk_off_v1() -> None:
+    eff = go.apply_gate_overlay(
+        "conservative", "risk_off", base_risk_assets_cap=0.20, base_portfolio_beta_cap=0.30
+    )
+    assert go.bl_confidence_multiplier(eff) == 0.0
+
+
+def test_bl_confidence_multiplier_is_one_in_risk_on() -> None:
+    eff = go.apply_gate_overlay(
+        "conservative", "risk_on", base_risk_assets_cap=0.20, base_portfolio_beta_cap=0.30
+    )
+    assert go.bl_confidence_multiplier(eff) == 1.0
+
+
+def test_no_effective_beta_coef_symbol() -> None:
+    # The rejected per-asset bg_coef-scaling scheme must not exist. The aggregate
+    # portfolio-beta cap lives on EffectiveGate.beta_cap, applied as a LinearConstraint
+    # by Plan C — there is no per-instrument coefficient helper here.
+    assert not hasattr(go, "effective_beta_coef")
