@@ -22,12 +22,17 @@ from app.api.routes import treasury as treasury_router
 from app.core.cache import CatalogCacheMiddleware
 from app.core.config import get_settings
 from app.core.db import engine
+from app.core.policy_startup import validate_combo_startup
 from app.core.tiingo_provider import provider as tiingo_provider
 from app.core.timing import RequestTimingMiddleware
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    # COMBO regime_aware policy core: fail-loud at boot if any of the 12 policies,
+    # the gate shape/ladder, or the legacy-symbol scan fails (spec §37). Raising
+    # here aborts the boot — the service must not serve an invalid policy set.
+    validate_combo_startup()
     # The TiingoClient is created lazily on first dependency use (the app must
     # boot without a token so /health works); if created, close it here.
     yield
