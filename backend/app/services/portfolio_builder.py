@@ -85,9 +85,39 @@ QUADRANT_MODEL_VERSION = "macro_quadrant_us_v1"
 # Test seam: when set, overrides the regime state read (bypasses the data-lake).
 _OVERRIDE_REGIME_STATE: str | None = None
 
+# N2: gate freshness (max-lag). The gate worker materializes ``regime_gate_daily``
+# DAILY; a stalled worker leaves a days/weeks-old latest row. ``fetch_gate_regime``
+# selects the latest row with NO max-age predicate, so on the regime_aware path we
+# enforce that the gate snapshot's ``as_of`` is within this many BUSINESS days of the
+# decision time — otherwise the gate is non-consumable (freeze §11: consume the gate
+# only when fresh). SEED value (a calibration point — A3/A4): the gate is daily, so
+# 5 business days tolerates a long weekend + holiday gap without admitting a truly
+# stalled worker. Applies to the regime_aware path ONLY; ``max_return_cvar`` keeps
+# its existing (unchecked) gate read.
+GATE_MAX_LAG_BUSINESS_DAYS: int = 5
+
+# Test seam: when set, overrides the regime_aware decision "now" (used for BOTH the
+# §6 quadrant decision_time AND the N2 gate freshness lag) so fixtures with a fixed
+# ``as_of`` stay deterministic regardless of wall-clock. None → real UTC now.
+_OVERRIDE_DECISION_NOW: "dt.datetime | None" = None
+
 
 class BuilderError(ValueError):
     """Domain failure in the builder — mapped verbatim to HTTP 422."""
+
+
+def _gate_business_day_lag(as_of: "dt.date", now: "dt.datetime") -> int:
+    """Business-day gap between the gate snapshot ``as_of`` and the decision ``now``.
+
+    Counts weekdays strictly AFTER ``as_of`` up to and including ``now``'s date
+    (``numpy.busday_count`` is half-open ``[as_of, now)`` over Mon–Fri, so a same-day
+    or next-business-day snapshot yields 0/1). Holidays are not modelled (a seed
+    simplification — the daily gate already tolerates a few days of slack); a negative
+    gap (a future-dated ``as_of``) is clamped to 0 so a clock skew never reads as
+    stale. Pure + dependency-free (no calendar table needed in this repo)."""
+    today = now.date()
+    lag = int(np.busday_count(as_of, today))
+    return max(0, lag)
 
 
 # Display labels (ticker, name) for a fund label key — only the universe path
@@ -160,6 +190,19 @@ class GateUnavailableError(BuilderError):
 
 class PolicyNotFoundError(BuilderError):
     """No QuadrantPolicy for this profile×quadrant (spec §31)."""
+
+
+class PolicyInfeasibleError(BuilderError):
+    """The policy caps cannot be satisfied by ANY allocation (spec §31).
+
+    N1: the AGGREGATE risk_assets_cap / defensive_floor (or the per-sleeve bands
+    under them) are structurally unsatisfiable for this profile×quadrant×gate —
+    e.g. the risk sleeves' band-lows already exceed ``risk_assets_cap``. Fail loud
+    (→ 422), NEVER weights-with-warnings and NEVER a silent relaxation of the
+    advertised envelope (freeze §1.7/§28/§31). Distinct from
+    ``QuadrantUnavailableError`` (no consumable quadrant/proxies) — here the
+    quadrant IS consumable but the policy itself is infeasible.
+    """
 
 
 def _as_builder_error(exc: effective_policy.EffectivePolicyError) -> BuilderError:
@@ -488,6 +531,54 @@ def _regime_prior(groups: list[str]) -> np.ndarray:
     return raw / s
 
 
+# Sleeves that count toward the AGGREGATE risk_assets_cap (equity+thematic ceiling)
+# and the defensive_floor (cash+fixed_income+gold+long_short floor). Canonical per
+# quadrant_policy.py §4/§5 — ``alternatives`` counts toward NEITHER.
+_RISK_ASSET_SLEEVES: frozenset[str] = frozenset({"equity", "thematic"})
+_DEFENSIVE_SLEEVES: frozenset[str] = frozenset(
+    {"cash", "fixed_income", "gold", "long_short"}
+)
+
+
+def _aggregate_policy_constraints(
+    proxy_groups: list[str],
+    *,
+    risk_assets_cap: float | None,
+    defensive_floor: float | None,
+) -> list[engine.LinearConstraint]:
+    """N1: the two AGGREGATE overlay constraints over the structural sleeves.
+
+    ``equity+thematic ≤ risk_assets_cap`` and
+    ``cash+fixed_income+gold+long_short ≥ defensive_floor`` — sleeve-level (over the
+    Level-1 proxy columns), NOT fund-level, so no implementation matrix is needed.
+    These are the gate-tightened overlay numbers off the ``EffectiveRegimePolicy``;
+    the per-sleeve ``BlockBudget`` bands alone do NOT bound the aggregate (risk_off
+    band-his can sum above the cap), so without these the endpoint would return
+    weights outside the advertised envelope while reporting the cap. A ``None`` cap/
+    floor (the standalone Level-1 caller without an eff_policy) emits no row for it.
+    """
+    out: list[engine.LinearConstraint] = []
+    if risk_assets_cap is not None:
+        coef = np.array(
+            [1.0 if g in _RISK_ASSET_SLEEVES else 0.0 for g in proxy_groups]
+        )
+        out.append(
+            engine.LinearConstraint(
+                coef=coef, lo=None, hi=risk_assets_cap, label="risk_assets_cap"
+            )
+        )
+    if defensive_floor is not None:
+        coef = np.array(
+            [1.0 if g in _DEFENSIVE_SLEEVES else 0.0 for g in proxy_groups]
+        )
+        out.append(
+            engine.LinearConstraint(
+                coef=coef, lo=defensive_floor, hi=None, label="defensive_floor"
+            )
+        )
+    return out
+
+
 def _solve_regime_level1(
     proxies: list[str],
     proxy_returns: np.ndarray,
@@ -498,6 +589,9 @@ def _solve_regime_level1(
     cvar_cap: float,
     gate_state: str | None,
     view_confidence_multiplier: float = 1.0,
+    *,
+    risk_assets_cap: float | None = None,
+    defensive_floor: float | None = None,
 ) -> dict[str, float]:
     """COMBO S4b Level-1: per-sleeve CATEGORY weights over the canonical proxies.
 
@@ -508,10 +602,19 @@ def _solve_regime_level1(
     risk_off, μ = π); ``gamma``/``cvar_cap`` are the per-mandate ladder (the caller
     already tightened ``cvar_cap`` via the gate overlay). One annualized Ledoit-Wolf
     Σ feeds both the equilibrium and the utility penalty (harness parity);
-    ``proxy_returns`` are the daily scenarios for the CVaR cap. On ``OptimizerError``
-    falls back to min-CVaR inside the same bands (the structural envelope is never
-    silently relaxed). Returns ``{proxy: weight}`` (sum 1; proxies at ~0 dropped).
-    Raises ``OptimizerError`` if even the fallback is infeasible.
+    ``proxy_returns`` are the daily scenarios for the CVaR cap.
+
+    N1: ``risk_assets_cap`` / ``defensive_floor`` (the gate-tightened overlay numbers
+    off the ``EffectiveRegimePolicy``) add the two AGGREGATE constraints
+    ``equity+thematic ≤ risk_assets_cap`` and
+    ``cash+fixed_income+gold+long_short ≥ defensive_floor`` — the per-sleeve bands
+    alone do not bound these aggregates, so without them the solve can escape the
+    advertised envelope. They are passed to BOTH the BL-utility solve and its
+    min-CVaR fallback (the envelope is never silently relaxed). If even the fallback
+    is infeasible UNDER these caps, raises ``OptimizerError`` (the caller maps this to
+    a structured ``PolicyInfeasibleError`` → 422 — fail loud, never relax).
+
+    Returns ``{proxy: weight}`` (sum 1; proxies at ~0 dropped).
     """
     sigma = engine.sigma_ledoit_wolf(proxy_returns)
     prior = _regime_prior(proxy_groups)
@@ -527,13 +630,16 @@ def _solve_regime_level1(
             lo, hi = bands[g]
             blocks.append(engine.BlockBudget(indices=idx, lo=lo, hi=min(hi, 1.0)))
     bounds = engine.BoundsBundle(blocks=blocks or None)
+    linear = _aggregate_policy_constraints(
+        proxy_groups, risk_assets_cap=risk_assets_cap, defensive_floor=defensive_floor
+    )
     try:
         wcat, _status = engine.solve_bl_utility_cvar(
-            mu, sigma, proxy_returns, gamma, cvar_cap, bounds=bounds,
+            mu, sigma, proxy_returns, gamma, cvar_cap, bounds=bounds, linear=linear,
         )
     except engine.OptimizerError:
         wcat, _status = engine.solve_min_cvar(
-            proxy_returns, bounds=bounds, cvar_limit=cvar_cap,
+            proxy_returns, bounds=bounds, cvar_limit=cvar_cap, linear=linear,
         )
     return {proxies[k]: float(wcat[k]) for k in range(len(proxies)) if wcat[k] > 1e-9}
 
@@ -674,13 +780,28 @@ async def _solve_regime_two_level(
     view_mult = eff_policy.bl_view_confidence_multiplier
 
     # 4. Level-1: category weights over the proxies, keyed off the eff_policy quadrant.
+    # The AGGREGATE overlay caps (N1) are sourced from eff_policy and enforced INSIDE
+    # the solve (equity+thematic ≤ risk_assets_cap; defensives ≥ defensive_floor) —
+    # the per-sleeve bands alone do not bound them. If the solve (even its min-CVaR
+    # fallback) is infeasible UNDER these caps, that is a STRUCTURALLY infeasible
+    # policy → fail loud as PolicyInfeasibleError (422), NOT a None (which the caller
+    # turns into 'no proxies'). Distinguishing the two failure modes is deliberate:
+    # 'no consumable proxies' is QUADRANT_UNAVAILABLE; 'policy caps unsatisfiable' is
+    # POLICY_INFEASIBLE — neither ever silently relaxes the advertised envelope.
     try:
         wcat = _solve_regime_level1(
             proxies_live, proxy_returns, proxy_groups, profile, eff_policy.quadrant,
             gamma, cvar_cap, gate_state, view_mult,
+            risk_assets_cap=eff_policy.risk_assets_cap,
+            defensive_floor=eff_policy.defensive_floor,
         )
-    except engine.OptimizerError:
-        return None
+    except engine.OptimizerError as exc:
+        raise PolicyInfeasibleError(
+            f"POLICY_INFEASIBLE: regime_aware sleeve solve infeasible under the "
+            f"{profile}/{eff_policy.quadrant} policy caps "
+            f"(risk_assets_cap={eff_policy.risk_assets_cap}, "
+            f"defensive_floor={eff_policy.defensive_floor}): {exc}"
+        ) from exc
 
     # 5. Level-2: funds equal-weight; a proxy-only sleeve keeps its proxy holding.
     fund_weights, proxy_holdings = _solve_regime_level2(
@@ -1124,10 +1245,30 @@ async def run_optimize(
             # QUADRANT_UNAVAILABLE (freeze §6/§8/§36). The payload's ``block_budgets``
             # are IGNORED here — bands derive from the policy.
             _profile = _regime_profile(payload.mandate)
+            # ONE decision "now" for BOTH the §6 quadrant decision_time and the N2
+            # gate freshness lag (consistent decision-time semantics across the two
+            # reads). The seam keeps fixtures deterministic regardless of wall-clock.
+            decision_now = _OVERRIDE_DECISION_NOW or dt.datetime.now(dt.UTC)
             gate_snap = (
                 await taa_bands.fetch_gate_regime(datalake)
                 if datalake is not None else None
             )
+            # N2: gate freshness (max-lag). ``fetch_gate_regime`` has NO max-age
+            # predicate, so a stalled gate worker leaves a days/weeks-old latest row
+            # that would otherwise be consumed as fresh. Freeze §11: consume the gate
+            # ONLY when fresh — a gate whose as_of exceeds GATE_MAX_LAG_BUSINESS_DAYS
+            # of the decision time is non-consumable → GATE_UNAVAILABLE (422), no
+            # trade. Checked on the regime_aware path ONLY (max_return_cvar's gate
+            # read is unchanged). A None gate falls through to build_effective_policy,
+            # which fails loud GATE_UNAVAILABLE for the missing-snapshot case.
+            if gate_snap is not None:
+                lag = _gate_business_day_lag(gate_snap.as_of, decision_now)
+                if lag > GATE_MAX_LAG_BUSINESS_DAYS:
+                    raise GateUnavailableError(
+                        f"GATE_UNAVAILABLE: gate stale, as_of={gate_snap.as_of} "
+                        f"is {lag} business days old, exceeds max-lag "
+                        f"{GATE_MAX_LAG_BUSINESS_DAYS}"
+                    )
             # §6 consumable quadrant read (production decision time = now). A None
             # row means NO consumable snapshot → build_effective_policy raises
             # QUADRANT_UNAVAILABLE below. ``datalake is None`` (test seam) likewise
@@ -1136,7 +1277,7 @@ async def run_optimize(
                 await quadrant_reader.fetch_quadrant_snapshot(
                     datalake,
                     model_version=QUADRANT_MODEL_VERSION,
-                    decision_time=dt.datetime.now(dt.UTC),
+                    decision_time=decision_now,
                 )
                 if datalake is not None else None
             )

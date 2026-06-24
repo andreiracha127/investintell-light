@@ -19,6 +19,7 @@ from app.core.datalake import get_optional_datalake_session
 from app.core.db import get_session
 from app.main import create_app
 from app.optimizer import data as optimizer_data
+from app.optimizer import sleeves
 from app.services import portfolio_builder as pb
 from app.services import quadrant_reader as qr
 from app.services import taa_bands as tb
@@ -363,6 +364,12 @@ def _stub_two_level_world(
     monkeypatch.setattr(
         qr, "fetch_quadrant_snapshot", _async(_quad_snapshot(quadrant))
     )
+    # N2: pin the regime_aware decision "now" right after the gate fixture's as_of
+    # (2026-06-20) so the gate-freshness (max-lag) check sees a FRESH gate regardless
+    # of wall-clock. Stale-gate tests override this seam with an older/younger as_of.
+    monkeypatch.setattr(
+        pb, "_OVERRIDE_DECISION_NOW", dt.datetime(2026, 6, 22, 12, tzinfo=dt.UTC)
+    )
 
 
 def _tl_payload(mandate: str = "moderate") -> dict[str, Any]:
@@ -698,6 +705,183 @@ def test_two_level_uses_quadrant_policy_bands(monkeypatch: Any) -> None:
     expected = qp.policy_bands(qp.QUADRANT_POLICIES["moderate"]["recovery"])
     for sleeve, (lo, hi) in result.sleeve_bands.items():
         assert (lo, hi) == pytest.approx(expected[sleeve])
+
+
+# ── N1: enforce risk_assets_cap / defensive_floor in the Level-1 solve ───────
+
+
+def _riskasset_momentum_matrix(seed: int, groups: list[str], n: int = 400) -> np.ndarray:
+    """A return matrix that gives the RISK sleeves (equity/thematic) a strong
+    uptrend so an unconstrained max-utility solve WANTS to load them up to the
+    per-sleeve band-hi (which exceeds the risk_off overlay cap). The defensive
+    sleeves drift flat. This makes the aggregate-cap breach REAL, not theoretical."""
+    rng = np.random.default_rng(seed)
+    base = rng.normal(0.0, 0.008, (n, len(groups)))
+    for k, g in enumerate(groups):
+        if g in ("equity", "thematic"):
+            base[:, k] += 0.0020   # strong risk-asset uptrend → solver leans in
+    return base
+
+
+def test_level1_enforces_risk_assets_cap_aggregate() -> None:
+    """N1: in risk_off the equity+thematic per-sleeve band-his (aggressive/expansion:
+    0.288 + 0.082 = 0.39) EXCEED the overlay risk_assets_cap (0.32), while the
+    band-LOWS (0.29) are below it (feasible). The Level-1 solve MUST honour the
+    AGGREGATE cap equity+thematic ≤ risk_assets_cap, not just the per-sleeve bands —
+    even when momentum wants the risk sleeves at their highs.
+
+    (aggressive/recovery risk_off is the ONE seed-infeasible edge — band-low 0.36 >
+    cap 0.35; that combo is exercised by the deliberately-infeasible tests below.)"""
+    from app.services import effective_policy as ep
+
+    groups = list(qp.STRUCTURAL_SLEEVES)
+    proxies = [sleeves.GROUP_BENCHMARK[g] for g in groups]
+    returns = _riskasset_momentum_matrix(seed=11, groups=groups)
+    eff = ep.build_effective_policy(
+        _quad_snapshot("expansion"), _gate(state="risk_off", quadrant="expansion"),
+        "aggressive", base_cvar_limit=0.030,
+    )
+    assert eff.risk_assets_cap == pytest.approx(0.32)  # 0.42 base − 0.10 risk_off
+    wcat = pb._solve_regime_level1(
+        proxies, returns, groups, "aggressive", "expansion",
+        gamma=1.90, cvar_cap=eff.cvar_limit, gate_state="risk_off",
+        view_confidence_multiplier=eff.bl_view_confidence_multiplier,
+        risk_assets_cap=eff.risk_assets_cap, defensive_floor=eff.defensive_floor,
+    )
+    equity = wcat.get(sleeves.GROUP_BENCHMARK["equity"], 0.0)
+    thematic = wcat.get(sleeves.GROUP_BENCHMARK["thematic"], 0.0)
+    assert equity + thematic <= eff.risk_assets_cap + 1e-6
+    defensive = sum(
+        wcat.get(sleeves.GROUP_BENCHMARK[g], 0.0)
+        for g in ("cash", "fixed_income", "gold", "long_short")
+    )
+    assert defensive >= eff.defensive_floor - 1e-6
+
+
+async def test_two_level_realized_weights_honour_risk_assets_cap(monkeypatch: Any) -> None:
+    """N1 end-to-end: a risk_off aggressive/expansion request returns realized
+    category weights with equity+thematic ≤ risk_assets_cap (0.32), NOT the
+    per-sleeve-band sum (0.39). The endpoint no longer advertises a cap it does
+    not enforce."""
+    _stub_two_level_world(monkeypatch, state="risk_off", quadrant="expansion")
+    async with _client() as client:
+        resp = await client.post("/builder/optimize", json=_tl_payload("aggressive"))
+    assert resp.status_code == 200, resp.text
+    diag = resp.json()["diagnostics"]
+    cw = diag["category_weights"]
+    assert cw is not None
+    risk = cw.get("equity", 0.0) + cw.get("thematic", 0.0)
+    assert risk <= 0.32 + 1e-6, f"equity+thematic {risk} breached risk_assets_cap 0.32"
+
+
+def test_level1_infeasible_policy_caps_fail_loud() -> None:
+    """N1: if the aggregate caps are structurally unsatisfiable (a risk_assets_cap
+    BELOW the sum of the risk sleeves' band-LOWS, so equity+thematic can never be
+    that small), Level-1 fails loud with a POLICY_INFEASIBLE-style error — NEVER a
+    silently relaxed solve (freeze §1.7/§28/§31)."""
+    groups = list(qp.STRUCTURAL_SLEEVES)
+    proxies = [sleeves.GROUP_BENCHMARK[g] for g in groups]
+    returns = _riskasset_momentum_matrix(seed=12, groups=groups)
+    # aggressive/recovery risk-sleeve band-lows: equity 0.29 + thematic 0.07 = 0.36.
+    # A cap of 0.10 forces equity+thematic ≤ 0.10 < 0.36 → infeasible.
+    with pytest.raises(pb.engine.OptimizerError):
+        pb._solve_regime_level1(
+            proxies, returns, groups, "aggressive", "recovery",
+            gamma=1.90, cvar_cap=0.030, gate_state="risk_off",
+            view_confidence_multiplier=0.0,
+            risk_assets_cap=0.10, defensive_floor=0.28,
+        )
+
+
+async def test_two_level_infeasible_caps_return_422(monkeypatch: Any) -> None:
+    """N1: a deliberately-infeasible eff_policy (risk_assets_cap below the risk
+    sleeves' band-low sum) makes the two-level solve infeasible → structured 422
+    (no weights). Monkeypatch the eff_policy cap to force the infeasibility."""
+    _stub_two_level_world(monkeypatch, state="risk_off", quadrant="recovery")
+    real_build = pb.effective_policy.build_effective_policy
+
+    def _infeasible_build(*a: Any, **k: Any):
+        import dataclasses
+        eff = real_build(*a, **k)
+        return dataclasses.replace(eff, risk_assets_cap=0.02)
+
+    monkeypatch.setattr(
+        pb.effective_policy, "build_effective_policy", _infeasible_build
+    )
+    async with _client() as client:
+        resp = await client.post("/builder/optimize", json=_tl_payload("aggressive"))
+    assert resp.status_code == 422, resp.text
+    assert "POLICY_INFEASIBLE" in resp.text
+
+
+# ── N2: gate freshness / max-lag on the regime_aware path ────────────────────
+
+
+def test_gate_business_day_lag_counts_weekdays() -> None:
+    """The lag helper counts BUSINESS days (Mon–Fri) strictly after as_of up to the
+    decision date; same/next-business-day → 0/1, a weekend does not inflate it, and a
+    future-dated gate clamps to 0 (clock skew never reads as stale)."""
+    fri = dt.date(2026, 6, 19)   # Friday
+    # same day → 0
+    assert pb._gate_business_day_lag(fri, dt.datetime(2026, 6, 19, tzinfo=dt.UTC)) == 0
+    # the following Monday is ONE business day later (Sat/Sun skipped)
+    assert pb._gate_business_day_lag(fri, dt.datetime(2026, 6, 22, tzinfo=dt.UTC)) == 1
+    # one trading week later → 5
+    assert pb._gate_business_day_lag(fri, dt.datetime(2026, 6, 26, tzinfo=dt.UTC)) == 5
+    # future-dated as_of → clamped to 0
+    assert pb._gate_business_day_lag(fri, dt.datetime(2026, 6, 18, tzinfo=dt.UTC)) == 0
+
+
+async def test_regime_aware_stale_gate_fails_loud(monkeypatch: Any) -> None:
+    """N2 (THE finding): a gate snapshot whose ``as_of`` exceeds
+    GATE_MAX_LAG_BUSINESS_DAYS of the decision time (a stalled gate worker) must fail
+    loud as a structured 422 GATE_UNAVAILABLE — NEVER silently consumed as fresh
+    (freeze §11). Decision now = 2026-06-22; gate as_of = 2026-05-15 is far beyond the
+    5-business-day lag."""
+    _stub_two_level_world(monkeypatch, state="risk_on", quadrant="recovery")
+    stale = tb.GateRegimeSnapshot(
+        as_of=dt.date(2026, 5, 15), state="risk_on",  # ~26 business days stale
+        vote_count=0, trend_vote=False, credit_vote=False, drawdown_vote=False,
+        dwell_days=30, last_flip=None, growth_score=None, inflation_score=None,
+        quadrant="recovery",
+    )
+    monkeypatch.setattr(tb, "fetch_gate_regime", _async(stale))
+    async with _client() as client:
+        resp = await client.post("/builder/optimize", json=_tl_payload())
+    assert resp.status_code == 422, resp.text
+    assert "GATE_UNAVAILABLE" in resp.text
+    assert "stale" in resp.text.lower()
+
+
+async def test_regime_aware_fresh_gate_reaches_solve(monkeypatch: Any) -> None:
+    """N2: a gate whose ``as_of`` is within the max-lag (here the next business day
+    before the pinned decision now) is consumed normally and the two-level solve
+    runs (weights returned, category_weights exposed)."""
+    _stub_two_level_world(monkeypatch, state="risk_on", quadrant="recovery")
+    async with _client() as client:
+        resp = await client.post("/builder/optimize", json=_tl_payload())
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["diagnostics"]["category_weights"] is not None
+
+
+async def test_regime_aware_gate_at_max_lag_boundary_is_fresh(monkeypatch: Any) -> None:
+    """N2 boundary: a gate exactly GATE_MAX_LAG_BUSINESS_DAYS old is still fresh
+    (the predicate is lag <= max-lag). as_of 2026-06-15 (Mon) vs decision now
+    2026-06-22 (Mon) = 5 business days = the seed limit."""
+    _stub_two_level_world(monkeypatch, state="risk_on", quadrant="recovery")
+    boundary = tb.GateRegimeSnapshot(
+        as_of=dt.date(2026, 6, 15), state="risk_on",
+        vote_count=0, trend_vote=False, credit_vote=False, drawdown_vote=False,
+        dwell_days=30, last_flip=None, growth_score=None, inflation_score=None,
+        quadrant="recovery",
+    )
+    assert pb._gate_business_day_lag(
+        boundary.as_of, dt.datetime(2026, 6, 22, 12, tzinfo=dt.UTC)
+    ) == pb.GATE_MAX_LAG_BUSINESS_DAYS
+    monkeypatch.setattr(tb, "fetch_gate_regime", _async(boundary))
+    async with _client() as client:
+        resp = await client.post("/builder/optimize", json=_tl_payload())
+    assert resp.status_code == 200, resp.text
 
 
 def test_combined_regime_removed_from_builder_solve_path() -> None:
