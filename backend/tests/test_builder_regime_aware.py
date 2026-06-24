@@ -168,6 +168,21 @@ async def test_regime_no_gate_degrades_to_riskon(monkeypatch: pytest.MonkeyPatch
     assert len(blocks) == 4
 
 
+# Task 7 retired the S4a single-level dispatch, the STAG_GOLD goldfix branch, and the
+# SPY vol/beta graduated-cap overlays from the regime_aware path: the orthogonal model
+# routes EXCLUSIVELY to the two-level solve (covered by test_builder_regime_two_level.py)
+# and fails loud (422) when it can't be built. The single-level/goldfix/overlay HELPERS
+# (_solve_regime_motor, taa_bands.goldfix_target / effective_class_bands /
+# vol_graduated_caps / beta_graduated_caps) survive for the macro route and retain unit
+# coverage in test_taa_bands.py; their formal removal is Task 8. The dispatch tests below
+# exercise that retired single-level path, so they are skipped until Task 8 deletes it.
+_S4A_RETIRED = pytest.mark.skip(
+    reason="S4a single-level / goldfix / overlay dispatch retired by Task 7 "
+    "(orthogonal two-level only); helpers + their removal are Task 8. Two-level "
+    "coverage lives in test_builder_regime_two_level.py."
+)
+
+
 # ── Task 3: regime_aware dispatch (end-to-end via the optimize route) ─────────
 
 
@@ -217,6 +232,7 @@ def _stub_taxonomy(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(optimizer_data, "load_fund_strategy_label", fake_strategy)
 
 
+@_S4A_RETIRED
 async def test_regime_respects_riskoff_equity_band(monkeypatch: pytest.MonkeyPatch) -> None:
     """RISK_OFF equity band [0.26, 0.50] is enforced by the regime_aware solve."""
     _stub_returns(monkeypatch)
@@ -239,6 +255,7 @@ async def test_regime_respects_riskoff_equity_band(monkeypatch: pytest.MonkeyPat
     assert body["diagnostics"]["class_bands"]["equity"] == pytest.approx([0.26, 0.50])
 
 
+@_S4A_RETIRED
 async def test_regime_riskon_equity_band_is_floored(monkeypatch: pytest.MonkeyPatch) -> None:
     """Control: RISK_ON raises the equity floor to 0.40 (vs risk_off 0.26)."""
     _stub_returns(monkeypatch)
@@ -258,6 +275,7 @@ async def test_regime_riskon_equity_band_is_floored(monkeypatch: pytest.MonkeyPa
     assert eq_w <= 0.64 + 1e-6
 
 
+@_S4A_RETIRED
 async def test_regime_slowdown_routes_goldfix(monkeypatch: pytest.MonkeyPatch) -> None:
     """SLOWDOWN routes the fixed goldfix haven over available names; equity
     stocks go to 0 and diagnostics.haven_tilt is populated."""
@@ -310,6 +328,7 @@ async def test_regime_slowdown_routes_goldfix(monkeypatch: pytest.MonkeyPatch) -
     assert abs(sum(w["weight"] for w in body["weights"]) - 1.0) < 1e-6
 
 
+@_S4A_RETIRED
 async def test_regime_ignores_payload_block_budgets(monkeypatch: pytest.MonkeyPatch) -> None:
     """regime_aware derives bands from the regime; a payload block_budget is
     IGNORED (the equity band is the regime's, not the payload's tight 0.05)."""
@@ -372,6 +391,7 @@ def test_load_spy_signal_degrades_without_session() -> None:
 # ── COMBO S4a: return-aware motor (BL max-utility) wiring ────────────────────
 
 
+@_S4A_RETIRED
 async def test_regime_uses_bl_utility_motor(monkeypatch: pytest.MonkeyPatch) -> None:
     """The regime_aware band route invokes the BL max-utility + CVaR motor with the
     per-mandate gamma/CVaR (not the return-blind min-CVaR), inside the regime bands."""
@@ -402,6 +422,7 @@ async def test_regime_uses_bl_utility_motor(monkeypatch: pytest.MonkeyPatch) -> 
     assert eq_w >= 0.40 - 1e-6  # RISK_ON equity band still enforced under the new motor
 
 
+@_S4A_RETIRED
 async def test_regime_falls_back_to_min_cvar(monkeypatch: pytest.MonkeyPatch) -> None:
     """If the BL-utility solve is infeasible, the regime envelope is still honoured
     via the min-CVaR fallback — valid weights, bands respected."""
@@ -517,6 +538,7 @@ def _stub_overlay_world(monkeypatch: pytest.MonkeyPatch, n_obs: int = 400) -> np
 _RISING_SPY_CLOSES = [float(x) for x in np.linspace(100.0, 200.0, 130)[::-1]]
 
 
+@_S4A_RETIRED
 async def test_overlays_activate_without_spy_in_universe(monkeypatch: pytest.MonkeyPatch) -> None:
     """The RISK_OFF beta-graduated cap SHRINKS a HIGH-beta asset's weight using a
     SPY SIGNAL loaded from eod_prices — even though SPY is NOT in the traded
@@ -556,6 +578,7 @@ async def test_overlays_activate_without_spy_in_universe(monkeypatch: pytest.Mon
     assert (w0_overlay + w1_overlay) >= 0.26 - 1e-6
 
 
+@_S4A_RETIRED
 async def test_overlay_betas_come_from_loaded_spy(monkeypatch: pytest.MonkeyPatch) -> None:
     """The throttle keys off the LOADED SPY RETURNS, not a fabricated signal:
     same SPY levels but returns present vs absent flips the beta overlay on/off."""

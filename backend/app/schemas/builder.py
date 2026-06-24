@@ -314,6 +314,11 @@ class DiagnosticsOut(BaseModel):
     combined_regime: str | None = None
     class_bands: dict[str, list[float]] | None = None
     haven_tilt: dict[str, float] | None = None
+    # AGGREGATE portfolio-beta cap TARGET (β_portfolio ≤ beta_cap) from the
+    # EffectiveRegimePolicy gate overlay — present on the regime_aware path.
+    # EXPOSED for telemetry only; NOT enforced until Plan C compiles it into a
+    # LinearConstraint (RELEASE GATE). Do not treat as a guarantee.
+    beta_cap: float | None = None
     # Present only on the regime_aware TWO-LEVEL path (COMBO S4b): the Level-1
     # per-sleeve category weights (book B), against which the fund-level weights
     # (book A) are the selection bet — A−B is the selection alpha.

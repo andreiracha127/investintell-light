@@ -29,6 +29,7 @@ builder yet → any equity in a views request is rejected; funds with NULL AUM
 are rejected with the explicit list. The caller decides what to exclude.
 """
 
+import datetime as dt
 import uuid
 from dataclasses import dataclass
 from typing import cast
@@ -66,7 +67,13 @@ from app.schemas.builder import (
     ViewIn,
     WeightOut,
 )
-from app.services import funds_catalog, lookthrough_exposure, taa_bands
+from app.services import (
+    effective_policy,
+    funds_catalog,
+    lookthrough_exposure,
+    quadrant_policy,
+    taa_bands,
+)
 from app.services._series import select_adj_close_rows
 
 # Test seam: when set, overrides the regime state read (bypasses the data-lake).
@@ -129,6 +136,105 @@ def apply_regime_cvar_limit(
 ) -> float:
     """Effective CVaR limit = base × regime multiplier."""
     return base_limit * regime_cvar_multiplier(state, risk_off_factor=risk_off_factor)
+
+
+# ── Structured regime_aware errors (spec §31) — all map to HTTP 422 ──────────
+# The orthogonal builder consumes ``EffectiveRegimePolicy`` (decision B): a
+# regime_aware request that cannot produce a consumable quadrant/gate/policy
+# fails LOUD as one of these (no weights-with-warnings, no None→default).
+
+
+class QuadrantUnavailableError(BuilderError):
+    """regime_aware requested but no consumable quadrant (spec §31)."""
+
+
+class GateUnavailableError(BuilderError):
+    """regime_aware requested but no consumable gate (spec §31)."""
+
+
+class PolicyNotFoundError(BuilderError):
+    """No QuadrantPolicy for this profile×quadrant (spec §31)."""
+
+
+def _as_builder_error(exc: effective_policy.EffectivePolicyError) -> BuilderError:
+    """Map a policy-core ``EffectivePolicyError`` to the matching structured
+    ``BuilderError`` (→ 422) by message prefix (spec §31).
+
+    ``QUADRANT_UNAVAILABLE``/``UNKNOWN_PROFILE`` → ``QuadrantUnavailableError`` (the
+    default); ``GATE_UNAVAILABLE`` → ``GateUnavailableError``; ``POLICY_NOT_FOUND``
+    → ``PolicyNotFoundError``. The original message (with its structured prefix) is
+    preserved verbatim so nothing is masked.
+    """
+    msg = str(exc)
+    if msg.startswith("GATE_UNAVAILABLE"):
+        return GateUnavailableError(msg)
+    if msg.startswith("POLICY_NOT_FOUND"):
+        return PolicyNotFoundError(msg)
+    return QuadrantUnavailableError(msg)
+
+
+def _resolve_quadrant_policy(
+    profile: str, quadrant: str | None
+) -> quadrant_policy.QuadrantPolicy:
+    """Load the ``QuadrantPolicy`` for a profile×quadrant, fail-loud (spec §31).
+
+    A None/unknown quadrant is QUADRANT_UNAVAILABLE (never falls back to a default
+    quadrant — spec §1.2). A missing policy for a valid quadrant is POLICY_NOT_FOUND.
+    Kept as a thin helper for ``_solve_regime_level1`` (called standalone); the
+    dispatch path prefers ``effective_policy.build_effective_policy``.
+    """
+    if quadrant is None or quadrant not in quadrant_policy.QUADRANTS:
+        raise QuadrantUnavailableError(
+            f"regime_aware: no consumable quadrant (got {quadrant!r})"
+        )
+    by_quadrant = quadrant_policy.QUADRANT_POLICIES.get(profile)
+    if by_quadrant is None or quadrant not in by_quadrant:
+        raise PolicyNotFoundError(
+            f"regime_aware: no policy for profile {profile!r} quadrant {quadrant!r}"
+        )
+    return by_quadrant[quadrant]
+
+
+def _snapshot_from(quadrant: str | None, gate_state: str | None) -> taa_bands.GateRegimeSnapshot:
+    """Wrap a (quadrant, gate_state) pair into a minimal ``GateRegimeSnapshot`` so the
+    solve path can feed ``build_effective_policy`` even when it received the regime
+    fields directly (e.g. the standalone two-level call) rather than a DB row.
+
+    v1: quadrant and gate are materialized on ONE ``regime_gate_daily`` row, so the
+    single synthetic snapshot stands in for both the quadrant_snapshot and the
+    gate_snapshot (spec note in ``effective_policy._snapshot_id``). Only ``as_of`` /
+    ``state`` / ``quadrant`` are consumed by ``build_effective_policy``; the vote
+    fields are lineage placeholders.
+    """
+    return taa_bands.GateRegimeSnapshot(
+        as_of=dt.date.today(),
+        state=gate_state or "",
+        vote_count=0,
+        trend_vote=False,
+        credit_vote=False,
+        drawdown_vote=False,
+        dwell_days=0,
+        last_flip=None,
+        growth_score=None,
+        inflation_score=None,
+        quadrant=quadrant,
+    )
+
+
+def _effective_policy_from(
+    quadrant: str | None, gate_state: str | None, profile: str, *, base_cvar_limit: float
+) -> effective_policy.EffectiveRegimePolicy:
+    """Build the cohesive ``EffectiveRegimePolicy`` ONCE (decision B) from a
+    (quadrant, gate_state) pair, re-raising ``EffectivePolicyError`` as the matching
+    structured ``BuilderError`` (→ 422). The gate overlay is applied INSIDE
+    ``build_effective_policy`` — the caller reads the FINAL numbers off the result."""
+    snap = _snapshot_from(quadrant, gate_state)
+    try:
+        return effective_policy.build_effective_policy(
+            snap, snap, profile, base_cvar_limit=base_cvar_limit
+        )
+    except effective_policy.EffectivePolicyError as exc:
+        raise _as_builder_error(exc) from exc
 
 
 def _to_data_ref(ref: FundRefIn | EquityRefIn) -> optimizer_data.AssetRef:
@@ -556,30 +662,33 @@ def _solve_regime_level1(
     proxy_returns: np.ndarray,
     proxy_groups: list[str],
     profile: str,
-    band_state: str,
+    quadrant: str,
     gamma: float,
     cvar_cap: float,
     gate_state: str | None,
+    view_confidence_multiplier: float = 1.0,
 ) -> dict[str, float]:
     """COMBO S4b Level-1: per-sleeve CATEGORY weights over the canonical proxies.
 
-    BL max-utility + hard CVaR inside the per-profile ``taa_bands`` sleeve
-    envelope: μ = equilibrium π (DELTA_MARKET) + the 12-1 momentum view (fires
-    with ≥4 risk sleeves, zeroed by a risk_off gate); ``gamma``/``cvar_cap`` are
-    the per-mandate ladder (the caller already tightened ``cvar_cap`` in risk_off).
-    One annualized Ledoit-Wolf Σ feeds both the equilibrium and the utility penalty
-    (harness parity); ``proxy_returns`` are the daily scenarios for the CVaR cap.
-    On ``OptimizerError`` falls back to min-CVaR inside the same bands (the
-    structural envelope is never silently relaxed). Returns ``{proxy: weight}``
-    (sum 1; proxies at ~0 dropped). Raises ``OptimizerError`` if even the fallback
-    is infeasible — the caller then drops to the single-level S4a path.
+    BL max-utility + hard CVaR inside the ``QUADRANT_POLICIES[profile][quadrant]``
+    sleeve envelope (decision B; ``band_state_from_quadrant`` retired): μ =
+    equilibrium π (DELTA_MARKET) + the 12-1 momentum view (fires with ≥4 risk
+    sleeves, scaled by ``view_confidence_multiplier`` — the gate sets it to 0.0 in
+    risk_off, μ = π); ``gamma``/``cvar_cap`` are the per-mandate ladder (the caller
+    already tightened ``cvar_cap`` via the gate overlay). One annualized Ledoit-Wolf
+    Σ feeds both the equilibrium and the utility penalty (harness parity);
+    ``proxy_returns`` are the daily scenarios for the CVaR cap. On ``OptimizerError``
+    falls back to min-CVaR inside the same bands (the structural envelope is never
+    silently relaxed). Returns ``{proxy: weight}`` (sum 1; proxies at ~0 dropped).
+    Raises ``OptimizerError`` if even the fallback is infeasible.
     """
     sigma = engine.sigma_ledoit_wolf(proxy_returns)
     prior = _regime_prior(proxy_groups)
     mu = momentum_view.category_momentum_mu(
         proxy_returns, proxy_groups, prior, gate_state, sigma=sigma,
+        view_confidence_multiplier=view_confidence_multiplier,
     )
-    bands = taa_bands.profile_sleeve_bands(profile, band_state)
+    bands = quadrant_policy.policy_bands(_resolve_quadrant_policy(profile, quadrant))
     blocks: list[engine.BlockBudget] = []
     for g in sleeves.SLEEVE_GROUPS:
         idx = [k for k, gg in enumerate(proxy_groups) if gg == g]
@@ -633,6 +742,11 @@ class _RegimeTwoLevel:
     proxy_returns: dict[str, np.ndarray]  # frame-aligned returns for those holdings
     category_weights: dict[str, float]    # sleeve → Level-1 weight (book B; A−B base)
     sleeve_bands: dict[str, list[float]]  # sleeve → [lo, hi] enforced (diagnostics)
+    cvar_limit: float                     # gate-tightened CVaR cap actually applied
+    # AGGREGATE portfolio-beta cap target (β_portfolio ≤ beta_cap). EXPOSED for
+    # telemetry ONLY — NOT compiled into a LinearConstraint here (RELEASE GATE; the
+    # aggregate-beta constraint is Plan C). Never claim portfolio beta is enforced.
+    beta_cap: float
 
 
 # Mandate label → one of the 3 PROFILE_CENTERS profiles for the sleeve bands.
@@ -672,16 +786,25 @@ async def _solve_regime_two_level(
     (Level-2); a floored sleeve with no fund (gold via GLD, long_short via FTLS)
     keeps its authorized proxy as a holding.
 
-    Band-state comes from the QUADRANT (the gate only tightens CVaR + the goldfix
-    is routed upstream). Returns ``None`` to signal the caller to fall back to the
-    single-level S4a path: no fund maps to a base sleeve, <2 live proxies, or the
-    Level-1 solve is infeasible even after its min-CVaR fallback. Degrade-safe: the
-    proxy-returns loader returns ``{}`` without a DB session, so no-DB/tests drop
-    to S4a.
+    Sleeve bands + the gate-tightened CVaR/beta/view-confidence come from ONE
+    ``EffectiveRegimePolicy`` (decision B): ``build_effective_policy`` composes the
+    ``QUADRANT_POLICIES[profile][quadrant]`` bands with the gate overlay. A
+    non-consumable quadrant/gate raises a structured ``BuilderError`` (→ 422; spec
+    §31) — regime_aware NEVER returns weights-with-warnings. Returns ``None`` ONLY
+    for a feasibility shortfall the caller treats as no-trade (no fund maps to a base
+    sleeve, <2 live proxies, or the Level-1 solve is infeasible even after its
+    min-CVaR fallback). Degrade-safe: the proxy-returns loader returns ``{}`` without
+    a DB session.
     """
     profile = _regime_profile(payload.mandate)
-    band_state = taa_bands.band_state_from_quadrant(quadrant)
-    bands = taa_bands.profile_sleeve_bands(profile, band_state)
+    # ONE EffectiveRegimePolicy (decision B): bands from QUADRANT_POLICIES, with the
+    # gate overlay tightening cvar/beta/view-confidence INSIDE build_effective_policy
+    # (fail-loud on a non-consumable quadrant/gate — spec §31).
+    base_cvar = resolve_cvar_limit(payload.cvar_limit, payload.mandate)
+    eff_policy = _effective_policy_from(
+        quadrant, gate_state, profile, base_cvar_limit=base_cvar
+    )
+    bands = {s: (b.lo, b.hi) for s, b in eff_policy.sleeve_budgets.items()}
 
     # 1. fund → sleeve (strategy_label finest; asset_class fallback; raw equities
     # via the proxy ticker, else equity). 'hedge' (SH) is excluded from the book.
@@ -720,18 +843,18 @@ async def _solve_regime_two_level(
     proxy_groups = [proxy_to_sleeve[p] for p in proxies_live]
     proxy_returns = np.column_stack([proxy_rets[p] for p in proxies_live])
 
-    # 3. per-mandate dials: gamma decoupled from the equilibrium delta; CVaR
-    # tightened by the live gate (same factor as the single-level path).
+    # 3. per-mandate dials: gamma decoupled from the equilibrium delta; the CVaR cap
+    # and BL view-confidence are the FINAL gate-tightened numbers from eff_policy (the
+    # overlay was applied inside build_effective_policy — no second tighten here).
     gamma = resolve_gamma(None, payload.mandate)
-    cvar_cap = resolve_cvar_limit(payload.cvar_limit, payload.mandate)
-    if (gate_state or "").lower() == "risk_off":
-        cvar_cap *= DEFAULT_RISK_OFF_CVAR_FACTOR
+    cvar_cap = eff_policy.cvar_limit
+    view_mult = eff_policy.bl_view_confidence_multiplier
 
-    # 4. Level-1: category weights over the proxies.
+    # 4. Level-1: category weights over the proxies, keyed off the eff_policy quadrant.
     try:
         wcat = _solve_regime_level1(
-            proxies_live, proxy_returns, proxy_groups, profile, band_state,
-            gamma, cvar_cap, gate_state,
+            proxies_live, proxy_returns, proxy_groups, profile, eff_policy.quadrant,
+            gamma, cvar_cap, gate_state, view_mult,
         )
     except engine.OptimizerError:
         return None
@@ -751,6 +874,8 @@ async def _solve_regime_two_level(
         proxy_returns={t: proxy_rets[t] for t in proxy_holdings},
         category_weights=category_weights,
         sleeve_bands=sleeve_bands,
+        cvar_limit=eff_policy.cvar_limit,
+        beta_cap=eff_policy.beta_cap,
     )
 
 
@@ -1143,11 +1268,12 @@ async def run_optimize(
     cvar_limit_effective: float | None = None
     regime_state: str | None = None
     # Regime-Aware diagnostics (research codename COMBO): populated only on the
-    # ``regime_aware`` path.
+    # ``regime_aware`` path. ``combined_regime``/``haven_tilt`` retired (orthogonal
+    # quadrant/gate model — Task 7); ``regime_beta_cap`` is the AGGREGATE
+    # portfolio-beta cap EXPOSED for telemetry only, NOT enforced (RELEASE GATE).
     regime_quadrant: str | None = None
-    regime_combined: str | None = None
+    regime_beta_cap: float | None = None
     regime_class_bands: dict[str, list[float]] | None = None
-    regime_haven_tilt: dict[str, float] | None = None
     # COMBO S4b two-level diagnostics + proxy-only holdings (gold/long_short).
     regime_category_weights: dict[str, float] | None = None
     regime_proxy_holdings: dict[str, float] = {}
@@ -1211,117 +1337,51 @@ async def run_optimize(
 
     try:
         if payload.objective == "regime_aware":
-            # Regime-Aware allocator (research codename COMBO, spec §3.3): the
-            # gate-driven per-class band ENVELOPE + min-CVaR inside it (decision
-            # B), with the SLOWDOWN goldfix haven and vol/beta graduated caps. The
-            # payload's ``block_budgets`` are IGNORED here — bands derive from the
-            # regime.
-            regime_blocks, regime_combined, regime_quadrant = (
-                await _resolve_regime_block_budgets(session, datalake, assets, labels)
-            )
-            # Gate state also scales the reported CVaR limit + drives diagnostics,
-            # honouring the same test seam as the scaling read (Task 4).
+            # Regime-Aware allocator (research codename COMBO): ORTHOGONAL model
+            # (decision B, Task 7). Build ONE EffectiveRegimePolicy from the live
+            # gate (quadrant + gate state, both materialized on the same row in v1 →
+            # quadrant_snapshot == gate_snapshot) and route directly to the two-level
+            # proxy→fund solve. ``combined_regime``/``band_state_from_quadrant`` and
+            # the STAG_GOLD goldfix + S4a single-level fallback are retired (the
+            # legacy helpers remain for the macro route / Task 8). The payload's
+            # ``block_budgets`` are IGNORED here — bands derive from the policy.
+            _profile = _regime_profile(payload.mandate)
             gate_state = _OVERRIDE_REGIME_STATE
-            if gate_state is None and datalake is not None:
-                gate_snap = await taa_bands.fetch_gate_regime(datalake)
+            gate_snap = (
+                await taa_bands.fetch_gate_regime(datalake)
+                if datalake is not None else None
+            )
+            if gate_state is None:
                 gate_state = gate_snap.state if gate_snap is not None else None
+            quadrant = gate_snap.quadrant if gate_snap is not None else None
+            # ONE policy build (fail-loud on a non-consumable quadrant/gate → 422).
+            eff_policy = _effective_policy_from(
+                quadrant, gate_state, _profile,
+                base_cvar_limit=resolve_cvar_limit(payload.cvar_limit, payload.mandate),
+            )
+            regime_quadrant = eff_policy.quadrant
             regime_state = gate_state
-            if payload.cvar_limit is not None:
-                cvar_limit_effective = apply_regime_cvar_limit(
-                    payload.cvar_limit, gate_state,
-                    risk_off_factor=DEFAULT_RISK_OFF_CVAR_FACTOR,
+            cvar_limit_effective = eff_policy.cvar_limit
+            # eff_policy.beta_cap is the AGGREGATE portfolio-beta cap — EXPOSED for
+            # telemetry ONLY, NOT compiled into a constraint (RELEASE GATE; Plan C).
+            regime_beta_cap = eff_policy.beta_cap
+            two_level = await _solve_regime_two_level(
+                session, assets, labels, frame.index,
+                regime_quadrant, gate_state, payload,
+            )
+            if two_level is None:
+                # Fail-loud: regime_aware that can't be produced is a no-trade
+                # structured error, NEVER weights-with-warnings (spec §31).
+                raise QuadrantUnavailableError(
+                    "regime_aware: two-level solve could not be built for this "
+                    "universe (need >=2 live sleeves with proxies)"
                 )
-            if regime_combined == "STAG_GOLD":
-                # Goldfix haven: IMPOSE the fixed gold-led target over available
-                # names (port _haven_weights goldfix, main.py:959-972); the
-                # whitelist IS the defense — skip the solver entirely.
-                ticker_col = _available_tickers(assets, label_map)
-                target = taa_bands.goldfix_target(set(ticker_col.keys()))
-                if not target:
-                    raise BuilderError(
-                        "regime_aware SLOWDOWN haven needs at least one of GLD/"
-                        "VOOV/QAI/GCC/BIL in the universe; none were found"
-                    )
-                weights = np.zeros(len(labels), dtype=float)
-                for ticker, wgt in target.items():
-                    weights[ticker_col[ticker]] = wgt
-                status = "goldfix"
-                regime_haven_tilt = dict(target)
-            else:
-                # COMBO S4b: try the TWO-LEVEL (proxy→fund equal-weight) allocator
-                # first — per-sleeve category weights (BL max-utility + momentum)
-                # over the canonical proxies, implemented by the selected funds
-                # equal-weight. Band-state from the QUADRANT; the gate tightens CVaR.
-                # Falls back to the single-level S4a path when it can't be built
-                # (no live proxies / infeasible) — worst case == the prior behaviour.
-                two_level = await _solve_regime_two_level(
-                    session, assets, labels, frame.index,
-                    regime_quadrant, gate_state, payload,
-                )
-                if two_level is not None:
-                    weights = two_level.fund_weights
-                    status = "regime_two_level"
-                    regime_proxy_holdings = two_level.proxy_holdings
-                    regime_proxy_returns = two_level.proxy_returns
-                    regime_category_weights = two_level.category_weights
-                    regime_class_bands = two_level.sleeve_bands
-                else:
-                    # ── Single-level S4a fallback: min-CVaR / BL max-utility inside
-                    # the 4-class regime envelope with the vol/(beta) graduated caps.
-                    # Surface the per-class (min, max) bands actually enforced (only
-                    # the classes PRESENT as a BlockBudget).
-                    present_classes = await _fund_class_columns(session, assets, labels)
-                    _band_map, _ = taa_bands.effective_class_bands(regime_combined)
-                    regime_class_bands = {
-                        cls: [_band_map[cls][0], _band_map[cls][1]]
-                        for cls in _COMBO_BAND_CLASSES
-                        if present_classes.get(cls)
-                    }
-                    base_cap = cap if cap is not None else engine.DEFAULT_CAP
-                    return_cols = [scenarios[:, j] for j in range(scenarios.shape[1])]
-                    # SPY is loaded as a SIGNAL series from eod_prices over the
-                    # optimization window — decoupled from the traded universe — so
-                    # the vol/beta overlays activate for ANY universe (Sprint 5). The
-                    # in-universe synthetic proxy is the fallback when the DB read
-                    # yields too little history (degrade-safe: flat cap, no crash).
-                    spy_desc, spy_rets_aligned = await _load_spy_signal(
-                        session, frame.index
-                    )
-                    if not spy_desc:
-                        spy_desc = _spy_closes_from_frame(frame)
-                    graduated_caps = taa_bands.vol_graduated_caps(
-                        base_cap, return_cols, spy_desc
-                    )
-                    if regime_combined == "RISK_OFF":
-                        # Prefer the loaded SPY returns (aligned to the scenario
-                        # rows); fall back to in-universe SPY if the loader was empty.
-                        spy_rets = spy_rets_aligned
-                        if spy_rets is None:
-                            spy_col = index_of.get("equity:SPY")
-                            if spy_col is not None and spy_desc:
-                                spy_rets = scenarios[:, spy_col]
-                        if spy_rets is not None and spy_desc:
-                            betas = taa_bands.asset_betas(
-                                {labels[j]: scenarios[:, j] for j in range(len(labels))},
-                                spy_rets,
-                            )
-                            graduated_caps = taa_bands.beta_graduated_caps(
-                                graduated_caps,
-                                [betas[labels[j]] for j in range(len(labels))],
-                            )
-                    cvar_bounds_regime = engine.BoundsBundle(
-                        cap_vec=graduated_caps,
-                        min_vec=np.full(n, min_weight) if min_weight is not None else None,
-                        blocks=regime_blocks or None,
-                    )
-                    # COMBO S4a: return-aware motor — BL max-utility + hard CVaR with
-                    # the per-mandate gamma and μ = equilibrium π + category momentum
-                    # view, inside this same regime envelope. Falls back to min-CVaR
-                    # on infeasibility (envelope preserved).
-                    weights, status = await _solve_regime_motor(
-                        session, assets, labels, scenarios, sigma, cvar_bounds_regime,
-                        gate_state, payload, cap, min_weight, current_vec, linear,
-                    )
+            weights = two_level.fund_weights
+            status = "regime_two_level"
+            regime_proxy_holdings = two_level.proxy_holdings
+            regime_proxy_returns = two_level.proxy_returns
+            regime_category_weights = two_level.category_weights
+            regime_class_bands = two_level.sleeve_bands
         elif payload.objective == "bl_utility":
             assert mu_equilibrium is not None  # needs_bl guarantees it
             mu_for_utility = mu_posterior if mu_posterior is not None else mu_equilibrium
@@ -1488,9 +1548,11 @@ async def run_optimize(
             cvar_limit_effective=cvar_limit_effective,
             regime_state=regime_state,
             quadrant=regime_quadrant,
-            combined_regime=regime_combined,
             class_bands=regime_class_bands,
-            haven_tilt=regime_haven_tilt,
+            # AGGREGATE portfolio-beta cap TARGET — EXPOSED for telemetry only, NOT
+            # enforced until Plan C compiles the aggregate-beta LinearConstraint
+            # (RELEASE GATE). Never claim the portfolio beta is guaranteed.
+            beta_cap=regime_beta_cap,
             category_weights=regime_category_weights,
         ),
     )
