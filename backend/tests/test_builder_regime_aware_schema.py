@@ -2,8 +2,9 @@
 diagnostics fields.
 
 Schema-only contract tests (no DB / no solver): the ``"regime_aware"`` objective
-is accepted by ``OptimizeRequest`` with no extra required field (bands derive
-from the regime), and ``DiagnosticsOut`` carries the additive regime fields
+is accepted by ``OptimizeRequest`` with no extra required client-side CVaR field
+(bands and hard CVaR derive from the calibrated profile), and ``DiagnosticsOut``
+carries the additive regime fields
 (``quadrant`` / ``class_bands`` / ``haven_tilt`` / ``beta_cap``; the legacy
 ``combined_regime`` was retired in Task 9 — the orthogonal quadrant/gate model).
 """
@@ -25,8 +26,8 @@ def test_regime_aware_is_valid_objective() -> None:
 
 
 def test_regime_aware_needs_no_extra_required_field() -> None:
-    """regime_aware derives its bands from the regime, so no ``cvar_limit``
-    (unlike ``max_return_cvar``) and no ``block_budgets`` are required."""
+    """regime_aware derives bands and CVaR from the calibrated profile, so no
+    client ``cvar_limit`` (unlike ``max_return_cvar``) is required."""
     req = OptimizeRequest.model_validate(
         {
             "assets": [
@@ -38,6 +39,25 @@ def test_regime_aware_needs_no_extra_required_field() -> None:
     )
     assert req.objective == "regime_aware"
     assert req.cvar_limit is None
+    assert req.profile == "moderate"
+
+
+def test_regime_aware_rejects_client_cvar_limit() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="CVaR is calibrated by profile"):
+        OptimizeRequest.model_validate(
+            {
+                "assets": [
+                    {"kind": "fund", "id": "00000000-0000-0000-0000-000000000001"},
+                    {"kind": "fund", "id": "00000000-0000-0000-0000-000000000002"},
+                ],
+                "objective": "regime_aware",
+                "profile": "conservative",
+                "cvar_limit": 0.01,
+            }
+        )
 
 
 def test_diagnostics_has_regime_fields() -> None:
@@ -68,8 +88,7 @@ def test_diagnostics_has_no_combined_regime_field() -> None:
 
 
 def test_diagnostics_exposes_beta_cap_field() -> None:
-    # The aggregate portfolio-beta cap is EXPOSED for telemetry (RELEASE GATE): it is
-    # a target, NOT guaranteed until Plan C compiles the LinearConstraint.
+    # The aggregate portfolio-beta cap is enforced by the compiled two-level book.
     from app.schemas.builder import DiagnosticsOut
 
     assert "beta_cap" in DiagnosticsOut.model_fields

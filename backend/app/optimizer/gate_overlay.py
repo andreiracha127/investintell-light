@@ -48,7 +48,7 @@ GATE_OVERLAY_SHAPE = GateOverlayShape(
     risk_assets_reduction=0.10,
 )
 
-# Per-profile intensity ladder (seed): the more aggressive the mandate, the
+# Per-profile intensity ladder (seed): the more aggressive the profile, the
 # harder the risk-off brake. bl_view_confidence_multiplier fixed 0.0 (spec §24).
 PROFILE_GATE_POLICIES: dict[str, ProfileGatePolicy] = {
     "aggressive": ProfileGatePolicy(intensity=1.00, bl_view_confidence_multiplier=0.0),
@@ -57,7 +57,7 @@ PROFILE_GATE_POLICIES: dict[str, ProfileGatePolicy] = {
 }
 
 # Per-profile AGGREGATE portfolio-beta cap ladder (seed; calibrated in A4). This is
-# the mandate-level β_portfolio ≤ cap; it is a NEW, independent concept from the
+# the profile-level β_portfolio ≤ cap; it is a NEW, independent concept from the
 # per-instrument throttle in taa_bands.beta_graduated_caps (which is preserved as-is).
 # Monotone: aggressive admits more aggregate beta than conservative.
 PROFILE_PORTFOLIO_BETA_CAPS: dict[str, float] = {

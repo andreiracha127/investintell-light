@@ -14,6 +14,22 @@ the excluded ones — Balanced / Target Date / Defined Outcome / Leveraged / Cry
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+MAPPING_VERSION = "regime-category-map-v1"
+
+
+@dataclass(frozen=True)
+class CategorySpec:
+    """Stable economic category used by the regime-aware two-level compiler."""
+
+    category_id: str
+    sleeve_id: str
+    benchmark_ticker: str
+    display_label: str
+    strategy_aliases: tuple[str, ...]
+    mapping_version: str = MAPPING_VERSION
+
 # strategy_label -> category proxy ETF. Labels outside the sleeve design
 # (Balanced/Target Date/Defined Outcome/Leveraged/Crypto/Unclassified/Multi-Asset
 # blends) are intentionally absent -> they resolve via ``asset_class``.
@@ -85,12 +101,133 @@ GROUP_BENCHMARK: dict[str, str] = {
     "alternatives": "QAI", "gold": "GLD", "long_short": "FTLS",
 }
 
-# Authorized proxy fill for a floored sleeve with no eligible fund: gold has no
-# fund label at all; long_short has few funds. NO hedge (SH research-only).
-GROUP_PROXY_FILL: dict[str, list[str]] = {"gold": ["GLD"], "long_short": ["FTLS"]}
+_CATEGORY_ID_BY_PROXY: dict[str, str] = {
+    "BIL": "CASH_USD/BIL",
+    "IVV": "EQUITY_US_LARGE/IVV",
+    "QQQ": "EQUITY_US_GROWTH/QQQ",
+    "VOOV": "EQUITY_US_VALUE/VOOV",
+    "SCHM": "EQUITY_US_MID/SCHM",
+    "IWP": "EQUITY_US_MID_GROWTH/IWP",
+    "IWS": "EQUITY_US_MID_VALUE/IWS",
+    "IWM": "EQUITY_US_SMALL/IWM",
+    "IWO": "EQUITY_US_SMALL_GROWTH/IWO",
+    "IWN": "EQUITY_US_SMALL_VALUE/IWN",
+    "IEFA": "EQUITY_INTL_DEVELOPED/IEFA",
+    "IEMG": "EQUITY_EMERGING/IEMG",
+    "VT": "EQUITY_GLOBAL/VT",
+    "ESGV": "EQUITY_ESG/ESGV",
+    "AAXJ": "EQUITY_ASIA/AAXJ",
+    "FEZ": "EQUITY_EUROPE/FEZ",
+    "XLK": "THEMATIC_TECH/XLK",
+    "XLE": "THEMATIC_ENERGY/XLE",
+    "XLV": "THEMATIC_HEALTHCARE/XLV",
+    "XLF": "THEMATIC_FINANCIALS/XLF",
+    "XLI": "THEMATIC_INDUSTRIALS/XLI",
+    "IFRA": "THEMATIC_INFRASTRUCTURE/IFRA",
+    "XLB": "THEMATIC_MATERIALS/XLB",
+    "GUNR": "THEMATIC_NATURAL_RESOURCES/GUNR",
+    "XLY": "THEMATIC_CONSUMER_DISCRETIONARY/XLY",
+    "IBB": "THEMATIC_BIOTECH/IBB",
+    "XLU": "THEMATIC_UTILITIES/XLU",
+    "XLC": "THEMATIC_COMMUNICATIONS/XLC",
+    "XLP": "THEMATIC_CONSUMER_STAPLES/XLP",
+    "EQL": "THEMATIC_SECTOR_ROTATION/EQL",
+    "ICLN": "THEMATIC_CLEAN_ENERGY/ICLN",
+    "LQD": "FIXED_INCOME_IG_CREDIT/LQD",
+    "GOVT": "FIXED_INCOME_US_GOVT/GOVT",
+    "HYG": "FIXED_INCOME_HIGH_YIELD/HYG",
+    "MUB": "FIXED_INCOME_MUNICIPAL/MUB",
+    "VCEB": "FIXED_INCOME_ESG/VCEB",
+    "BND": "FIXED_INCOME_CORE/BND",
+    "EMB": "FIXED_INCOME_EM_DEBT/EMB",
+    "PAAA": "FIXED_INCOME_STRUCTURED/PAAA",
+    "MBB": "FIXED_INCOME_MBS/MBB",
+    "PFF": "FIXED_INCOME_PREFERRED/PFF",
+    "DEED": "FIXED_INCOME_ABS/DEED",
+    "ICVT": "FIXED_INCOME_CONVERTIBLE/ICVT",
+    "TIP": "FIXED_INCOME_TIPS/TIP",
+    "BIZD": "FIXED_INCOME_PRIVATE_CREDIT/BIZD",
+    "VNQ": "ALTERNATIVES_REAL_ESTATE/VNQ",
+    "GCC": "ALTERNATIVES_COMMODITIES/GCC",
+    "QAI": "ALTERNATIVES_MULTI_STRATEGY/QAI",
+    "AOR": "ALTERNATIVES_MULTI_ASSET/AOR",
+    "RING": "ALTERNATIVES_PRECIOUS_METALS/RING",
+    "GLD": "GOLD/GLD",
+    "FTLS": "LONG_SHORT_EQUITY/FTLS",
+}
+
+_DISPLAY_LABEL_BY_PROXY: dict[str, str] = {
+    proxy: category_id.split("/", 1)[0].replace("_", " ").title()
+    for proxy, category_id in _CATEGORY_ID_BY_PROXY.items()
+}
+
+
+def _aliases_by_proxy() -> dict[str, list[str]]:
+    aliases: dict[str, list[str]] = {proxy: [] for proxy in PROXY_TO_GROUP}
+    for label, proxy in LABEL_TO_PROXY.items():
+        aliases.setdefault(proxy, []).append(label)
+    return aliases
+
+
+_ALIASES_BY_PROXY = _aliases_by_proxy()
+
+CATEGORY_SPECS: tuple[CategorySpec, ...] = tuple(
+    CategorySpec(
+        category_id=_CATEGORY_ID_BY_PROXY[proxy],
+        sleeve_id=PROXY_TO_GROUP[proxy],
+        benchmark_ticker=proxy,
+        display_label=_DISPLAY_LABEL_BY_PROXY[proxy],
+        strategy_aliases=tuple(sorted(_ALIASES_BY_PROXY.get(proxy, []))),
+    )
+    for proxy in sorted(PROXY_TO_GROUP)
+)
+
+CATEGORY_BY_PROXY: dict[str, CategorySpec] = {
+    spec.benchmark_ticker: spec for spec in CATEGORY_SPECS
+}
+CATEGORY_BY_STRATEGY_ALIAS: dict[str, CategorySpec] = {
+    alias: spec for spec in CATEGORY_SPECS for alias in spec.strategy_aliases
+}
+
+# Authorized proxy fills for ``complete_macro``. These are the only proxies the
+# backend may activate when an economic sleeve needs an implementation. NO hedge
+# (SH research-only).
+GROUP_PROXY_FILL: dict[str, list[str]] = {
+    "cash": ["BIL"],
+    "equity": ["IVV"],
+    "fixed_income": ["GOVT", "LQD", "HYG", "TIP", "BND"],
+    "thematic": ["XLK"],
+    "alternatives": ["QAI"],
+    "gold": ["GLD"],
+    "long_short": ["FTLS"],
+}
 
 # The lenient 4-class fallback (production ``load_fund_asset_class`` taxonomy).
 _FALLBACK_CLASSES = frozenset({"cash", "equity", "fixed_income", "alternatives"})
+
+
+def category_for_proxy(proxy: str) -> CategorySpec:
+    """Resolve an authorized proxy ticker to its canonical category."""
+    ticker = proxy.upper()
+    if ticker in CATEGORY_BY_PROXY:
+        return CATEGORY_BY_PROXY[ticker]
+    return CATEGORY_BY_PROXY[GROUP_BENCHMARK["equity"]]
+
+
+def category_for_fund(
+    strategy_label: str | None, asset_class: str | None
+) -> CategorySpec:
+    """Resolve fund taxonomy to a stable economic category.
+
+    Fine-grained strategy aliases win. Unknown labels fall back to the lenient
+    4-class asset class. Inverse / Hedge and SH are intentionally absent from the
+    taxonomy, so they never become policy-core categories.
+    """
+    if strategy_label and strategy_label in CATEGORY_BY_STRATEGY_ALIAS:
+        return CATEGORY_BY_STRATEGY_ALIAS[strategy_label]
+    if asset_class and asset_class in _FALLBACK_CLASSES:
+        return CATEGORY_BY_PROXY[GROUP_BENCHMARK[asset_class]]
+    return CATEGORY_BY_PROXY[GROUP_BENCHMARK["equity"]]
 
 
 def fund_sleeve_group(strategy_label: str | None, asset_class: str | None) -> str:
@@ -104,8 +241,4 @@ def fund_sleeve_group(strategy_label: str | None, asset_class: str | None) -> st
     produces a ``"hedge"`` sleeve. ``"gold"`` is never produced here (no label maps
     to GLD); it enters only via ``GROUP_PROXY_FILL``.
     """
-    if strategy_label and strategy_label in LABEL_TO_GROUP:
-        return LABEL_TO_GROUP[strategy_label]
-    if asset_class and asset_class in _FALLBACK_CLASSES:
-        return asset_class
-    return "equity"
+    return category_for_fund(strategy_label, asset_class).sleeve_id

@@ -101,22 +101,32 @@ def test_views_with_universe_is_rejected() -> None:
         )
 
 
-def test_optimize_request_mandate_defaults_to_none() -> None:
+def test_optimize_request_profile_defaults_to_moderate() -> None:
     req = OptimizeRequest(assets=_assets())
-    assert req.mandate is None
+    assert req.profile == "moderate"
 
 
-def test_optimize_request_accepts_known_mandate() -> None:
-    req = OptimizeRequest(assets=_assets(), mandate="aggressive")
-    assert req.mandate == "aggressive"
+def test_optimize_request_accepts_canonical_profile() -> None:
+    req = OptimizeRequest(assets=_assets(), profile="aggressive")
+    assert req.profile == "aggressive"
 
 
-def test_optimize_request_rejects_unknown_mandate() -> None:
+def test_optimize_request_rejects_noncanonical_profile() -> None:
     import pytest
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
-        OptimizeRequest(assets=_assets(), mandate="not_a_mandate")
+        OptimizeRequest(assets=_assets(), profile="moderate_aggressive")
+
+
+def test_regime_aware_rejects_client_cvar_limit_override() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="CVaR is calibrated by profile"):
+        OptimizeRequest(
+            assets=_assets(), objective="regime_aware", profile="moderate", cvar_limit=0.05
+        )
 
 
 def test_diagnostics_out_view_consistency_defaults_to_none() -> None:

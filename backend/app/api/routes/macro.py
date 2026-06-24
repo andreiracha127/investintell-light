@@ -36,7 +36,7 @@ router = APIRouter(tags=["macro"])
 
 DETECTOR_NAME = "vote2of3"
 
-_MACRO_DISPLAY_PROFILE = "moderate"  # informational block; not the builder mandate
+_MACRO_DISPLAY_PROFILE = "moderate"  # informational block; not a builder input
 
 
 def _distance_pct(ratio: float | None, p20_5y: float | None) -> float | None:

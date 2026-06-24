@@ -67,16 +67,7 @@ Objective = Literal[
     "bl_utility", "max_return_cvar", "regime_aware",
 ]
 
-Mandate = Literal[
-    "conservative",
-    "defensive",
-    "moderate_conservative",
-    "moderate",
-    "balanced",
-    "moderate_aggressive",
-    "aggressive",
-    "growth",
-]
+Profile = Literal["conservative", "moderate", "aggressive"]
 
 # Candidate-universe selection vocabulary — mirrors the GET /funds filters and
 # sort whitelist so a universe optimization reuses the same catalog semantics.
@@ -202,9 +193,12 @@ class OptimizeRequest(BaseModel):
     # size (AUM for funds, market cap for equities).
     views: list[ViewIn] | None = None
     bl: BLParamsIn = BLParamsIn()
-    # Optional investor mandate; resolves the BL risk-aversion (delta) ladder.
-    # An explicit bl.delta override still wins (see app.optimizer.mandate).
-    mandate: Mandate | None = None
+    # Canonical policy profile. For ``regime_aware`` this is the ONLY calibrated
+    # risk selector: sleeve bands, gamma, CVaR safety cap, beta cap and gate
+    # intensity all derive from these three profile masters. Portfolio-specific
+    # IPS/mandate constraints are represented as construction constraints, not as
+    # a second calibration axis.
+    profile: Profile = "moderate"
     # L1 turnover penalty λ·‖w − w₀‖₁ on the min_cvar objective. Requires
     # ``current_weights`` (asset-label -> decimal fraction, label scheme
     # 'fund:<uuid>' / 'equity:<TICKER>'). v1: honoured only by min_cvar.
@@ -215,6 +209,10 @@ class OptimizeRequest(BaseModel):
     # scenarios, so this is a *daily* limit — not an annualised figure.
     # Required for that objective, ignored otherwise.
     cvar_limit: Annotated[float, Field(gt=0, le=1)] | None = None
+    # Regime-aware universe completion policy. ``complete_macro`` activates only
+    # authorized sleeve proxies needed by the effective policy; ``strict`` fails
+    # loud when a required sleeve has no selected implementation.
+    universe_policy: Literal["complete_macro", "strict"] = "complete_macro"
 
     @model_validator(mode="after")
     def _check_asset_source(self) -> "OptimizeRequest":
@@ -238,6 +236,11 @@ class OptimizeRequest(BaseModel):
             )
         if self.objective == "max_return_cvar" and self.cvar_limit is None:
             raise ValueError("max_return_cvar requires a cvar_limit (tail-loss cap)")
+        if self.objective == "regime_aware" and self.cvar_limit is not None:
+            raise ValueError(
+                "regime_aware CVaR is calibrated by profile; use construction "
+                "constraints for portfolio-specific IPS overrides"
+            )
         return self
 
 
@@ -313,10 +316,9 @@ class DiagnosticsOut(BaseModel):
     quadrant: str | None = None
     class_bands: dict[str, list[float]] | None = None
     haven_tilt: dict[str, float] | None = None
-    # AGGREGATE portfolio-beta cap TARGET (β_portfolio ≤ beta_cap) from the
-    # EffectiveRegimePolicy gate overlay — present on the regime_aware path.
-    # EXPOSED for telemetry only; NOT enforced until Plan C compiles it into a
-    # LinearConstraint (RELEASE GATE). Do not treat as a guarantee.
+    # AGGREGATE portfolio-beta cap (β_portfolio ≤ beta_cap) from the
+    # EffectiveRegimePolicy gate overlay — enforced on the regime_aware compiled
+    # two-level book and surfaced for diagnostics.
     beta_cap: float | None = None
     # Present only on the regime_aware TWO-LEVEL path (COMBO S4b): the Level-1
     # per-sleeve category weights (book B), against which the fund-level weights

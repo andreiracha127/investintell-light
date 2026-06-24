@@ -1071,7 +1071,7 @@ def solve_bl_utility_cvar(
         s.t. CVaR_α(w) ≤ cvar_limit, long-only, sum(w)=1, caps/min/blocks/linear.
 
     This is the calibrated COMBO Level-1 objective (BL max-utility, not min-CVaR):
-    ``gamma`` (the per-mandate risk aversion ladder) shapes the return/risk tilt
+    ``gamma`` (the calibrated profile risk aversion) shapes the return/risk tilt
     while the CVaR constraint is the hard tail cap. ``gamma`` is unit-invariant as
     long as ``mu`` and ``sigma`` share units (both daily OR both annual — the
     first-order weights are identical); ``cvar_limit`` and ``scenarios`` are in the

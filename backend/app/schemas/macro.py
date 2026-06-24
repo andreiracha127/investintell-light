@@ -64,7 +64,7 @@ class MacroQuadrantOut(BaseModel):
     ``regime_gate_daily`` (decision A — worker-materialized; the backend lacks
     TIP/IEF). The quadrant and the gate are ORTHOGONAL (spec §12): ``bands`` are
     the per-sleeve ``policy_bands`` of ``QUADRANT_POLICIES["moderate"][quadrant]``
-    (the display profile; informational, not the builder mandate), and the gate is
+    (the display profile; informational, not a builder input), and the gate is
     reported in ``gate`` but does not fold into the bands here. ``bands`` is empty
     when the quadrant is not consumable. ``haven_tilt`` is a legacy field that is
     always ``None`` (the goldfix haven was retired with the orthogonal model).

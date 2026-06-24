@@ -69,13 +69,33 @@ def test_group_benchmark_covers_every_sleeve() -> None:
         assert sleeves.PROXY_TO_GROUP[proxy] == g
 
 
-def test_proxy_fill_is_authorized_only_for_gold_and_long_short() -> None:
-    """gold (never a fund) and long_short (few funds) get an authorized fill;
+def test_proxy_fill_is_authorized_for_every_policy_sleeve() -> None:
+    """complete_macro may fill any missing policy sleeve with its authorized proxy;
     each fill proxy belongs to its sleeve."""
-    assert set(sleeves.GROUP_PROXY_FILL) == {"gold", "long_short"}
+    assert set(sleeves.GROUP_PROXY_FILL) == set(sleeves.SLEEVE_GROUPS)
     for g, fills in sleeves.GROUP_PROXY_FILL.items():
         for px in fills:
             assert sleeves.PROXY_TO_GROUP[px] == g
+
+
+def test_fixed_income_proxy_fills_cover_product_categories() -> None:
+    assert sleeves.GROUP_PROXY_FILL["fixed_income"] == [
+        "GOVT", "LQD", "HYG", "TIP", "BND"
+    ]
+
+
+def test_canonical_category_consolidates_cash_aliases() -> None:
+    cash = sleeves.category_for_fund("Cash Equivalent", None)
+    gov_mm = sleeves.category_for_fund("Government Money Market", None)
+    assert cash.category_id == "CASH_USD/BIL"
+    assert gov_mm.category_id == cash.category_id
+
+
+def test_precious_metals_maps_to_alternatives_not_gold() -> None:
+    spec = sleeves.category_for_fund("Precious Metals", None)
+    assert spec.benchmark_ticker == "RING"
+    assert spec.sleeve_id == "alternatives"
+    assert sleeves.category_for_proxy("GLD").sleeve_id == "gold"
 
 
 def test_label_to_group_consistency() -> None:

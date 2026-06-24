@@ -255,7 +255,7 @@ def test_level2_total_weight_is_conserved() -> None:
 # (>=4 risk sleeves so the momentum view fires; gold/long_short are proxy-only).
 _TL_IDS = [uuid.UUID(f"00000000-0000-0000-0000-0000000002{i:02d}") for i in range(5)]
 _TL_STRATEGY = {
-    _TL_IDS[0]: "Large Blend", _TL_IDS[1]: "Large Growth",       # equity, equity
+    _TL_IDS[0]: "Large Blend", _TL_IDS[1]: "Index / Passive",    # same IVV category
     _TL_IDS[2]: "Technology",                                    # thematic
     _TL_IDS[3]: "Government Bond",                               # fixed_income
     _TL_IDS[4]: "Real Estate",                                  # alternatives
@@ -372,13 +372,62 @@ def _stub_two_level_world(
     )
 
 
-def _tl_payload(mandate: str = "moderate") -> dict[str, Any]:
+def _tl_payload(profile: str = "moderate") -> dict[str, Any]:
     return {
         "assets": [{"kind": "fund", "id": str(fid)} for fid in _TL_IDS],
         "objective": "regime_aware",
-        "mandate": mandate,
+        "profile": profile,
         "constraints": {"cap": 1.0},
     }
+
+
+async def _compile_stub_problem(
+    monkeypatch: Any,
+    *,
+    constraints: dict[str, Any] | None = None,
+    universe_policy: str = "complete_macro",
+    spy_signal: Any | None = None,
+):
+    dates = [dt.date(2024, 1, 2) + dt.timedelta(days=i) for i in range(500)]
+    index = pd.Index(dates)
+    assets = [pb.FundRefIn(kind="fund", id=fid) for fid in _TL_IDS]
+    labels = [pb._ref_key(a) for a in assets]
+
+    def _levels(ticker: str) -> list[float]:
+        rng = np.random.default_rng(sum(ord(c) for c in ticker))
+        lvl, out = 100.0, []
+        for r in rng.normal(0.0003, 0.01, len(index)):
+            lvl *= 1.0 + r
+            out.append(lvl)
+        return out
+
+    async def fake_rows(session: Any, ticker: str, start: Any, end: Any) -> list[tuple]:
+        return [(d, float(p)) for d, p in zip(dates, _levels(ticker), strict=True)]
+
+    async def fake_strategy(session: Any, fund_ids: list) -> dict:
+        return {fid: _TL_STRATEGY.get(fid) for fid in fund_ids}
+
+    async def fake_class(session: Any, fund_ids: list) -> dict:
+        return {fid: _TL_CLASS.get(fid) for fid in fund_ids}
+
+    monkeypatch.setattr(pb, "select_adj_close_rows", fake_rows)
+    monkeypatch.setattr(optimizer_data, "load_fund_strategy_label", fake_strategy)
+    monkeypatch.setattr(optimizer_data, "load_fund_asset_class", fake_class)
+    monkeypatch.setattr(pb, "_load_spy_signal", spy_signal or _async(([], None)))
+
+    from app.schemas.builder import OptimizeRequest
+
+    payload = OptimizeRequest(
+        assets=assets,
+        objective="regime_aware",
+        profile="moderate",
+        constraints=constraints or {},
+        universe_policy=universe_policy,
+    )
+    return await pb._compile_regime_problem(
+        object(), None, assets, labels, index,
+        _eff_policy("moderate", "recovery"), payload,
+    )
 
 
 async def test_two_level_activates_and_exposes_category_weights(monkeypatch: Any) -> None:
@@ -410,9 +459,8 @@ async def test_two_level_injects_gold_proxy_holding(monkeypatch: Any) -> None:
     assert abs(sum(w["weight"] for w in body["weights"]) - 1.0) < 1e-6
 
 
-async def test_two_level_funds_in_same_sleeve_are_equal_weight(monkeypatch: Any) -> None:
-    """The two equity funds split the equity sleeve weight equally (Level-2 is
-    equal-weight, no re-optimization)."""
+async def test_two_level_funds_in_same_category_are_equal_weight(monkeypatch: Any) -> None:
+    """Two funds in the same canonical category split that category equally."""
     _stub_two_level_world(monkeypatch)
     async with _client() as client:
         resp = await client.post("/builder/optimize", json=_tl_payload())
@@ -425,15 +473,14 @@ async def test_two_level_funds_in_same_sleeve_are_equal_weight(monkeypatch: Any)
 
 
 async def test_two_level_without_proxies_fails_loud(monkeypatch: Any) -> None:
-    """No live proxies (loader returns {}) -> the two-level can't be built. The
-    orthogonal model RETIRES the S4a single-level fallback (Task 7): regime_aware
-    that can't be produced is a structured 422 no-trade, never weights."""
+    """No live proxy history for required fills is a structured 422 no-trade."""
     _stub_two_level_world(monkeypatch)
     monkeypatch.setattr(pb, "_load_proxy_returns", _async({}))  # no proxies
     async with _client() as client:
         resp = await client.post("/builder/optimize", json=_tl_payload())
     assert resp.status_code == 422, resp.text
-    assert "two-level solve could not be built" in resp.text
+    assert "POLICY_INFEASIBLE" in resp.text
+    assert "missing return history for active proxy" in resp.text
 
 
 async def test_two_level_band_state_comes_from_quadrant_not_gate(monkeypatch: Any) -> None:
@@ -633,7 +680,7 @@ async def test_two_level_reached_with_production_object_date_index(monkeypatch: 
     monkeypatch.setattr(optimizer_data, "load_fund_asset_class", fake_class)
 
     payload = OptimizeRequest(
-        assets=assets, objective="regime_aware", mandate="moderate"
+        assets=assets, objective="regime_aware", profile="moderate"
     )
     result = await pb._solve_regime_two_level(
         object(), assets, labels, index, _eff_policy("moderate", "expansion"), payload
@@ -692,10 +739,11 @@ def test_two_level_uses_quadrant_policy_bands(monkeypatch: Any) -> None:
     monkeypatch.setattr(pb, "select_adj_close_rows", fake_rows)
     monkeypatch.setattr(optimizer_data, "load_fund_strategy_label", fake_strategy)
     monkeypatch.setattr(optimizer_data, "load_fund_asset_class", fake_class)
+    monkeypatch.setattr(pb, "_load_spy_signal", _async(([], None)))
 
     from app.schemas.builder import OptimizeRequest
 
-    payload = OptimizeRequest(assets=assets, objective="regime_aware", mandate="moderate")
+    payload = OptimizeRequest(assets=assets, objective="regime_aware", profile="moderate")
     result = asyncio.run(
         pb._solve_regime_two_level(
             object(), assets, labels, index, _eff_policy("moderate", "recovery"), payload
@@ -705,6 +753,157 @@ def test_two_level_uses_quadrant_policy_bands(monkeypatch: Any) -> None:
     expected = qp.policy_bands(qp.QUADRANT_POLICIES["moderate"]["recovery"])
     for sleeve, (lo, hi) in result.sleeve_bands.items():
         assert (lo, hi) == pytest.approx(expected[sleeve])
+
+
+def test_complete_macro_adds_fixed_income_categories_for_capacity(
+    monkeypatch: Any,
+) -> None:
+    """FI is a sleeve, not one GOVT category. With the default 25% instrument cap
+    and a moderate/recovery FI floor above 25%, complete_macro must activate
+    another authorized FI category proxy instead of declaring the policy
+    infeasible."""
+    dates = [dt.date(2024, 1, 2) + dt.timedelta(days=i) for i in range(500)]
+    index = pd.Index(dates)
+    assets = [pb.FundRefIn(kind="fund", id=fid) for fid in _TL_IDS]
+    labels = [pb._ref_key(a) for a in assets]
+
+    def _levels(ticker: str) -> list[float]:
+        rng = np.random.default_rng(sum(ord(c) for c in ticker))
+        lvl, out = 100.0, []
+        for r in rng.normal(0.0003, 0.01, len(index)):
+            lvl *= 1.0 + r
+            out.append(lvl)
+        return out
+
+    async def fake_rows(session: Any, ticker: str, start: Any, end: Any) -> list[tuple]:
+        return [(d, float(p)) for d, p in zip(dates, _levels(ticker), strict=True)]
+
+    async def fake_strategy(session: Any, fund_ids: list) -> dict:
+        return {fid: _TL_STRATEGY.get(fid) for fid in fund_ids}
+
+    async def fake_class(session: Any, fund_ids: list) -> dict:
+        return {fid: _TL_CLASS.get(fid) for fid in fund_ids}
+
+    monkeypatch.setattr(pb, "select_adj_close_rows", fake_rows)
+    monkeypatch.setattr(optimizer_data, "load_fund_strategy_label", fake_strategy)
+    monkeypatch.setattr(optimizer_data, "load_fund_asset_class", fake_class)
+    monkeypatch.setattr(pb, "_load_spy_signal", _async(([], None)))
+
+    from app.schemas.builder import OptimizeRequest
+
+    payload = OptimizeRequest(assets=assets, objective="regime_aware", profile="moderate")
+    problem, active, _ = asyncio.run(
+        pb._compile_regime_problem(
+            object(), None, assets, labels, index,
+            _eff_policy("moderate", "recovery"), payload,
+        )
+    )
+    fi_categories = [
+        cid
+        for cid, sleeve in zip(
+            problem.category_ids, problem.category_sleeve_ids, strict=True
+        )
+        if sleeve == "fixed_income"
+    ]
+    assert "FIXED_INCOME_US_GOVT/GOVT" in fi_categories
+    assert len(fi_categories) >= 2
+    lqd_idx = next(i for i, item in enumerate(active) if item.label == "equity:LQD")
+    assert problem.daily_returns.shape[1] == len(active)
+    assert np.isfinite(problem.daily_returns[:, lqd_idx]).all()
+
+
+def test_complete_macro_does_not_add_fi_proxy_when_capacity_is_enough(
+    monkeypatch: Any,
+) -> None:
+    problem, active, _ = asyncio.run(
+        _compile_stub_problem(monkeypatch, constraints={"cap": 1.0})
+    )
+    assert "FIXED_INCOME_US_GOVT/GOVT" in problem.category_ids
+    assert "FIXED_INCOME_IG_CREDIT/LQD" not in problem.category_ids
+    assert all(item.label != "equity:LQD" for item in active)
+
+
+def test_strict_missing_required_sleeves_fails_loud(monkeypatch: Any) -> None:
+    with pytest.raises(pb.MissingRequiredSleevesError, match="MISSING_REQUIRED_SLEEVES"):
+        asyncio.run(
+            _compile_stub_problem(
+                monkeypatch, constraints={"cap": 1.0}, universe_policy="strict"
+            )
+        )
+
+
+def test_min_weight_compiles_per_final_instrument_not_category(
+    monkeypatch: Any,
+) -> None:
+    problem, _active, _ = asyncio.run(
+        _compile_stub_problem(monkeypatch, constraints={"cap": 1.0, "min_weight": 0.02})
+    )
+    equity_idx = problem.category_ids.index("EQUITY_US_LARGE/IVV")
+    floor_rows = [
+        lc
+        for lc in problem.linear_constraints
+        if lc.label.startswith("instrument_floor:fund:")
+        and lc.coef[equity_idx] > 0
+    ]
+    assert len(floor_rows) == 2
+    assert [row.lo for row in floor_rows] == [0.02, 0.02]
+    assert [row.coef[equity_idx] for row in floor_rows] == pytest.approx([0.5, 0.5])
+
+
+def test_primary_and_fallback_receive_identical_compiled_constraints(
+    monkeypatch: Any,
+) -> None:
+    problem, _active, _ = asyncio.run(
+        _compile_stub_problem(monkeypatch, constraints={"cap": 1.0})
+    )
+    pb._preflight_compiled_problem(problem)
+    seen: dict[str, list[str]] = {}
+
+    def fake_primary(*_args: Any, **kwargs: Any):
+        seen["primary"] = [lc.label for lc in kwargs["linear"]]
+        raise pb.engine.OptimizerError("force fallback")
+
+    def fake_fallback(*args: Any, **kwargs: Any):
+        seen["fallback"] = [lc.label for lc in kwargs["linear"]]
+        n = args[0].shape[1]
+        return np.full(n, 1.0 / n), "optimal"
+
+    monkeypatch.setattr(pb.engine, "solve_bl_utility_cvar", fake_primary)
+    monkeypatch.setattr(pb.engine, "solve_min_cvar", fake_fallback)
+    pb._solve_compiled_regime_problem(
+        problem,
+        gamma=4.75,
+        gate_state="risk_on",
+        view_confidence_multiplier=1.0,
+    )
+    assert seen["primary"] == seen["fallback"]
+    assert problem.signature
+
+
+def test_beta_cap_compiles_when_spy_signal_is_available(monkeypatch: Any) -> None:
+    spy = np.linspace(-0.01, 0.01, 500)
+
+    async def fake_spy_signal(*_args: Any, **_kwargs: Any):
+        return [100.0] * 500, spy
+
+    problem, _active, _ = asyncio.run(
+        _compile_stub_problem(
+            monkeypatch, constraints={"cap": 1.0}, spy_signal=fake_spy_signal
+        )
+    )
+    beta_rows = [
+        lc for lc in problem.linear_constraints if lc.label == "portfolio_beta_cap"
+    ]
+    assert len(beta_rows) == 1
+    assert beta_rows[0].hi == pytest.approx(_eff_policy("moderate", "recovery").beta_cap)
+
+
+def test_post_verify_constraint_violation_fails_loud(monkeypatch: Any) -> None:
+    problem, _active, _ = asyncio.run(
+        _compile_stub_problem(monkeypatch, constraints={"cap": 1.0})
+    )
+    with pytest.raises(pb.ConstraintViolationError, match="CONSTRAINT_VIOLATION"):
+        pb._post_verify_compiled_solution(problem, np.zeros(len(problem.category_ids)))
 
 
 # ── N1: enforce risk_assets_cap / defensive_floor in the Level-1 solve ───────
@@ -943,4 +1142,3 @@ def test_combined_regime_removed_from_builder_solve_path() -> None:
         "_fund_class_columns", "_regime_sleeve_groups", "_COMBO_BAND_CLASSES",
     ):
         assert not hasattr(pb, name), f"portfolio_builder.{name} should be retired"
-

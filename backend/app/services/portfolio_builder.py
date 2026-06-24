@@ -30,10 +30,13 @@ are rejected with the explicit list. The caller decides what to exclude.
 """
 
 import datetime as dt
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass
 from typing import cast
 
+import cvxpy as cp
 import numpy as np
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,10 +48,9 @@ from app.optimizer import engine, momentum_view, sleeves
 from app.optimizer import selection as optimizer_selection
 from app.optimizer.dates import coerce_date
 from app.optimizer.mandate import (
-    normalise_mandate,
-    resolve_cvar_limit,
     resolve_delta,
-    resolve_gamma,
+    resolve_profile_cvar_limit,
+    resolve_profile_gamma,
 )
 from app.schemas.builder import (
     AbsoluteViewIn,
@@ -205,6 +207,59 @@ class PolicyInfeasibleError(BuilderError):
     ``QuadrantUnavailableError`` (no consumable quadrant/proxies) — here the
     quadrant IS consumable but the policy itself is infeasible.
     """
+
+
+class MissingRequiredSleevesError(BuilderError):
+    """Strict universe lacks a sleeve required by the effective policy."""
+
+
+class SolverFailedError(BuilderError):
+    """No solver objective produced a usable point under the compiled policy."""
+
+
+class ConstraintViolationError(BuilderError):
+    """A solved book failed post-verification; no weights may be published."""
+
+
+@dataclass(frozen=True)
+class _ActiveInstrument:
+    instrument_id: str
+    label: str
+    ref: FundRefIn | EquityRefIn
+    category_id: str
+    sleeve_id: str
+    returns: np.ndarray
+    is_proxy_fill: bool = False
+
+
+@dataclass(frozen=True)
+class CompiledRegimeProblem:
+    """Immutable two-level problem for the regime-aware compiler.
+
+    ``x`` lives in canonical economic categories. ``S`` maps categories to the
+    seven policy sleeves and ``M`` maps categories to deduplicated final
+    instruments, so the published book is always ``y = Mx``.
+    """
+
+    category_ids: tuple[str, ...]
+    category_sleeve_ids: tuple[str, ...]
+    sleeve_ids: tuple[str, ...]
+    instrument_ids: tuple[str, ...]
+    instrument_labels: tuple[str, ...]
+    S: np.ndarray
+    M: np.ndarray
+    daily_returns: np.ndarray
+    category_returns: np.ndarray
+    return_dates: tuple[str, ...]
+    bounds: engine.BoundsBundle
+    linear_constraints: tuple[engine.LinearConstraint, ...]
+    cvar_alpha: float
+    cvar_limit: float
+    min_weight: float | None
+    tolerances: dict[str, float]
+    as_of: str
+    mapping_version: str
+    signature: str
 
 
 def _as_builder_error(exc: effective_policy.EffectivePolicyError) -> BuilderError:
@@ -581,6 +636,566 @@ def _aggregate_policy_constraints(
     return out
 
 
+def _return_dates(index: "pd.Index") -> tuple[str, ...]:
+    return tuple(coerce_date(value).isoformat() for value in index)
+
+
+def _linear_on_categories(
+    label: str,
+    coef: np.ndarray,
+    *,
+    lo: float | None = None,
+    hi: float | None = None,
+) -> engine.LinearConstraint:
+    return engine.LinearConstraint(
+        coef=np.asarray(coef, dtype=float).ravel(), lo=lo, hi=hi, label=label
+    )
+
+
+def _compiled_signature(
+    *,
+    category_ids: tuple[str, ...],
+    instrument_ids: tuple[str, ...],
+    M: np.ndarray,
+    return_dates: tuple[str, ...],
+    linear: tuple[engine.LinearConstraint, ...],
+    mapping_version: str,
+) -> str:
+    constraints = [
+        {
+            "label": lc.label,
+            "lo": lc.lo,
+            "hi": lc.hi,
+            "coef": np.round(np.asarray(lc.coef, dtype=float), 12).tolist(),
+        }
+        for lc in linear
+    ]
+    payload = {
+        "category_ids": category_ids,
+        "instrument_ids": instrument_ids,
+        "M": np.round(M, 12).tolist(),
+        "return_dates": return_dates,
+        "constraints": constraints,
+        "mapping_version": mapping_version,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _ordered_unique(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            out.append(item)
+    return out
+
+
+def _authorized_proxy_fills(sleeve_id: str) -> list[tuple[str, sleeves.CategorySpec]]:
+    fills = sleeves.GROUP_PROXY_FILL.get(sleeve_id) or []
+    if not fills:
+        raise MissingRequiredSleevesError(
+            f"MISSING_REQUIRED_SLEEVES: no authorized proxy fill for sleeve "
+            f"{sleeve_id!r}"
+        )
+    return [(proxy, sleeves.category_for_proxy(proxy)) for proxy in fills]
+
+
+def _append_next_fill(
+    fill_by_sleeve: dict[str, list[tuple[str, sleeves.CategorySpec]]],
+    active_category_ids: set[str],
+    sleeve_id: str,
+) -> bool:
+    for proxy, spec in _authorized_proxy_fills(sleeve_id):
+        if spec.category_id in active_category_ids:
+            continue
+        fill_by_sleeve.setdefault(sleeve_id, []).append((proxy, spec))
+        active_category_ids.add(spec.category_id)
+        return True
+    return False
+
+
+async def _compile_regime_problem(
+    session: AsyncSession,
+    datalake: AsyncSession | None,
+    assets: list[AssetRefIn],
+    labels: list[str],
+    frame_or_index: "pd.DataFrame | pd.Index",
+    eff_policy: effective_policy.EffectiveRegimePolicy,
+    payload: "OptimizeRequest",
+) -> tuple[CompiledRegimeProblem, tuple[_ActiveInstrument, ...], dict[str, float]]:
+    """Compile the formal two-level problem ``s=Sx`` / ``y=Mx``.
+
+    The active final-instrument set is frozen before caps, floors, beta, overlap
+    and CVaR are compiled. Selected assets are always active. Authorized proxies
+    are activated only for missing required sleeves or for aggregate defensive
+    feasibility.
+    """
+    if isinstance(frame_or_index, pd.DataFrame):
+        frame_index = frame_or_index.index
+        frame_returns = {
+            str(col): frame_or_index[str(col)].to_numpy(dtype=float)
+            for col in frame_or_index.columns
+        }
+    else:
+        frame_index = frame_or_index
+        frame_returns = {}
+
+    bands = {s: (b.lo, b.hi) for s, b in eff_policy.sleeve_budgets.items()}
+    index_of = {label: i for i, label in enumerate(labels)}
+    fund_ids = [ref.id for ref in assets if isinstance(ref, FundRefIn)]
+    strat = await optimizer_data.load_fund_strategy_label(session, fund_ids)
+    cls = await optimizer_data.load_fund_asset_class(session, fund_ids)
+
+    selected: list[tuple[str, FundRefIn | EquityRefIn, sleeves.CategorySpec]] = []
+    selected_sleeves: set[str] = set()
+    selected_counts_by_category: dict[str, int] = {}
+    for ref in assets:
+        label = _ref_key(ref)
+        if label not in index_of:
+            continue
+        if isinstance(ref, FundRefIn):
+            spec = sleeves.category_for_fund(strat.get(ref.id), cls.get(ref.id))
+        else:
+            spec = sleeves.category_for_proxy(ref.ticker)
+        selected.append((label, ref, spec))
+        selected_sleeves.add(spec.sleeve_id)
+        selected_counts_by_category[spec.category_id] = (
+            selected_counts_by_category.get(spec.category_id, 0) + 1
+        )
+    if not selected:
+        raise QuadrantUnavailableError(
+            "regime_aware: two-level solve could not be built for this universe "
+            "(no selected instruments survived return alignment)"
+        )
+
+    fill_by_sleeve: dict[str, list[tuple[str, sleeves.CategorySpec]]] = {}
+    active_category_ids = set(selected_counts_by_category)
+    missing_required = [
+        sleeve_id
+        for sleeve_id in sleeves.SLEEVE_GROUPS
+        if bands[sleeve_id][0] > 1e-12 and sleeve_id not in selected_sleeves
+    ]
+    if missing_required and payload.universe_policy == "strict":
+        missing = ", ".join(sorted(missing_required))
+        raise MissingRequiredSleevesError(
+            f"MISSING_REQUIRED_SLEEVES: strict regime_aware universe lacks "
+            f"required sleeve(s): {missing}"
+        )
+    for sleeve_id in missing_required:
+        if not _append_next_fill(fill_by_sleeve, active_category_ids, sleeve_id):
+            raise MissingRequiredSleevesError(
+                f"MISSING_REQUIRED_SLEEVES: no unused authorized proxy fill for "
+                f"sleeve {sleeve_id!r}"
+            )
+
+    active_sleeves = set(selected_sleeves) | set(fill_by_sleeve)
+    defensive_hi = sum(
+        bands[g][1] for g in _DEFENSIVE_SLEEVES if g in active_sleeves
+    )
+    if defensive_hi + 1e-12 < eff_policy.defensive_floor:
+        for sleeve_id in sleeves.SLEEVE_GROUPS:
+            if sleeve_id not in _DEFENSIVE_SLEEVES or sleeve_id in active_sleeves:
+                continue
+            if not _append_next_fill(fill_by_sleeve, active_category_ids, sleeve_id):
+                continue
+            active_sleeves.add(sleeve_id)
+            defensive_hi += bands[sleeve_id][1]
+            if defensive_hi + 1e-12 >= eff_policy.defensive_floor:
+                break
+
+    if payload.universe_policy == "complete_macro":
+        cap = payload.constraints.cap
+        spec_by_category_id = {spec.category_id: spec for spec in sleeves.CATEGORY_SPECS}
+        category_capacity: dict[str, float] = {}
+        for category_id, count in selected_counts_by_category.items():
+            category_capacity[category_id] = 1.0 if cap is None else min(1.0, cap * count)
+        for fills in fill_by_sleeve.values():
+            for _proxy, spec in fills:
+                category_capacity[spec.category_id] = 1.0 if cap is None else min(1.0, cap)
+
+        def sleeve_capacity(sleeve_id: str) -> float:
+            total = 0.0
+            for category_id, capacity in category_capacity.items():
+                spec = spec_by_category_id[category_id]
+                if spec.sleeve_id == sleeve_id:
+                    total += capacity
+            return min(total, 1.0)
+
+        for sleeve_id in sleeves.SLEEVE_GROUPS:
+            while sleeve_capacity(sleeve_id) + 1e-12 < bands[sleeve_id][0]:
+                if not _append_next_fill(fill_by_sleeve, active_category_ids, sleeve_id):
+                    break
+                _proxy, spec = fill_by_sleeve[sleeve_id][-1]
+                category_capacity[spec.category_id] = 1.0 if cap is None else min(1.0, cap)
+                active_sleeves.add(sleeve_id)
+
+        while (
+            sum(sleeve_capacity(g) for g in _DEFENSIVE_SLEEVES)
+            + 1e-12
+            < eff_policy.defensive_floor
+        ):
+            added = False
+            for sleeve_id in ("fixed_income", "cash", "gold", "long_short"):
+                if _append_next_fill(fill_by_sleeve, active_category_ids, sleeve_id):
+                    _proxy, spec = fill_by_sleeve[sleeve_id][-1]
+                    category_capacity[spec.category_id] = (
+                        1.0 if cap is None else min(1.0, cap)
+                    )
+                    active_sleeves.add(sleeve_id)
+                    added = True
+                    break
+            if not added:
+                break
+
+    needed_proxy_tickers = {
+        proxy for fills in fill_by_sleeve.values() for proxy, _spec in fills
+    }
+    if not frame_returns:
+        needed_proxy_tickers.update(spec.benchmark_ticker for _label, _ref, spec in selected)
+    proxy_rets = await _load_proxy_returns(
+        session, sorted(needed_proxy_tickers), frame_index
+    )
+
+    active_by_id: dict[str, _ActiveInstrument] = {}
+    category_to_instruments: dict[str, list[str]] = {}
+    category_spec: dict[str, sleeves.CategorySpec] = {}
+
+    def add_instrument(
+        *,
+        instrument_id: str,
+        label: str,
+        ref: FundRefIn | EquityRefIn,
+        spec: sleeves.CategorySpec,
+        returns: np.ndarray,
+        is_proxy_fill: bool,
+    ) -> None:
+        vec = np.asarray(returns, dtype=float).ravel()
+        if vec.shape[0] != len(frame_index) or not np.isfinite(vec).all():
+            raise PolicyInfeasibleError(
+                f"POLICY_INFEASIBLE: active instrument {instrument_id} has "
+                "missing or non-finite return history"
+            )
+        active_by_id.setdefault(
+            instrument_id,
+            _ActiveInstrument(
+                instrument_id=instrument_id,
+                label=label,
+                ref=ref,
+                category_id=spec.category_id,
+                sleeve_id=spec.sleeve_id,
+                returns=vec,
+                is_proxy_fill=is_proxy_fill,
+            ),
+        )
+        category_spec[spec.category_id] = spec
+        category_to_instruments.setdefault(spec.category_id, []).append(instrument_id)
+
+    for label, ref, spec in selected:
+        returns = frame_returns.get(label)
+        if returns is None:
+            returns = proxy_rets.get(spec.benchmark_ticker)
+        if returns is None:
+            raise PolicyInfeasibleError(
+                f"POLICY_INFEASIBLE: missing return history for active instrument "
+                f"{label}"
+            )
+        add_instrument(
+            instrument_id=label,
+            label=label,
+            ref=ref,
+            spec=spec,
+            returns=returns,
+            is_proxy_fill=False,
+        )
+
+    for fills in fill_by_sleeve.values():
+        for proxy, spec in fills:
+            ref = EquityRefIn(kind="equity", ticker=proxy)
+            label = _ref_key(ref)
+            returns = proxy_rets.get(proxy)
+            if returns is None:
+                raise PolicyInfeasibleError(
+                    f"POLICY_INFEASIBLE: missing return history for active proxy {proxy}"
+                )
+            add_instrument(
+                instrument_id=label,
+                label=label,
+                ref=ref,
+                spec=spec,
+                returns=returns,
+                is_proxy_fill=True,
+            )
+
+    active = tuple(active_by_id.values())
+    instrument_ids = tuple(item.instrument_id for item in active)
+    instrument_labels = tuple(item.label for item in active)
+    instrument_index = {iid: i for i, iid in enumerate(instrument_ids)}
+    category_ids = tuple(category_to_instruments)
+    category_sleeves = tuple(category_spec[cid].sleeve_id for cid in category_ids)
+    sleeve_ids = tuple(sleeves.SLEEVE_GROUPS)
+    sleeve_index = {sleeve_id: i for i, sleeve_id in enumerate(sleeve_ids)}
+
+    M = np.zeros((len(instrument_ids), len(category_ids)), dtype=float)
+    for j, category_id in enumerate(category_ids):
+        members = _ordered_unique(category_to_instruments[category_id])
+        share = 1.0 / len(members)
+        for instrument_id in members:
+            M[instrument_index[instrument_id], j] += share
+
+    S = np.zeros((len(sleeve_ids), len(category_ids)), dtype=float)
+    for j, sleeve_id in enumerate(category_sleeves):
+        S[sleeve_index[sleeve_id], j] = 1.0
+
+    daily_returns = np.column_stack([item.returns for item in active])
+    category_returns = daily_returns @ M
+
+    blocks: list[engine.BlockBudget] = []
+    for sleeve_id in sleeve_ids:
+        idx = [
+            j
+            for j, category_sleeve in enumerate(category_sleeves)
+            if category_sleeve == sleeve_id
+        ]
+        lo, hi = bands[sleeve_id]
+        if idx:
+            blocks.append(engine.BlockBudget(indices=idx, lo=lo, hi=hi))
+        elif lo > 1e-12:
+            raise PolicyInfeasibleError(
+                f"POLICY_INFEASIBLE: sleeve {sleeve_id!r} has floor {lo} "
+                "but no active implementation"
+            )
+
+    linear: list[engine.LinearConstraint] = []
+    cap = payload.constraints.cap
+    if cap is not None:
+        for i, instrument_id in enumerate(instrument_ids):
+            linear.append(
+                _linear_on_categories(
+                    f"instrument_cap:{instrument_id}", M[i, :], hi=cap
+                )
+            )
+    min_weight = payload.constraints.min_weight
+    if min_weight is not None and min_weight > 0:
+        for i, instrument_id in enumerate(instrument_ids):
+            linear.append(
+                _linear_on_categories(
+                    f"instrument_floor:{instrument_id}", M[i, :], lo=min_weight
+                )
+            )
+
+    linear.extend(
+        _aggregate_policy_constraints(
+            list(category_sleeves),
+            risk_assets_cap=eff_policy.risk_assets_cap,
+            defensive_floor=eff_policy.defensive_floor,
+        )
+    )
+
+    _spy_closes, spy_returns = await _load_spy_signal(session, frame_index)
+    if spy_returns is not None:
+        returns_by_label = {
+            item.instrument_id: item.returns for item in active
+        }
+        beta_map = taa_bands.asset_betas(returns_by_label, spy_returns)
+        instrument_betas = np.array(
+            [beta_map.get(item.instrument_id, 1.0) for item in active], dtype=float
+        )
+        linear.append(
+            _linear_on_categories(
+                "portfolio_beta_cap", instrument_betas @ M, hi=eff_policy.beta_cap
+            )
+        )
+
+    overlap_linear = await _resolve_overlap_constraints(
+        session,
+        datalake,
+        [item.ref for item in active],
+        list(instrument_labels),
+        payload.constraints.overlap_cap,
+    )
+    for lc in overlap_linear:
+        linear.append(
+            _linear_on_categories(
+                lc.label, np.asarray(lc.coef, dtype=float) @ M, lo=lc.lo, hi=lc.hi
+            )
+        )
+
+    linear_tuple = tuple(linear)
+    returns_dates = _return_dates(frame_index)
+    signature = _compiled_signature(
+        category_ids=category_ids,
+        instrument_ids=instrument_ids,
+        M=M,
+        return_dates=returns_dates,
+        linear=linear_tuple,
+        mapping_version=sleeves.MAPPING_VERSION,
+    )
+    problem = CompiledRegimeProblem(
+        category_ids=category_ids,
+        category_sleeve_ids=category_sleeves,
+        sleeve_ids=sleeve_ids,
+        instrument_ids=instrument_ids,
+        instrument_labels=instrument_labels,
+        S=S,
+        M=M,
+        daily_returns=daily_returns,
+        category_returns=category_returns,
+        return_dates=returns_dates,
+        bounds=engine.BoundsBundle(blocks=blocks),
+        linear_constraints=linear_tuple,
+        cvar_alpha=engine.DEFAULT_CVAR_ALPHA,
+        cvar_limit=eff_policy.cvar_limit,
+        min_weight=min_weight,
+        tolerances={
+            "sum": 1e-6,
+            "weight": 1e-6,
+            "constraint": 1e-6,
+            "cvar": 1e-4,
+        },
+        as_of=returns_dates[-1] if returns_dates else "",
+        mapping_version=sleeves.MAPPING_VERSION,
+        signature=signature,
+    )
+    sleeve_weights = {
+        sleeve_id: 0.0 for sleeve_id in sleeve_ids
+    }
+    return problem, active, sleeve_weights
+
+
+def _preflight_compiled_problem(problem: CompiledRegimeProblem) -> None:
+    n = len(problem.category_ids)
+    x = cp.Variable(n)
+    try:
+        cons = engine.bounds_constraints(
+            x,
+            problem.bounds.cap_vec,
+            problem.bounds.min_vec,
+            problem.bounds.blocks,
+            linear=list(problem.linear_constraints),
+        )
+        feasibility = cp.Problem(cp.Minimize(0), cons)
+        feasibility.solve()
+    except Exception as exc:
+        raise PolicyInfeasibleError(
+            f"POLICY_INFEASIBLE: compiled regime policy is structurally infeasible: {exc}"
+        ) from exc
+    if str(feasibility.status) not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
+        raise PolicyInfeasibleError(
+            "POLICY_INFEASIBLE: compiled regime policy is structurally "
+            f"infeasible (status {feasibility.status})"
+        )
+    try:
+        engine.solve_min_cvar(
+            problem.category_returns,
+            alpha=problem.cvar_alpha,
+            bounds=problem.bounds,
+            cvar_limit=problem.cvar_limit,
+            linear=list(problem.linear_constraints),
+        )
+    except engine.OptimizerError as exc:
+        raise PolicyInfeasibleError(
+            f"POLICY_INFEASIBLE: minimum feasible CVaR exceeds the policy limit "
+            f"{problem.cvar_limit}: {exc}"
+        ) from exc
+
+
+def _solve_compiled_regime_problem(
+    problem: CompiledRegimeProblem,
+    *,
+    gamma: float,
+    gate_state: str | None,
+    view_confidence_multiplier: float,
+) -> tuple[np.ndarray, str]:
+    sigma = engine.sigma_ledoit_wolf(problem.category_returns)
+    prior = _regime_prior(list(problem.category_sleeve_ids))
+    mu = momentum_view.category_momentum_mu(
+        problem.category_returns,
+        list(problem.category_sleeve_ids),
+        prior,
+        gate_state,
+        sigma=sigma,
+        view_confidence_multiplier=view_confidence_multiplier,
+    )
+    try:
+        weights, _status = engine.solve_bl_utility_cvar(
+            mu,
+            sigma,
+            problem.category_returns,
+            gamma,
+            problem.cvar_limit,
+            alpha=problem.cvar_alpha,
+            bounds=problem.bounds,
+            linear=list(problem.linear_constraints),
+        )
+        return weights, "regime_two_level"
+    except engine.OptimizerError:
+        try:
+            weights, _status = engine.solve_min_cvar(
+                problem.category_returns,
+                alpha=problem.cvar_alpha,
+                bounds=problem.bounds,
+                cvar_limit=problem.cvar_limit,
+                linear=list(problem.linear_constraints),
+            )
+            return weights, "regime_two_level_min_cvar_fallback"
+        except engine.OptimizerError as exc:
+            raise SolverFailedError(
+                f"SOLVER_FAILED: compiled regime problem {problem.signature} "
+                f"failed primary and min-CVaR fallback: {exc}"
+            ) from exc
+
+
+def _post_verify_compiled_solution(
+    problem: CompiledRegimeProblem,
+    x: np.ndarray,
+) -> np.ndarray:
+    tol = problem.tolerances
+    x_arr = np.asarray(x, dtype=float).ravel()
+    if x_arr.shape != (len(problem.category_ids),):
+        raise ConstraintViolationError(
+            "CONSTRAINT_VIOLATION: category solution has unexpected shape"
+        )
+    y = problem.M @ x_arr
+    if abs(float(y.sum()) - 1.0) > tol["sum"]:
+        raise ConstraintViolationError(
+            f"CONSTRAINT_VIOLATION: final weights sum {float(y.sum())}"
+        )
+    if (y < -tol["weight"]).any() or (x_arr < -tol["weight"]).any():
+        raise ConstraintViolationError("CONSTRAINT_VIOLATION: negative weight")
+    for lc in problem.linear_constraints:
+        value = float(np.asarray(lc.coef, dtype=float) @ x_arr)
+        if lc.hi is not None and value > lc.hi + tol["constraint"]:
+            raise ConstraintViolationError(
+                f"CONSTRAINT_VIOLATION: {lc.label}={value} > {lc.hi}"
+            )
+        if lc.lo is not None and value < lc.lo - tol["constraint"]:
+            raise ConstraintViolationError(
+                f"CONSTRAINT_VIOLATION: {lc.label}={value} < {lc.lo}"
+            )
+    sleeve_w = problem.S @ x_arr
+    block_by_sleeve = {
+        problem.sleeve_ids[i]: float(sleeve_w[i])
+        for i in range(len(problem.sleeve_ids))
+    }
+    for block in problem.bounds.blocks or []:
+        sleeve_id = problem.category_sleeve_ids[block.indices[0]]
+        value = block_by_sleeve[sleeve_id]
+        if value < block.lo - tol["constraint"] or value > block.hi + tol["constraint"]:
+            raise ConstraintViolationError(
+                f"CONSTRAINT_VIOLATION: sleeve {sleeve_id}={value} outside "
+                f"[{block.lo}, {block.hi}]"
+            )
+    realized_cvar = engine._realized_cvar(y, problem.daily_returns, problem.cvar_alpha)
+    if realized_cvar > problem.cvar_limit + tol["cvar"]:
+        raise ConstraintViolationError(
+            f"CONSTRAINT_VIOLATION: CVaR {realized_cvar} exceeds "
+            f"{problem.cvar_limit}"
+        )
+    return np.clip(y, 0.0, None)
+
+
 def _solve_regime_level1(
     proxies: list[str],
     proxy_returns: np.ndarray,
@@ -601,8 +1216,8 @@ def _solve_regime_level1(
     sleeve envelope (decision B; ``band_state_from_quadrant`` retired): μ =
     equilibrium π (DELTA_MARKET) + the 12-1 momentum view (fires with ≥4 risk
     sleeves, scaled by ``view_confidence_multiplier`` — the gate sets it to 0.0 in
-    risk_off, μ = π); ``gamma``/``cvar_cap`` are the per-mandate ladder (the caller
-    already tightened ``cvar_cap`` via the gate overlay). One annualized Ledoit-Wolf
+    risk_off, μ = π); ``gamma``/``cvar_cap`` come from the calibrated profile (the
+    caller already tightened ``cvar_cap`` via the gate overlay). One annualized Ledoit-Wolf
     Σ feeds both the equilibrium and the utility penalty (harness parity);
     ``proxy_returns`` are the daily scenarios for the CVaR cap.
 
@@ -682,146 +1297,68 @@ class _RegimeTwoLevel:
     category_weights: dict[str, float]    # sleeve → Level-1 weight (book B; A−B base)
     sleeve_bands: dict[str, list[float]]  # sleeve → [lo, hi] enforced (diagnostics)
     cvar_limit: float                     # gate-tightened CVaR cap actually applied
-    # AGGREGATE portfolio-beta cap target (β_portfolio ≤ beta_cap). EXPOSED for
-    # telemetry ONLY — NOT compiled into a LinearConstraint here (RELEASE GATE; the
-    # aggregate-beta constraint is Plan C). Never claim portfolio beta is enforced.
+    # AGGREGATE portfolio-beta cap target (β_portfolio ≤ beta_cap), compiled into
+    # the category-level LinearConstraint by Plan C.
     beta_cap: float
-
-
-# Mandate label → one of the 3 QUADRANT_POLICIES profiles for the sleeve bands.
-_REGIME_PROFILES = {
-    "conservative": "conservative", "defensive": "conservative",
-    "moderate_conservative": "conservative",
-    "moderate": "moderate", "balanced": "moderate",
-    "moderate_aggressive": "aggressive", "aggressive": "aggressive", "growth": "aggressive",
-}
-
-
-def _regime_profile(mandate: str | None) -> str:
-    """Resolve a mandate to one of {aggressive, moderate, conservative} (default
-    moderate) — the per-profile sleeve-band selector for the two-level allocator."""
-    if mandate:
-        key = normalise_mandate(mandate)
-        if key in _REGIME_PROFILES:
-            return _REGIME_PROFILES[key]
-    return "moderate"
+    problem_signature: str
 
 
 async def _solve_regime_two_level(
     session: AsyncSession,
     assets: list[AssetRefIn],
     labels: list[str],
-    frame_index: "pd.Index",
+    frame_index: "pd.DataFrame | pd.Index",
     eff_policy: effective_policy.EffectiveRegimePolicy,
     payload: "OptimizeRequest",
+    datalake: AsyncSession | None = None,
 ) -> "_RegimeTwoLevel | None":
-    """COMBO S4b: two-level ``regime_aware`` solve (proxy → fund equal-weight).
-
-    Maps each fund to a 7-sleeve via ``strategy_label`` (``asset_class`` fallback),
-    optimizes per-sleeve CATEGORY weights over the canonical ``GROUP_BENCHMARK``
-    proxies inside the per-profile band envelope (Level-1, BL max-utility + CVaR +
-    momentum), then implements each sleeve with its selected funds EQUAL-WEIGHT
-    (Level-2); a floored sleeve with no fund (gold via GLD, long_short via FTLS)
-    keeps its authorized proxy as a holding.
-
-    The cohesive ``eff_policy`` is built ONCE by the caller (the dispatch) from the
-    §6 consumable quadrant + the live gate; this solve READS its sleeve bands and the
-    gate-tightened CVaR/beta/view-confidence off it (no second
-    ``build_effective_policy`` here — exactly one build per request). Returns ``None``
-    ONLY for a feasibility shortfall the caller treats as no-trade (no fund maps to a
-    base sleeve, <2 live proxies, or the Level-1 solve is infeasible even after its
-    min-CVaR fallback). Degrade-safe: the proxy-returns loader returns ``{}`` without
-    a DB session.
-    """
-    profile = eff_policy.profile
-    gate_state = eff_policy.gate_state
-    bands = {s: (b.lo, b.hi) for s, b in eff_policy.sleeve_budgets.items()}
-
-    # 1. fund → sleeve (strategy_label finest; asset_class fallback; raw equities
-    # via the proxy ticker, else equity). 'hedge' (SH) is excluded from the book.
-    fund_ids = [ref.id for ref in assets if isinstance(ref, FundRefIn)]
-    strat = await optimizer_data.load_fund_strategy_label(session, fund_ids)
-    cls = await optimizer_data.load_fund_asset_class(session, fund_ids)
-    index_of = {label: i for i, label in enumerate(labels)}
-    funds_by_sleeve: dict[str, list[int]] = {}
-    for ref in assets:
-        col = index_of.get(_ref_key(ref))
-        if col is None:
-            continue
-        if isinstance(ref, FundRefIn):
-            sleeve = sleeves.fund_sleeve_group(strat.get(ref.id), cls.get(ref.id))
-        else:
-            sleeve = sleeves.PROXY_TO_GROUP.get(ref.ticker.upper(), "equity")
-        if sleeve in sleeves.SLEEVE_GROUPS:
-            funds_by_sleeve.setdefault(sleeve, []).append(col)
-    if not funds_by_sleeve:
-        return None
-
-    # 2. live proxies = one canonical benchmark per present sleeve, plus authorized
-    # fills for a FLOORED sleeve with no fund (gold/long_short).
-    proxy_to_sleeve: dict[str, str] = {
-        sleeves.GROUP_BENCHMARK[g]: g for g in funds_by_sleeve
-    }
-    for g in sleeves.SLEEVE_GROUPS:
-        if bands[g][0] > 0 and g not in funds_by_sleeve:
-            for px in sleeves.GROUP_PROXY_FILL.get(g, []):
-                proxy_to_sleeve[px] = g
-    proxy_rets = await _load_proxy_returns(session, list(proxy_to_sleeve), frame_index)
-    proxies_live = [p for p in proxy_to_sleeve if p in proxy_rets]
-    if len(proxies_live) < 2:
-        return None
-    proxy_to_sleeve = {p: proxy_to_sleeve[p] for p in proxies_live}
-    proxy_groups = [proxy_to_sleeve[p] for p in proxies_live]
-    proxy_returns = np.column_stack([proxy_rets[p] for p in proxies_live])
-
-    # 3. per-mandate dials: gamma decoupled from the equilibrium delta; the CVaR cap
-    # and BL view-confidence are the FINAL gate-tightened numbers from eff_policy (the
-    # overlay was applied inside build_effective_policy — no second tighten here).
-    gamma = resolve_gamma(None, payload.mandate)
-    cvar_cap = eff_policy.cvar_limit
-    view_mult = eff_policy.bl_view_confidence_multiplier
-
-    # 4. Level-1: category weights over the proxies, keyed off the eff_policy quadrant.
-    # The AGGREGATE overlay caps (N1) are sourced from eff_policy and enforced INSIDE
-    # the solve (equity+thematic ≤ risk_assets_cap; defensives ≥ defensive_floor) —
-    # the per-sleeve bands alone do not bound them. If the solve (even its min-CVaR
-    # fallback) is infeasible UNDER these caps, that is a STRUCTURALLY infeasible
-    # policy → fail loud as PolicyInfeasibleError (422), NOT a None (which the caller
-    # turns into 'no proxies'). Distinguishing the two failure modes is deliberate:
-    # 'no consumable proxies' is QUADRANT_UNAVAILABLE; 'policy caps unsatisfiable' is
-    # POLICY_INFEASIBLE — neither ever silently relaxes the advertised envelope.
-    try:
-        wcat = _solve_regime_level1(
-            proxies_live, proxy_returns, proxy_groups, profile, eff_policy.quadrant,
-            gamma, cvar_cap, gate_state, view_mult,
-            risk_assets_cap=eff_policy.risk_assets_cap,
-            defensive_floor=eff_policy.defensive_floor,
-        )
-    except engine.OptimizerError as exc:
-        raise PolicyInfeasibleError(
-            f"POLICY_INFEASIBLE: regime_aware sleeve solve infeasible under the "
-            f"{profile}/{eff_policy.quadrant} policy caps "
-            f"(risk_assets_cap={eff_policy.risk_assets_cap}, "
-            f"defensive_floor={eff_policy.defensive_floor}): {exc}"
-        ) from exc
-
-    # 5. Level-2: funds equal-weight; a proxy-only sleeve keeps its proxy holding.
-    fund_weights, proxy_holdings = _solve_regime_level2(
-        wcat, proxy_to_sleeve, funds_by_sleeve, len(labels)
+    """Compile and solve the formal ``regime_aware`` two-level problem."""
+    problem, active, _empty_sleeve_weights = await _compile_regime_problem(
+        session, datalake, assets, labels, frame_index, eff_policy, payload
     )
-    category_weights = {proxy_to_sleeve[p]: w for p, w in wcat.items()}
-    present = set(funds_by_sleeve) | set(category_weights)
+    _preflight_compiled_problem(problem)
+    gamma = resolve_profile_gamma(eff_policy.profile)
+    x, _status = _solve_compiled_regime_problem(
+        problem,
+        gamma=gamma,
+        gate_state=eff_policy.gate_state,
+        view_confidence_multiplier=eff_policy.bl_view_confidence_multiplier,
+    )
+    y = _post_verify_compiled_solution(problem, x)
+    sleeve_vector = problem.S @ x
+    category_weights = {
+        problem.sleeve_ids[i]: float(sleeve_vector[i])
+        for i in range(len(problem.sleeve_ids))
+        if sleeve_vector[i] > 1e-10
+    }
+    original_index = {label: i for i, label in enumerate(labels)}
+    fund_weights = np.zeros(len(labels), dtype=float)
+    proxy_holdings: dict[str, float] = {}
+    proxy_returns: dict[str, np.ndarray] = {}
+    for i, item in enumerate(active):
+        weight = float(y[i])
+        original_col = original_index.get(item.label)
+        if original_col is not None:
+            fund_weights[original_col] += weight
+            continue
+        if isinstance(item.ref, EquityRefIn):
+            ticker = item.ref.ticker.upper()
+            proxy_holdings[ticker] = proxy_holdings.get(ticker, 0.0) + weight
+            proxy_returns[ticker] = item.returns
+    bands = {s: (b.lo, b.hi) for s, b in eff_policy.sleeve_budgets.items()}
+    present = {s for s, w in category_weights.items() if w > 1e-10}
     sleeve_bands = {
         g: [bands[g][0], bands[g][1]] for g in sleeves.SLEEVE_GROUPS if g in present
     }
     return _RegimeTwoLevel(
         fund_weights=fund_weights,
         proxy_holdings=proxy_holdings,
-        proxy_returns={t: proxy_rets[t] for t in proxy_holdings},
+        proxy_returns=proxy_returns,
         category_weights=category_weights,
         sleeve_bands=sleeve_bands,
         cvar_limit=eff_policy.cvar_limit,
         beta_cap=eff_policy.beta_cap,
+        problem_signature=problem.signature,
     )
 
 
@@ -1156,9 +1693,9 @@ async def run_optimize(
         cap = min_feasible_cap
     has_views = bool(payload.views)
     needs_bl = has_views or payload.objective in ("bl_utility", "max_return_cvar")
-    # Effective risk-aversion: explicit bl.delta override beats the mandate
-    # ladder; both feed equilibrium (pi = delta*Sigma*w_mkt) and bl_utility.
-    delta = resolve_delta(payload.bl.delta, payload.mandate)
+    # Generic BL objectives use the explicit/default BL delta. Customer IPS
+    # constraints do not alter equilibrium risk aversion.
+    delta = resolve_delta(payload.bl.delta)
 
     mu_equilibrium: np.ndarray | None = None
     mu_posterior: np.ndarray | None = None
@@ -1168,7 +1705,7 @@ async def run_optimize(
     # Regime-Aware diagnostics (research codename COMBO): populated only on the
     # ``regime_aware`` path. ``combined_regime``/``haven_tilt`` retired (orthogonal
     # quadrant/gate model — Task 7); ``regime_beta_cap`` is the AGGREGATE
-    # portfolio-beta cap EXPOSED for telemetry only, NOT enforced (RELEASE GATE).
+    # portfolio-beta cap enforced by the compiled two-level problem.
     regime_quadrant: str | None = None
     regime_beta_cap: float | None = None
     regime_class_bands: dict[str, list[float]] | None = None
@@ -1246,7 +1783,7 @@ async def run_optimize(
             # drive sleeve bands; a non-consumable quadrant fails loud as
             # QUADRANT_UNAVAILABLE (freeze §6/§8/§36). The payload's ``block_budgets``
             # are IGNORED here — bands derive from the policy.
-            _profile = _regime_profile(payload.mandate)
+            _profile = payload.profile
             # ONE decision "now" for BOTH the §6 quadrant decision_time and the N2
             # gate freshness lag (consistent decision-time semantics across the two
             # reads). The seam keeps fixtures deterministic regardless of wall-clock.
@@ -1299,20 +1836,16 @@ async def run_optimize(
             try:
                 eff_policy = effective_policy.build_effective_policy(
                     quadrant_row, gate_snap, _profile,
-                    base_cvar_limit=resolve_cvar_limit(
-                        payload.cvar_limit, payload.mandate
-                    ),
+                    base_cvar_limit=resolve_profile_cvar_limit(_profile),
                 )
             except effective_policy.EffectivePolicyError as exc:
                 raise _as_builder_error(exc) from exc
             regime_quadrant = eff_policy.quadrant
             regime_state = eff_policy.gate_state
             cvar_limit_effective = eff_policy.cvar_limit
-            # eff_policy.beta_cap is the AGGREGATE portfolio-beta cap — EXPOSED for
-            # telemetry ONLY, NOT compiled into a constraint (RELEASE GATE; Plan C).
             regime_beta_cap = eff_policy.beta_cap
             two_level = await _solve_regime_two_level(
-                session, assets, labels, frame.index, eff_policy, payload,
+                session, assets, labels, frame, eff_policy, payload, datalake=datalake,
             )
             if two_level is None:
                 # Fail-loud: regime_aware that can't be produced is a no-trade
@@ -1494,9 +2027,7 @@ async def run_optimize(
             regime_state=regime_state,
             quadrant=regime_quadrant,
             class_bands=regime_class_bands,
-            # AGGREGATE portfolio-beta cap TARGET — EXPOSED for telemetry only, NOT
-            # enforced until Plan C compiles the aggregate-beta LinearConstraint
-            # (RELEASE GATE). Never claim the portfolio beta is guaranteed.
+            # AGGREGATE portfolio-beta cap enforced on the regime_aware compiled book.
             beta_cap=regime_beta_cap,
             category_weights=regime_category_weights,
         ),
