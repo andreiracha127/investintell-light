@@ -820,7 +820,9 @@ async def test_two_level_infeasible_caps_return_422(monkeypatch: Any) -> None:
 def test_gate_business_day_lag_counts_weekdays() -> None:
     """The lag helper counts BUSINESS days (Mon–Fri) strictly after as_of up to the
     decision date; same/next-business-day → 0/1, a weekend does not inflate it, and a
-    future-dated gate clamps to 0 (clock skew never reads as stale)."""
+    future-dated gate returns a NEGATIVE lag (no clamp) so the caller can reject it
+    explicitly as GATE_UNAVAILABLE — a future snapshot is NOT available at decision
+    time and must never silently read as fresh (freeze §8/§11)."""
     fri = dt.date(2026, 6, 19)   # Friday
     # same day → 0
     assert pb._gate_business_day_lag(fri, dt.datetime(2026, 6, 19, tzinfo=dt.UTC)) == 0
@@ -828,8 +830,9 @@ def test_gate_business_day_lag_counts_weekdays() -> None:
     assert pb._gate_business_day_lag(fri, dt.datetime(2026, 6, 22, tzinfo=dt.UTC)) == 1
     # one trading week later → 5
     assert pb._gate_business_day_lag(fri, dt.datetime(2026, 6, 26, tzinfo=dt.UTC)) == 5
-    # future-dated as_of → clamped to 0
-    assert pb._gate_business_day_lag(fri, dt.datetime(2026, 6, 18, tzinfo=dt.UTC)) == 0
+    # future-dated as_of → NEGATIVE lag (no clamp): decision now is the Thursday
+    # BEFORE the as_of Friday, so the true business-day gap is -1.
+    assert pb._gate_business_day_lag(fri, dt.datetime(2026, 6, 18, tzinfo=dt.UTC)) == -1
 
 
 async def test_regime_aware_stale_gate_fails_loud(monkeypatch: Any) -> None:
@@ -851,6 +854,28 @@ async def test_regime_aware_stale_gate_fails_loud(monkeypatch: Any) -> None:
     assert resp.status_code == 422, resp.text
     assert "GATE_UNAVAILABLE" in resp.text
     assert "stale" in resp.text.lower()
+
+
+async def test_regime_aware_future_gate_fails_loud(monkeypatch: Any) -> None:
+    """N2 (adversarial fix): a gate snapshot whose ``as_of`` is dated AFTER the
+    decision time (a worker date bug / bad ingest) must fail loud as a structured 422
+    GATE_UNAVAILABLE — a future snapshot is NOT available at the decision time and must
+    NEVER silently read as fresh (freeze §8/§11). Decision now = 2026-06-22; gate
+    as_of = 2026-06-25 is three days in the future. This rejection happens BEFORE the
+    stale-lag check (the future date can no longer clamp to lag 0)."""
+    _stub_two_level_world(monkeypatch, state="risk_on", quadrant="recovery")
+    future = tb.GateRegimeSnapshot(
+        as_of=dt.date(2026, 6, 25), state="risk_on",  # +3 days vs decision now
+        vote_count=0, trend_vote=False, credit_vote=False, drawdown_vote=False,
+        dwell_days=30, last_flip=None, growth_score=None, inflation_score=None,
+        quadrant="recovery",
+    )
+    monkeypatch.setattr(tb, "fetch_gate_regime", _async(future))
+    async with _client() as client:
+        resp = await client.post("/builder/optimize", json=_tl_payload())
+    assert resp.status_code == 422, resp.text
+    assert "GATE_UNAVAILABLE" in resp.text
+    assert "future" in resp.text.lower()
 
 
 async def test_regime_aware_fresh_gate_reaches_solve(monkeypatch: Any) -> None:

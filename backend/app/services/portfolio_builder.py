@@ -112,12 +112,14 @@ def _gate_business_day_lag(as_of: "dt.date", now: "dt.datetime") -> int:
     Counts weekdays strictly AFTER ``as_of`` up to and including ``now``'s date
     (``numpy.busday_count`` is half-open ``[as_of, now)`` over Mon–Fri, so a same-day
     or next-business-day snapshot yields 0/1). Holidays are not modelled (a seed
-    simplification — the daily gate already tolerates a few days of slack); a negative
-    gap (a future-dated ``as_of``) is clamped to 0 so a clock skew never reads as
-    stale. Pure + dependency-free (no calendar table needed in this repo)."""
+    simplification — the daily gate already tolerates a few days of slack). The TRUE
+    (possibly NEGATIVE) gap is returned: a future-dated ``as_of`` (``as_of > today``)
+    yields a negative lag and is NOT clamped, so the call site can reject it
+    explicitly as GATE_UNAVAILABLE — a future snapshot is not available at the decision
+    time and must never silently read as fresh (freeze §8/§11). Pure + dependency-free
+    (no calendar table needed in this repo)."""
     today = now.date()
-    lag = int(np.busday_count(as_of, today))
-    return max(0, lag)
+    return int(np.busday_count(as_of, today))
 
 
 # Display labels (ticker, name) for a fund label key — only the universe path
@@ -1253,15 +1255,26 @@ async def run_optimize(
                 await taa_bands.fetch_gate_regime(datalake)
                 if datalake is not None else None
             )
-            # N2: gate freshness (max-lag). ``fetch_gate_regime`` has NO max-age
-            # predicate, so a stalled gate worker leaves a days/weeks-old latest row
-            # that would otherwise be consumed as fresh. Freeze §11: consume the gate
-            # ONLY when fresh — a gate whose as_of exceeds GATE_MAX_LAG_BUSINESS_DAYS
-            # of the decision time is non-consumable → GATE_UNAVAILABLE (422), no
-            # trade. Checked on the regime_aware path ONLY (max_return_cvar's gate
-            # read is unchanged). A None gate falls through to build_effective_policy,
-            # which fails loud GATE_UNAVAILABLE for the missing-snapshot case.
+            # N2: gate freshness on the regime_aware path ONLY (max_return_cvar's gate
+            # read is unchanged). ``fetch_gate_regime`` selects the latest row by
+            # descending date with NO decision-time predicate, so a future-dated row (a
+            # worker date bug / bad ingest) or a stalled-worker stale row would both be
+            # consumed as fresh. Freeze §8/§11: consume the gate ONLY when it is
+            # available at the decision time AND fresh. A None gate falls through to
+            # build_effective_policy, which fails loud GATE_UNAVAILABLE for the
+            # missing-snapshot case.
             if gate_snap is not None:
+                # (1) FUTURE gate → not available at the decision time. Reject BEFORE
+                #     the stale-lag check (a future as_of would otherwise produce a
+                #     negative lag that the > max-lag predicate silently treats as
+                #     fresh). Strictly after today → non-consumable.
+                if gate_snap.as_of > decision_now.date():
+                    raise GateUnavailableError(
+                        f"GATE_UNAVAILABLE: gate as_of {gate_snap.as_of} is in the "
+                        "future (not available at decision time)"
+                    )
+                # (2) STALE gate → as_of more than GATE_MAX_LAG_BUSINESS_DAYS before
+                #     the decision time (a stalled gate worker). Non-consumable.
                 lag = _gate_business_day_lag(gate_snap.as_of, decision_now)
                 if lag > GATE_MAX_LAG_BUSINESS_DAYS:
                     raise GateUnavailableError(
