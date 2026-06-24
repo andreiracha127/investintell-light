@@ -4,7 +4,7 @@ calibrated harness and validated against the production catalog
 (funds_v.strategy_label)."""
 
 from app.optimizer import sleeves
-from app.services import taa_bands as tb
+from app.services import quadrant_policy as qp
 
 
 def test_label_maps_to_finest_sleeve() -> None:
@@ -46,10 +46,10 @@ def test_hedge_label_is_not_a_base_sleeve() -> None:
     assert "hedge" not in sleeves.SLEEVE_GROUPS
 
 
-def test_sleeve_groups_match_production_taa_bands() -> None:
-    """The 7 base sleeves are exactly taa_bands.SLEEVE_GROUPS (single source of
-    truth for the per-profile bands)."""
-    assert sleeves.SLEEVE_GROUPS == tb.SLEEVE_GROUPS
+def test_sleeve_groups_match_quadrant_policy() -> None:
+    """The 7 base sleeves are exactly quadrant_policy.STRUCTURAL_SLEEVES (the single
+    source of truth for the per-profile bands; taa_bands.SLEEVE_GROUPS retired)."""
+    assert sleeves.SLEEVE_GROUPS == list(qp.STRUCTURAL_SLEEVES)
 
 
 def test_group_benchmark_covers_every_sleeve() -> None:

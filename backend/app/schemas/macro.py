@@ -37,9 +37,9 @@ class RegimeHistoryOut(BaseModel):
 
 
 class ClassBandOut(BaseModel):
-    """Per-asset-class ``(min, max)`` weight band derived from the regime."""
+    """Per-sleeve ``(min, max)`` weight band from the quadrant policy."""
 
-    asset_class: str  # equity | fixed_income | alternatives | cash
+    asset_class: str  # one of quadrant_policy.STRUCTURAL_SLEEVES
     min_weight: float
     max_weight: float
 
@@ -57,15 +57,17 @@ class GateBlockOut(BaseModel):
 
 
 class MacroQuadrantOut(BaseModel):
-    """COMBO macro block: growth×inflation quadrant + gate + resulting bands.
+    """COMBO macro block: growth×inflation quadrant + gate + per-sleeve bands.
 
     ADDITIVE to the vote2of3 detector (decision O3 — the composite stays the
     headline). The quadrant + growth/inflation scores are READ from
     ``regime_gate_daily`` (decision A — worker-materialized; the backend lacks
-    TIP/IEF), the live gate dominates the band state when risk-off, and the
-    SLOWDOWN quadrant routes to the goldfix ``haven_tilt`` (then ``bands`` is
-    empty). ``haven_tilt`` is the conviction TARGET; the realized tilt depends on
-    the builder universe.
+    TIP/IEF). The quadrant and the gate are ORTHOGONAL (spec §12): ``bands`` are
+    the per-sleeve ``policy_bands`` of ``QUADRANT_POLICIES["moderate"][quadrant]``
+    (the display profile; informational, not the builder mandate), and the gate is
+    reported in ``gate`` but does not fold into the bands here. ``bands`` is empty
+    when the quadrant is not consumable. ``haven_tilt`` is always ``None``
+    (goldfix retired with ``combined_regime`` in Task 8).
     """
 
     as_of: dt.date | None
@@ -74,9 +76,8 @@ class MacroQuadrantOut(BaseModel):
     inflation_state: str | None  # up|down
     growth_score: float | None
     inflation_score: float | None
-    combined_regime: str  # RISK_ON|RISK_OFF|INFLATION|STAG_GOLD
-    bands: list[ClassBandOut]  # 4 classes (empty when STAG_GOLD haven)
-    haven_tilt: dict[str, float] | None  # goldfix target when STAG_GOLD, else None
+    bands: list[ClassBandOut]  # 7 sleeves (empty when quadrant not consumable)
+    haven_tilt: dict[str, float] | None  # always None (goldfix retired, Task 8)
     gate: GateBlockOut | None  # None when regime_gate_daily empty
 
 

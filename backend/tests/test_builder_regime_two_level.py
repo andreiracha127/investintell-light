@@ -609,12 +609,14 @@ def test_combined_regime_removed_from_builder_solve_path() -> None:
     combined_regime/band_state_from_quadrant (Task 7) — it consumes
     EffectiveRegimePolicy / QUADRANT_POLICIES instead.
 
-    NOTE: ``_resolve_regime_block_budgets`` (the S4a single-level envelope) and
-    ``taa_bands.combined_regime`` itself still exist — their retirement, plus the
-    macro route + macro schema that consume combined_regime, is scoped to Task
-    8/9. So we assert against the two-level SOLVE source, not the taa_bands
-    module (which the macro route still depends on)."""
+    Task 8 also RETIRED the legacy helpers themselves: ``_resolve_regime_block_budgets``
+    / ``_solve_regime_motor`` from the builder and ``combined_regime`` /
+    ``effective_class_bands`` / ``goldfix_target`` / ``band_state_from_quadrant`` /
+    ``profile_sleeve_bands`` from ``taa_bands``. This test now asserts BOTH: no call
+    in the two-level solve source AND the symbols' absence from both modules."""
     import inspect
+
+    from app.services import taa_bands
 
     src = inspect.getsource(pb._solve_regime_two_level)
     src += inspect.getsource(pb._solve_regime_level1)
@@ -623,4 +625,17 @@ def test_combined_regime_removed_from_builder_solve_path() -> None:
     assert "taa_bands.combined_regime" not in src
     assert "band_state_from_quadrant(" not in src
     assert "profile_sleeve_bands(" not in src
+
+    # Task 8: the retired symbols no longer exist on either module.
+    for name in (
+        "combined_regime", "effective_class_bands", "goldfix_target",
+        "band_state_from_quadrant", "profile_sleeve_bands",
+        "normalized_profile_centers", "DEFAULT_TAA_BANDS", "SLEEVE_GROUPS",
+    ):
+        assert not hasattr(taa_bands, name), f"taa_bands.{name} should be retired"
+    for name in (
+        "_resolve_regime_block_budgets", "_solve_regime_motor",
+        "_fund_class_columns", "_regime_sleeve_groups", "_COMBO_BAND_CLASSES",
+    ):
+        assert not hasattr(pb, name), f"portfolio_builder.{name} should be retired"
 

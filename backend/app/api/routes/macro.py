@@ -36,8 +36,7 @@ router = APIRouter(tags=["macro"])
 
 DETECTOR_NAME = "vote2of3"
 
-# Asset-class display order for the per-class regime bands (matches taa_bands).
-_BAND_CLASS_ORDER = taa_bands.ASSET_CLASSES
+_MACRO_DISPLAY_PROFILE = "moderate"  # informational block; not the builder mandate
 
 
 def _distance_pct(ratio: float | None, p20_5y: float | None) -> float | None:
@@ -52,46 +51,35 @@ def _score_state(score: float | None) -> str | None:
 
 
 async def _build_macro_quadrant(datalake: AsyncSession) -> MacroQuadrantOut:
-    """Assemble the ADDITIVE COMBO macro block (gate + quadrant + bands + haven).
+    """Assemble the additive COMBO macro block: gate + quadrant + per-sleeve bands.
 
-    Decision A (spec §9): the quadrant + growth/inflation scores are READ from
-    ``regime_gate_daily`` via ``taa_bands.fetch_gate_regime`` (worker-materialized;
-    no proxy compute here). The gate's risk-off dominates the band state; SLOWDOWN
-    routes to the goldfix ``haven_tilt`` (then ``bands`` is empty). Best-effort:
-    when the gate row is missing, ``gate``/``quadrant`` degrade to ``None`` and the
-    combined regime falls back to RISK_ON with the 4 default class bands.
+    Reads the worker-materialized quadrant (decision A). The quadrant and gate are
+    ORTHOGONAL (spec §12): the bands come from QUADRANT_POLICIES[display_profile]
+    [quadrant]; the gate is reported but does not fold into the bands here. No
+    goldfix/STAG_GOLD. ``bands`` is empty when the quadrant is not consumable.
     """
+    from app.services import quadrant_policy
+
     gate = await taa_bands.fetch_gate_regime(datalake)
-    gate_state = gate.state if gate else None
     quadrant = gate.quadrant if gate else None
     growth_score = gate.growth_score if gate else None
     inflation_score = gate.inflation_score if gate else None
 
-    regime = taa_bands.combined_regime(gate_state, quadrant)
-
-    if regime == "STAG_GOLD":
-        # SLOWDOWN haven: the conviction goldfix target (realized tilt depends on
-        # the builder universe). Pass the full name set so all legs show.
-        bands: list[ClassBandOut] = []
-        haven_tilt = taa_bands.goldfix_target({"GLD", "VOOV", "QAI", "GCC", "BIL"})
-    else:
-        band_map, _smoothed = taa_bands.effective_class_bands(regime)
+    bands: list[ClassBandOut] = []
+    if quadrant in quadrant_policy.QUADRANTS:
+        policy = quadrant_policy.QUADRANT_POLICIES[_MACRO_DISPLAY_PROFILE][quadrant]
+        sleeve_bands = quadrant_policy.policy_bands(policy)
         bands = [
-            ClassBandOut(asset_class=ac, min_weight=lo, max_weight=hi)
-            for ac in _BAND_CLASS_ORDER
-            for (lo, hi) in (band_map[ac],)
+            ClassBandOut(asset_class=sleeve, min_weight=lo, max_weight=hi)
+            for sleeve in quadrant_policy.STRUCTURAL_SLEEVES
+            for (lo, hi) in (sleeve_bands[sleeve],)
         ]
-        haven_tilt = None
 
     gate_block = (
         GateBlockOut(
-            as_of=gate.as_of,
-            state=gate.state,
-            trend_vote=gate.trend_vote,
-            credit_vote=gate.credit_vote,
-            drawdown_vote=gate.drawdown_vote,
-            vote_count=gate.vote_count,
-            dwell_days=gate.dwell_days,
+            as_of=gate.as_of, state=gate.state, trend_vote=gate.trend_vote,
+            credit_vote=gate.credit_vote, drawdown_vote=gate.drawdown_vote,
+            vote_count=gate.vote_count, dwell_days=gate.dwell_days,
         )
         if gate
         else None
@@ -104,9 +92,8 @@ async def _build_macro_quadrant(datalake: AsyncSession) -> MacroQuadrantOut:
         inflation_state=_score_state(inflation_score),
         growth_score=growth_score,
         inflation_score=inflation_score,
-        combined_regime=regime,
         bands=bands,
-        haven_tilt=haven_tilt,
+        haven_tilt=None,
         gate=gate_block,
     )
 

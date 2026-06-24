@@ -4877,7 +4877,7 @@
           "max_weight"
         ],
         "title": "ClassBandOut",
-        "description": "Per-asset-class ``(min, max)`` weight band derived from the regime."
+        "description": "Per-sleeve ``(min, max)`` weight band from the quadrant policy."
       },
       "ClassLimitItem": {
         "properties": {
@@ -5784,6 +5784,31 @@
               }
             ],
             "title": "Haven Tilt"
+          },
+          "beta_cap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beta Cap"
+          },
+          "category_weights": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Weights"
           }
         },
         "type": "object",
@@ -10658,10 +10683,6 @@
             ],
             "title": "Inflation Score"
           },
-          "combined_regime": {
-            "type": "string",
-            "title": "Combined Regime"
-          },
           "bands": {
             "items": {
               "$ref": "#/components/schemas/ClassBandOut"
@@ -10702,13 +10723,12 @@
           "inflation_state",
           "growth_score",
           "inflation_score",
-          "combined_regime",
           "bands",
           "haven_tilt",
           "gate"
         ],
         "title": "MacroQuadrantOut",
-        "description": "COMBO macro block: growth\u00d7inflation quadrant + gate + resulting bands.\n\nADDITIVE to the vote2of3 detector (decision O3 \u2014 the composite stays the\nheadline). The quadrant + growth/inflation scores are READ from\n``regime_gate_daily`` (decision A \u2014 worker-materialized; the backend lacks\nTIP/IEF), the live gate dominates the band state when risk-off, and the\nSLOWDOWN quadrant routes to the goldfix ``haven_tilt`` (then ``bands`` is\nempty). ``haven_tilt`` is the conviction TARGET; the realized tilt depends on\nthe builder universe."
+        "description": "COMBO macro block: growth\u00d7inflation quadrant + gate + per-sleeve bands.\n\nADDITIVE to the vote2of3 detector (decision O3 \u2014 the composite stays the\nheadline). The quadrant + growth/inflation scores are READ from\n``regime_gate_daily`` (decision A \u2014 worker-materialized; the backend lacks\nTIP/IEF). The quadrant and the gate are ORTHOGONAL (spec \u00a712): ``bands`` are\nthe per-sleeve ``policy_bands`` of ``QUADRANT_POLICIES[\"moderate\"][quadrant]``\n(the display profile; informational, not the builder mandate), and the gate is\nreported in ``gate`` but does not fold into the bands here. ``bands`` is empty\nwhen the quadrant is not consumable. ``haven_tilt`` is always ``None``\n(goldfix retired with ``combined_regime`` in Task 8)."
       },
       "MacroRegimeResponse": {
         "properties": {
