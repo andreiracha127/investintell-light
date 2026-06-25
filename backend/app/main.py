@@ -62,6 +62,7 @@ def create_app() -> FastAPI:
     application.include_router(portfolio_router.router)
     application.include_router(portfolios_router.router)
     application.include_router(statistics_router.router)
+    application.include_router(screener_router.public_router)
     application.include_router(screener_router.router)
     application.include_router(funds_router.router)
     application.include_router(backtest_router.router)

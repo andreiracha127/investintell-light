@@ -402,7 +402,17 @@ def test_screens_tables_registered() -> None:
 def test_screens_name_unique_and_audit_columns() -> None:
     name = _col("screens", "name")
     assert name.nullable is False
-    assert name.unique is True
+    assert name.unique is not True
+    for col_name in ("owner_sub", "org_id"):
+        assert col_name in _table("screens").c
+    assert _col("screens", "owner_sub").nullable is False
+    assert _col("screens", "org_id").nullable is True
+    uniques = [
+        c for c in _table("screens").constraints if isinstance(c, UniqueConstraint)
+    ]
+    assert any(
+        {col.name for col in c.columns} == {"owner_sub", "name"} for c in uniques
+    )
     for col_name in ("created_at", "updated_at"):
         col = _col("screens", col_name)
         assert col.nullable is False

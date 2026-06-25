@@ -1,8 +1,8 @@
 """ORM models for persisted screens (F6.4): `screens` and `screen_filters`.
 
 A screen is a named, persisted set of metric filters over the screener
-universe. Single-tenant: no owner column. ``metric_code`` is validated
-against the backend metric catalog at the API layer (422 on unknown codes) —
+universe. Screens are owned by ``owner_sub``; ``metric_code`` is validated
+against the backend metric catalog at the API layer (422 on unknown codes) -
 deliberately a plain string, not an enum column, so adding a catalog metric
 never requires a migration.
 """
@@ -20,8 +20,13 @@ class Screen(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
 
-    # Display name — unique across the (single-tenant) installation.
-    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    # Display name - unique per owner.
+    name: Mapped[str] = mapped_column(String, nullable=False)
+
+    # Stable JWT subject used for reads/writes. org_id is recorded for future
+    # organization sharing, but is not part of the access predicate yet.
+    owner_sub: Mapped[str] = mapped_column(String, nullable=False)
+    org_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Audit timestamps — both tz-aware, server-set (same conventions and
     # Core-update caveat as Portfolio).
@@ -47,6 +52,11 @@ class Screen(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by="ScreenFilter.position, ScreenFilter.id",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("owner_sub", "name", name="uq_screens_owner_sub_name"),
+        Index("ix_screens_owner_sub", "owner_sub"),
     )
 
 

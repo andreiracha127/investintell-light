@@ -3,8 +3,9 @@
 /**
  * Rebalancing section for the portfolio overview page.
  *
- * Query 1: fetchRebalancePolicy — 404 means no policy configured → renders null.
- * Query 2: fetchRebalancePreview — enabled only when a policy exists.
+ * fetchRebalancePreview returns the effective policy. When no saved policy
+ * exists, the backend evaluates with documented defaults and marks it as
+ * `is_default`.
  *
  * Scale note (verified against backend/app/schemas/rebalance.py docstring):
  *   "Bandas e pesos em frações decimais (0.05 = 5 p.p.), convenção do projeto;
@@ -23,8 +24,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
-  ApiError,
-  fetchRebalancePolicy,
   fetchRebalancePreview,
   type PositionDrift,
   type RebalancePreview,
@@ -264,24 +263,9 @@ export function PortfolioRebalanceSection({
     setColors(chartColors());
   }, []);
 
-  // Query 1: policy — 404 means "no policy configured", render nothing.
-  const policyQuery = useQuery({
-    queryKey: ["rebalance-policy", portfolioId],
-    queryFn: ({ signal }) => fetchRebalancePolicy(portfolioId, signal),
-    staleTime: 60_000,
-    retry: (failureCount, err) => {
-      if (err instanceof ApiError && err.status === 404) return false;
-      return retryPolicy(failureCount, err);
-    },
-  });
-
-  // Query 2: preview — enabled only once we know a policy exists.
-  // isSuccess already narrows data to be defined; the !== undefined guard is redundant.
-  const policyExists = policyQuery.isSuccess;
   const previewQuery = useQuery({
     queryKey: ["rebalance-preview", portfolioId],
     queryFn: ({ signal }) => fetchRebalancePreview(portfolioId, signal),
-    enabled: policyExists,
     staleTime: 60_000,
     retry: retryPolicy,
   });
@@ -296,16 +280,7 @@ export function PortfolioRebalanceSection({
 
   // ── All hooks above this line — early returns below ──────────────────────
 
-  // 404 → no policy configured; render nothing silently.
-  if (
-    policyQuery.isError &&
-    policyQuery.error instanceof ApiError &&
-    policyQuery.error.status === 404
-  ) {
-    return null;
-  }
-
-  if (policyQuery.isPending) {
+  if (previewQuery.isPending) {
     return (
       <div
         aria-busy="true"
@@ -315,43 +290,33 @@ export function PortfolioRebalanceSection({
     );
   }
 
-  if (policyQuery.isError) {
+  if (previewQuery.isError) {
     return (
       <ErrorPanel
-        title="Failed to load rebalance policy"
-        message={policyQuery.error.message}
-        onRetry={() => policyQuery.refetch()}
+        title="Failed to load rebalance preview"
+        message={previewQuery.error.message}
+        onRetry={() => previewQuery.refetch()}
       />
     );
   }
 
-  const policy = policyQuery.data;
+  const preview = previewQuery.data;
+  const policy = preview.policy;
 
   // ── Render the card ───────────────────────────────────────────────────────
 
-  const preview = previewQuery.data;
-
   // Derive "band breach" trigger from drifts (any position with breach: true).
-  const hasBandBreach = preview?.drifts.some((d) => d.breach) ?? false;
+  const hasBandBreach = preview.drifts.some((d) => d.breach);
 
   return (
     <section>
       <Card title="Rebalancing">
         {/* Status row: decision pill + trigger pills */}
         <div className="flex flex-wrap items-center gap-2">
-          {preview ? (
-            <>
-              <DecisionPill decision={preview.decision} />
-              {preview.calendar_due && <TriggerPill label="Calendar due" />}
-              {preview.macro_triggered && <TriggerPill label="Macro triggered" />}
-              {hasBandBreach && <TriggerPill label="Band breach" />}
-            </>
-          ) : previewQuery.isPending ? (
-            <span
-              aria-busy="true"
-              className="inline-block h-[26px] w-[90px] animate-pulse bg-surface-2"
-            />
-          ) : null}
+          <DecisionPill decision={preview.decision} />
+          {preview.calendar_due && <TriggerPill label="Calendar due" />}
+          {preview.macro_triggered && <TriggerPill label="Macro triggered" />}
+          {hasBandBreach && <TriggerPill label="Band breach" />}
         </div>
 
         {/* Policy summary line */}
@@ -368,17 +333,8 @@ export function PortfolioRebalanceSection({
           )}
         </p>
 
-        {/* Preview error (policy exists but preview failed) */}
-        {previewQuery.isError && (
-          <ErrorPanel
-            title="Failed to load rebalance preview"
-            message={previewQuery.error.message}
-            onRetry={() => previewQuery.refetch()}
-          />
-        )}
-
         {/* Drift chart */}
-        {preview && preview.drifts.length > 0 && colors && driftOption && (
+        {preview.drifts.length > 0 && colors && driftOption && (
           <div className="mt-4">
             <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.07em] text-text-muted">
               Position drift
@@ -396,12 +352,12 @@ export function PortfolioRebalanceSection({
         )}
 
         {/* Proposal table */}
-        {preview && preview.decision === "proposal" && (
+        {preview.decision === "proposal" && (
           <ProposalTable preview={preview} />
         )}
 
         {/* Methodology accordion */}
-        <MethodologyAccordion objective={preview?.proposal?.objective} />
+        <MethodologyAccordion objective={preview.proposal?.objective} />
 
         {/* Advisory disclaimer footnote */}
         <p className="mt-3 text-[11px] text-text-muted">
