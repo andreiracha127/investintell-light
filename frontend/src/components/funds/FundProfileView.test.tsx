@@ -564,6 +564,14 @@ describe("FundProfileView", () => {
 
     expect(await screen.findByText("Vanguard 500 Index Fund")).toBeInTheDocument();
 
+    await waitFor(() =>
+      expect(mocked.fetchFundRiskTimeseries).toHaveBeenCalledWith(
+        FUND_ID,
+        { benchmark_id: benchmarkUuid },
+        expect.any(AbortSignal),
+      ),
+    );
+
     await user.click(screen.getByRole("button", { name: "Deep Analysis" }));
 
     await waitFor(() =>

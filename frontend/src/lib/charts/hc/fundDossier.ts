@@ -33,6 +33,24 @@ function pointDates(points: [string, number][]): string[] {
   return points.map(([date]) => date);
 }
 
+function percentPoint(value: number, dp = 1): string {
+  return `${formatNumber(value, dp)}%`;
+}
+
+function paddedPercentBounds(
+  values: [string, number][],
+  mode: "positive" | "drawdown",
+): { min?: number; max?: number } {
+  const ys = values.map(([, value]) => value).filter(Number.isFinite);
+  if (ys.length === 0) return {};
+  if (mode === "positive") {
+    const max = Math.max(...ys, 0);
+    return { min: 0, max: Math.max(5, Math.ceil((max * 1.18) / 5) * 5) };
+  }
+  const min = Math.min(...ys, 0);
+  return { min: Math.min(-1, Math.floor((min * 1.12) / 5) * 5), max: 0 };
+}
+
 export function buildHcStyleDriftOption(
   drift: FundStyleDrift,
   colors: ChartColors,
@@ -310,6 +328,154 @@ export function buildHcRiskTimeseriesOption(
       },
     ],
   };
+}
+
+export interface HcRiskSynchronizedPane {
+  id: "conditional-volatility" | "fund-drawdown" | "benchmark-drawdown";
+  title: string;
+  subtitle?: string;
+  option: Options;
+  isEmpty: boolean;
+  emptyMessage: string;
+}
+
+function riskSyncPaneOption({
+  name,
+  data,
+  colors,
+  color,
+  yTitle,
+  mode,
+  plotBands,
+  showXAxisLabels,
+  area,
+}: {
+  name: string;
+  data: [string, number][];
+  colors: ChartColors;
+  color: string;
+  yTitle: string;
+  mode: "positive" | "drawdown";
+  plotBands?: XAxisPlotBandsOptions[];
+  showXAxisLabels: boolean;
+  area?: boolean;
+}): Options {
+  const bounds = paddedPercentBounds(data, mode);
+  return {
+    chart: { type: area ? "area" : "line", spacing: [6, 12, 6, 6] },
+    legend: { enabled: false },
+    title: { text: undefined },
+    xAxis: {
+      ...compactDatetimeXAxis({
+        ...(plotBands ? { plotBands } : {}),
+        crosshair: { width: 1, color: colors.textMuted, dashStyle: "ShortDot" },
+        labels: { enabled: showXAxisLabels },
+      }),
+    },
+    yAxis: {
+      title: { text: yTitle },
+      ...(bounds.min !== undefined ? { min: bounds.min } : {}),
+      ...(bounds.max !== undefined ? { max: bounds.max } : {}),
+      labels: {
+        formatter() {
+          return percentPoint(this.value as number, 0);
+        },
+      },
+    },
+    tooltip: {
+      shared: false,
+      useHTML: true,
+      formatter() {
+        return `${formatTimestampDate(this.x)}<br/><span style="color:${color}">●</span> ${name}: <b>${percentPoint(
+          this.y as number,
+          2,
+        )}</b>`;
+      },
+    },
+    plotOptions: {
+      series: {
+        animation: { duration: 450 },
+        states: { inactive: { opacity: 1 } },
+      },
+      area: {
+        threshold: 0,
+      },
+    },
+    series: [
+      {
+        type: area ? "area" : "line",
+        name,
+        data: toDatetimeData(data),
+        color,
+        lineWidth: area ? 1.5 : 1.8,
+        fillOpacity: area ? 0.18 : undefined,
+        marker: { enabled: false },
+      },
+    ],
+  };
+}
+
+export function buildHcRiskSynchronizedOptions(
+  risk: FundRiskTimeseries,
+  colors: ChartColors,
+): HcRiskSynchronizedPane[] {
+  const model = risk.volatility_model.toUpperCase();
+  const benchmarkDrawdown = risk.benchmark_drawdown ?? [];
+  const benchmarkLabel = risk.benchmark_label ?? "Benchmark";
+  return [
+    {
+      id: "conditional-volatility",
+      title: "Conditional volatility",
+      subtitle: model,
+      option: riskSyncPaneOption({
+        name: "Conditional volatility",
+        data: risk.conditional_volatility,
+        colors,
+        color: colors.accent,
+        yTitle: "Ann. vol",
+        mode: "positive",
+        plotBands: regimeBands(risk, colors),
+        showXAxisLabels: false,
+      }),
+      isEmpty: risk.conditional_volatility.length === 0,
+      emptyMessage: "No conditional volatility series for this window.",
+    },
+    {
+      id: "fund-drawdown",
+      title: "Fund drawdown",
+      option: riskSyncPaneOption({
+        name: "Fund drawdown",
+        data: risk.drawdown,
+        colors,
+        color: colors.loss,
+        yTitle: "Drawdown",
+        mode: "drawdown",
+        showXAxisLabels: false,
+        area: true,
+      }),
+      isEmpty: risk.drawdown.length === 0,
+      emptyMessage: "No fund drawdown series for this window.",
+    },
+    {
+      id: "benchmark-drawdown",
+      title: "Benchmark drawdown",
+      subtitle: benchmarkLabel,
+      option: riskSyncPaneOption({
+        name: benchmarkLabel,
+        data: benchmarkDrawdown,
+        colors,
+        color: colors.textMuted,
+        yTitle: "Drawdown",
+        mode: "drawdown",
+        showXAxisLabels: true,
+        area: true,
+      }),
+      isEmpty: benchmarkDrawdown.length === 0,
+      emptyMessage:
+        risk.benchmark_empty_state?.reason ??
+        "No benchmark drawdown series for this window.",
+    },
+  ];
 }
 
 export function buildHcTailRiskOption(

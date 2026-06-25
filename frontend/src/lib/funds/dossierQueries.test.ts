@@ -15,6 +15,7 @@ import {
   normalizeAnalysisParams,
   normalizeCusip,
   normalizeEntityAnalyticsParams,
+  normalizeRiskTimeseriesParams,
 } from "@/lib/funds/dossierQueries";
 
 describe("fund dossier query config", () => {
@@ -31,6 +32,13 @@ describe("fund dossier query config", () => {
       "1Y",
       null,
     ]);
+    expect(dossierQueryKeys.riskTimeseries("fund-1", { benchmark_id: "bench-1" })).toEqual([
+      "fund-risk-timeseries",
+      "fund-1",
+      null,
+      null,
+      "bench-1",
+    ]);
   });
 
   it("normalizes query params without object identity churn", () => {
@@ -42,6 +50,11 @@ describe("fund dossier query config", () => {
       window: "1Y",
       benchmark_id: null,
     });
+    expect(normalizeRiskTimeseriesParams({ benchmark_id: "  bench-1  " })).toEqual({
+      from: null,
+      to: null,
+      benchmark_id: "bench-1",
+    });
   });
 
   it("builds proxy and backend paths from the same normalized params", () => {
@@ -50,6 +63,9 @@ describe("fund dossier query config", () => {
     );
     expect(buildFundBackendPath("holdings-top", "fund/with space", {})).toBe(
       "/funds/fund%2Fwith%20space/holdings/top?limit=25",
+    );
+    expect(buildFundProxyPath("risk-timeseries", "fund-1", { benchmark_id: "bench-1" })).toBe(
+      "/api/funds/fund-1/risk-timeseries?benchmark_id=bench-1",
     );
     expect(buildFundsScatterProxyPath({})).toBe("/api/funds/scatter?limit=250");
     expect(buildFundProxyPath("institutional-reveal", "fund-1")).toBe(

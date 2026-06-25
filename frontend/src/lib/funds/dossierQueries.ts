@@ -138,10 +138,13 @@ export function normalizeStyleDriftParams(query: FundStyleDriftQuery | { quarter
   return { quarters: integerParam(query.quarters, FUND_DOSSIER_DEFAULTS.styleDriftQuarters) };
 }
 
-export function normalizeRiskTimeseriesParams(query: FundRiskTimeseriesQuery | { from?: QueryValue; to?: QueryValue } = {}) {
+export function normalizeRiskTimeseriesParams(
+  query: FundRiskTimeseriesQuery | { from?: QueryValue; to?: QueryValue; benchmark_id?: QueryValue } = {},
+) {
   return {
     from: cleanString(query.from),
     to: cleanString(query.to),
+    benchmark_id: cleanString(query.benchmark_id),
   };
 }
 
@@ -247,6 +250,7 @@ function paramPairs(resource: FundDossierSubresource, params: Record<string, Que
       return [
         ["from", params.from],
         ["to", params.to],
+        ["benchmark_id", params.benchmark_id],
       ] as const;
     case "entity-analytics":
       return [
@@ -427,9 +431,12 @@ export const dossierQueryKeys = {
     const params = normalizeStyleDriftParams(query);
     return ["fund-style-drift", instrumentId, params.quarters] as const;
   },
-  riskTimeseries: (instrumentId: string, query: FundRiskTimeseriesQuery | { from?: QueryValue; to?: QueryValue } = {}) => {
+  riskTimeseries: (
+    instrumentId: string,
+    query: FundRiskTimeseriesQuery | { from?: QueryValue; to?: QueryValue; benchmark_id?: QueryValue } = {},
+  ) => {
     const params = normalizeRiskTimeseriesParams(query);
-    return ["fund-risk-timeseries", instrumentId, params.from, params.to] as const;
+    return ["fund-risk-timeseries", instrumentId, params.from, params.to, params.benchmark_id] as const;
   },
   entityAnalytics: (
     instrumentId: string,

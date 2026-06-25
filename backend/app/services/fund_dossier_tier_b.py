@@ -1365,6 +1365,49 @@ async def _benchmark_nav_for_window(
     return await _eod_close_for_window(session, ticker.upper(), window), ticker or name
 
 
+async def _eod_close_for_dates(
+    session: AsyncSession,
+    ticker: str,
+    start: dt.date,
+    end: dt.date,
+) -> pd.Series:
+    rows = await session.execute(
+        text(
+            """
+            SELECT date, adj_close
+            FROM eod_prices
+            WHERE ticker = :ticker
+              AND date >= :start
+              AND date <= :end
+              AND adj_close IS NOT NULL
+            ORDER BY date
+            """
+        ),
+        {"ticker": ticker, "start": start, "end": end},
+    )
+    return build_nav_series((date, close) for date, close in rows.all())
+
+
+async def _benchmark_nav_for_dates(
+    session: AsyncSession,
+    benchmark_id: uuid.UUID,
+    start: dt.date,
+    end: dt.date,
+) -> tuple[pd.Series, str | None]:
+    benchmark = await _fund_or_none(session, benchmark_id)
+    if benchmark is not None:
+        rows = await select_nav_rows(session, benchmark_id, start, end)
+        return build_nav_series(rows), benchmark.ticker or benchmark.name
+
+    instrument = await _instrument_ticker_label(session, benchmark_id)
+    if instrument is None:
+        raise InvalidBenchmarkError(f"Benchmark instrument {benchmark_id} not found.")
+    ticker, name = instrument
+    if not ticker:
+        raise InvalidBenchmarkError(f"Benchmark instrument {benchmark_id} has no ticker.")
+    return await _eod_close_for_dates(session, ticker.upper(), start, end), ticker or name
+
+
 async def fetch_fund_entity_analytics(
     session: AsyncSession,
     datalake: AsyncSession,
@@ -2067,6 +2110,7 @@ async def fetch_fund_risk_timeseries(
     *,
     from_date: dt.date | None,
     to_date: dt.date | None,
+    benchmark_id: uuid.UUID | None = None,
 ) -> FundRiskTimeseriesResponse | None:
     fund = await _fund_or_none(session, instrument_id)
     if fund is None:
@@ -2097,10 +2141,31 @@ async def fetch_fund_risk_timeseries(
     else:
         drawdown_points_out = _series_points(_max_drawdown_series(nav) * 100.0)
 
+    benchmark_drawdown: list[SeriesPoint] = []
+    benchmark_label: str | None = None
+    benchmark_empty: EmptyState | None = None
+    if benchmark_id is not None:
+        benchmark_nav, benchmark_label = await _benchmark_nav_for_dates(
+            session,
+            benchmark_id,
+            nav.index[0].date(),
+            nav.index[-1].date(),
+        )
+        if len(benchmark_nav) >= 2:
+            benchmark_drawdown = _series_points(_max_drawdown_series(benchmark_nav) * 100.0)
+        else:
+            benchmark_empty = _empty(
+                "No benchmark NAV history in the requested risk-timeseries window.",
+                "nav_timeseries",
+            )
+
     return FundRiskTimeseriesResponse(
         instrument_id=instrument_id,
         drawdown=drawdown_points_out,
         conditional_volatility=vol,
+        benchmark_drawdown=benchmark_drawdown,
+        benchmark_label=benchmark_label,
+        benchmark_empty_state=benchmark_empty,
         volatility_model=model,
         regime_bands=regimes,
         empty_state=regime_empty,

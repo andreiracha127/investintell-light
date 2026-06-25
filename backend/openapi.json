@@ -3149,6 +3149,25 @@
               "title": "To"
             },
             "description": "Optional inclusive end date."
+          },
+          {
+            "name": "benchmark_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional benchmark instrument id for an aligned drawdown series.",
+              "title": "Benchmark Id"
+            },
+            "description": "Optional benchmark instrument id for an aligned drawdown series."
           }
         ],
         "responses": {
@@ -10017,6 +10036,46 @@
             "type": "array",
             "title": "Conditional Volatility",
             "description": "Annualized conditional volatility in percent points."
+          },
+          "benchmark_drawdown": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "title": "Benchmark Drawdown",
+            "description": "Benchmark drawdown in percent points, aligned to the requested risk window when available."
+          },
+          "benchmark_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Label"
+          },
+          "benchmark_empty_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmptyState"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "volatility_model": {
             "type": "string",

@@ -377,6 +377,10 @@ async def get_fund_risk_timeseries(
         dt.date | None,
         Query(alias="to", description="Optional inclusive end date."),
     ] = None,
+    benchmark_id: Annotated[
+        uuid.UUID | None,
+        Query(description="Optional benchmark instrument id for an aligned drawdown series."),
+    ] = None,
 ) -> FundRiskTimeseriesResponse:
     """Tier B drawdown, conditional volatility, and regime overlay."""
     try:
@@ -386,6 +390,7 @@ async def get_fund_risk_timeseries(
             instrument_id,
             from_date=from_date,
             to_date=to_date,
+            benchmark_id=benchmark_id,
         )
     except (fund_analysis.FundAnalysisError, fund_dossier_tier_b.TierBSourceError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

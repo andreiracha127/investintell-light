@@ -3521,6 +3521,17 @@ export interface components {
                 number
             ][];
             /**
+             * Benchmark Drawdown
+             * @description Benchmark drawdown in percent points, aligned to the requested risk window when available.
+             */
+            benchmark_drawdown?: [
+                string,
+                number
+            ][];
+            /** Benchmark Label */
+            benchmark_label?: string | null;
+            benchmark_empty_state?: components["schemas"]["EmptyState"] | null;
+            /**
              * Volatility Model
              * @enum {string}
              */
@@ -8200,6 +8211,8 @@ export interface operations {
                 from?: string | null;
                 /** @description Optional inclusive end date. */
                 to?: string | null;
+                /** @description Optional benchmark instrument id for an aligned drawdown series. */
+                benchmark_id?: string | null;
             };
             header?: never;
             path: {

@@ -336,19 +336,29 @@ async def test_fund_entity_analytics_invalid_benchmark_422(
 async def test_fund_risk_timeseries_success(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = {}
 
-    async def fake_fetch(session, datalake, instrument_id, *, from_date, to_date):
-        seen.update(instrument_id=instrument_id, from_date=from_date, to_date=to_date)
+    async def fake_fetch(session, datalake, instrument_id, *, from_date, to_date, benchmark_id=None):
+        seen.update(
+            instrument_id=instrument_id,
+            from_date=from_date,
+            to_date=to_date,
+            benchmark_id=benchmark_id,
+        )
         return _risk_ts_payload()
 
     monkeypatch.setattr(tier_b, "fetch_fund_risk_timeseries", fake_fetch)
     async with _client() as client:
         resp = await client.get(
             f"/funds/{_FUND_ID}/risk-timeseries",
-            params={"from": "2026-01-01", "to": "2026-06-12"},
+            params={
+                "from": "2026-01-01",
+                "to": "2026-06-12",
+                "benchmark_id": str(_BENCH_ID),
+            },
         )
     assert resp.status_code == 200
     assert resp.json()["drawdown"][0][1] == -5.0
     assert seen["from_date"] == dt.date(2026, 1, 1)
+    assert seen["benchmark_id"] == _BENCH_ID
 
 
 async def test_fund_active_share_empty_state(

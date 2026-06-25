@@ -9,7 +9,8 @@
  */
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { Chart } from "highcharts";
 
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { InteractiveChart } from "@/components/charts/InteractiveChart";
@@ -44,10 +45,11 @@ import {
   buildHcFactorSensitivityOption,
   buildHcInsiderSentimentOption,
   buildHcPeerBubbleOption,
-  buildHcRiskTimeseriesOption,
+  buildHcRiskSynchronizedOptions,
   buildHcStyleBiasOption,
   buildHcStyleDriftOption,
   buildHcTailRiskOption,
+  type HcRiskSynchronizedPane,
 } from "@/lib/charts/hc/fundDossier";
 import { buildHcFactorRadarOption } from "@/lib/charts/hc/fund-radar";
 import { buildHcHistogramOption } from "@/lib/charts/hc/histogram";
@@ -321,8 +323,9 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
   });
 
   const riskTimeseriesQuery = useQuery({
-    queryKey: dossierQueryKeys.riskTimeseries(instrumentId),
-    queryFn: ({ signal }) => fetchFundRiskTimeseries(instrumentId, {}, signal),
+    queryKey: dossierQueryKeys.riskTimeseries(instrumentId, benchmarkQuery),
+    queryFn: ({ signal }) =>
+      fetchFundRiskTimeseries(instrumentId, benchmarkQuery, signal),
     staleTime: FUND_DOSSIER_STALE_TIME_MS["risk-timeseries"],
     enabled: isPerformanceTab,
     retry: retryPolicy,
@@ -369,21 +372,6 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     );
   }, [analysisQuery.data, colors]);
 
-  const volatilityOption = useMemo(() => {
-    if (!colors || !analysisQuery.data?.rolling_volatility.length) return null;
-    return buildHcRollingOption(
-      analysisQuery.data.rolling_volatility,
-      "Volatility",
-      colors,
-      { yPercent: true },
-    );
-  }, [analysisQuery.data, colors]);
-
-  const sharpeOption = useMemo(() => {
-    if (!colors || !analysisQuery.data?.rolling_sharpe.length) return null;
-    return buildHcRollingOption(analysisQuery.data.rolling_sharpe, "Sharpe", colors);
-  }, [analysisQuery.data, colors]);
-
   const histogramOption = useMemo(() => {
     if (!colors || !analysisQuery.data) return null;
     return buildHcHistogramOption(analysisQuery.data.histogram, colors);
@@ -401,10 +389,15 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     );
   }, [analysisQuery.data, colors]);
 
-  const riskTimeseriesOption = useMemo(() => {
+  const riskSyncPanes = useMemo(() => {
     if (!colors || !riskTimeseriesQuery.data) return null;
-    if (riskTimeseriesQuery.data.empty_state) return null;
-    return buildHcRiskTimeseriesOption(riskTimeseriesQuery.data, colors);
+    if (
+      riskTimeseriesQuery.data.drawdown.length === 0 &&
+      riskTimeseriesQuery.data.conditional_volatility.length === 0
+    ) {
+      return null;
+    }
+    return buildHcRiskSynchronizedOptions(riskTimeseriesQuery.data, colors);
   }, [riskTimeseriesQuery.data, colors]);
 
   const styleDriftOption = useMemo(() => {
@@ -614,11 +607,9 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
           analysisQuery={analysisQuery}
           riskTimeseriesQuery={riskTimeseriesQuery}
           growthOption={growthOption}
-          volatilityOption={volatilityOption}
-          sharpeOption={sharpeOption}
           histogramOption={histogramOption}
           distributionBellOption={distributionBellOption}
-          riskTimeseriesOption={riskTimeseriesOption}
+          riskSyncPanes={riskSyncPanes}
           risk={risk}
           fundType={fund.fund_type}
           assetClass={fund.asset_class}
@@ -688,11 +679,9 @@ function PerformanceTab({
   analysisQuery,
   riskTimeseriesQuery,
   growthOption,
-  volatilityOption,
-  sharpeOption,
   histogramOption,
   distributionBellOption,
-  riskTimeseriesOption,
+  riskSyncPanes,
   risk,
   fundType,
   assetClass,
@@ -705,11 +694,9 @@ function PerformanceTab({
   analysisQuery: UseQueryResult<FundAnalysis, Error>;
   riskTimeseriesQuery: UseQueryResult<FundRiskTimeseries, Error>;
   growthOption: Highcharts.Options | null;
-  volatilityOption: Highcharts.Options | null;
-  sharpeOption: Highcharts.Options | null;
   histogramOption: Highcharts.Options | null;
   distributionBellOption: Highcharts.Options | null;
-  riskTimeseriesOption: Highcharts.Options | null;
+  riskSyncPanes: HcRiskSynchronizedPane[] | null;
   risk: FundRisk | null;
   fundType: string;
   assetClass: string | null;
@@ -766,30 +753,10 @@ function PerformanceTab({
             query={analysisQuery}
             emptyMessage="No return distribution for this window."
           />
-          <ChartCard
-            title="Rolling volatility"
-            subtitle="63 sessions"
-            option={volatilityOption}
-            query={analysisQuery}
-            emptyMessage="No rolling volatility for this window."
-          />
-          <ChartCard
-            title="Rolling Sharpe"
-            subtitle="63 sessions"
-            option={sharpeOption}
-            query={analysisQuery}
-            emptyMessage="No rolling Sharpe for this window."
-          />
         </div>
 
-        <ChartCard
-          title="Drawdown and conditional volatility"
-          subtitle={
-            riskTimeseriesQuery.data
-              ? riskTimeseriesQuery.data.volatility_model.toUpperCase()
-              : undefined
-          }
-          option={riskTimeseriesOption}
+        <SynchronizedRiskCharts
+          panes={riskSyncPanes}
           query={riskTimeseriesQuery}
           emptyMessage={
             riskTimeseriesQuery.data?.empty_state?.reason ??
@@ -1205,6 +1172,81 @@ function DeepAnalysisModal({
         )}
       </div>
     </SidePanel>
+  );
+}
+
+function SynchronizedRiskCharts({
+  panes,
+  query,
+  emptyMessage,
+}: {
+  panes: HcRiskSynchronizedPane[] | null;
+  query: UseQueryResult<FundRiskTimeseries, Error>;
+  emptyMessage: string;
+}) {
+  const chartsRef = useRef(new Map<string, Chart>());
+
+  function syncPointer(
+    event: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>,
+  ) {
+    const sourceEvent = event.nativeEvent;
+    for (const chart of chartsRef.current.values()) {
+      const series = chart.series.find((item) => item.visible && item.points.length > 0);
+      if (!series) continue;
+      const pointerEvent = chart.pointer.normalize(sourceEvent);
+      const point = series.searchPoint(pointerEvent, true);
+      if (!point) continue;
+      point.onMouseOver();
+      chart.tooltip?.refresh(point);
+      chart.xAxis[0]?.drawCrosshair(pointerEvent, point);
+    }
+  }
+
+  function clearPointer() {
+    for (const chart of chartsRef.current.values()) {
+      chart.tooltip?.hide(0);
+      chart.xAxis[0]?.hideCrosshair();
+    }
+  }
+
+  return (
+    <Card title="Drawdown and conditional volatility" subtitle="synchronized">
+      {panes ? (
+        <div
+          className="divide-y divide-border"
+          onMouseMove={syncPointer}
+          onMouseLeave={clearPointer}
+          onTouchMove={syncPointer}
+          onTouchEnd={clearPointer}
+        >
+          {panes.map((pane) => (
+            <div key={pane.id} className="py-3 first:pt-0 last:pb-0">
+              <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
+                <h3 className="ix-label m-0">
+                  {pane.title}
+                  {pane.subtitle && (
+                    <span className="ml-2 font-normal normal-case tracking-normal text-text-secondary">
+                      {pane.subtitle}
+                    </span>
+                  )}
+                </h3>
+              </div>
+              <HighchartsChart
+                options={pane.option}
+                className="h-[190px] w-full"
+                emptyMessage={pane.emptyMessage}
+                isEmpty={pane.isEmpty}
+                onReady={(chart) => {
+                  chartsRef.current.set(pane.id, chart);
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <QueryMessage query={query} emptyMessage={emptyMessage} />
+      )}
+    </Card>
   );
 }
 

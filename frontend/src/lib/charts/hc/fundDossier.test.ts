@@ -18,6 +18,7 @@ import {
   buildHcInstitutionalHolderOption,
   buildHcInstitutionalOverlapOption,
   buildHcPeerBubbleOption,
+  buildHcRiskSynchronizedOptions,
   buildHcRiskTimeseriesOption,
   buildHcStyleBiasOption,
   buildHcStyleDriftOption,
@@ -95,6 +96,12 @@ function riskTimeseries(): FundRiskTimeseries {
       ["2026-01-01", 10],
       ["2026-01-02", 12],
     ],
+    benchmark_drawdown: [
+      ["2026-01-01", 0],
+      ["2026-01-02", -3],
+    ],
+    benchmark_label: "Benchmark Fund",
+    benchmark_empty_state: null,
     volatility_model: "ewma",
     regime_bands: [
       { time: "2026-01-01", value: 0, regime: "Expansion" },
@@ -297,6 +304,32 @@ describe("fund dossier Highcharts builders", () => {
       ],
     });
     expect((option.xAxis as { type?: string }).type).toBe("datetime");
+  });
+
+  it("builds synchronized risk panes for volatility, fund drawdown, and benchmark drawdown", () => {
+    const panes = buildHcRiskSynchronizedOptions(riskTimeseries(), colors);
+
+    expect(panes).toHaveLength(3);
+    expect(panes.map((pane) => pane.id)).toEqual([
+      "conditional-volatility",
+      "fund-drawdown",
+      "benchmark-drawdown",
+    ]);
+    expect(panes[0].option.series?.[0]).toMatchObject({
+      name: "Conditional volatility",
+      data: [
+        [dateToUtcMs("2026-01-01"), 10],
+        [dateToUtcMs("2026-01-02"), 12],
+      ],
+    });
+    expect(panes[2].subtitle).toBe("Benchmark Fund");
+    expect(panes[2].option.series?.[0]).toMatchObject({
+      name: "Benchmark Fund",
+      data: [
+        [dateToUtcMs("2026-01-01"), 0],
+        [dateToUtcMs("2026-01-02"), -3],
+      ],
+    });
   });
 
   it("builds tail risk bars from decimal-fraction backend metrics", () => {

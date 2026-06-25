@@ -538,7 +538,7 @@ class FundRegimeBand(BaseModel):
 
 
 class FundRiskTimeseriesResponse(BaseModel):
-    """Drawdown, conditional volatility, and regime overlay series."""
+    """Drawdown, conditional volatility, benchmark drawdown, and regime overlay series."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -547,6 +547,12 @@ class FundRiskTimeseriesResponse(BaseModel):
     conditional_volatility: list[SeriesPoint] = Field(
         description="Annualized conditional volatility in percent points."
     )
+    benchmark_drawdown: list[SeriesPoint] = Field(
+        default_factory=list,
+        description="Benchmark drawdown in percent points, aligned to the requested risk window when available.",
+    )
+    benchmark_label: str | None = None
+    benchmark_empty_state: EmptyState | None = None
     volatility_model: VolatilityModel
     regime_bands: list[FundRegimeBand]
     empty_state: EmptyState | None = None
