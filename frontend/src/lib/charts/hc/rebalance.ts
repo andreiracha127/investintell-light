@@ -53,8 +53,8 @@ export function buildHcDriftBandsOption(
   drifts: PositionDrift[],
   colors: ChartColors,
   bandAbs: number,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   bandRel: number,
+  labelsByTicker: Record<string, string> = {},
 ): Options | null {
   if (!drifts || drifts.length === 0) return null;
 
@@ -65,7 +65,8 @@ export function buildHcDriftBandsOption(
     .map((d) => ({ ...d, drift: d.current_weight - d.target_weight }))
     .sort((a, b) => a.drift - b.drift);
 
-  const labels = rows.map((d) => d.ticker);
+  const labelFor = (ticker: string) => labelsByTicker[ticker.toUpperCase()] ?? ticker;
+  const labels = rows.map((d) => labelFor(d.ticker));
   const bandPct = bandAbs * 100;
 
   // Signed drift (p.p.); breached rows in loss color, others neutral graphite.
@@ -75,13 +76,25 @@ export function buildHcDriftBandsOption(
   }));
 
   return {
-    chart: { type: "bar" },
+    chart: {
+      type: "bar",
+      spacing: [10, 18, 16, 8],
+    },
     legend: { enabled: false },
     xAxis: {
       categories: labels,
       tickWidth: 0,
+      lineWidth: 0,
+      labels: {
+        style: {
+          color: colors.textSecondary,
+          fontSize: "11px",
+          textOverflow: "ellipsis",
+        },
+      },
     },
     yAxis: {
+      gridLineColor: colors.grid,
       title: {
         text: "Drift vs. target (p.p.)",
         style: { color: colors.textSecondary, fontSize: "10px" },
@@ -124,7 +137,7 @@ export function buildHcDriftBandsOption(
           : "";
         return [
           `<div style="font-size:12px">`,
-          `<b>${row.ticker}</b>`,
+          `<b>${labelFor(row.ticker)}</b>`,
           `<br/>Current: <b>${formatPercent(row.current_weight, 2)}</b>`,
           `<br/>Target: <b>${formatPercent(row.target_weight, 2)}</b>`,
           `<br/>Drift: <b style="color:${tone}">${ppLabel(row.drift * 100, 2)}</b>`,
@@ -135,10 +148,15 @@ export function buildHcDriftBandsOption(
     },
     plotOptions: {
       bar: {
-        borderRadius: 0,
-        pointPadding: 0.12,
+        borderRadius: 2,
+        groupPadding: 0.18,
+        pointPadding: 0.22,
+        pointWidth: 14,
         dataLabels: {
           enabled: true,
+          allowOverlap: false,
+          crop: false,
+          overflow: "allow",
           formatter() {
             return ppLabel(this.y as number, 1);
           },

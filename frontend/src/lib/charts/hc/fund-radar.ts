@@ -28,25 +28,62 @@ function radarBound(values: number[]): number {
   return Math.max(2, Math.ceil(peak));
 }
 
+function factorLabel(raw: string): string {
+  const key = raw.trim().toLowerCase();
+  const labels: Record<string, string> = {
+    book_to_market: "Value",
+    investment: "Investment",
+    momentum: "Momentum",
+    profitability: "Profitability",
+    quality: "Quality",
+    size: "Size",
+  };
+  return labels[key] ?? raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export function buildHcFactorRadarOption(
   factors: FundFactors,
   colors: ChartColors,
 ): Options {
   const rows = factors.style_bias;
-  const categories = rows.map((item) => item.factor);
+  const categories = rows.map((item) => factorLabel(item.factor));
   const zScores = rows.map((item) => item.z_score ?? 0);
   const bound = radarBound(zScores);
 
   return {
-    chart: { polar: true, type: "area" },
+    chart: {
+      polar: true,
+      type: "area",
+      spacing: [8, 28, 10, 28],
+    },
     legend: { enabled: false },
-    pane: { size: "82%", startAngle: 0 },
+    pane: {
+      size: "76%",
+      startAngle: 0,
+      background: [
+        {
+          backgroundColor: `${colors.accentWash}55`,
+          borderColor: colors.grid,
+          borderWidth: 1,
+          innerRadius: "0%",
+          outerRadius: "100%",
+        },
+      ],
+    },
     xAxis: {
       categories,
       tickmarkPlacement: "on",
       lineWidth: 0,
       gridLineColor: colors.grid,
-      labels: { style: { color: colors.textSecondary, fontSize: "10px" } },
+      labels: {
+        distance: 18,
+        style: {
+          color: colors.textSecondary,
+          fontSize: "11px",
+          fontWeight: "700",
+          textOverflow: "none",
+        },
+      },
     },
     yAxis: {
       gridLineInterpolation: "polygon",
@@ -79,7 +116,12 @@ export function buildHcFactorRadarOption(
     },
     plotOptions: {
       area: {
-        marker: { enabled: true, radius: 3 },
+        marker: {
+          enabled: true,
+          radius: 3.5,
+          lineColor: colors.surface,
+          lineWidth: 1,
+        },
         states: { hover: { lineWidth: 2 } },
       },
     },
@@ -89,8 +131,8 @@ export function buildHcFactorRadarOption(
         name: "Style bias",
         data: zScores,
         color: colors.accent,
-        lineWidth: 1.6,
-        fillOpacity: 0.22,
+        lineWidth: 2,
+        fillOpacity: 0.28,
         pointPlacement: "on",
       },
     ],

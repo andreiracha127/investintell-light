@@ -25,8 +25,25 @@ import { formatNumber } from "@/lib/format";
 export interface AllocationConfig {
   innerSize?: string;
   dataLabels?: boolean;
+  /** Total NAV used for "% NAV" labels. Falls back to the sum of slices. */
+  navTotal?: number;
+  /** Asset-class label currently expanded in two-level drilldown mode. */
+  activeAssetClass?: string | null;
+  /** Show only asset classes until the user expands one class into holdings. */
+  drilldown?: boolean;
+  /** Render leader labels with each point's NAV share. */
+  navDataLabels?: boolean;
+  /** Called when an asset-class point is clicked in drilldown mode. */
+  onAssetClassClick?: (assetClass: string | null) => void;
   valueFormatter?: (value: number) => string;
 }
+
+type AllocationPointCustom = {
+  assetClass?: string;
+  displayName?: string;
+  isAssetClass?: boolean;
+  navPct?: number;
+};
 
 function assetClassLabel(assetClass: string | null | undefined): string {
   if (!assetClass) return "Other";
@@ -47,6 +64,17 @@ function pointColor(slice: AllocationSlice, index: number, colors: ChartColors):
     : colors.categories[index % colors.categories.length];
 }
 
+function navPct(value: number, total: number): number {
+  return total > 0 ? (value / total) * 100 : 0;
+}
+
+function navPctLabel(point: Point, colors: ChartColors): string {
+  const custom = point.options.custom as AllocationPointCustom | undefined;
+  const pct = custom?.navPct ?? point.percentage ?? 0;
+  const name = String(point.key ?? point.name ?? "");
+  return `<span>${name}</span><br/><span style="color:${colors.textMuted};font-size:10px">${formatNumber(pct, 1)}% NAV</span>`;
+}
+
 export function buildHcAllocationOption(
   slices: AllocationSlice[],
   colors: ChartColors,
@@ -55,6 +83,7 @@ export function buildHcAllocationOption(
   const innerSize = config.innerSize ?? "62%";
   const valueFormatter = config.valueFormatter;
   const hasAssetClasses = slices.some((slice) => slice.assetClass);
+  const totalForPct = config.navTotal ?? slices.reduce((sum, slice) => sum + slice.value, 0);
   const holdingData = slices.map((slice, i) => ({
     name: slice.name,
     y: slice.value,
@@ -62,6 +91,7 @@ export function buildHcAllocationOption(
     custom: {
       assetClass: assetClassLabel(slice.assetClass),
       displayName: slice.displayName,
+      navPct: navPct(slice.value, totalForPct),
     },
   }));
 
@@ -80,6 +110,11 @@ export function buildHcAllocationOption(
     name,
     y: item.value,
     color: item.color,
+    custom: {
+      assetClass: name,
+      isAssetClass: true,
+      navPct: navPct(item.value, totalForPct),
+    },
   }));
 
   const singleSeries: SeriesPieOptions = {
@@ -104,15 +139,34 @@ export function buildHcAllocationOption(
     data: holdingData,
   };
 
-  const nestedSeries: SeriesPieOptions[] = [
-    {
-      type: "pie",
-      name: "Asset class",
-      size: "58%",
-      innerSize: "34%",
-      borderWidth: 1,
-      borderColor: colors.surface,
-      dataLabels: {
+  const activeAssetClass = config.activeAssetClass ?? null;
+  const drilldown = config.drilldown ?? false;
+  const showSecondLevel = !drilldown || Boolean(activeAssetClass);
+  const secondLevelData = activeAssetClass
+    ? holdingData.filter((point) => point.custom.assetClass === activeAssetClass)
+    : holdingData;
+
+  const innerLabelOptions: SeriesPieOptions["dataLabels"] = config.navDataLabels
+    ? {
+        enabled: true,
+        crop: false,
+        distance: 16,
+        connectorColor: colors.grid,
+        connectorWidth: 1,
+        overflow: "allow",
+        softConnector: true,
+        useHTML: true,
+        style: {
+          color: colors.text,
+          fontSize: "11px",
+          fontWeight: "700",
+          textOutline: "none",
+        },
+        formatter(this: Point) {
+          return navPctLabel(this, colors);
+        },
+      }
+    : {
         enabled: true,
         distance: -36,
         style: {
@@ -124,22 +178,45 @@ export function buildHcAllocationOption(
         formatter(this: Point) {
           return (this.percentage ?? 0) >= 8 ? String(this.key ?? this.name ?? "") : "";
         },
-      },
+      };
+
+  const nestedSeries: SeriesPieOptions[] = [
+    {
+      type: "pie",
+      name: "Asset class",
+      size: showSecondLevel ? "58%" : "82%",
+      innerSize: showSecondLevel ? "34%" : "52%",
+      borderWidth: 1,
+      borderColor: colors.surface,
+      dataLabels: innerLabelOptions,
       states: { hover: { halo: { size: 5 }, brightness: 0.08 } },
+      point: {
+        events: {
+          click() {
+            if (!drilldown || !config.onAssetClassClick) return;
+            const custom = this.options.custom as AllocationPointCustom | undefined;
+            const label = custom?.assetClass ?? String(this.name ?? "");
+            config.onAssetClassClick(label === activeAssetClass ? null : label);
+          },
+        },
+      },
       data: innerData,
     },
-    {
+  ];
+
+  if (showSecondLevel) {
+    nestedSeries.push({
       type: "pie",
       name: "Holding",
       size: "88%",
       innerSize: "60%",
       borderWidth: 1,
       borderColor: colors.surface,
-      dataLabels: config.dataLabels
+      dataLabels: config.dataLabels || (drilldown && Boolean(activeAssetClass))
         ? {
             enabled: true,
             crop: false,
-            distance: 28,
+            distance: 24,
             connectorColor: colors.grid,
             connectorWidth: 1,
             overflow: "allow",
@@ -147,27 +224,30 @@ export function buildHcAllocationOption(
             style: { color: colors.text, fontSize: "11px", fontWeight: "400", textOutline: "none" },
             useHTML: true,
             formatter(this: Point) {
-              const pct = formatNumber(this.percentage ?? 0, 1);
-              return `<span><b>${String(this.key ?? this.name ?? "")}</b>: <span style="color:${colors.textMuted};">${pct}%</span></span>`;
+              const custom = this.options.custom as AllocationPointCustom | undefined;
+              const pct = custom?.navPct ?? this.percentage ?? 0;
+              const name = String(this.key ?? this.name ?? "");
+              return `<span><b>${name}</b>: <span style="color:${colors.textMuted};">${formatNumber(pct, 1)}% NAV</span></span>`;
             },
           }
         : { enabled: false },
       states: { hover: { halo: { size: 6 }, brightness: 0.1 } },
-      data: holdingData,
-    },
-  ];
+      data: secondLevelData,
+    });
+  }
 
   return {
-    chart: { type: "pie", spacing: config.dataLabels ? [8, 76, 8, 76] : [4, 4, 4, 4] },
+    chart: {
+      type: "pie",
+      spacing: config.dataLabels || config.navDataLabels ? [10, 58, 10, 58] : [4, 4, 4, 4],
+    },
     legend: { enabled: false },
     tooltip: {
       useHTML: true,
       pointFormatter(this: Point) {
         const name = String(this.key ?? this.name ?? "");
-        const custom = this.options?.custom as
-          | { assetClass?: string; displayName?: string }
-          | undefined;
-        const pct = formatNumber(this.percentage ?? 0, 1);
+        const custom = this.options?.custom as AllocationPointCustom | undefined;
+        const pct = formatNumber(custom?.navPct ?? this.percentage ?? 0, 1);
         const valueLine = valueFormatter
           ? `<div style="font-variant-numeric:tabular-nums;">${valueFormatter(this.y ?? 0)}</div>`
           : "";
@@ -177,7 +257,8 @@ export function buildHcAllocationOption(
         const displayLine = custom?.displayName && custom.displayName !== name
           ? `<div>${custom.displayName}</div>`
           : "";
-        return `<b>${name}</b>${displayLine}${classLine}${valueLine}<div style="color:${colors.textMuted};">${pct}% of portfolio</div>`;
+        const pctLabel = config.navTotal ? "of NAV" : "of portfolio";
+        return `<b>${name}</b>${displayLine}${classLine}${valueLine}<div style="color:${colors.textMuted};">${pct}% ${pctLabel}</div>`;
       },
     },
     plotOptions: {

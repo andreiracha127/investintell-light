@@ -71,6 +71,23 @@ describe("buildHcDriftBandsOption", () => {
     expect(cats).toEqual(["CCC", "BBB", "AAA"]);
   });
 
+  it("uses sanitized display labels when provided instead of ticker categories", () => {
+    const opt = buildHcDriftBandsOption(DRIFTS, TEST_COLORS, BAND_ABS, BAND_REL, {
+      AAA: "Alpha Core",
+      BBB: "Beta Income",
+      CCC: "Credit Sleeve",
+    })!;
+    const cats = (opt.xAxis as { categories?: string[] }).categories;
+    expect(cats).toEqual(["Credit Sleeve", "Beta Income", "Alpha Core"]);
+
+    const tooltip = opt.tooltip as {
+      formatter?: (this: { point: { index: number } }) => string;
+    };
+    const out = tooltip!.formatter!.call({ point: { index: 2 } });
+    expect(out).toContain("Alpha Core");
+    expect(out).not.toContain("<b>AAA</b>");
+  });
+
   it("maps signed drift -> single bar series in p.p., coloring out-of-band rows with loss", () => {
     const opt = buildHcDriftBandsOption(DRIFTS, TEST_COLORS, BAND_ABS, BAND_REL)!;
     expect(opt.series).toHaveLength(1);
@@ -126,6 +143,12 @@ describe("buildHcDriftBandsOption", () => {
     expect(dl.enabled).toBe(true);
     expect(dl.formatter!.call({ y: 7 })).toBe("+7.0 p.p.");
     expect(dl.formatter!.call({ y: -6 })).toBe("−6.0 p.p.");
+  });
+
+  it("uses slim bars for the negative-stack drift treatment", () => {
+    const opt = buildHcDriftBandsOption(DRIFTS, TEST_COLORS, BAND_ABS, BAND_REL)!;
+    expect(opt.plotOptions?.bar?.pointWidth).toBe(14);
+    expect(opt.plotOptions?.bar?.borderRadius).toBe(2);
   });
 
   it("renders a rich tooltip with band-breach styling", () => {

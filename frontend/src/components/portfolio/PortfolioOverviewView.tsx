@@ -847,7 +847,7 @@ function OverviewSection({
         inceptionDate={inceptionDate}
       />
       {colors && (
-        <div className="grid items-stretch gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]">
+        <div className="grid items-stretch gap-px bg-border lg:grid-cols-[minmax(320px,0.8fr)_minmax(420px,1.2fr)]">
           {(overview.positions.length > 0 || overview.aggregates.cash > 0) && (
             <AllocationPanel overview={overview} colors={colors} />
           )}
@@ -910,7 +910,7 @@ function NavPanel({
     // Baseline NAV (range start) for the "% from range start" tooltip line.
     const base0 = slice[0]![1];
     return {
-      chart: { type: "line", height: 200, zooming: { type: "x" } },
+      chart: { type: "areaspline", height: 340, zooming: { type: "x" } },
       legend: { enabled: false },
       xAxis: compactDatetimeXAxis({
         crosshair: { color: colors.grid },
@@ -938,14 +938,30 @@ function NavPanel({
           );
         },
       },
+      plotOptions: {
+        areaspline: {
+          animation: { duration: 900 },
+          marker: {
+            enabled: false,
+            states: { hover: { enabled: true, radius: 3 } },
+          },
+        },
+      },
       series: [
         {
-          type: "line",
+          type: "areaspline",
           name: "NAV Index",
           data: slice,
           color: colors.accent,
-          lineWidth: 2,
-          marker: { enabled: false },
+          lineWidth: 2.4,
+          fillColor: {
+            linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
+            stops: [
+              [0, colors.accentWash],
+              [1, colors.surface],
+            ],
+          },
+          threshold: null,
         },
       ],
     };
@@ -989,11 +1005,11 @@ function NavPanel({
         </div>
       </div>
       {isLoading && slice.length === 0 ? (
-        <div className="h-[200px] flex-1 animate-pulse bg-layer-active" />
+        <div className="h-[340px] flex-1 animate-pulse bg-layer-active" />
       ) : option ? (
-        <HighchartsChart options={option} className="h-[200px] w-full flex-1" />
+        <HighchartsChart options={option} className="h-[340px] w-full flex-1" />
       ) : (
-        <div className="flex h-[200px] flex-1 items-center justify-center px-4 text-center text-[12px] text-text-muted">
+        <div className="flex h-[340px] flex-1 items-center justify-center px-4 text-center text-[12px] text-text-muted">
           {isError
             ? "Could not load materialized portfolio NAV."
             : "NAV not materialized."}
@@ -1105,6 +1121,7 @@ function AllocationPanel({
   colors: ChartColors;
 }) {
   const { aggregates, positions } = overview;
+  const [activeAssetClass, setActiveAssetClass] = useState<string | null>(null);
 
   const slices = useMemo<Array<AllocationSlice & { displayName?: string }>>(() => {
     const positionSlices = positions.map((position) => ({
@@ -1121,15 +1138,34 @@ function AllocationPanel({
   const options = useMemo(
     () =>
       buildHcAllocationOption(slices, colors, {
-        // Tooltip shows the $ market value above the "% of portfolio" line.
+        // Tooltip shows the $ market value above the "% NAV" line.
         valueFormatter: (value) => formatCurrency(value),
+        navTotal: aggregates.total_value,
+        activeAssetClass,
+        drilldown: true,
+        navDataLabels: true,
+        onAssetClassClick: setActiveAssetClass,
       }),
-    [slices, colors],
+    [slices, colors, aggregates.total_value, activeAssetClass],
   );
 
   return (
-    <Card title="Allocation" subtitle="market value">
-      <HighchartsChart options={options} className="h-[360px] w-full" />
+    <Card
+      title="Allocation"
+      subtitle={activeAssetClass ?? "market value"}
+      actions={
+        activeAssetClass ? (
+          <button
+            type="button"
+            onClick={() => setActiveAssetClass(null)}
+            className="h-[24px] border border-border-strong bg-field px-2 text-[11px] text-text-secondary hover:bg-layer-hover"
+          >
+            Reset
+          </button>
+        ) : null
+      }
+    >
+      <HighchartsChart options={options} className="h-[340px] w-full" />
     </Card>
   );
 }

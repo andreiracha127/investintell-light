@@ -22,13 +22,11 @@ import {
   fetchFundEntityAnalytics,
   fetchFundFactors,
   fetchFundHoldingsTop,
-  fetchFundInstitutionalReveal,
   fetchFundPeers,
   fetchFundProfile,
   fetchFundRiskTimeseries,
   fetchFundStyleDrift,
   fetchFundTimeseries,
-  fetchHoldingReverseLookup,
   fetchFundsScatter,
   fundTimeseriesToHistoryBars,
   type FundActiveShare,
@@ -36,8 +34,6 @@ import {
   type FundEntityAnalytics,
   type FundFactors,
   type FundHoldingsTop,
-  type FundInstitutionalReveal,
-  type HoldingReverseLookup,
   type FundPeers,
   type FundRisk,
   type FundRiskTimeseries,
@@ -49,8 +45,6 @@ import {
   buildHcFactorSensitivityOption,
   buildHcFundsScatterOption,
   buildHcInsiderSentimentOption,
-  buildHcInstitutionalHolderOption,
-  buildHcInstitutionalOverlapOption,
   buildHcRiskTimeseriesOption,
   buildHcStyleBiasOption,
   buildHcStyleDriftOption,
@@ -202,31 +196,26 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
   const [activeTab, setActiveTab] = useState<TabId>("performance");
   const [range, setRange] = useState<RangePreset>("1Y");
   const [deepOpen, setDeepOpen] = useState(false);
-  const [relationshipsOpen, setRelationshipsOpen] = useState(false);
   const [benchmarkId, setBenchmarkId] = useState("");
-  const [selectedCusip, setSelectedCusip] = useState("");
 
   useEffect(() => {
     setActiveTab("performance");
     setRange("1Y");
     setDeepOpen(false);
-    setRelationshipsOpen(false);
     setBenchmarkId("");
-    setSelectedCusip("");
   }, [instrumentId]);
 
-  // Escape closes whichever side panel is open (Deep analysis / Ownership).
+  // Escape closes the Deep Analysis side panel.
   useEffect(() => {
-    if (!deepOpen && !relationshipsOpen) return;
+    if (!deepOpen) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setDeepOpen(false);
-        setRelationshipsOpen(false);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [deepOpen, relationshipsOpen]);
+  }, [deepOpen]);
 
   const benchmarkQuery = benchmarkId ? { benchmark_id: benchmarkId } : {};
   const isPerformanceTab = activeTab === "performance";
@@ -374,25 +363,6 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     retry: retryPolicy,
   });
 
-  const institutionalRevealQuery = useQuery({
-    queryKey: dossierQueryKeys.institutionalReveal(instrumentId),
-    queryFn: ({ signal }) => fetchFundInstitutionalReveal(instrumentId, signal),
-    staleTime: FUND_DOSSIER_STALE_TIME_MS["institutional-reveal"],
-    enabled: relationshipsOpen,
-    retry: retryPolicy,
-  });
-
-  const reverseLookupCusip =
-    selectedCusip || institutionalRevealQuery.data?.overlap[0]?.cusip || "";
-
-  const reverseLookupQuery = useQuery({
-    queryKey: dossierQueryKeys.holdingReverseLookup(reverseLookupCusip),
-    queryFn: ({ signal }) => fetchHoldingReverseLookup(reverseLookupCusip, signal),
-    staleTime: FUND_DOSSIER_STALE_TIME_MS["holding-reverse-lookup"],
-    enabled: relationshipsOpen && reverseLookupCusip.length > 0,
-    retry: retryPolicy,
-  });
-
   const chartBars = useMemo(
     () =>
       timeseriesQuery.data
@@ -493,18 +463,6 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     return buildHcInsiderSentimentOption(analytics, colors);
   }, [entityAnalyticsQuery.data, colors]);
 
-  const institutionalHolderOption = useMemo(() => {
-    if (!colors || !institutionalRevealQuery.data?.top_holders.length) return null;
-    if (institutionalRevealQuery.data.empty_state) return null;
-    return buildHcInstitutionalHolderOption(institutionalRevealQuery.data, colors);
-  }, [institutionalRevealQuery.data, colors]);
-
-  const institutionalOverlapOption = useMemo(() => {
-    if (!colors || !institutionalRevealQuery.data?.overlap.length) return null;
-    if (institutionalRevealQuery.data.empty_state) return null;
-    return buildHcInstitutionalOverlapOption(institutionalRevealQuery.data, colors);
-  }, [institutionalRevealQuery.data, colors]);
-
   const distributionOption = useMemo(() => {
     if (!colors || !entityAnalyticsQuery.data) return null;
     const distribution = entityAnalyticsQuery.data.distribution;
@@ -601,13 +559,6 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setRelationshipsOpen(true)}
-            className="h-[32px] border border-border-strong bg-surface-2 px-3 text-[11px] font-bold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:bg-layer-hover"
-          >
-            Relationships
-          </button>
           <button
             type="button"
             onClick={() => setDeepOpen(true)}
@@ -732,17 +683,6 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
         />
       )}
 
-      {relationshipsOpen && (
-        <RelationshipsModal
-          institutionalRevealQuery={institutionalRevealQuery}
-          reverseLookupQuery={reverseLookupQuery}
-          selectedCusip={reverseLookupCusip}
-          onSelectCusip={setSelectedCusip}
-          onClose={() => setRelationshipsOpen(false)}
-          holderOption={institutionalHolderOption}
-          overlapOption={institutionalOverlapOption}
-        />
-      )}
     </div>
   );
 }
@@ -972,7 +912,7 @@ function FactorsTab({
   factorRadarOption: Highcharts.Options | null;
 }) {
   return (
-    <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))]">
+    <div className="grid items-stretch gap-px bg-border xl:grid-cols-[minmax(280px,0.8fr)_minmax(520px,1.2fr)]">
       <ChartCard
         title="Market sensitivities"
         subtitle="beta"
@@ -980,43 +920,16 @@ function FactorsTab({
         query={factorsQuery}
         emptyMessage="No factor sensitivities available."
         tip="How strongly the fund moves with each driver. A market beta of 1.0 tracks the index; positive size / value tilts mean a small-cap or value lean."
-        className="h-[320px]"
+        className="h-[420px]"
       />
-      {/* Style bias spider — falls back to diverging bars below 3 spokes. */}
       <ChartCard
         title="Style bias"
         subtitle="holdings-weighted z-score"
         option={factorRadarOption ?? styleBiasOption}
         query={factorsQuery}
         emptyMessage="No style-bias snapshot available."
-        className="h-[320px]"
+        className="h-[420px]"
       />
-      <Card title="Factor source metadata">
-        {factorsQuery.data ? (
-          factorsQuery.data.source_metadata.length > 0 ? (
-            <dl className="m-0">
-              {factorsQuery.data.source_metadata.map((source) => (
-                <StatRow
-                  key={source.source}
-                  label={source.source}
-                  value={source.as_of ? formatDate(source.as_of) : "--"}
-                  detail={source.empty_state?.reason}
-                />
-              ))}
-            </dl>
-          ) : (
-            <p className="py-8 text-center text-[13px] text-text-muted">
-              No source metadata returned.
-            </p>
-          )
-        ) : (
-          <QueryMessage
-            query={factorsQuery}
-            emptyMessage="No factor source metadata."
-            loadingMessage="Loading factors..."
-          />
-        )}
-      </Card>
     </div>
   );
 }
@@ -1095,53 +1008,69 @@ function DeepAnalysisModal({
       ariaLabel="Deep fund analysis"
       closeLabel="Close deep analysis"
       onClose={onClose}
+      wide
     >
-        <div className="overflow-y-auto px-4 py-4">
-          {!data ? (
-            <QueryMessage
-              query={entityAnalyticsQuery}
-              emptyMessage="No deep-analysis payload returned."
-              loadingMessage="Loading deep analysis..."
-            />
-          ) : (
-            <div className="grid gap-4 lg:grid-cols-2">
-              <ModalSection title="Risk Statistics">
-                <dl className="m-0 grid gap-px border border-border bg-border md:grid-cols-2">
-                  <StatBlock label="Ann. return" value={pct(data.risk_statistics.annualized_return)} />
-                  <StatBlock label="Ann. volatility" value={pct(data.risk_statistics.annualized_volatility)} />
-                  <StatBlock label="Sharpe" value={num(data.risk_statistics.sharpe_ratio)} />
-                  <StatBlock label="Sortino" value={num(data.risk_statistics.sortino_ratio)} />
-                  <StatBlock label="Calmar" value={num(data.risk_statistics.calmar_ratio)} />
-                  <StatBlock label="Observations" value={String(data.risk_statistics.n_observations)} />
-                  <StatBlock label="Alpha" value={pct(data.risk_statistics.alpha)} />
-                  <StatBlock label="Beta" value={num(data.risk_statistics.beta)} />
-                  <StatBlock label="Tracking error" value={pct(data.risk_statistics.tracking_error)} />
-                  <StatBlock label="Information ratio" value={num(data.risk_statistics.information_ratio)} />
-                </dl>
-              </ModalSection>
+      <div className="overflow-y-auto bg-surface px-5 py-5">
+        {!data ? (
+          <QueryMessage
+            query={entityAnalyticsQuery}
+            emptyMessage="No deep-analysis payload returned."
+            loadingMessage="Loading deep analysis..."
+          />
+        ) : (
+          <div className="flex flex-col gap-px">
+            <ModalSection title="Risk Statistics" className="bg-surface-2">
+              <dl className="m-0 grid gap-px border border-border bg-border [grid-template-columns:repeat(auto-fit,minmax(140px,1fr))]">
+                <StatBlock label="Ann. return" value={pct(data.risk_statistics.annualized_return)} />
+                <StatBlock label="Ann. volatility" value={pct(data.risk_statistics.annualized_volatility)} />
+                <StatBlock label="Sharpe" value={num(data.risk_statistics.sharpe_ratio)} />
+                <StatBlock label="Sortino" value={num(data.risk_statistics.sortino_ratio)} />
+                <StatBlock label="Calmar" value={num(data.risk_statistics.calmar_ratio)} />
+                <StatBlock label="Max drawdown" value={pct(data.drawdown.max_drawdown)} />
+                <StatBlock label="Alpha" value={pct(data.risk_statistics.alpha)} />
+                <StatBlock label="Beta" value={num(data.risk_statistics.beta)} />
+                <StatBlock label="Tracking error" value={pct(data.risk_statistics.tracking_error)} />
+                <StatBlock label="Information ratio" value={num(data.risk_statistics.information_ratio)} />
+              </dl>
+            </ModalSection>
 
+            <div className="grid gap-px bg-border">
               <ModalSection title="Drawdown">
-                {drawdownOption ? (
-                  <HighchartsChart options={drawdownOption} className="h-[230px] w-full" />
-                ) : (
-                  <EmptyMessage message="No drawdown series for this window." />
-                )}
-                <dl className="m-0 mt-3">
-                  <StatRow label="Max drawdown" value={pct(data.drawdown.max_drawdown)} />
-                  <StatRow label="Current drawdown" value={pct(data.drawdown.current_drawdown)} />
-                  {data.drawdown.worst_periods.slice(0, 3).map((period) => (
-                    <StatRow
-                      key={`${period.start_date}-${period.trough_date}`}
-                      label={formatDate(period.trough_date)}
-                      value={pct(period.depth)}
-                      detail={`${formatDate(period.start_date)} - ${
-                        period.end_date ? formatDate(period.end_date) : "open"
-                      }`}
-                    />
-                  ))}
-                </dl>
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(300px,0.38fr)]">
+                  <DeepChartFrame className="h-[360px] xl:h-[420px]">
+                    {drawdownOption ? (
+                      <HighchartsChart options={drawdownOption} className="h-full w-full" />
+                    ) : (
+                      <EmptyMessage message="No drawdown series for this window." />
+                    )}
+                  </DeepChartFrame>
+                  <div className="grid gap-px border border-border bg-border sm:grid-cols-2 lg:grid-cols-1">
+                    <StatBlock label="Max drawdown" value={pct(data.drawdown.max_drawdown)} />
+                    <StatBlock label="Current drawdown" value={pct(data.drawdown.current_drawdown)} />
+                    {data.drawdown.worst_periods.slice(0, 4).map((period) => (
+                      <div
+                        key={`${period.start_date}-${period.trough_date}`}
+                        className="bg-surface-2 px-3 py-2"
+                      >
+                        <div className="flex items-baseline justify-between gap-3">
+                          <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-text-muted">
+                            {formatDate(period.trough_date)}
+                          </span>
+                          <span className="tabular-nums font-bold text-loss">
+                            {pct(period.depth)}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-right text-[11px] text-text-muted">
+                          {formatDate(period.start_date)} - {period.end_date ? formatDate(period.end_date) : "open"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </ModalSection>
+            </div>
 
+            <div className="grid gap-px bg-border lg:grid-cols-2">
               <ModalSection title="Capture">
                 <dl className="m-0">
                   <StatRow label="Up capture" value={num(data.capture.up_capture, 1)} />
@@ -1178,23 +1107,27 @@ function DeepAnalysisModal({
                   <EmptyMessage message="No rolling-return series for this window." />
                 )}
               </ModalSection>
+            </div>
 
+            <div className="grid gap-px bg-border xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
               <ModalSection title="Distribution">
-                {distributionOption ? (
-                  <HighchartsChart options={distributionOption} className="h-[230px] w-full" />
-                ) : (
-                  <EmptyMessage message="No return distribution for this window." />
-                )}
-                <dl className="m-0 mt-3">
-                  <StatRow label="Skewness" value={num(data.distribution.skewness)} />
-                  <StatRow label="Kurtosis" value={num(data.distribution.kurtosis)} />
-                  <StatRow label="VaR 95" value={pct(data.distribution.var_95)} />
-                  <StatRow label="CVaR 95" value={pct(data.distribution.cvar_95)} />
+                <DeepChartFrame className="h-[320px]">
+                  {distributionOption ? (
+                    <HighchartsChart options={distributionOption} className="h-full w-full" />
+                  ) : (
+                    <EmptyMessage message="No return distribution for this window." />
+                  )}
+                </DeepChartFrame>
+                <dl className="m-0 mt-3 grid gap-px border border-border bg-border sm:grid-cols-4">
+                  <StatBlock label="Skewness" value={num(data.distribution.skewness)} />
+                  <StatBlock label="Kurtosis" value={num(data.distribution.kurtosis)} />
+                  <StatBlock label="VaR 95" value={pct(data.distribution.var_95)} />
+                  <StatBlock label="CVaR 95" value={pct(data.distribution.cvar_95)} />
                 </dl>
               </ModalSection>
 
               <ModalSection title="Return Statistics">
-                <dl className="m-0">
+                <dl className="m-0 grid gap-x-4 md:grid-cols-2">
                   <StatRow label="Arithmetic mean monthly" value={pct(data.return_statistics.arithmetic_mean_monthly)} />
                   <StatRow label="Geometric mean monthly" value={pct(data.return_statistics.geometric_mean_monthly)} />
                   <StatRow label="Avg monthly gain" value={pct(data.return_statistics.avg_monthly_gain)} />
@@ -1207,18 +1140,22 @@ function DeepAnalysisModal({
                   <StatRow label="Down percentage ratio" value={pct(data.return_statistics.down_percentage_ratio)} />
                 </dl>
               </ModalSection>
+            </div>
 
+            <div className="grid gap-px bg-border xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
               <ModalSection title="Tail Risk">
-                {tailRiskOption ? (
-                  <HighchartsChart options={tailRiskOption} className="h-[230px] w-full" />
-                ) : (
-                  <EmptyMessage message="No tail-risk ladder for this window." />
-                )}
-                <dl className="m-0 mt-3">
-                  <StatRow label="STARR" value={num(data.tail_risk.starr)} />
-                  <StatRow label="Rachev" value={num(data.tail_risk.rachev)} />
-                  <StatRow label="Jarque-Bera" value={num(data.tail_risk.jarque_bera)} />
-                  <StatRow label="JB p-value" value={num(data.tail_risk.jarque_bera_pvalue, 4)} />
+                <DeepChartFrame className="h-[260px]">
+                  {tailRiskOption ? (
+                    <HighchartsChart options={tailRiskOption} className="h-full w-full" />
+                  ) : (
+                    <EmptyMessage message="No tail-risk ladder for this window." />
+                  )}
+                </DeepChartFrame>
+                <dl className="m-0 mt-3 grid gap-px border border-border bg-border sm:grid-cols-4">
+                  <StatBlock label="STARR" value={num(data.tail_risk.starr)} />
+                  <StatBlock label="Rachev" value={num(data.tail_risk.rachev)} />
+                  <StatBlock label="Jarque-Bera" value={num(data.tail_risk.jarque_bera)} />
+                  <StatBlock label="JB p-value" value={num(data.tail_risk.jarque_bera_pvalue, 4)} />
                 </dl>
               </ModalSection>
 
@@ -1230,7 +1167,7 @@ function DeepAnalysisModal({
                   />
                 ) : data.insider_data ? (
                   <>
-                    <div className="mb-3 grid gap-px border border-border bg-border [grid-template-columns:repeat(auto-fit,minmax(130px,1fr))]">
+                    <div className="mb-3 grid gap-px border border-border bg-border [grid-template-columns:repeat(auto-fit,minmax(120px,1fr))]">
                       <KpiTile label="Buy value" value={money(data.insider_data.total_buy_value)} />
                       <KpiTile label="Sell value" value={money(data.insider_data.total_sell_value)} />
                       <KpiTile label="Net" value={money(data.insider_data.net_value)} />
@@ -1238,190 +1175,23 @@ function DeepAnalysisModal({
                       <KpiTile label="Issuers" value={String(data.insider_data.issuer_ciks?.length ?? 0)} />
                       <KpiTile label="As of" value={formatDate(data.insider_data.as_of)} />
                     </div>
-                    {insiderOption ? (
-                      <HighchartsChart options={insiderOption} className="h-[230px] w-full" />
-                    ) : (
-                      <EmptyMessage message="No insider sentiment quarters returned." />
-                    )}
+                    <DeepChartFrame className="h-[260px]">
+                      {insiderOption ? (
+                        <HighchartsChart options={insiderOption} className="h-full w-full" />
+                      ) : (
+                        <EmptyMessage message="No insider sentiment quarters returned." />
+                      )}
+                    </DeepChartFrame>
                   </>
                 ) : (
                   <EmptyMessage message="No insider payload returned." />
                 )}
               </ModalSection>
             </div>
-          )}
-        </div>
-    </SidePanel>
-  );
-}
-
-function RelationshipsModal({
-  institutionalRevealQuery,
-  reverseLookupQuery,
-  selectedCusip,
-  onSelectCusip,
-  onClose,
-  holderOption,
-  overlapOption,
-}: {
-  institutionalRevealQuery: UseQueryResult<FundInstitutionalReveal, Error>;
-  reverseLookupQuery: UseQueryResult<HoldingReverseLookup, Error>;
-  selectedCusip: string;
-  onSelectCusip: (cusip: string) => void;
-  onClose: () => void;
-  holderOption: Highcharts.Options | null;
-  overlapOption: Highcharts.Options | null;
-}) {
-  const data = institutionalRevealQuery.data;
-  return (
-    <SidePanel
-      title="Ownership"
-      subtitle={
-        data
-          ? `${data.fund_name} · ${data.period ? formatDate(data.period) : "no 13F period"}`
-          : "Loading"
-      }
-      ariaLabel="Fund relationships"
-      closeLabel="Close relationships"
-      onClose={onClose}
-    >
-        <div className="overflow-y-auto px-4 py-4">
-          {!data ? (
-            <QueryMessage
-              query={institutionalRevealQuery}
-              emptyMessage="No institutional reveal payload returned."
-              loadingMessage="Loading institutional relationships..."
-            />
-          ) : data.empty_state ? (
-            <EmptyStatePanel
-              reason={data.empty_state.reason}
-              source={data.empty_state.source}
-            />
-          ) : (
-            <div className="grid gap-4 lg:grid-cols-2">
-              <ModalSection title="Ranked Holders">
-                {holderOption ? (
-                  <HighchartsChart options={holderOption} className="h-[300px] w-full" />
-                ) : (
-                  <EmptyMessage message="No institutional holders returned." />
-                )}
-              </ModalSection>
-
-              <ModalSection title="Institutional Overlap">
-                {overlapOption ? (
-                  <HighchartsChart options={overlapOption} className="h-[300px] w-full" />
-                ) : (
-                  <EmptyMessage message="No overlap securities returned." />
-                )}
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {data.overlap.slice(0, 10).map((row) => (
-                    <button
-                      key={row.cusip}
-                      type="button"
-                      onClick={() => onSelectCusip(row.cusip)}
-                      className={`h-[28px] border px-2 text-[11px] font-bold tabular-nums ${
-                        selectedCusip === row.cusip
-                          ? "border-accent bg-accent text-on-accent"
-                          : "border-border-strong bg-surface-2 text-text-secondary hover:bg-layer-hover"
-                      }`}
-                    >
-                      {row.cusip}
-                    </button>
-                  ))}
-                </div>
-              </ModalSection>
-
-              <ModalSection title="Holder Network">
-                <NetworkTable data={data} />
-              </ModalSection>
-
-              <ModalSection title="Reverse Lookup">
-                <ReverseLookupPanel query={reverseLookupQuery} cusip={selectedCusip} />
-              </ModalSection>
-            </div>
-          )}
-        </div>
-    </SidePanel>
-  );
-}
-
-function NetworkTable({ data }: { data: FundInstitutionalReveal }) {
-  if (data.holder_network.edges.length === 0) {
-    return <EmptyMessage message="No holder-network edges returned." />;
-  }
-  const nodeLabel = new Map(data.holder_network.nodes.map((node) => [node.id, node.label]));
-  return (
-    <table className="w-full border-collapse ix-fs tabular-nums lining-nums">
-      <thead>
-        <tr className="bg-field">
-          <Th>Source</Th>
-          <Th>Target</Th>
-          <Th align="right">Weight</Th>
-        </tr>
-      </thead>
-      <tbody>
-        {data.holder_network.edges.slice(0, 18).map((edge, index) => (
-          <tr key={`${edge.source}-${edge.target}-${index}`} className="border-t border-border">
-            <Td>{nodeLabel.get(edge.source) ?? edge.source}</Td>
-            <Td>{nodeLabel.get(edge.target) ?? edge.target}</Td>
-            <Td align="right">{edge.label === "fund holding" ? pct(edge.weight, 1) : money(edge.weight)}</Td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function ReverseLookupPanel({
-  query,
-  cusip,
-}: {
-  query: UseQueryResult<HoldingReverseLookup, Error>;
-  cusip: string;
-}) {
-  if (!cusip) {
-    return <EmptyMessage message="Select an overlap CUSIP to inspect reverse lookup." />;
-  }
-  const data = query.data;
-  if (!data) {
-    return (
-      <QueryMessage
-        query={query}
-        emptyMessage="No reverse lookup payload returned."
-        loadingMessage={`Loading ${cusip} reverse lookup...`}
-      />
-    );
-  }
-  if (data.empty_state) {
-    return <EmptyStatePanel reason={data.empty_state.reason} source={data.empty_state.source} />;
-  }
-  return (
-    <div className="space-y-3">
-      <div className="grid gap-px border border-border bg-border [grid-template-columns:repeat(auto-fit,minmax(120px,1fr))]">
-        <KpiTile label="CUSIP" value={data.cusip} />
-        <KpiTile label="Institutions" value={String(data.institutions.length)} />
-        <KpiTile label="Funds" value={String(data.fund_exposures.length)} />
-        <KpiTile label="Period" value={formatDate(data.period)} />
+          </div>
+        )}
       </div>
-      <table className="w-full border-collapse ix-fs tabular-nums lining-nums">
-        <thead>
-          <tr className="bg-field">
-            <Th>Institution</Th>
-            <Th align="right">13F value</Th>
-            <Th align="right">Shares</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.institutions.slice(0, 8).map((institution) => (
-            <tr key={institution.cik} className="border-t border-border">
-              <Td>{institution.manager_name}</Td>
-              <Td align="right">{money(institution.value_usd)}</Td>
-              <Td align="right">{num(institution.shares, 0)}</Td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    </SidePanel>
   );
 }
 
@@ -1620,6 +1390,7 @@ function SidePanel({
   ariaLabel,
   closeLabel,
   onClose,
+  wide = false,
   children,
 }: {
   title: string;
@@ -1627,11 +1398,12 @@ function SidePanel({
   ariaLabel: string;
   closeLabel: string;
   onClose: () => void;
+  wide?: boolean;
   children: ReactNode;
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex justify-end bg-[rgba(22,22,22,0.5)]"
+      className="fixed inset-0 z-50 flex justify-end bg-[rgba(22,22,22,0.58)]"
       onClick={onClose}
     >
       <div
@@ -1639,9 +1411,11 @@ function SidePanel({
         aria-modal="true"
         aria-label={ariaLabel}
         onClick={(event) => event.stopPropagation()}
-        className="ix-thin-scroll flex h-full w-[min(720px,94vw)] flex-col overflow-y-auto border-l border-border-strong bg-surface shadow-2xl"
+        className={`ix-thin-scroll flex h-full flex-col overflow-y-auto border-l border-border-strong bg-surface shadow-2xl ${
+          wide ? "w-[min(1180px,96vw)]" : "w-[min(720px,94vw)]"
+        }`}
       >
-        <div className="sticky top-0 z-[5] flex items-center justify-between gap-3 border-b border-border bg-surface-2 px-4 py-3">
+        <div className="sticky top-0 z-[5] flex items-center justify-between gap-3 border-b border-border bg-surface-2 px-5 py-3.5">
           <div className="min-w-0">
             <h2 className="ix-title m-0 text-[18px]">{title}</h2>
             {subtitle && (
@@ -1665,26 +1439,42 @@ function SidePanel({
 
 function ModalSection({
   title,
+  className = "",
   children,
 }: {
   title: string;
+  className?: string;
   children: ReactNode;
 }) {
   return (
-    <section className="border border-border bg-surface-2 p-3">
+    <section className={`border border-border bg-surface-2 p-3 ${className}`}>
       <h3 className="ix-label m-0 mb-2">{title}</h3>
       {children}
     </section>
   );
 }
 
+function DeepChartFrame({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`border border-border bg-field p-2 ${className}`}>
+      {children}
+    </div>
+  );
+}
+
 function StatBlock({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-surface-2 px-3 py-2">
+    <div className="bg-surface-2 px-3 py-2.5">
       <dt className="text-[10px] font-bold uppercase tracking-[0.06em] text-text-muted">
         {label}
       </dt>
-      <dd className="m-0 mt-1 text-[15px] font-bold tabular-nums text-text-primary">
+      <dd className="m-0 mt-1 text-[16px] font-bold tabular-nums text-text-primary">
         {value}
       </dd>
     </div>

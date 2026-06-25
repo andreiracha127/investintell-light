@@ -260,11 +260,11 @@ describe("fund dossier Highcharts builders", () => {
     expect((option.xAxis as { type?: string }).type).toBe("datetime");
   });
 
-  it("builds tail risk columns from decimal-fraction backend metrics", () => {
+  it("builds tail risk bars from decimal-fraction backend metrics", () => {
     const option = buildHcTailRiskOption(analytics(), colors);
 
     expect(option.series?.[0]).toMatchObject({
-      type: "column",
+      type: "bar",
       data: [1, 2, 3, 2.5, 4, 3.5000000000000004],
     });
   });

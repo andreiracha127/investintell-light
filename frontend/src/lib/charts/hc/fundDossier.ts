@@ -110,13 +110,17 @@ export function buildHcFactorSensitivityOption(
   colors: ChartColors,
 ): Options {
   return {
-    chart: { type: "bar" },
+    chart: { type: "bar", spacing: [10, 16, 14, 8] },
     xAxis: {
       categories: factors.market_sensitivities.map((item) => item.factor),
       tickWidth: 0,
+      lineWidth: 0,
+      labels: { style: { color: colors.textSecondary, fontSize: "11px" } },
     },
     yAxis: {
       title: { text: "Beta vs. factor" },
+      gridLineColor: colors.grid,
+      plotLines: [{ value: 0, color: colors.textMuted, width: 1 }],
       labels: {
         formatter() {
           return formatNumber(this.value as number, 1);
@@ -130,6 +134,26 @@ export function buildHcFactorSensitivityOption(
         return `${this.category}<br/><b>${formatNumber(
           this.y as number,
         )}</b>${t}${row?.significance ?? ""}`;
+      },
+    },
+    plotOptions: {
+      bar: {
+        borderRadius: 2,
+        groupPadding: 0.16,
+        pointPadding: 0.24,
+        pointWidth: 14,
+        dataLabels: {
+          enabled: true,
+          formatter() {
+            return formatNumber(this.y as number, 2);
+          },
+          style: {
+            color: colors.textSecondary,
+            fontSize: "10px",
+            fontWeight: "700",
+            textOutline: "none",
+          },
+        },
       },
     },
     series: [
@@ -151,14 +175,19 @@ export function buildHcStyleBiasOption(
   colors: ChartColors,
 ): Options {
   return {
-    chart: { type: "bar" },
+    chart: { type: "bar", spacing: [10, 16, 14, 8] },
     xAxis: {
-      categories: factors.style_bias.map((item) => item.factor),
+      categories: factors.style_bias.map((item) =>
+        item.factor.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+      ),
       tickWidth: 0,
+      lineWidth: 0,
+      labels: { style: { color: colors.textSecondary, fontSize: "11px" } },
     },
     yAxis: {
       title: { text: "Z-score (σ)" },
-      plotLines: [{ value: 0, color: colors.grid, width: 1 }],
+      gridLineColor: colors.grid,
+      plotLines: [{ value: 0, color: colors.textMuted, width: 1 }],
       labels: {
         formatter() {
           return formatNumber(this.value as number, 1);
@@ -172,6 +201,26 @@ export function buildHcStyleBiasOption(
         return `${this.category}<br/><b>z ${formatNumber(
           this.y as number,
         )}</b>${raw}`;
+      },
+    },
+    plotOptions: {
+      bar: {
+        borderRadius: 2,
+        groupPadding: 0.16,
+        pointPadding: 0.24,
+        pointWidth: 14,
+        dataLabels: {
+          enabled: true,
+          formatter() {
+            return formatNumber(this.y as number, 2);
+          },
+          style: {
+            color: colors.textSecondary,
+            fontSize: "10px",
+            fontWeight: "700",
+            textOutline: "none",
+          },
+        },
       },
     },
     series: [
@@ -277,10 +326,17 @@ export function buildHcTailRiskOption(
   ] as const;
 
   return {
-    chart: { type: "column" },
-    xAxis: { categories: rows.map(([label]) => label), tickWidth: 0 },
+    chart: { type: "bar", spacing: [8, 12, 8, 8] },
+    xAxis: {
+      categories: rows.map(([label]) => label),
+      tickWidth: 0,
+      lineWidth: 0,
+      labels: { style: { color: colors.textMuted, fontSize: "11px" } },
+    },
     yAxis: {
       title: { text: "Daily loss" },
+      min: 0,
+      gridLineColor: colors.grid,
       labels: {
         formatter() {
           return formatPercent((this.value as number) / 100, 1);
@@ -295,13 +351,33 @@ export function buildHcTailRiskOption(
         )}</b>`;
       },
     },
+    plotOptions: {
+      bar: {
+        borderWidth: 0,
+        borderRadius: 2,
+        pointWidth: 10,
+        groupPadding: 0.16,
+        dataLabels: {
+          enabled: true,
+          formatter() {
+            return formatPercent((this.y as number) / 100, 2);
+          },
+          style: {
+            color: colors.text,
+            fontSize: "10px",
+            fontWeight: "700",
+            textOutline: "none",
+          },
+        },
+      },
+    },
     series: [
       {
-        type: "column",
+        type: "bar",
         name: "Tail risk",
         data: rows.map(([, value]) => (value ?? 0) * 100),
         color: colors.accent,
-        borderWidth: 0,
+        showInLegend: false,
       },
     ],
   };

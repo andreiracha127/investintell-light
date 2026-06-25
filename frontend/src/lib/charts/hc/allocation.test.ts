@@ -105,7 +105,64 @@ describe("buildHcAllocationOption", () => {
     const dl = Array.isArray(series.dataLabels) ? series.dataLabels[0] : series.dataLabels;
     expect(dl?.enabled).toBe(true);
     expect(dl?.formatter?.call({ key: "Equity", percentage: 60 })).toBe("Equity 60%");
-    expect(opt.chart?.spacing).toEqual([8, 76, 8, 76]);
+    expect(opt.chart?.spacing).toEqual([10, 58, 10, 58]);
+  });
+
+  it("renders only the asset-class ring in drilldown mode until a group is selected", () => {
+    const opt = buildHcAllocationOption(HIERARCHICAL_SLICES, TEST_COLORS, {
+      drilldown: true,
+      navDataLabels: true,
+      navTotal: 100,
+    });
+    const inner = opt.series?.[0] as {
+      dataLabels?: { enabled?: boolean; formatter?: (this: unknown) => string };
+      data?: { name: string; y: number; custom?: { navPct?: number } }[];
+      innerSize?: string;
+      size?: string;
+    };
+
+    expect(opt.series).toHaveLength(1);
+    expect(inner.size).toBe("82%");
+    expect(inner.innerSize).toBe("52%");
+    expect(inner.data?.[0]).toMatchObject({ name: "Equity", y: 75 });
+    expect(inner.data?.[0]?.custom?.navPct).toBe(75);
+    expect(inner.dataLabels?.enabled).toBe(true);
+    expect(
+      inner.dataLabels?.formatter?.call({
+        key: "Equity",
+        name: "Equity",
+        percentage: 75,
+        options: { custom: { navPct: 75 } },
+      }),
+    ).toContain("75.0% NAV");
+  });
+
+  it("expands the selected asset class into a second holding ring with NAV labels", () => {
+    const opt = buildHcAllocationOption(HIERARCHICAL_SLICES, TEST_COLORS, {
+      activeAssetClass: "Equity",
+      drilldown: true,
+      navDataLabels: true,
+      navTotal: 100,
+    });
+    const outer = opt.series?.[1] as {
+      data?: { name: string; custom?: { navPct?: number } }[];
+      dataLabels?: { enabled?: boolean; formatter?: (this: unknown) => string };
+      name?: string;
+    };
+
+    expect(opt.series).toHaveLength(2);
+    expect(outer.name).toBe("Holding");
+    expect(outer.data?.map((point) => point.name)).toEqual(["AAPL", "GOOG"]);
+    expect(outer.data?.map((point) => point.custom?.navPct)).toEqual([40, 35]);
+    expect(outer.dataLabels?.enabled).toBe(true);
+    expect(
+      outer.dataLabels?.formatter?.call({
+        key: "AAPL",
+        name: "AAPL",
+        percentage: 40,
+        options: { custom: { navPct: 40 } },
+      }),
+    ).toContain("40.0% NAV");
   });
 
   it("keeps compact chart spacing when external data labels are disabled", () => {

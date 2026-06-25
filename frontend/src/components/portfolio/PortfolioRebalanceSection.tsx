@@ -24,10 +24,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
+  fetchPortfolioOverview,
   fetchRebalancePreview,
   type PositionDrift,
   type RebalancePreview,
   type RebalancePolicy,
+  type PortfolioOverview,
 } from "@/lib/api/client";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
 import { Card } from "@/components/ui/panels";
@@ -129,6 +131,30 @@ function policyLine(policy: RebalancePolicy): string {
   return `${freq} · ±${absStr} abs band · ±${relStr} rel band${macro}`;
 }
 
+function sanitizeInstrumentLabel(name: string | null | undefined, fallback: string): string {
+  const source = (name ?? "").trim() || fallback;
+  const cleaned = source
+    .replace(/\b(class|cl)\s+[a-z0-9]+\b/gi, " ")
+    .replace(/\b(investor|institutional|service|advisor|admiral|initial|shares?)\b/gi, " ")
+    .replace(/\b(fund|etf|trust)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const label = cleaned || fallback;
+  return label.length > 34 ? `${label.slice(0, 33).trim()}…` : label;
+}
+
+function instrumentLabelsByTicker(
+  overview: PortfolioOverview | undefined,
+): Record<string, string> {
+  if (!overview) return {};
+  return Object.fromEntries(
+    overview.positions.map((position) => [
+      position.ticker.toUpperCase(),
+      sanitizeInstrumentLabel(position.name, position.ticker),
+    ]),
+  );
+}
+
 // ── Proposal table ────────────────────────────────────────────────────────────
 
 /**
@@ -141,8 +167,10 @@ function policyLine(policy: RebalancePolicy): string {
  */
 function ProposalTable({
   preview,
+  labelsByTicker,
 }: {
   preview: RebalancePreview;
+  labelsByTicker: Record<string, string>;
 }) {
   const { proposal, drifts, invested_value } = preview;
 
@@ -158,7 +186,14 @@ function ProposalTable({
       // invested_value is in currency units (backend schema).
       const tradeDollars = (proposedWeight - currentWeight) * invested_value;
       const delta = proposedWeight - currentWeight;
-      return { ticker, proposedWeight, currentWeight, delta, tradeDollars };
+      return {
+        ticker,
+        label: labelsByTicker[ticker.toUpperCase()] ?? ticker,
+        proposedWeight,
+        currentWeight,
+        delta,
+        tradeDollars,
+      };
     })
     .filter((r) => Math.abs(r.tradeDollars) > 0.01) // skip noise
     .sort((a, b) => b.tradeDollars - a.tradeDollars);
@@ -206,7 +241,7 @@ function ProposalTable({
                   className={`border-b border-border last:border-b-0 ${i % 2 === 1 ? "bg-zebra" : ""}`}
                 >
                   <td className={TD_LEFT + " font-bold text-text-primary"}>
-                    {row.ticker}
+                    {row.label}
                   </td>
                   <td className={TD_CLASS + " text-text-secondary"}>
                     {formatPercent(row.currentWeight, 2)}
@@ -269,14 +304,24 @@ export function PortfolioRebalanceSection({
     staleTime: 60_000,
     retry: retryPolicy,
   });
+  const overviewQuery = useQuery({
+    queryKey: ["overview", portfolioId],
+    queryFn: ({ signal }) => fetchPortfolioOverview(portfolioId, signal),
+    staleTime: 60_000,
+    retry: retryPolicy,
+  });
+  const labelsByTicker = useMemo(
+    () => instrumentLabelsByTicker(overviewQuery.data),
+    [overviewQuery.data],
+  );
 
   // Memoize the chart option — depends on drifts data and resolved colors.
   const driftOption = useMemo(() => {
     if (!previewQuery.data || !colors) return null;
     const drifts: PositionDrift[] = previewQuery.data.drifts;
     const { band_abs, band_rel } = previewQuery.data.policy;
-    return buildHcDriftBandsOption(drifts, colors, band_abs, band_rel);
-  }, [previewQuery.data, colors]);
+    return buildHcDriftBandsOption(drifts, colors, band_abs, band_rel, labelsByTicker);
+  }, [previewQuery.data, colors, labelsByTicker]);
 
   // ── All hooks above this line — early returns below ──────────────────────
 
@@ -339,11 +384,10 @@ export function PortfolioRebalanceSection({
             <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.07em] text-text-muted">
               Position drift
             </p>
-            {/* Height calculated from row count: 32px per bar row + 40px grid margins,
-                minimum 120px. The chart wrapper receives its height from here. */}
+            {/* Height follows thinner bars without leaving the plot visually bloated. */}
             <div
               style={{
-                height: `${Math.max(120, preview.drifts.length * 32 + 40)}px`, // 32px per bar row + 40px grid margins
+                height: `${Math.max(220, preview.drifts.length * 30 + 72)}px`,
               }}
             >
               <HighchartsChart options={driftOption} className="h-full w-full" />
@@ -353,7 +397,7 @@ export function PortfolioRebalanceSection({
 
         {/* Proposal table */}
         {preview.decision === "proposal" && (
-          <ProposalTable preview={preview} />
+          <ProposalTable preview={preview} labelsByTicker={labelsByTicker} />
         )}
 
         <p className="mt-3 text-[11px] text-text-muted">
