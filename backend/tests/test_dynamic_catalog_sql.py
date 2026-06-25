@@ -24,6 +24,12 @@ BENCHMARK_DDL_PATH = (
     / "ddl"
     / "2026-06-20_fund_benchmark_candidates.sql"
 )
+BENCHMARK_MV_DDL_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "db"
+    / "ddl"
+    / "2026-06-25_fund_benchmark_candidates_mv.sql"
+)
 ALTERNATIVE_OVERRIDES_DDL_PATH = (
     Path(__file__).resolve().parents[1]
     / "db"
@@ -401,3 +407,13 @@ def test_fund_benchmark_candidates_sql_preserves_declared_composite_proxy() -> N
     assert "'AOR'::text AS proxy_etf_ticker" in sql
     assert "CASE WHEN s.strategy_overrides_declared THEN s.benchmark_name END" in sql
     assert "d.benchmark_name" in sql
+
+
+def test_fund_benchmark_candidates_mv_materializes_request_path_snapshot() -> None:
+    sql = BENCHMARK_MV_DDL_PATH.read_text(encoding="utf-8")
+
+    assert "CREATE MATERIALIZED VIEW fund_benchmark_candidates_mv AS" in sql
+    assert "FROM fund_benchmark_candidates_v" in sql
+    assert "fund_benchmark_candidates_mv_pk" in sql
+    assert "ON fund_benchmark_candidates_mv (series_id)" in sql
+    assert "REFRESH MATERIALIZED VIEW fund_benchmark_candidates_mv" in sql

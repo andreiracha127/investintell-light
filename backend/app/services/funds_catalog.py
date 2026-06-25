@@ -634,7 +634,7 @@ async def fetch_fund_profile(
                     (SELECT to_jsonb(f) FROM fund f) AS fund,
                     (
                         SELECT to_jsonb(b)
-                        FROM fund_benchmark_candidates_v b
+                        FROM fund_benchmark_candidates_mv b
                         JOIN fund f ON f.series_id = b.series_id
                         LIMIT 1
                     ) AS benchmark,

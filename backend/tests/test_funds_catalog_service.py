@@ -4,6 +4,7 @@ CSV projection (header + stable cells via the screener renderer).
 """
 
 import datetime as dt
+import inspect
 import uuid
 
 import pytest
@@ -125,6 +126,12 @@ def test_build_funds_select_compiles_with_filters_and_sort() -> None:
     assert "funds_list_mv" in sql
     assert "ORDER BY funds_list_mv.sharpe_1y DESC NULLS LAST" in sql
     assert "LIMIT" in sql and "OFFSET" in sql
+
+
+def test_fund_profile_uses_materialized_benchmark_snapshot() -> None:
+    source = inspect.getsource(catalog.fetch_fund_profile)
+    assert "fund_benchmark_candidates_mv" in source
+    assert "fund_benchmark_candidates_v" not in source
 
 
 def test_build_funds_select_rejects_non_whitelisted_sort() -> None:
