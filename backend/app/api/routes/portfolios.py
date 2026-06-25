@@ -44,6 +44,11 @@ from app.schemas.lookthrough import (
 )
 from app.schemas.news import NewsArticle
 from app.schemas.portfolios import (
+    AlertsView,
+    BreachesView,
+    ClassLimitItem,
+    ConstraintsPut,
+    ConstraintsView,
     PortfolioCreate,
     PortfolioListItem,
     PortfolioNavPoint,
@@ -57,7 +62,13 @@ from app.schemas.portfolios import (
     PositionBody,
     PositionOut,
 )
-from app.services import lookthrough, portfolio_crud, portfolio_ledger
+from app.services import (
+    lookthrough,
+    portfolio_constraints,
+    portfolio_crud,
+    portfolio_drift,
+    portfolio_ledger,
+)
 from app.tiingo.client import TiingoClient
 from app.tiingo.exceptions import TiingoError
 
@@ -277,6 +288,95 @@ async def delete_portfolio(
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
     await _invalidate_portfolio_cache(user.sub, portfolio_id)
+
+
+# ---------------------------------------------------------------------------
+# Construction constraints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{portfolio_id}/constraints", response_model=ConstraintsView)
+async def get_portfolio_constraints(
+    portfolio_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> ConstraintsView:
+    """Return the persisted construction constraints for a portfolio."""
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id, user.sub):
+        raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
+    constraints = await portfolio_constraints.get_constraints(session, portfolio_id)
+    if constraints is None:
+        return ConstraintsView(portfolio_id=portfolio_id)
+    return ConstraintsView(
+        portfolio_id=portfolio_id,
+        cap=constraints.cap,
+        min_weight=constraints.min_weight,
+        overlap_cap=constraints.overlap_cap,
+        class_limits=[
+            ClassLimitItem(
+                asset_class=limit.asset_class,
+                min_weight=limit.min_weight,
+                max_weight=limit.max_weight,
+            )
+            for limit in constraints.class_limits
+        ],
+    )
+
+
+@router.put("/{portfolio_id}/constraints", response_model=ConstraintsView)
+async def put_portfolio_constraints(
+    portfolio_id: int,
+    payload: ConstraintsPut,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> ConstraintsView:
+    """Validate and upsert construction constraints for a portfolio."""
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id, user.sub):
+        raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
+    await portfolio_constraints.upsert_constraints(
+        session,
+        portfolio_id,
+        cap=payload.cap,
+        min_weight=payload.min_weight,
+        overlap_cap=payload.overlap_cap,
+        class_limits=[
+            (limit.asset_class, limit.min_weight, limit.max_weight)
+            for limit in payload.class_limits
+        ],
+    )
+    await session.commit()
+    await _invalidate_portfolio_cache(user.sub, portfolio_id)
+    return ConstraintsView(
+        portfolio_id=portfolio_id,
+        cap=payload.cap,
+        min_weight=payload.min_weight,
+        overlap_cap=payload.overlap_cap,
+        class_limits=payload.class_limits,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Drift alerts
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{portfolio_id}/alerts", response_model=AlertsView)
+async def get_portfolio_alerts(
+    portfolio_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> AlertsView:
+    """Return the latest persisted drift status for a portfolio."""
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id, user.sub):
+        raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
+    status = await portfolio_drift.get_drift_status(session, portfolio_id)
+    if status is None:
+        return AlertsView()
+    return AlertsView(
+        evaluated_at=status.evaluated_at,
+        worst_status=status.worst_status,
+        breaches=BreachesView.model_validate(status.breaches),
+    )
 
 
 # ---------------------------------------------------------------------------

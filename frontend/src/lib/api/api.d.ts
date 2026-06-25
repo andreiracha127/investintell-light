@@ -323,6 +323,50 @@ export interface paths {
         patch: operations["patch_portfolio_portfolios__portfolio_id__patch"];
         trace?: never;
     };
+    "/portfolios/{portfolio_id}/constraints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Portfolio Constraints
+         * @description Return the persisted construction constraints for a portfolio.
+         */
+        get: operations["get_portfolio_constraints_portfolios__portfolio_id__constraints_get"];
+        /**
+         * Put Portfolio Constraints
+         * @description Validate and upsert construction constraints for a portfolio.
+         */
+        put: operations["put_portfolio_constraints_portfolios__portfolio_id__constraints_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/portfolios/{portfolio_id}/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Portfolio Alerts
+         * @description Return the latest persisted drift status for a portfolio.
+         */
+        get: operations["get_portfolio_alerts_portfolios__portfolio_id__alerts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/portfolios/{portfolio_id}/positions/{ticker}": {
         parameters: {
             query?: never;
@@ -1497,6 +1541,20 @@ export interface components {
             confidence: number;
         };
         /**
+         * AlertsView
+         * @description Response for GET /portfolios/{id}/alerts.
+         */
+        AlertsView: {
+            /** Evaluated At */
+            evaluated_at?: string | null;
+            /**
+             * Worst Status
+             * @default ok
+             */
+            worst_status: string;
+            breaches?: components["schemas"]["BreachesView"];
+        };
+        /**
          * AllocationOut
          * @description Resolved allocation at the first analyzed date (the replay strike point).
          */
@@ -1775,6 +1833,26 @@ export interface components {
             hi: number;
         };
         /**
+         * BreachesView
+         * @description Breach payload from the latest drift evaluation.
+         */
+        BreachesView: {
+            /** Position Drifts */
+            position_drifts?: {
+                [key: string]: unknown;
+            }[];
+            /** Class Breaches */
+            class_breaches?: {
+                [key: string]: unknown;
+            }[];
+            /** Overlap Breaches */
+            overlap_breaches?: {
+                [key: string]: unknown;
+            }[];
+            /** Overlap Report Date */
+            overlap_report_date?: string | null;
+        };
+        /**
          * BuildAllResponse
          * @description GET /screener/screens/{id}/build — every filter's distribution in one round-trip.
          *
@@ -1828,6 +1906,28 @@ export interface components {
             close: number;
             /** Volume */
             volume: number;
+        };
+        /**
+         * ClassLimitItem
+         * @description One per-asset-class min/max weight bound.
+         */
+        ClassLimitItem: {
+            /**
+             * Asset Class
+             * @description One of: equity, fixed_income, cash, alternatives, multi_asset.
+             * @enum {string}
+             */
+            asset_class: "equity" | "fixed_income" | "cash" | "alternatives" | "multi_asset";
+            /**
+             * Min Weight
+             * @description Lower weight bound, decimal fraction in [0, 1]; null = none.
+             */
+            min_weight?: number | null;
+            /**
+             * Max Weight
+             * @description Upper weight bound, decimal fraction in [0, 1]; null = none.
+             */
+            max_weight?: number | null;
         };
         /** ConcentrationOut */
         ConcentrationOut: {
@@ -1905,6 +2005,60 @@ export interface components {
             min_weight?: number | null;
             /** Block Budgets */
             block_budgets?: components["schemas"]["BlockBudgetIn"][] | null;
+        };
+        /**
+         * ConstraintsPut
+         * @description Body for PUT /portfolios/{id}/constraints.
+         */
+        ConstraintsPut: {
+            /**
+             * Cap
+             * @description Max per-position weight, decimal fraction in (0, 1]; null = none.
+             */
+            cap?: number | null;
+            /**
+             * Min Weight
+             * @description Min per-position weight, decimal fraction in [0, 1]; null = none.
+             */
+            min_weight?: number | null;
+            /**
+             * Overlap Cap
+             * @description Max pairwise overlap, decimal fraction in (0, 1]; null = none.
+             */
+            overlap_cap?: number | null;
+            /**
+             * Class Limits
+             * @description Per-asset-class min/max weight bounds, replaced wholesale.
+             */
+            class_limits?: components["schemas"]["ClassLimitItem"][];
+        };
+        /**
+         * ConstraintsView
+         * @description Response for GET /portfolios/{id}/constraints.
+         */
+        ConstraintsView: {
+            /**
+             * Cap
+             * @description Max per-position weight, decimal fraction in (0, 1]; null = none.
+             */
+            cap?: number | null;
+            /**
+             * Min Weight
+             * @description Min per-position weight, decimal fraction in [0, 1]; null = none.
+             */
+            min_weight?: number | null;
+            /**
+             * Overlap Cap
+             * @description Max pairwise overlap, decimal fraction in (0, 1]; null = none.
+             */
+            overlap_cap?: number | null;
+            /**
+             * Class Limits
+             * @description Per-asset-class min/max weight bounds, replaced wholesale.
+             */
+            class_limits?: components["schemas"]["ClassLimitItem"][];
+            /** Portfolio Id */
+            portfolio_id: number;
         };
         /**
          * CorrelationMatrixOut
@@ -6887,6 +7041,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PortfolioOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_portfolio_constraints_portfolios__portfolio_id__constraints_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConstraintsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_portfolio_constraints_portfolios__portfolio_id__constraints_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConstraintsPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConstraintsView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_portfolio_alerts_portfolios__portfolio_id__alerts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlertsView"];
                 };
             };
             /** @description Validation Error */

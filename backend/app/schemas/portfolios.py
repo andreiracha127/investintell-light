@@ -15,9 +15,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.models.portfolio_constraint import ASSET_CLASSES
 from app.schemas._tickers import normalize_ticker
 from app.schemas.news import NewsArticle
 
+AssetClass = Literal["equity", "fixed_income", "cash", "alternatives", "multi_asset"]
 PositionPriceSource = Literal["eod", "nav"]
 
 MAX_POSITIONS = 50
@@ -391,3 +393,101 @@ class PortfolioNewsResponse(BaseModel):
     count: int
     stale: bool = False
     items: list[NewsArticle]
+
+
+# ---------------------------------------------------------------------------
+# Construction constraints (Sprint B) — header limits + per-class bounds
+# ---------------------------------------------------------------------------
+
+
+class ClassLimitItem(BaseModel):
+    """One per-asset-class min/max weight bound."""
+
+    asset_class: AssetClass = Field(
+        description=f"One of: {', '.join(ASSET_CLASSES)}."
+    )
+    min_weight: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+        description="Lower weight bound, decimal fraction in [0, 1]; null = none.",
+    )
+    max_weight: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+        description="Upper weight bound, decimal fraction in [0, 1]; null = none.",
+    )
+
+    @model_validator(mode="after")
+    def _check_min_le_max(self) -> "ClassLimitItem":
+        if (
+            self.min_weight is not None
+            and self.max_weight is not None
+            and self.min_weight > self.max_weight
+        ):
+            raise ValueError(
+                f"class limit for {self.asset_class!r}: min_weight "
+                f"({self.min_weight}) must be <= max_weight ({self.max_weight})."
+            )
+        return self
+
+
+class ConstraintsPut(BaseModel):
+    """Body for PUT /portfolios/{id}/constraints."""
+
+    cap: float | None = Field(
+        default=None,
+        gt=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+        description="Max per-position weight, decimal fraction in (0, 1]; null = none.",
+    )
+    min_weight: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+        description="Min per-position weight, decimal fraction in [0, 1]; null = none.",
+    )
+    overlap_cap: float | None = Field(
+        default=None,
+        gt=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+        description="Max pairwise overlap, decimal fraction in (0, 1]; null = none.",
+    )
+    class_limits: list[ClassLimitItem] = Field(
+        default_factory=list,
+        description="Per-asset-class min/max weight bounds, replaced wholesale.",
+    )
+
+
+class ConstraintsView(ConstraintsPut):
+    """Response for GET /portfolios/{id}/constraints."""
+
+    portfolio_id: int
+
+
+# ---------------------------------------------------------------------------
+# Drift alerts (Sprint C) — latest persisted drift evaluation
+# ---------------------------------------------------------------------------
+
+
+class BreachesView(BaseModel):
+    """Breach payload from the latest drift evaluation."""
+
+    position_drifts: list[dict] = Field(default_factory=list)
+    class_breaches: list[dict] = Field(default_factory=list)
+    overlap_breaches: list[dict] = Field(default_factory=list)
+    overlap_report_date: str | None = None
+
+
+class AlertsView(BaseModel):
+    """Response for GET /portfolios/{id}/alerts."""
+
+    evaluated_at: dt.datetime | None = None
+    worst_status: str = "ok"
+    breaches: BreachesView = Field(default_factory=BreachesView)

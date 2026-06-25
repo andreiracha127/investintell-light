@@ -34,6 +34,11 @@ from app.models.portfolio import (
     PortfolioTransaction,
     Position,
 )
+from app.models.portfolio_constraint import (
+    PortfolioClassLimit,
+    PortfolioConstraintSet,
+)
+from app.models.portfolio_drift_status import PortfolioDriftStatus
 from app.models.price_latest import NavLatest, PriceLatest
 from app.models.rebalance import RebalancePolicy
 from app.models.screen import Screen, ScreenFilter
@@ -69,6 +74,9 @@ __all__ = [
     "NavLatest",
     "OptimizeJob",
     "Portfolio",
+    "PortfolioClassLimit",
+    "PortfolioConstraintSet",
+    "PortfolioDriftStatus",
     "PortfolioNavDaily",
     "PortfolioTransaction",
     "PriceLatest",

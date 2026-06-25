@@ -77,6 +77,9 @@ type RebalancePolicyOperation =
   paths["/portfolios/{portfolio_id}/rebalance/policy"]["get"];
 type RebalancePreviewOperation =
   paths["/portfolios/{portfolio_id}/rebalance/preview"]["get"];
+type PortfolioConstraintsPath = paths["/portfolios/{portfolio_id}/constraints"];
+type PortfolioAlertsOperation =
+  paths["/portfolios/{portfolio_id}/alerts"]["get"];
 
 type MarketOverviewOperation = paths["/stocks/overview"]["get"];
 export type MarketOverview =
@@ -296,6 +299,14 @@ export type RebalancePreview =
   RebalancePreviewOperation["responses"]["200"]["content"]["application/json"];
 export type PositionDrift = components["schemas"]["PositionDriftOut"];
 export type Proposal = components["schemas"]["ProposalOut"];
+export type PortfolioConstraints =
+  PortfolioConstraintsPath["get"]["responses"]["200"]["content"]["application/json"];
+export type PortfolioConstraintsPut =
+  PortfolioConstraintsPath["put"]["requestBody"]["content"]["application/json"];
+export type ClassLimit = components["schemas"]["ClassLimitItem"];
+export type ConstraintAssetClass = ClassLimit["asset_class"];
+export type PortfolioAlerts =
+  PortfolioAlertsOperation["responses"]["200"]["content"]["application/json"];
 
 export type OptimizeRequest =
   BuilderOptimizeOperation["requestBody"]["content"]["application/json"];
@@ -1398,6 +1409,38 @@ export function fetchRebalancePreview(
 ): Promise<RebalancePreview> {
   return request<RebalancePreview>(
     `/portfolios/${portfolioId}/rebalance/preview`,
+    signal,
+  );
+}
+
+export function getPortfolioConstraints(
+  portfolioId: number,
+  signal?: AbortSignal,
+): Promise<PortfolioConstraints> {
+  return request<PortfolioConstraints>(
+    `/portfolios/${portfolioId}/constraints`,
+    signal,
+  );
+}
+
+export function putPortfolioConstraints(
+  portfolioId: number,
+  body: PortfolioConstraintsPut,
+  signal?: AbortSignal,
+): Promise<PortfolioConstraints> {
+  return request<PortfolioConstraints>(
+    `/portfolios/${portfolioId}/constraints`,
+    signal,
+    { method: "PUT", json: body },
+  );
+}
+
+export function getPortfolioAlerts(
+  portfolioId: number,
+  signal?: AbortSignal,
+): Promise<PortfolioAlerts> {
+  return request<PortfolioAlerts>(
+    `/portfolios/${portfolioId}/alerts`,
     signal,
   );
 }

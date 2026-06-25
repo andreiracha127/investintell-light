@@ -781,6 +781,158 @@
         }
       }
     },
+    "/portfolios/{portfolio_id}/constraints": {
+      "get": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Get Portfolio Constraints",
+        "description": "Return the persisted construction constraints for a portfolio.",
+        "operationId": "get_portfolio_constraints_portfolios__portfolio_id__constraints_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConstraintsView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Put Portfolio Constraints",
+        "description": "Validate and upsert construction constraints for a portfolio.",
+        "operationId": "put_portfolio_constraints_portfolios__portfolio_id__constraints_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConstraintsPut"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConstraintsView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/portfolios/{portfolio_id}/alerts": {
+      "get": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Get Portfolio Alerts",
+        "description": "Return the latest persisted drift status for a portfolio.",
+        "operationId": "get_portfolio_alerts_portfolios__portfolio_id__alerts_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "portfolio_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Portfolio Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertsView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/portfolios/{portfolio_id}/positions/{ticker}": {
       "put": {
         "tags": [
@@ -1496,7 +1648,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -1536,7 +1693,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/screener/screens/{screen_id}": {
@@ -1547,6 +1709,11 @@
         "summary": "Get Screen",
         "description": "One screen with its filters (position order).",
         "operationId": "get_screen_screener_screens__screen_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "screen_id",
@@ -1588,6 +1755,11 @@
         "summary": "Patch Screen",
         "description": "Rename a screen.",
         "operationId": "patch_screen_screener_screens__screen_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "screen_id",
@@ -1639,6 +1811,11 @@
         "summary": "Delete Screen",
         "description": "Delete a screen; its filters cascade away at the DB level.",
         "operationId": "delete_screen_screener_screens__screen_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "screen_id",
@@ -1675,6 +1852,11 @@
         "summary": "Put Filter",
         "description": "Upsert one filter (bounds null = unbounded; both null = metric selected).\n\nResponds with the updated screen, the metric's universe distribution\n(null when the snapshot has no data for it) and the new headline count.",
         "operationId": "put_filter_screener_screens__screen_id__filters__metric_code__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "screen_id",
@@ -1735,6 +1917,11 @@
         "summary": "Delete Filter",
         "description": "Remove one filter; same Build payload as the upsert (count updates live).",
         "operationId": "delete_filter_screener_screens__screen_id__filters__metric_code__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "screen_id",
@@ -1787,6 +1974,11 @@
         "summary": "Reorder Filters",
         "description": "Reorder a screen's filters; position drives the Results column order.",
         "operationId": "reorder_filters_screener_screens__screen_id__filters_reorder_patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "screen_id",
@@ -1840,6 +2032,11 @@
         "summary": "Build Metric",
         "description": "Histogram of one metric over the WHOLE active universe + headline count.\n\nThe histogram ignores the screen's filters (it is the slider backdrop);\nthe headline count honors ALL of them. counts_normalized is 0..1 \u2014\nnever pixel heights.",
         "operationId": "build_metric_screener_screens__screen_id__build__metric_code__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "screen_id",
@@ -1892,6 +2089,11 @@
         "summary": "Build All",
         "description": "Every filter's universe distribution + the live headline count, one round-trip.\n\nFeeds the Build panel's per-row sparklines and the active-row distribution\nin a single request (vs. one GET /build/{metric_code} per filter).",
         "operationId": "build_all_screener_screens__screen_id__build_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "screen_id",
@@ -1935,6 +2137,11 @@
         "summary": "Get Results",
         "description": "Matching tickers with the screen's columns (filter position order).\n\nAn empty metrics snapshot is a legitimate 200 with total=0.",
         "operationId": "get_results_screener_screens__screen_id__results_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "screen_id",
@@ -2046,6 +2253,11 @@
         "summary": "Get Results Csv",
         "description": "The same result set as /results, unpaginated, hard-capped at 5 000 rows.",
         "operationId": "get_results_csv_screener_screens__screen_id__results_csv_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "screen_id",
@@ -4229,6 +4441,33 @@
         "title": "AbsoluteViewIn",
         "description": "'Asset returns q per year' (e.g. q=0.12 \u2192 12% a.a.)."
       },
+      "AlertsView": {
+        "properties": {
+          "evaluated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluated At"
+          },
+          "worst_status": {
+            "type": "string",
+            "title": "Worst Status",
+            "default": "ok"
+          },
+          "breaches": {
+            "$ref": "#/components/schemas/BreachesView"
+          }
+        },
+        "type": "object",
+        "title": "AlertsView",
+        "description": "Response for GET /portfolios/{id}/alerts."
+      },
       "AllocationOut": {
         "properties": {
           "positions": {
@@ -4688,6 +4927,48 @@
         "title": "BlockBudgetIn",
         "description": "\u03a3 of weights in an asset-class block must lie in [lo, hi] (decimal\nfractions). ``asset_class`` matches ``Fund.asset_class``."
       },
+      "BreachesView": {
+        "properties": {
+          "position_drifts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Position Drifts"
+          },
+          "class_breaches": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Class Breaches"
+          },
+          "overlap_breaches": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Overlap Breaches"
+          },
+          "overlap_report_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Report Date"
+          }
+        },
+        "type": "object",
+        "title": "BreachesView",
+        "description": "Breach payload from the latest drift evaluation."
+      },
       "BuildAllResponse": {
         "properties": {
           "headline_count": {
@@ -4774,6 +5055,56 @@
         ],
         "title": "Candle",
         "description": "One OHLCV candle built from RAW (un-adjusted) prices.\n\nDaily for ranges up to 5Y; weekly (W-FRI buckets: open=first, high=max,\nlow=min, close=last, volume=sum) for range MAX."
+      },
+      "ClassLimitItem": {
+        "properties": {
+          "asset_class": {
+            "type": "string",
+            "enum": [
+              "equity",
+              "fixed_income",
+              "cash",
+              "alternatives",
+              "multi_asset"
+            ],
+            "title": "Asset Class",
+            "description": "One of: equity, fixed_income, cash, alternatives, multi_asset."
+          },
+          "min_weight": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Weight",
+            "description": "Lower weight bound, decimal fraction in [0, 1]; null = none."
+          },
+          "max_weight": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Weight",
+            "description": "Upper weight bound, decimal fraction in [0, 1]; null = none."
+          }
+        },
+        "type": "object",
+        "required": [
+          "asset_class"
+        ],
+        "title": "ClassLimitItem",
+        "description": "One per-asset-class min/max weight bound."
       },
       "ConcentrationOut": {
         "properties": {
@@ -4939,6 +5270,127 @@
         "type": "object",
         "title": "ConstraintsIn",
         "description": "Long-only and sum(w)=1 are always enforced; these are the knobs.\n\n``block_budgets`` (per-asset-class \u03a3-weight bounds) are honoured ONLY by the\n``min_cvar`` objective in v1; they are resolved against ``Fund.asset_class``\nserver-side and IGNORED by the other objectives. Empty/None = no blocks."
+      },
+      "ConstraintsPut": {
+        "properties": {
+          "cap": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cap",
+            "description": "Max per-position weight, decimal fraction in (0, 1]; null = none."
+          },
+          "min_weight": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Weight",
+            "description": "Min per-position weight, decimal fraction in [0, 1]; null = none."
+          },
+          "overlap_cap": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Cap",
+            "description": "Max pairwise overlap, decimal fraction in (0, 1]; null = none."
+          },
+          "class_limits": {
+            "items": {
+              "$ref": "#/components/schemas/ClassLimitItem"
+            },
+            "type": "array",
+            "title": "Class Limits",
+            "description": "Per-asset-class min/max weight bounds, replaced wholesale."
+          }
+        },
+        "type": "object",
+        "title": "ConstraintsPut",
+        "description": "Body for PUT /portfolios/{id}/constraints."
+      },
+      "ConstraintsView": {
+        "properties": {
+          "cap": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cap",
+            "description": "Max per-position weight, decimal fraction in (0, 1]; null = none."
+          },
+          "min_weight": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Weight",
+            "description": "Min per-position weight, decimal fraction in [0, 1]; null = none."
+          },
+          "overlap_cap": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Cap",
+            "description": "Max pairwise overlap, decimal fraction in (0, 1]; null = none."
+          },
+          "class_limits": {
+            "items": {
+              "$ref": "#/components/schemas/ClassLimitItem"
+            },
+            "type": "array",
+            "title": "Class Limits",
+            "description": "Per-asset-class min/max weight bounds, replaced wholesale."
+          },
+          "portfolio_id": {
+            "type": "integer",
+            "title": "Portfolio Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "portfolio_id"
+        ],
+        "title": "ConstraintsView",
+        "description": "Response for GET /portfolios/{id}/constraints."
       },
       "CorrelationMatrixOut": {
         "properties": {
