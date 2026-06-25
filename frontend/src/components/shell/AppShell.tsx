@@ -12,6 +12,21 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import {
+  ChartColumn,
+  ChartLineData,
+  ChevronDown,
+  DataVis_4,
+  EarthAmericas,
+  Filter,
+  Finance,
+  Logout,
+  Menu,
+  Moon,
+  Portfolio,
+  SettingsAdjust,
+  Sun,
+} from "@carbon/icons-react";
 import { TickerSearch } from "@/components/TickerSearch";
 import { useAuth } from "@/lib/auth/context";
 import { gateDecision, isPublicPath } from "@/lib/auth/authState";
@@ -69,83 +84,43 @@ const NAV_ITEMS: { href: string; match: (p: string) => boolean; label: string; i
     href: "/stocks",
     match: (p) => p.startsWith("/stocks"),
     label: "Stocks",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-        <rect x="2" y="6" width="2.4" height="6" fill="currentColor" />
-        <rect x="6.8" y="3" width="2.4" height="9" fill="currentColor" />
-        <rect x="11.6" y="8" width="2.4" height="4" fill="currentColor" />
-      </svg>
-    ),
+    icon: <ChartColumn size={16} aria-hidden />,
   },
   {
     href: "/portfolio",
     match: (p) => p.startsWith("/portfolio"),
     label: "Portfolio",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-        <circle cx="8" cy="8" r="5.4" stroke="currentColor" strokeWidth="2.2" />
-        <path d="M8 2.6V8h5.4" stroke="var(--color-accent)" strokeWidth="2.2" />
-      </svg>
-    ),
+    icon: <Portfolio size={16} aria-hidden />,
   },
   {
     href: "/statistics/scenario",
     match: (p) => p.startsWith("/statistics"),
     label: "Statistics",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-        <path d="M2 13V3M2 13h12" stroke="currentColor" strokeWidth="1.4" />
-        <path d="M4.5 11l2.5-3 2.2 2 3-4.5" stroke="var(--color-accent)" strokeWidth="1.6" fill="none" />
-      </svg>
-    ),
+    icon: <ChartLineData size={16} aria-hidden />,
   },
   {
     href: "/screener",
     match: (p) => p.startsWith("/screener"),
     label: "Screener",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-        <path d="M1.5 3h13l-5 6v4l-3 1.5V9z" stroke="currentColor" strokeWidth="1.3" fill="none" />
-      </svg>
-    ),
+    icon: <Filter size={16} aria-hidden />,
   },
   {
     href: "/funds",
     match: (p) => p.startsWith("/funds"),
     label: "Funds",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-        <rect x="2" y="10" width="12" height="3.6" stroke="currentColor" strokeWidth="1.3" fill="none" />
-        <rect x="3.6" y="6.2" width="8.8" height="3.6" stroke="currentColor" strokeWidth="1.3" fill="none" />
-        <rect x="5.2" y="2.4" width="5.6" height="3.6" stroke="var(--color-accent)" strokeWidth="1.3" fill="none" />
-      </svg>
-    ),
+    icon: <Finance size={16} aria-hidden />,
   },
   {
     href: "/builder",
     match: (p) => p.startsWith("/builder"),
     label: "Builder",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-        <path d="M3.5 1.5v13M8 1.5v13M12.5 1.5v13" stroke="currentColor" strokeWidth="1.3" />
-        <rect x="2" y="9" width="3" height="3" fill="var(--color-accent)" />
-        <rect x="6.5" y="4" width="3" height="3" fill="currentColor" />
-        <rect x="11" y="7" width="3" height="3" fill="currentColor" />
-      </svg>
-    ),
+    icon: <DataVis_4 size={16} aria-hidden />,
   },
   {
     href: "/macro",
     match: (p) => p.startsWith("/macro"),
     label: "Macro",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-        <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.3" />
-        <path d="M2.5 8h11" stroke="currentColor" strokeWidth="1.1" />
-        <path d="M8 2.5v11" stroke="currentColor" strokeWidth="1.1" />
-        <path d="M4.5 11.5C5.5 9 6.5 7 8 7s2.5 2 3.5 4.5" stroke="var(--color-accent)" strokeWidth="1.4" fill="none" />
-      </svg>
-    ),
+    icon: <EarthAmericas size={16} aria-hidden />,
   },
 ];
 
@@ -243,12 +218,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               navOpen ? "bg-layer-hover" : ""
             }`}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-              <path d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
+            <Menu size={20} aria-hidden />
           </button>
           <Link href="/" className="flex items-baseline gap-1.5 no-underline">
-            <span className="text-[15px] font-bold tracking-[-0.01em] text-text-primary">Investintell</span>
+            <span className="text-[15px] font-bold text-text-primary">Investintell</span>
             <span className="text-[11px] font-semibold uppercase tracking-[0.04em] text-text-muted">Cockpit</span>
           </Link>
         </div>
@@ -262,56 +235,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* Right cluster */}
         <div className="flex flex-none items-center gap-1 pr-3">
-          {/* Settings dropdown */}
-          <div className="relative">
-            <button
-              type="button"
-              aria-label="Display settings"
-              title="Display settings"
-              aria-expanded={settingsOpen}
-              onClick={() => {
-                setSettingsOpen((v) => !v);
-                setUserMenuOpen(false);
-                setNavOpen(false);
-              }}
-              className={`flex h-[38px] w-[38px] items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-layer-hover ${
-                settingsOpen ? "bg-layer-hover" : ""
-              }`}
-            >
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden>
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-              </svg>
-            </button>
-            {settingsOpen && (
-              <div
-                role="menu"
-                className="absolute right-0 top-[calc(100%+6px)] z-[60] w-[248px] overflow-hidden rounded-lg border border-border-strong bg-surface-1 shadow-[0_12px_32px_rgba(0,0,0,0.18)]"
-              >
-                <div className="px-3.5 pt-3 text-[10px] font-bold uppercase tracking-[0.1em] text-text-muted">
-                  Appearance
-                </div>
-                <div className="flex flex-col gap-3.5 px-3.5 pb-3.5 pt-2.5">
-                  <Segmented label="Theme">
-                    <SegBtn active={settings.theme === "light"} onClick={() => update({ theme: "light" })}>Light</SegBtn>
-                    <SegBtn active={settings.theme === "dark"} onClick={() => update({ theme: "dark" })}>Dark</SegBtn>
-                  </Segmented>
-                  <Segmented label="Density">
-                    <SegBtn active={settings.density === "compact"} onClick={() => update({ density: "compact" })}>Compact</SegBtn>
-                    <SegBtn active={settings.density === "comfortable"} onClick={() => update({ density: "comfortable" })}>Comfort</SegBtn>
-                  </Segmented>
-                  <div>
-                    <div className="mb-1.5 text-[11px] text-text-secondary">Accent</div>
-                    <div className="flex gap-2">
-                      <AccentSwatch color="#7a1c24" label="Oxblood" active={settings.accent === "oxblood"} onClick={() => update({ accent: "oxblood" })} />
-                      <AccentSwatch color="#0f62fe" label="Carbon blue" active={settings.accent === "blue"} onClick={() => update({ accent: "blue" })} />
-                      <AccentSwatch color="#007d79" label="Teal" active={settings.accent === "teal"} onClick={() => update({ accent: "teal" })} />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+          <button
+            type="button"
+            aria-label={settings.theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            title={settings.theme === "dark" ? "Light mode" : "Dark mode"}
+            onClick={() => {
+              update({ theme: settings.theme === "dark" ? "light" : "dark" });
+              setUserMenuOpen(false);
+              setSettingsOpen(false);
+            }}
+            className="flex h-[34px] w-[34px] items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-layer-hover hover:text-text-primary"
+          >
+            {settings.theme === "dark" ? <Sun size={18} aria-hidden /> : <Moon size={18} aria-hidden />}
+          </button>
 
           <div className="mx-1.5 h-6 w-px bg-border" />
 
@@ -337,9 +273,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <span className="max-w-[140px] truncate text-[12px] font-semibold text-text-primary">{identity.name}</span>
                 <span className="max-w-[140px] truncate text-[10px] text-text-muted">{identity.email}</span>
               </span>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-text-muted" aria-hidden>
-                <path d="M6 9l6 6 6-6" />
-              </svg>
+              <ChevronDown size={16} className="text-text-muted" aria-hidden />
             </button>
             {userMenuOpen && (
               <div
@@ -362,11 +296,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     onClick={() => void signOut()}
                     className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[12.5px] text-loss transition-colors hover:bg-loss-muted"
                   >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden>
-                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                      <path d="M16 17l5-5-5-5" />
-                      <path d="M21 12H9" />
-                    </svg>
+                    <Logout size={16} aria-hidden />
                     Sign out
                   </button>
                 </div>
@@ -420,6 +350,40 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </Link>
             );
           })}
+          <div className="mt-1 border-t border-border pt-1">
+            <button
+              type="button"
+              tabIndex={navOpen ? undefined : -1}
+              aria-expanded={settingsOpen}
+              onClick={() => setSettingsOpen((v) => !v)}
+              className={`relative flex h-10 w-full items-center gap-3 overflow-hidden whitespace-nowrap px-4 text-left text-[13px] hover:bg-layer-hover ${
+                settingsOpen
+                  ? "bg-layer-active font-bold text-accent shadow-[inset_3px_0_0_var(--color-accent)]"
+                  : "font-medium text-text-secondary"
+              }`}
+            >
+              <span className="flex w-[18px] shrink-0 items-center justify-center">
+                <SettingsAdjust size={16} aria-hidden />
+              </span>
+              <span>Settings</span>
+            </button>
+            {settingsOpen && (
+              <div className="mx-3 mb-2 mt-1 border border-border bg-field p-2.5">
+                <Segmented label="Density">
+                  <SegBtn active={settings.density === "compact"} onClick={() => update({ density: "compact" })}>Compact</SegBtn>
+                  <SegBtn active={settings.density === "comfortable"} onClick={() => update({ density: "comfortable" })}>Comfort</SegBtn>
+                </Segmented>
+                <div className="mt-3">
+                  <div className="mb-1.5 text-[11px] text-text-secondary">Accent</div>
+                  <div className="flex gap-2">
+                    <AccentSwatch color="#7a1c24" label="Oxblood" active={settings.accent === "oxblood"} onClick={() => update({ accent: "oxblood" })} />
+                    <AccentSwatch color="#0f62fe" label="Carbon blue" active={settings.accent === "blue"} onClick={() => update({ accent: "blue" })} />
+                    <AccentSwatch color="#007d79" label="Teal" active={settings.accent === "teal"} onClick={() => update({ accent: "teal" })} />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </nav>
 
         {/* Keyed on settings so chart options built from chartColors() in useMemo

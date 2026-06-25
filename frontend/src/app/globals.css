@@ -80,9 +80,9 @@
   --color-chart-blue: var(--ix-chart-blue);
   --color-chart-amber: var(--ix-chart-amber);
 
-  /* ── Font stack — serif on titles, sans on data ── */
-  --font-sans: Arial, "Arimo", "Helvetica Neue", ui-sans-serif, sans-serif;
-  --font-serif: Cambria, "PT Serif", Georgia, serif;
+  /* ── Font stack — native UI first for stable rendering across browsers ── */
+  --font-sans: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-sans);
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 
   /* ── Flat forms: square corners everywhere ── */
@@ -224,11 +224,11 @@ body {
   color: var(--color-text-muted);
 }
 
-/* Serif page title */
+/* Page title */
 @utility ix-title {
   font-family: var(--font-serif);
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   color: var(--color-text-primary);
 }
 

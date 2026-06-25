@@ -1,17 +1,8 @@
 "use client";
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { ArrowRight, View, ViewOff } from "@carbon/icons-react";
 import { useAuth } from "@/lib/auth/context";
-
-function EyeIcon({ off }: { off: boolean }) {
-  return (
-    <svg width="17" height="17" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path d="M1 8s2.5-4.5 7-4.5S15 8 15 8s-2.5 4.5-7 4.5S1 8 1 8Z" stroke="currentColor" strokeWidth="1.3" />
-      <circle cx="8" cy="8" r="1.9" stroke="currentColor" strokeWidth="1.3" />
-      {off && <path d="M2 2l12 12" stroke="currentColor" strokeWidth="1.3" />}
-    </svg>
-  );
-}
 
 function LoginForm() {
   const router = useRouter();
@@ -51,11 +42,11 @@ function LoginForm() {
         {/* Brand */}
         <div className="mb-[30px] flex items-center gap-2">
           <span className="h-3.5 w-3.5 flex-none bg-accent" aria-hidden />
-          <span className="font-serif text-[21px] font-bold tracking-[-0.01em] text-text-primary">Investintell</span>
+          <span className="font-serif text-[21px] font-bold text-text-primary">Investintell</span>
           <span className="text-[9.5px] font-bold uppercase tracking-[0.16em] text-accent">Cockpit</span>
         </div>
 
-        <h1 className="mb-7 font-serif text-[24px] font-bold tracking-[-0.01em] text-text-primary">Sign in</h1>
+        <h1 className="mb-7 font-serif text-[24px] font-bold text-text-primary">Sign in</h1>
 
         <form onSubmit={onSubmit} noValidate>
           {error && (
@@ -102,7 +93,7 @@ function LoginForm() {
               onClick={() => setShowPassword((v) => !v)}
               className="absolute right-2 top-0 flex h-11 w-[34px] items-center justify-center text-text-muted transition-colors hover:text-text-primary"
             >
-              <EyeIcon off={showPassword} />
+              {showPassword ? <ViewOff size={17} aria-hidden /> : <View size={17} aria-hidden />}
             </button>
           </div>
 
@@ -122,9 +113,7 @@ function LoginForm() {
             className="flex h-12 w-full items-center justify-between bg-accent px-[18px] text-[14px] font-bold tracking-[0.01em] text-on-accent transition hover:bg-accent-muted active:bg-accent-pressed disabled:cursor-not-allowed disabled:opacity-60"
           >
             <span>{submitting ? "Signing in…" : "Sign in"}</span>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-              <path d="M3 8h9M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" />
-            </svg>
+            <ArrowRight size={16} aria-hidden />
           </button>
         </form>
       </div>

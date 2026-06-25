@@ -408,7 +408,7 @@ function StockHeaderBar({ header }: { header: StockQuote }) {
     <div className="mb-[18px] flex flex-wrap items-start justify-between gap-4">
       <div>
         <div className="flex flex-wrap items-baseline gap-2.5">
-          <h1 className="m-0 font-serif text-[clamp(24px,4vw,30px)] font-bold tracking-[-0.01em] text-text-primary">
+          <h1 className="m-0 font-serif text-[clamp(24px,4vw,30px)] font-bold text-text-primary">
             {header.ticker}
           </h1>
           {header.name && (
