@@ -14,10 +14,10 @@ helpers. Fail-loud contract:
 SQL-injection stance: results/build queries are dynamic per screen, but
 every user-supplied metric code is resolved through the backend catalog
 (``app.screener.catalog``) into a SQLAlchemy column attribute of
-``ScreenerMetrics`` — user input is NEVER interpolated into SQL text.
+``ScreenerEquitySnapshot`` — user input is NEVER interpolated into SQL text.
 
-Universe semantics: every read is over the ACTIVE universe — a LEFT JOIN
-from ``universe_constituents`` (status='active') to ``screener_metrics``.
+Universe semantics: every read is over the materialized ACTIVE equity snapshot
+in ``screener_equity_snapshot_mv``.
 Each filter requires its column IS NOT NULL by definition (a ticker that
 cannot be ranked on a metric never matches a filter on it), so constituents
 without a metrics row drop out as soon as any filter exists.
@@ -47,8 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, selectinload
 
 from app.models.screen import Screen, ScreenFilter
-from app.models.screener_metrics import ScreenerMetrics
-from app.models.universe import UniverseConstituent
+from app.models.screener_equity_snapshot import ScreenerEquitySnapshot
 from app.screener.catalog import MetricDef, get_metric
 
 # Hard cap on GET /screener/screens — single-tenant, a bound not pagination.
@@ -250,7 +249,7 @@ async def reorder_filters(
 
 
 def metric_column(code: str) -> InstrumentedAttribute[float | None]:
-    """Resolve a metric code to its ScreenerMetrics column — THE whitelist gate.
+    """Resolve a metric code to its snapshot column — THE whitelist gate.
 
     Raises UnknownMetricCodeError for anything outside the catalog, so a
     hostile code (e.g. an SQL-injection string) can never reach query text.
@@ -258,7 +257,8 @@ def metric_column(code: str) -> InstrumentedAttribute[float | None]:
     if get_metric(code) is None:
         raise UnknownMetricCodeError(f"Unknown metric code: {code!r}.")
     return cast(
-        "InstrumentedAttribute[float | None]", getattr(ScreenerMetrics, code)
+        "InstrumentedAttribute[float | None]",
+        getattr(ScreenerEquitySnapshot, code),
     )
 
 
@@ -281,12 +281,11 @@ def filter_conditions(filters: Sequence[FilterLike]) -> list[ColumnElement[bool]
 
 
 def _active_universe_select(*columns: Any) -> Select[Any]:
-    """SELECT *columns* over active universe LEFT JOIN screener_metrics."""
+    """SELECT *columns* over the materialized active-equity screener snapshot."""
     return (
         select(*columns)
-        .select_from(UniverseConstituent)
-        .outerjoin(ScreenerMetrics, ScreenerMetrics.ticker == UniverseConstituent.ticker)
-        .where(UniverseConstituent.status == "active")
+        .select_from(ScreenerEquitySnapshot)
+        .where(ScreenerEquitySnapshot.status == "active")
     )
 
 
@@ -297,10 +296,10 @@ def _escape_like(value: str) -> str:
 
 def _search_condition(search: str) -> ColumnElement[bool]:
     """Case-insensitive ticker/name PREFIX match."""
-    pattern = _escape_like(search) + "%"
+    pattern = _escape_like(search).lower() + "%"
     return or_(
-        UniverseConstituent.ticker.ilike(pattern, escape="\\"),
-        UniverseConstituent.name.ilike(pattern, escape="\\"),
+        func.lower(ScreenerEquitySnapshot.ticker).like(pattern, escape="\\"),
+        func.lower(ScreenerEquitySnapshot.name).like(pattern, escape="\\"),
     )
 
 
@@ -408,8 +407,8 @@ def build_results_select(
     """
     metric_codes = [item.metric_code for item in sorted(filters, key=lambda f: f.position)]
     sortable = {
-        "ticker": UniverseConstituent.ticker,
-        "name": UniverseConstituent.name,
+        "ticker": ScreenerEquitySnapshot.ticker,
+        "name": ScreenerEquitySnapshot.name,
         **{code: metric_column(code) for code in metric_codes},
     }
     if sort not in sortable:
@@ -419,14 +418,14 @@ def build_results_select(
     sort_column = sortable[sort]
     order = sort_column.desc() if direction == "desc" else sort_column.asc()
     stmt = _active_universe_select(
-        UniverseConstituent.ticker,
-        UniverseConstituent.name,
+        ScreenerEquitySnapshot.ticker,
+        ScreenerEquitySnapshot.name,
         *(metric_column(code) for code in metric_codes),
     ).where(*filter_conditions(filters))
     if search:
         stmt = stmt.where(_search_condition(search))
     return (
-        stmt.order_by(order.nulls_last(), UniverseConstituent.ticker)
+        stmt.order_by(order.nulls_last(), ScreenerEquitySnapshot.ticker)
         .limit(limit)
         .offset(offset)
     )

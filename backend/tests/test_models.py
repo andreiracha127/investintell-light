@@ -369,6 +369,27 @@ def test_screener_metrics_model_matches_metric_columns() -> None:
     assert actual == expected
 
 
+def test_screener_equity_snapshot_registered() -> None:
+    assert "screener_equity_snapshot_mv" in Base.metadata.tables
+
+
+def test_screener_equity_snapshot_pk_is_ticker() -> None:
+    pk = _table("screener_equity_snapshot_mv").primary_key
+    pk_cols = list(pk.columns)
+    assert len(pk_cols) == 1
+    assert pk_cols[0].name == "ticker"
+
+
+def test_screener_equity_snapshot_exposes_active_universe_and_metric_columns() -> None:
+    from app.sync.metrics import METRIC_COLUMNS
+
+    table = _table("screener_equity_snapshot_mv")
+    for col_name in ("ticker", "name", "sector", "status", "computed_at", "as_of"):
+        assert col_name in table.c
+    for col_name in METRIC_COLUMNS:
+        assert col_name in table.c, col_name
+
+
 # ---------------------------------------------------------------------------
 # screens / screen_filters (F6.4)
 # ---------------------------------------------------------------------------

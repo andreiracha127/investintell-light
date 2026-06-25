@@ -495,6 +495,7 @@ class FakeSession:
         self.eod_select_tickers: list[list[str]] = []
         self.fundamentals_selects = 0
         self.upserts: list[Any] = []
+        self.snapshot_refreshes = 0
         self.commits = 0
 
     @staticmethod
@@ -531,6 +532,9 @@ class FakeSession:
         if "INSERT INTO screener_metrics" in sql:
             self.upserts.append(stmt)
             return _FakeResult([])
+        if "REFRESH MATERIALIZED VIEW screener_equity_snapshot_mv" in sql:
+            self.snapshot_refreshes += 1
+            return _FakeResult([])
         raise AssertionError(f"Unexpected statement: {sql[:120]}")
 
     async def get(self, model: Any, ticker: str) -> Any:
@@ -566,9 +570,10 @@ async def test_run_metrics_batches_eod_selects_and_upserts() -> None:
     assert session.eod_select_tickers[0] == list(BENCHMARK_TICKERS)
     assert session.eod_select_tickers[1:] == [["AAA", "BBB"], ["CCC", "DDD"], ["EEE"]]
     assert session.fundamentals_selects == 3
-    # Every non-empty batch produced one upsert and one commit.
+    # Every non-empty batch produced one upsert/commit; the MV refresh commits once.
     assert len(session.upserts) == 3
-    assert session.commits == 3
+    assert session.snapshot_refreshes == 1
+    assert session.commits == 4
 
     assert report.total_active == 5
     assert report.computed == 4
@@ -610,4 +615,5 @@ async def test_run_metrics_chunks_large_upserts(monkeypatch: pytest.MonkeyPatch)
     )
     assert report.computed == 5
     assert len(session.upserts) == 3  # ceil(5/2)
-    assert session.commits == 1  # still one commit per ticker batch
+    assert session.snapshot_refreshes == 1
+    assert session.commits == 2  # one ticker-batch commit + one MV-refresh commit

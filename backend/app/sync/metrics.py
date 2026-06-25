@@ -41,9 +41,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import Insert as PgInsert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics import annualized_volatility, beta, correlation, simple_returns
@@ -400,6 +401,20 @@ def build_metrics_upsert(records: list[dict[str, Any]]) -> PgInsert:
     )
 
 
+async def refresh_screener_equity_snapshot(session: AsyncSession) -> None:
+    """Refresh the materialized read model when it exists in this database."""
+    try:
+        await session.execute(text("REFRESH MATERIALIZED VIEW screener_equity_snapshot_mv"))
+        await session.commit()
+    except DBAPIError as exc:
+        await session.rollback()
+        sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
+        if sqlstate == "42P01":  # undefined_table: older local/test DBs
+            logger.warning("screener_equity_snapshot_mv is missing; skipping refresh")
+            return
+        raise
+
+
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
@@ -606,6 +621,9 @@ async def run_metrics(
             len(todo),
             report.skipped_no_eod,
         )
+
+    if report.computed > 0:
+        await refresh_screener_equity_snapshot(session)
 
     report.elapsed_seconds = time.monotonic() - started
     return report

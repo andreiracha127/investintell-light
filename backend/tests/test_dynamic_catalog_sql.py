@@ -36,6 +36,12 @@ PROFILE_READ_MODELS_DDL_PATH = (
     / "ddl"
     / "2026-06-25_fund_profile_read_models_mv.sql"
 )
+SCREENER_SNAPSHOT_DDL_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "db"
+    / "ddl"
+    / "2026-06-25_screener_equity_snapshot_mv.sql"
+)
 ALTERNATIVE_OVERRIDES_DDL_PATH = (
     Path(__file__).resolve().parents[1]
     / "db"
@@ -80,6 +86,17 @@ def test_stage_labels_sql_prefers_manual_overrides() -> None:
     assert override_order in stage_sql
     assert stage_sql.index(override_order) < stage_sql.index(latest_order)
     assert "manual_stage AS" in stage_sql
+
+
+def test_screener_equity_snapshot_mv_materializes_active_universe_join() -> None:
+    sql = SCREENER_SNAPSHOT_DDL_PATH.read_text(encoding="utf-8")
+
+    assert "CREATE MATERIALIZED VIEW screener_equity_snapshot_mv_new AS" in sql
+    assert "FROM universe_constituents uc" in sql
+    assert "LEFT JOIN screener_metrics sm ON sm.ticker = uc.ticker" in sql
+    assert "WHERE uc.status = 'active'" in sql
+    assert "lower(ticker) text_pattern_ops" in sql
+    assert "lower(name) text_pattern_ops" in sql
 
 
 def test_dynamic_catalog_creates_daily_nav_cagg() -> None:

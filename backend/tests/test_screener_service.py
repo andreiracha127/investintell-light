@@ -124,14 +124,14 @@ def test_filter_conditions_exclude_nulls_and_apply_both_bounds() -> None:
     )
     # NULL exclusion for EVERY filter — including the unbounded one.
     assert sql.count("IS NOT NULL") == 3
-    assert "screener_metrics.pe_ratio >= 10.0" in sql
-    assert "screener_metrics.pe_ratio <= 15.0" in sql
-    assert "screener_metrics.market_cap >= 2000000000.0" in sql
+    assert "screener_equity_snapshot_mv.pe_ratio >= 10.0" in sql
+    assert "screener_equity_snapshot_mv.pe_ratio <= 15.0" in sql
+    assert "screener_equity_snapshot_mv.market_cap >= 2000000000.0" in sql
     # The unbounded filter contributes no range predicates.
     assert "ret_1y >=" not in sql
     assert "ret_1y <=" not in sql
     # Active-universe scope.
-    assert "universe_constituents.status = 'active'" in sql
+    assert "screener_equity_snapshot_mv.status = 'active'" in sql
 
 
 def test_filter_conditions_reject_unknown_codes() -> None:
@@ -156,11 +156,13 @@ def test_results_select_orders_pages_and_escapes_search() -> None:
             offset=50,
         )
     )
-    assert "ORDER BY screener_metrics.pe_ratio DESC NULLS LAST" in sql
+    assert "ORDER BY screener_equity_snapshot_mv.pe_ratio DESC NULLS LAST" in sql
     assert "LIMIT 25" in sql
     assert "OFFSET 50" in sql
     # Prefix match on BOTH ticker and name, with an explicit escape char.
-    assert sql.count("ILIKE") == 2
+    assert sql.count(" LIKE ") == 2
+    assert "lower(screener_equity_snapshot_mv.ticker)" in sql
+    assert "lower(screener_equity_snapshot_mv.name)" in sql
     assert sql.count("ESCAPE") == 2
 
 
@@ -253,13 +255,13 @@ def test_render_csv_no_scientific_notation() -> None:
 
 
 # ---------------------------------------------------------------------------
-# compile-level: metric-values SELECT covers active universe + IS NOT NULL
+# compile-level: metric-values SELECT covers active snapshot + IS NOT NULL
 # ---------------------------------------------------------------------------
 
 
-def test_select_metric_values_query_filters_active_universe_and_not_null() -> None:
+def test_select_metric_values_query_filters_active_snapshot_and_not_null() -> None:
     """F6.4 review: the build/distribution feed SELECT must restrict to the
-    active universe (status = 'active') and exclude NULL values for the metric.
+    active snapshot (status = 'active') and exclude NULL values for the metric.
 
     Compiled against the PostgreSQL dialect with literal binds — deterministic,
     no live DB required.
@@ -272,5 +274,5 @@ def test_select_metric_values_query_filters_active_universe_and_not_null() -> No
         stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
     )
 
-    assert "universe_constituents.status = 'active'" in sql
-    assert "screener_metrics.pe_ratio IS NOT NULL" in sql
+    assert "screener_equity_snapshot_mv.status = 'active'" in sql
+    assert "screener_equity_snapshot_mv.pe_ratio IS NOT NULL" in sql

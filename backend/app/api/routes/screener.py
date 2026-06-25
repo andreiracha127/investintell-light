@@ -2,8 +2,9 @@
 Build payload (universe distribution + headline count) and the results table
 with CSV export.
 
-DB-only contract: every read is served from the local `screener_metrics`
-snapshot joined to the active universe — these routes NEVER talk to Tiingo.
+DB-only contract: every read is served from the local
+`screener_equity_snapshot_mv` active-equity snapshot — these routes NEVER talk
+to Tiingo.
 Routes are thin: SQL and the histogram/CSV helpers live in
 ``app.services.screener``; the metric catalog in ``app.screener.catalog``.
 
@@ -16,7 +17,7 @@ Error mapping (fail loud, never silently empty):
   ("metrics snapshot not computed yet — run compute_screener_metrics");
   on the filter upsert/delete response the same condition degrades to
   ``distribution: null`` because the WRITE itself succeeded.
-- empty screener_metrics table on /results             -> 200 with total=0
+- empty screener snapshot on /results                  -> 200 with total=0
   (a legitimately empty cross-section, not an error).
 """
 
