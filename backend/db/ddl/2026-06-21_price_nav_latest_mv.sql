@@ -4,25 +4,39 @@
 -- lendo dos CAGGs diários. Refrescados pelo worker matview_refresh
 -- (REFRESH … CONCURRENTLY exige os índices UNIQUE abaixo).
 
--- Fonte = CAGGs diários canônicos (cagg_eod_daily / cagg_nav_daily), não as
--- tabelas cruas: alinha com a leitura db-first das rotas (38dbdb4), é mais
--- barato e tem real-time aggregation (inclui o dia corrente). Como eod_prices /
--- nav_timeseries são diários e os CAGGs usam last(... , <date>) por bucket, os
--- valores são idênticos aos da leitura legada (paridade). bucket é o time_bucket
--- diário; cast ::date para casar com PositionOverview.as_of (dt.date).
+-- Fonte primária = CAGGs diários canônicos (cagg_eod_daily / cagg_nav_daily).
+-- Para preço, tickers presentes em eod_prices mas ausentes do CAGG (ex. proxy
+-- ETFs carregados fora do universo principal) entram pelo fallback base-table.
+-- Isso preserva o contrato DB-first e evita que o overview volte ao fallback
+-- request-time em eod_prices para esses tickers. bucket é o time_bucket diário;
+-- cast ::date para casar com PositionOverview.as_of (dt.date).
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS price_latest_mv AS
-WITH ranked AS (
-    SELECT ticker, bucket, close,
-           row_number() OVER (PARTITION BY ticker ORDER BY bucket DESC) AS rn
+WITH cagg_tickers AS (
+    SELECT DISTINCT ticker
     FROM cagg_eod_daily
     WHERE close IS NOT NULL
+),
+daily AS (
+    SELECT ticker, bucket::date AS as_of, close
+    FROM cagg_eod_daily
+    WHERE close IS NOT NULL
+    UNION ALL
+    SELECT ticker, date AS as_of, close
+    FROM eod_prices
+    WHERE close IS NOT NULL
+      AND ticker NOT IN (SELECT ticker FROM cagg_tickers)
+),
+ranked AS (
+    SELECT ticker, as_of, close,
+           row_number() OVER (PARTITION BY ticker ORDER BY as_of DESC) AS rn
+    FROM daily
 )
 SELECT
     ticker,
-    (max(bucket) FILTER (WHERE rn = 1))::date AS as_of,
+    max(as_of)   FILTER (WHERE rn = 1)        AS as_of,
     max(close)   FILTER (WHERE rn = 1)        AS last_close,
-    (max(bucket) FILTER (WHERE rn = 2))::date AS prev_date,
+    max(as_of)   FILTER (WHERE rn = 2)        AS prev_date,
     max(close)   FILTER (WHERE rn = 2)        AS prev_close
 FROM ranked
 WHERE rn <= 2

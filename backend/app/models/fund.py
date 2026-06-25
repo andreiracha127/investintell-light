@@ -318,6 +318,26 @@ class FundListRow(Base):
     equity_correlation_252d: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
 
 
+class FundClassResolution(Base):
+    # MV-backed share-class resolver for portfolio overview and builder save
+    # paths. The canonical lineage remains fund_classes_v + funds_v; this
+    # projection keeps request-time ticker resolution off the dynamic views.
+    __tablename__ = "fund_class_resolution_mv"
+
+    class_id: Mapped[str] = mapped_column(String, primary_key=True)
+    class_ticker: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    class_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    series_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    instrument_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, primary_key=True, index=True
+    )
+    fund_ticker: Mapped[str | None] = mapped_column(String, nullable=True)
+    fund_name: Mapped[str] = mapped_column(String, nullable=False)
+    fund_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    strategy_label: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    asset_class: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+
+
 class FundNav(Base):
     # Repointed (Task 4.3) to the LIVE nav_timeseries hypertable — the fund_nav
     # snapshot is retired (its sync was deleted in Task 4.2 and nothing writes it

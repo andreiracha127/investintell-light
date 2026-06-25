@@ -471,18 +471,23 @@ async def get_portfolio_overview(
     nav_fund_tickers: set[str] = set()
     taxonomy = await portfolio_crud.resolve_position_taxonomy(session, tickers)
     if tickers:
+        fund_tickers = {
+            ticker
+            for ticker, position_taxonomy in taxonomy.items()
+            if position_taxonomy.instrument_id is not None
+        }
         # NAV-priced funds/classes use fund_nav. ETFs remain traded tickers:
         # if their local EOD rows are cold, they should fail like stocks.
-        fund_tickers = await portfolio_crud.select_fund_tickers(session, tickers)
         nav_fund_tickers = {
             ticker
             for ticker in fund_tickers
             if not _is_etf_taxonomy(taxonomy, ticker)
         }
 
-    closes = await portfolio_crud.select_last_two_closes(session, tickers)
+    eod_tickers = [ticker for ticker in tickers if ticker not in nav_fund_tickers]
+    closes = await portfolio_crud.select_last_two_closes(session, eod_tickers)
     names = await portfolio_crud.select_instrument_names(session, tickers)
-    nav_tickers = [t for t in nav_fund_tickers if t not in closes]
+    nav_tickers = list(nav_fund_tickers)
     if nav_tickers:
         closes.update(await portfolio_crud.select_last_two_navs(session, nav_tickers))
         fund_names = await portfolio_crud.select_fund_names(session, nav_tickers)

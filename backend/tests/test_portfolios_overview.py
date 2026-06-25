@@ -517,27 +517,22 @@ async def test_resolve_position_taxonomy_funds_vs_equities(
 ) -> None:
     import uuid as _uuid
 
-    from app.optimizer import data as optimizer_data
     from app.services import portfolio_crud
 
     iid = _uuid.UUID(int=11)
 
-    async def fake_instr(session: Any, tickers: Any) -> dict[str, Any]:
-        return {"VTI": iid}  # AAPL absent -> direct equity
+    async def fake_resolution(session: Any, tickers: Any) -> dict[str, Any]:
+        return {
+            "VTI": portfolio_crud.FundResolution(
+                iid,
+                "equity",
+                "Large-Cap Blend",
+                "etf",
+                "Vanguard Total Stock Market ETF",
+            )
+        }  # AAPL absent -> direct equity
 
-    async def fake_class(session: Any, fund_ids: Any) -> dict[Any, str]:
-        return {iid: "equity"}
-
-    async def fake_strategy(session: Any, fund_ids: Any) -> dict[Any, str]:
-        return {iid: "Large-Cap Blend"}
-
-    async def fake_fund_type(session: Any, fund_ids: Any) -> dict[Any, str]:
-        return {iid: "etf"}
-
-    monkeypatch.setattr(portfolio_crud, "_fund_instrument_by_ticker", fake_instr)
-    monkeypatch.setattr(optimizer_data, "load_fund_asset_class", fake_class)
-    monkeypatch.setattr(optimizer_data, "load_fund_strategy_label", fake_strategy)
-    monkeypatch.setattr(portfolio_crud, "_fund_type_by_instrument", fake_fund_type)
+    monkeypatch.setattr(portfolio_crud, "_fund_resolution_by_ticker", fake_resolution)
 
     out = await portfolio_crud.resolve_position_taxonomy(None, ["VTI", "AAPL"])  # type: ignore[arg-type]
     assert out["VTI"] == portfolio_crud.PositionTaxonomy(

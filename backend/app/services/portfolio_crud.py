@@ -16,17 +16,16 @@ from typing import Any, NamedTuple, Protocol, cast
 
 from sqlalchemy import CursorResult, Row, delete, func, select, union_all
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.models.eod_price import EodPrice
-from app.models.fund import Fund, FundClass, FundNav
+from app.models.fund import Fund, FundClass, FundClassResolution, FundListRow, FundNav
 from app.models.instrument import Instrument
 from app.models.portfolio import Portfolio, Position
 from app.models.price_latest import NavLatest, PriceLatest
-from app.optimizer import data as optimizer_data
 from app.schemas.portfolios import (
     OverviewAggregates,
     PortfolioCreate,
@@ -429,12 +428,7 @@ async def select_fund_tickers(
     """
     if not tickers:
         return set()
-    result = await session.execute(
-        select(Fund.ticker)
-        .where(Fund.ticker.in_(tickers))
-        .union(select(FundClass.ticker).where(FundClass.ticker.in_(tickers)))
-    )
-    return {row[0] for row in result.all()}
+    return set((await _fund_resolution_by_ticker(session, tickers)).keys())
 
 
 class PositionTaxonomy(NamedTuple):
@@ -444,6 +438,190 @@ class PositionTaxonomy(NamedTuple):
     strategy_label: str | None
     instrument_id: uuid.UUID | None
     fund_type: str | None = None
+
+
+class FundResolution(NamedTuple):
+    """Request-time fund/class ticker resolution flattened for overview reads."""
+
+    instrument_id: uuid.UUID
+    asset_class: str | None
+    strategy_label: str | None
+    fund_type: str | None
+    name: str | None
+    class_name: str | None = None
+
+
+def _fund_resolution_display_name(resolution: FundResolution) -> str | None:
+    if resolution.class_name and resolution.name:
+        return f"{resolution.name} — {resolution.class_name}"
+    return resolution.name
+
+
+async def _fund_resolution_by_ticker_mv(
+    session: AsyncSession, tickers: Sequence[str]
+) -> dict[str, FundResolution]:
+    """Resolve fund and share-class tickers from indexed materialized views."""
+    if not tickers:
+        return {}
+    unique = list(dict.fromkeys(tickers))
+    result = await session.execute(
+        select(
+            FundListRow.ticker,
+            FundListRow.instrument_id,
+            FundListRow.asset_class,
+            FundListRow.strategy_label,
+            FundListRow.fund_type,
+            FundListRow.name,
+        )
+        .where(FundListRow.ticker.in_(unique))
+        .order_by(FundListRow.ticker, FundListRow.instrument_id)
+    )
+    out: dict[str, FundResolution] = {}
+    for ticker, instrument_id, asset_class, strategy_label, fund_type, name in result.all():
+        if ticker is None:
+            continue
+        out.setdefault(
+            ticker,
+            FundResolution(
+                instrument_id,
+                asset_class,
+                strategy_label,
+                fund_type,
+                name,
+            ),
+        )
+
+    remaining = [ticker for ticker in unique if ticker not in out]
+    if remaining:
+        class_rows = await session.execute(
+            select(
+                FundClassResolution.class_ticker,
+                FundClassResolution.instrument_id,
+                FundClassResolution.asset_class,
+                FundClassResolution.strategy_label,
+                FundClassResolution.fund_type,
+                FundClassResolution.fund_name,
+                FundClassResolution.class_name,
+            )
+            .where(FundClassResolution.class_ticker.in_(remaining))
+            .order_by(
+                FundClassResolution.class_ticker,
+                FundClassResolution.instrument_id,
+            )
+        )
+        for (
+            ticker,
+            instrument_id,
+            asset_class,
+            strategy_label,
+            fund_type,
+            fund_name,
+            class_name,
+        ) in class_rows.all():
+            out.setdefault(
+                ticker,
+                FundResolution(
+                    instrument_id,
+                    asset_class,
+                    strategy_label,
+                    fund_type,
+                    fund_name,
+                    class_name,
+                ),
+            )
+    return out
+
+
+async def _fund_resolution_by_ticker_legacy(
+    session: AsyncSession, tickers: Sequence[str]
+) -> dict[str, FundResolution]:
+    """Fallback resolver over dynamic lineage views for stale/missing MV rows."""
+    if not tickers:
+        return {}
+    unique = list(dict.fromkeys(tickers))
+    out: dict[str, FundResolution] = {}
+    fund_rows = await session.execute(
+        select(
+            Fund.ticker,
+            Fund.instrument_id,
+            Fund.asset_class,
+            Fund.strategy_label,
+            Fund.fund_type,
+            Fund.name,
+        )
+        .where(Fund.ticker.in_(unique))
+        .order_by(Fund.ticker, Fund.instrument_id)
+    )
+    for ticker, instrument_id, asset_class, strategy_label, fund_type, name in fund_rows.all():
+        if ticker is None:
+            continue
+        out.setdefault(
+            ticker,
+            FundResolution(
+                instrument_id,
+                asset_class,
+                strategy_label,
+                fund_type,
+                name,
+            ),
+        )
+
+    remaining = [ticker for ticker in unique if ticker not in out]
+    if remaining:
+        class_rows = await session.execute(
+            select(
+                FundClass.ticker,
+                FundClass.class_name,
+                Fund.instrument_id,
+                Fund.asset_class,
+                Fund.strategy_label,
+                Fund.fund_type,
+                Fund.name,
+            )
+            .join(Fund, Fund.series_id == FundClass.series_id)
+            .where(FundClass.ticker.in_(remaining))
+            .order_by(FundClass.ticker, Fund.instrument_id)
+        )
+        for (
+            ticker,
+            class_name,
+            instrument_id,
+            asset_class,
+            strategy_label,
+            fund_type,
+            fund_name,
+        ) in class_rows.all():
+            out.setdefault(
+                ticker,
+                FundResolution(
+                    instrument_id,
+                    asset_class,
+                    strategy_label,
+                    fund_type,
+                    fund_name,
+                    class_name,
+                ),
+            )
+    return out
+
+
+async def _fund_resolution_by_ticker(
+    session: AsyncSession, tickers: Sequence[str]
+) -> dict[str, FundResolution]:
+    """Fast fund/class resolver with legacy fallback for undeployed MV states."""
+    if not tickers:
+        return {}
+    unique = list(dict.fromkeys(tickers))
+    try:
+        resolved = await _fund_resolution_by_ticker_mv(session, unique)
+    except (OperationalError, ProgrammingError):
+        await session.rollback()
+        return await _fund_resolution_by_ticker_legacy(session, unique)
+
+    missing = [ticker for ticker in unique if ticker not in resolved]
+    if missing:
+        resolved.update(await _fund_resolution_by_ticker_legacy(session, missing))
+    return resolved
 
 
 async def _fund_instrument_by_ticker(
@@ -456,30 +634,8 @@ async def _fund_instrument_by_ticker(
     NAV as a proxy). Within each source the lowest instrument_id wins when a
     ticker is duplicated (deterministic).
     """
-    if not tickers:
-        return {}
-    instrument_by_ticker: dict[str, Any] = {}
-    fund_rows = await session.execute(
-        select(Fund.ticker, Fund.instrument_id)
-        .where(Fund.ticker.in_(tickers))
-        .order_by(Fund.ticker, Fund.instrument_id)
-    )
-    for ticker, instrument_id in fund_rows.all():
-        instrument_by_ticker.setdefault(ticker, instrument_id)
-    remaining = [t for t in tickers if t not in instrument_by_ticker]
-    if remaining:
-        # FundClass (fund_classes_v) is keyed by series_id; resolve the
-        # instrument by joining funds_v on series_id (Task 2.5). Lowest
-        # instrument_id still wins ties (deterministic).
-        class_rows = await session.execute(
-            select(FundClass.ticker, Fund.instrument_id)
-            .join(Fund, Fund.series_id == FundClass.series_id)
-            .where(FundClass.ticker.in_(remaining))
-            .order_by(FundClass.ticker, Fund.instrument_id)
-        )
-        for ticker, instrument_id in class_rows.all():
-            instrument_by_ticker.setdefault(ticker, instrument_id)
-    return instrument_by_ticker
+    resolved = await _fund_resolution_by_ticker(session, tickers)
+    return {ticker: resolution.instrument_id for ticker, resolution in resolved.items()}
 
 
 async def _fund_type_by_instrument(
@@ -488,12 +644,25 @@ async def _fund_type_by_instrument(
     """instrument_id -> fund_type for resolved fund holdings."""
     if not instrument_ids:
         return {}
-    result = await session.execute(
-        select(Fund.instrument_id, Fund.fund_type).where(
-            Fund.instrument_id.in_(instrument_ids)
+    try:
+        result = await session.execute(
+            select(FundListRow.instrument_id, FundListRow.fund_type).where(
+                FundListRow.instrument_id.in_(instrument_ids)
+            )
         )
-    )
-    return {instrument_id: fund_type for instrument_id, fund_type in result.all()}
+        found = {instrument_id: fund_type for instrument_id, fund_type in result.all()}
+    except (OperationalError, ProgrammingError):
+        await session.rollback()
+        found = {}
+    missing = [instrument_id for instrument_id in instrument_ids if instrument_id not in found]
+    if missing:
+        result = await session.execute(
+            select(Fund.instrument_id, Fund.fund_type).where(
+                Fund.instrument_id.in_(missing)
+            )
+        )
+        found.update({instrument_id: fund_type for instrument_id, fund_type in result.all()})
+    return found
 
 
 async def resolve_position_taxonomy(
@@ -508,22 +677,18 @@ async def resolve_position_taxonomy(
     """
     if not tickers:
         return {}
-    instrument_by_ticker = await _fund_instrument_by_ticker(session, tickers)
-    instrument_ids = list({iid for iid in instrument_by_ticker.values()})
-    asset_class_of = await optimizer_data.load_fund_asset_class(session, instrument_ids)
-    strategy_of = await optimizer_data.load_fund_strategy_label(session, instrument_ids)
-    fund_type_of = await _fund_type_by_instrument(session, instrument_ids)
+    resolution_by_ticker = await _fund_resolution_by_ticker(session, tickers)
     out: dict[str, PositionTaxonomy] = {}
     for ticker in tickers:
-        iid = instrument_by_ticker.get(ticker)
-        if iid is None:
+        resolution = resolution_by_ticker.get(ticker)
+        if resolution is None:
             out[ticker] = PositionTaxonomy("equity", None, None)
         else:
             out[ticker] = PositionTaxonomy(
-                asset_class_of.get(iid),
-                strategy_of.get(iid),
-                iid,
-                fund_type_of.get(iid),
+                resolution.asset_class,
+                resolution.strategy_label,
+                resolution.instrument_id,
+                resolution.fund_type,
             )
     return out
 
@@ -657,26 +822,12 @@ async def select_fund_names(
     """
     if not tickers:
         return {}
-    result = await session.execute(
-        select(Fund.ticker, Fund.name)
-        .where(Fund.ticker.in_(tickers))
-        .order_by(Fund.ticker, Fund.instrument_id)
-    )
-    names: dict[str, str | None] = {}
-    for ticker, name in result.all():
-        names.setdefault(ticker, name)
-    remaining = [t for t in tickers if t not in names]
-    if remaining:
-        class_rows = await session.execute(
-            select(FundClass.ticker, FundClass.class_name, Fund.name)
-            .join(Fund, Fund.series_id == FundClass.series_id)
-            .where(FundClass.ticker.in_(remaining))
-            .order_by(FundClass.ticker, Fund.instrument_id)
-        )
-        for ticker, class_name, fund_name in class_rows.all():
-            display = f"{fund_name} — {class_name}" if class_name else fund_name
-            names.setdefault(ticker, display)
-    return names
+    return {
+        ticker: _fund_resolution_display_name(resolution)
+        for ticker, resolution in (
+            await _fund_resolution_by_ticker(session, tickers)
+        ).items()
+    }
 
 
 async def select_instrument_names(
