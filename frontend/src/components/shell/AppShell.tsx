@@ -14,7 +14,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { TickerSearch } from "@/components/TickerSearch";
 import { useAuth } from "@/lib/auth/context";
-import { gateDecision } from "@/lib/auth/authState";
+import { gateDecision, isPublicPath } from "@/lib/auth/authState";
 
 type Theme = "light" | "dark";
 type Accent = "oxblood" | "blue" | "teal";
@@ -153,6 +153,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { status, user, signOut } = useAuth();
+  const isPublicRoute = isPublicPath(pathname);
 
   const [settings, setSettings] = useState<Settings>(DEFAULTS);
   const [navOpen, setNavOpen] = useState(false);
@@ -210,7 +211,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   if (pathname === "/login") return <>{children}</>;
 
   // Don't flash the app or bounce a valid user while the session resolves.
-  if (status === "loading") {
+  if (status === "loading" && !isPublicRoute) {
     return <div className="flex h-screen items-center justify-center text-text-muted">Loading…</div>;
   }
 

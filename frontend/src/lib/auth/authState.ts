@@ -14,7 +14,7 @@ export function authReducer(_state: AuthState, action: AuthAction): AuthState {
   }
 }
 
-const PUBLIC_PATH_PREFIXES = ["/funds", "/login"];
+const PUBLIC_PATH_PREFIXES = ["/funds", "/login", "/stocks"];
 
 export function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATH_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));

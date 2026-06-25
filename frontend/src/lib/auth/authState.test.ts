@@ -34,6 +34,12 @@ describe("gateDecision", () => {
     expect(gateDecision("anon", "/funds")).toBeNull();
     expect(gateDecision("anon", "/funds/fund-1")).toBeNull();
   });
+  it("does not redirect anon users away from public stock routes", () => {
+    expect(isPublicPath("/stocks")).toBe(true);
+    expect(isPublicPath("/stocks/AMD")).toBe(true);
+    expect(gateDecision("anon", "/stocks")).toBeNull();
+    expect(gateDecision("anon", "/stocks/AMD")).toBeNull();
+  });
   it("does not redirect authed users", () => {
     expect(gateDecision("authed", "/portfolio")).toBeNull();
   });
