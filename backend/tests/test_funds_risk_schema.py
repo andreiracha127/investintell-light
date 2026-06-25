@@ -6,6 +6,7 @@ exactly as the profile route does (FundRiskOut.model_validate(profile.risk))."""
 
 import datetime as dt
 
+from app.models.fund import FundRiskLatest
 from app.schemas.funds import FundRiskOut
 
 
@@ -24,6 +25,18 @@ class _RiskAttrs:
 def test_fund_risk_out_declares_orphaned_worker_fields() -> None:
     fields = set(FundRiskOut.model_fields)
     assert {"volatility_garch", "vol_model", "cvar_999_evt", "evt_xi_shape"} <= fields
+
+
+def test_fund_risk_out_tracks_full_latest_risk_snapshot() -> None:
+    """Every scalar projected by fund_risk_latest_mv should be serializable.
+
+    instrument_id is the route path key and organization_id is always NULL for
+    the global latest snapshot; the API risk object exposes the remaining
+    worker-owned scalar columns.
+    """
+    table_cols = {c.name for c in FundRiskLatest.__table__.columns}
+    response_cols = set(FundRiskOut.model_fields)
+    assert table_cols - {"instrument_id", "organization_id"} <= response_cols
 
 
 def test_fund_risk_out_round_trips_orphaned_fields() -> None:

@@ -33,7 +33,7 @@ from sqlalchemy import (
     String,
     Uuid,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -182,15 +182,28 @@ class FundRiskLatest(Base):
     instrument_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
 
     calc_date: Mapped[date] = mapped_column(Date, nullable=False)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
 
     # Precomputed metrics copied verbatim from the latest fund_risk_metrics
     # row (all nullable — the mother DB has per-metric gaps).
+    cvar_95_1m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    cvar_95_3m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    cvar_95_6m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    cvar_95_12m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    var_95_1m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    var_95_3m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    var_95_6m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    var_95_12m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     return_1m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     return_3m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    return_6m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     return_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     return_3y_ann: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     return_5y_ann: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    return_10y_ann: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     volatility_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    volatility_garch: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    vol_model: Mapped[str | None] = mapped_column(String, nullable=True)
     max_drawdown_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     max_drawdown_3y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     sharpe_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
@@ -201,14 +214,20 @@ class FundRiskLatest(Base):
     beta_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     information_ratio_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     tracking_error_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    var_95_1m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    cvar_95_1m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    cvar_95_12m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    upside_capture_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    downside_capture_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    sharpe_cf: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    sharpe_cf_skew: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    sharpe_cf_kurt: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    sharpe_cf_ci_lower: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    sharpe_cf_ci_upper: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     cvar_99_evt: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     cvar_999_evt: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     evt_xi_shape: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    volatility_garch: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    vol_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    fed_funds_rate_at_calc: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    data_quality_flags: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB, nullable=True
+    )
     peer_strategy_label: Mapped[str | None] = mapped_column(String, nullable=True)
     peer_sharpe_pctl: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     peer_sortino_pctl: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
@@ -217,21 +236,15 @@ class FundRiskLatest(Base):
     peer_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     manager_score: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     elite_flag: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    downside_capture_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    upside_capture_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     equity_correlation_252d: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+
     # Class-specific regression metrics (Tier 1, rank 4) — read off the risk MV
     # (db/ddl/2026-06-13_dynamic_catalog.sql), computed by the risk_metrics
     # worker per asset_class. NULL for funds outside the matching class.
     empirical_duration: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     credit_beta: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    inflation_beta: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     crisis_alpha_score: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
-    # NAV data-quality eligibility (Bug 2): computed by the risk_metrics worker.
-    # nav_quality_ok=False excludes the fund from the optimizer universe; NULL is
-    # fail-open (kept) until the worker populates the column.
-    nav_quality_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    nav_glitch_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    inflation_beta: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
 
     # Active-share / overlap vs the fund's PRIMARY benchmark proxy (db-first A5).
     # Seeded onto fund_risk_metrics by the active-share worker and projected onto
@@ -262,6 +275,67 @@ class FundRiskLatest(Base):
     active_share_fund_report_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     active_share_benchmark_report_date: Mapped[date | None] = mapped_column(
         Date, nullable=True
+    )
+
+    # Scoring, momentum, MMF, peer-band and data-quality enrichments. These are
+    # generated by the risk_metrics worker and carried in the latest read-model
+    # so UI routes can avoid recomputing scalar snapshots at request time.
+    score_components: Mapped[dict[str, object] | None] = mapped_column(
+        JSONB, nullable=True
+    )
+    dtw_drift_score: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    rsi_14: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    bb_position: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    nav_momentum_score: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    flow_momentum_score: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    blended_momentum_score: Mapped[Decimal | None] = mapped_column(
+        Numeric, nullable=True
+    )
+    cvar_95_conditional: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    elite_rank_within_strategy: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    elite_target_count_per_strategy: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    empirical_duration_r2: Mapped[Decimal | None] = mapped_column(
+        Numeric, nullable=True
+    )
+    credit_beta_r2: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    yield_proxy_12m: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    duration_adj_drawdown_1y: Mapped[Decimal | None] = mapped_column(
+        Numeric, nullable=True
+    )
+    scoring_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    seven_day_net_yield: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    nav_per_share_mmf: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    pct_weekly_liquid: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    weighted_avg_maturity_days: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    inflation_beta_r2: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    peer_overall_quartile: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    peer_band_low: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    peer_band_mid: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    peer_band_high: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    # NAV data-quality eligibility (Bug 2): computed by the risk_metrics worker.
+    # nav_quality_ok=False excludes the fund from the optimizer universe; NULL is
+    # fail-open (kept) until the worker populates the column.
+    nav_quality_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    nav_glitch_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    flow_momentum_as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
+    flow_momentum_observation_count: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    nport_flow_momentum_score: Mapped[Decimal | None] = mapped_column(
+        Numeric, nullable=True
+    )
+    nport_flow_as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
+    nport_flow_staleness_days: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    nport_flow_observation_count: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
     )
 
 
@@ -312,6 +386,9 @@ class FundListRow(Base):
     peer_drawdown_pctl: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     peer_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     manager_score: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    blended_momentum_score: Mapped[Decimal | None] = mapped_column(
+        Numeric, nullable=True
+    )
     elite_flag: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     downside_capture_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     upside_capture_1y: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)

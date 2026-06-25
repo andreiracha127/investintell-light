@@ -2854,6 +2854,8 @@ export interface components {
             peer_sharpe_pctl: number | null;
             /** Manager Score */
             manager_score: number | null;
+            /** Blended Momentum Score */
+            blended_momentum_score?: number | null;
             /** Elite Flag */
             elite_flag: boolean | null;
             /** Manager Name */
@@ -3105,18 +3107,42 @@ export interface components {
              * Format: date
              */
             calc_date: string;
+            /** Cvar 95 1M */
+            cvar_95_1m: number | null;
+            /** Cvar 95 3M */
+            cvar_95_3m?: number | null;
+            /** Cvar 95 6M */
+            cvar_95_6m?: number | null;
+            /** Cvar 95 12M */
+            cvar_95_12m: number | null;
+            /** Var 95 1M */
+            var_95_1m: number | null;
+            /** Var 95 3M */
+            var_95_3m?: number | null;
+            /** Var 95 6M */
+            var_95_6m?: number | null;
+            /** Var 95 12M */
+            var_95_12m?: number | null;
             /** Return 1M */
             return_1m: number | null;
             /** Return 3M */
             return_3m: number | null;
+            /** Return 6M */
+            return_6m?: number | null;
             /** Return 1Y */
             return_1y: number | null;
             /** Return 3Y Ann */
             return_3y_ann: number | null;
             /** Return 5Y Ann */
             return_5y_ann: number | null;
+            /** Return 10Y Ann */
+            return_10y_ann?: number | null;
             /** Volatility 1Y */
             volatility_1y: number | null;
+            /** Volatility Garch */
+            volatility_garch: number | null;
+            /** Vol Model */
+            vol_model: string | null;
             /** Max Drawdown 1Y */
             max_drawdown_1y: number | null;
             /** Max Drawdown 3Y */
@@ -3137,22 +3163,32 @@ export interface components {
             information_ratio_1y: number | null;
             /** Tracking Error 1Y */
             tracking_error_1y: number | null;
-            /** Var 95 1M */
-            var_95_1m: number | null;
-            /** Cvar 95 1M */
-            cvar_95_1m: number | null;
-            /** Cvar 95 12M */
-            cvar_95_12m: number | null;
+            /** Upside Capture 1Y */
+            upside_capture_1y: number | null;
+            /** Downside Capture 1Y */
+            downside_capture_1y: number | null;
+            /** Sharpe Cf */
+            sharpe_cf?: number | null;
+            /** Sharpe Cf Skew */
+            sharpe_cf_skew?: number | null;
+            /** Sharpe Cf Kurt */
+            sharpe_cf_kurt?: number | null;
+            /** Sharpe Cf Ci Lower */
+            sharpe_cf_ci_lower?: number | null;
+            /** Sharpe Cf Ci Upper */
+            sharpe_cf_ci_upper?: number | null;
             /** Cvar 99 Evt */
             cvar_99_evt: number | null;
             /** Cvar 999 Evt */
             cvar_999_evt: number | null;
             /** Evt Xi Shape */
             evt_xi_shape: number | null;
-            /** Volatility Garch */
-            volatility_garch: number | null;
-            /** Vol Model */
-            vol_model: string | null;
+            /** Fed Funds Rate At Calc */
+            fed_funds_rate_at_calc?: number | null;
+            /** Data Quality Flags */
+            data_quality_flags?: {
+                [key: string]: unknown;
+            } | null;
             /** Peer Strategy Label */
             peer_strategy_label: string | null;
             /** Peer Sharpe Pctl */
@@ -3169,18 +3205,116 @@ export interface components {
             manager_score: number | null;
             /** Elite Flag */
             elite_flag: boolean | null;
-            /** Downside Capture 1Y */
-            downside_capture_1y: number | null;
-            /** Upside Capture 1Y */
-            upside_capture_1y: number | null;
             /** Equity Correlation 252D */
             equity_correlation_252d: number | null;
+            /** Active Share Normalized */
+            active_share_normalized?: number | null;
+            /** Overlap Normalized */
+            overlap_normalized?: number | null;
+            /** Overlap Nav Raw */
+            overlap_nav_raw?: number | null;
+            /** Fund Cusip Coverage Nav */
+            fund_cusip_coverage_nav?: number | null;
+            /** Benchmark Cusip Coverage Nav */
+            benchmark_cusip_coverage_nav?: number | null;
+            /** N Fund Holdings */
+            n_fund_holdings?: number | null;
+            /** N Benchmark Holdings */
+            n_benchmark_holdings?: number | null;
+            /** N Common Holdings */
+            n_common_holdings?: number | null;
+            /** N Fund Only */
+            n_fund_only?: number | null;
+            /** N Benchmark Only */
+            n_benchmark_only?: number | null;
+            /** Holdings Jaccard */
+            holdings_jaccard?: number | null;
+            /** Fund Report Age Days */
+            fund_report_age_days?: number | null;
+            /** Benchmark Report Age Days */
+            benchmark_report_age_days?: number | null;
+            /** Report Date Gap Days */
+            report_date_gap_days?: number | null;
+            /** Active Share Benchmark Instrument Id */
+            active_share_benchmark_instrument_id?: string | null;
+            /** Active Share Benchmark Series Id */
+            active_share_benchmark_series_id?: string | null;
+            /** Active Share Fund Report Date */
+            active_share_fund_report_date?: string | null;
+            /** Active Share Benchmark Report Date */
+            active_share_benchmark_report_date?: string | null;
+            /** Score Components */
+            score_components?: {
+                [key: string]: unknown;
+            } | null;
+            /** Dtw Drift Score */
+            dtw_drift_score?: number | null;
+            /** Rsi 14 */
+            rsi_14?: number | null;
+            /** Bb Position */
+            bb_position?: number | null;
+            /** Nav Momentum Score */
+            nav_momentum_score?: number | null;
+            /** Flow Momentum Score */
+            flow_momentum_score?: number | null;
+            /** Blended Momentum Score */
+            blended_momentum_score?: number | null;
+            /** Cvar 95 Conditional */
+            cvar_95_conditional?: number | null;
+            /** Elite Rank Within Strategy */
+            elite_rank_within_strategy?: number | null;
+            /** Elite Target Count Per Strategy */
+            elite_target_count_per_strategy?: number | null;
+            /** Yield Proxy 12M */
+            yield_proxy_12m?: number | null;
+            /** Duration Adj Drawdown 1Y */
+            duration_adj_drawdown_1y?: number | null;
+            /** Scoring Model */
+            scoring_model?: string | null;
+            /** Seven Day Net Yield */
+            seven_day_net_yield?: number | null;
+            /** Nav Per Share Mmf */
+            nav_per_share_mmf?: number | null;
+            /** Pct Weekly Liquid */
+            pct_weekly_liquid?: number | null;
+            /** Weighted Avg Maturity Days */
+            weighted_avg_maturity_days?: number | null;
+            /** Peer Overall Quartile */
+            peer_overall_quartile?: number | null;
+            /** Peer Band Low */
+            peer_band_low?: number | null;
+            /** Peer Band Mid */
+            peer_band_mid?: number | null;
+            /** Peer Band High */
+            peer_band_high?: number | null;
+            /** Nav Quality Ok */
+            nav_quality_ok?: boolean | null;
+            /** Nav Glitch Count */
+            nav_glitch_count?: number | null;
+            /** Flow Momentum As Of */
+            flow_momentum_as_of?: string | null;
+            /** Flow Momentum Observation Count */
+            flow_momentum_observation_count?: number | null;
+            /** Nport Flow Momentum Score */
+            nport_flow_momentum_score?: number | null;
+            /** Nport Flow As Of */
+            nport_flow_as_of?: string | null;
+            /** Nport Flow Staleness Days */
+            nport_flow_staleness_days?: number | null;
+            /** Nport Flow Observation Count */
+            nport_flow_observation_count?: number | null;
             /** Empirical Duration */
             empirical_duration?: number | null;
+            /** Empirical Duration R2 */
+            empirical_duration_r2?: number | null;
             /** Credit Beta */
             credit_beta?: number | null;
+            /** Credit Beta R2 */
+            credit_beta_r2?: number | null;
             /** Inflation Beta */
             inflation_beta?: number | null;
+            /** Inflation Beta R2 */
+            inflation_beta_r2?: number | null;
             /** Crisis Alpha Score */
             crisis_alpha_score?: number | null;
         };

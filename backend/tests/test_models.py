@@ -6,6 +6,7 @@ No live database required — we inspect the SQLAlchemy metadata objects directl
 
 from sqlalchemy import ARRAY, BigInteger, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
+from sqlalchemy.dialects.postgresql import JSONB
 
 # Importing Base triggers __init__.py which registers all ORM models.
 from app.models import Base, Portfolio, Position
@@ -551,6 +552,38 @@ def test_fund_risk_latest_surfaces_orphaned_worker_columns() -> None:
     assert "vol_model" in table.c
     assert isinstance(table.c["vol_model"].type, String)
     assert table.c["vol_model"].nullable is True
+
+
+def test_fund_risk_latest_matches_full_worker_snapshot_shape() -> None:
+    table = _table("fund_risk_latest_mv")
+    assert len(table.c) == 106
+    for col in (
+        "organization_id",
+        "cvar_95_3m",
+        "var_95_12m",
+        "return_10y_ann",
+        "sharpe_cf_ci_upper",
+        "cvar_95_conditional",
+        "elite_rank_within_strategy",
+        "duration_adj_drawdown_1y",
+        "seven_day_net_yield",
+        "nav_per_share_mmf",
+        "pct_weekly_liquid",
+        "weighted_avg_maturity_days",
+        "peer_band_high",
+        "flow_momentum_as_of",
+        "nport_flow_observation_count",
+    ):
+        assert col in table.c, col
+        assert table.c[col].nullable is True, col
+    assert isinstance(table.c["data_quality_flags"].type, JSONB)
+    assert isinstance(table.c["score_components"].type, JSONB)
+
+
+def test_funds_list_mv_carries_blended_momentum_only() -> None:
+    table = _table("funds_list_mv")
+    assert "blended_momentum_score" in table.c
+    assert "score_components" not in table.c
 
 
 def test_fund_nav_composite_pk_and_no_fk() -> None:

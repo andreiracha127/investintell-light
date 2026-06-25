@@ -7378,6 +7378,17 @@
             ],
             "title": "Manager Score"
           },
+          "blended_momentum_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blended Momentum Score"
+          },
           "elite_flag": {
             "anyOf": [
               {
@@ -8202,6 +8213,94 @@
             "format": "date",
             "title": "Calc Date"
           },
+          "cvar_95_1m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cvar 95 1M"
+          },
+          "cvar_95_3m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cvar 95 3M"
+          },
+          "cvar_95_6m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cvar 95 6M"
+          },
+          "cvar_95_12m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cvar 95 12M"
+          },
+          "var_95_1m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Var 95 1M"
+          },
+          "var_95_3m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Var 95 3M"
+          },
+          "var_95_6m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Var 95 6M"
+          },
+          "var_95_12m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Var 95 12M"
+          },
           "return_1m": {
             "anyOf": [
               {
@@ -8223,6 +8322,17 @@
               }
             ],
             "title": "Return 3M"
+          },
+          "return_6m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return 6M"
           },
           "return_1y": {
             "anyOf": [
@@ -8257,6 +8367,17 @@
             ],
             "title": "Return 5Y Ann"
           },
+          "return_10y_ann": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return 10Y Ann"
+          },
           "volatility_1y": {
             "anyOf": [
               {
@@ -8267,6 +8388,28 @@
               }
             ],
             "title": "Volatility 1Y"
+          },
+          "volatility_garch": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volatility Garch"
+          },
+          "vol_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vol Model"
           },
           "max_drawdown_1y": {
             "anyOf": [
@@ -8378,7 +8521,7 @@
             ],
             "title": "Tracking Error 1Y"
           },
-          "var_95_1m": {
+          "upside_capture_1y": {
             "anyOf": [
               {
                 "type": "number"
@@ -8387,9 +8530,9 @@
                 "type": "null"
               }
             ],
-            "title": "Var 95 1M"
+            "title": "Upside Capture 1Y"
           },
-          "cvar_95_1m": {
+          "downside_capture_1y": {
             "anyOf": [
               {
                 "type": "number"
@@ -8398,9 +8541,9 @@
                 "type": "null"
               }
             ],
-            "title": "Cvar 95 1M"
+            "title": "Downside Capture 1Y"
           },
-          "cvar_95_12m": {
+          "sharpe_cf": {
             "anyOf": [
               {
                 "type": "number"
@@ -8409,7 +8552,51 @@
                 "type": "null"
               }
             ],
-            "title": "Cvar 95 12M"
+            "title": "Sharpe Cf"
+          },
+          "sharpe_cf_skew": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe Cf Skew"
+          },
+          "sharpe_cf_kurt": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe Cf Kurt"
+          },
+          "sharpe_cf_ci_lower": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe Cf Ci Lower"
+          },
+          "sharpe_cf_ci_upper": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe Cf Ci Upper"
           },
           "cvar_99_evt": {
             "anyOf": [
@@ -8444,7 +8631,7 @@
             ],
             "title": "Evt Xi Shape"
           },
-          "volatility_garch": {
+          "fed_funds_rate_at_calc": {
             "anyOf": [
               {
                 "type": "number"
@@ -8453,18 +8640,19 @@
                 "type": "null"
               }
             ],
-            "title": "Volatility Garch"
+            "title": "Fed Funds Rate At Calc"
           },
-          "vol_model": {
+          "data_quality_flags": {
             "anyOf": [
               {
-                "type": "string"
+                "additionalProperties": true,
+                "type": "object"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Vol Model"
+            "title": "Data Quality Flags"
           },
           "peer_strategy_label": {
             "anyOf": [
@@ -8554,28 +8742,6 @@
             ],
             "title": "Elite Flag"
           },
-          "downside_capture_1y": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Downside Capture 1Y"
-          },
-          "upside_capture_1y": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Upside Capture 1Y"
-          },
           "equity_correlation_252d": {
             "anyOf": [
               {
@@ -8586,6 +8752,529 @@
               }
             ],
             "title": "Equity Correlation 252D"
+          },
+          "active_share_normalized": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Share Normalized"
+          },
+          "overlap_normalized": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Normalized"
+          },
+          "overlap_nav_raw": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Nav Raw"
+          },
+          "fund_cusip_coverage_nav": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fund Cusip Coverage Nav"
+          },
+          "benchmark_cusip_coverage_nav": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Cusip Coverage Nav"
+          },
+          "n_fund_holdings": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Fund Holdings"
+          },
+          "n_benchmark_holdings": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Benchmark Holdings"
+          },
+          "n_common_holdings": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Common Holdings"
+          },
+          "n_fund_only": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Fund Only"
+          },
+          "n_benchmark_only": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Benchmark Only"
+          },
+          "holdings_jaccard": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdings Jaccard"
+          },
+          "fund_report_age_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fund Report Age Days"
+          },
+          "benchmark_report_age_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Report Age Days"
+          },
+          "report_date_gap_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Date Gap Days"
+          },
+          "active_share_benchmark_instrument_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Share Benchmark Instrument Id"
+          },
+          "active_share_benchmark_series_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Share Benchmark Series Id"
+          },
+          "active_share_fund_report_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Share Fund Report Date"
+          },
+          "active_share_benchmark_report_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Share Benchmark Report Date"
+          },
+          "score_components": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Components"
+          },
+          "dtw_drift_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dtw Drift Score"
+          },
+          "rsi_14": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rsi 14"
+          },
+          "bb_position": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bb Position"
+          },
+          "nav_momentum_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nav Momentum Score"
+          },
+          "flow_momentum_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flow Momentum Score"
+          },
+          "blended_momentum_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blended Momentum Score"
+          },
+          "cvar_95_conditional": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cvar 95 Conditional"
+          },
+          "elite_rank_within_strategy": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elite Rank Within Strategy"
+          },
+          "elite_target_count_per_strategy": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elite Target Count Per Strategy"
+          },
+          "yield_proxy_12m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yield Proxy 12M"
+          },
+          "duration_adj_drawdown_1y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Adj Drawdown 1Y"
+          },
+          "scoring_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scoring Model"
+          },
+          "seven_day_net_yield": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seven Day Net Yield"
+          },
+          "nav_per_share_mmf": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nav Per Share Mmf"
+          },
+          "pct_weekly_liquid": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pct Weekly Liquid"
+          },
+          "weighted_avg_maturity_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weighted Avg Maturity Days"
+          },
+          "peer_overall_quartile": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peer Overall Quartile"
+          },
+          "peer_band_low": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peer Band Low"
+          },
+          "peer_band_mid": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peer Band Mid"
+          },
+          "peer_band_high": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peer Band High"
+          },
+          "nav_quality_ok": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nav Quality Ok"
+          },
+          "nav_glitch_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nav Glitch Count"
+          },
+          "flow_momentum_as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flow Momentum As Of"
+          },
+          "flow_momentum_observation_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flow Momentum Observation Count"
+          },
+          "nport_flow_momentum_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nport Flow Momentum Score"
+          },
+          "nport_flow_as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nport Flow As Of"
+          },
+          "nport_flow_staleness_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nport Flow Staleness Days"
+          },
+          "nport_flow_observation_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nport Flow Observation Count"
           },
           "empirical_duration": {
             "anyOf": [
@@ -8598,6 +9287,17 @@
             ],
             "title": "Empirical Duration"
           },
+          "empirical_duration_r2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Empirical Duration R2"
+          },
           "credit_beta": {
             "anyOf": [
               {
@@ -8609,6 +9309,17 @@
             ],
             "title": "Credit Beta"
           },
+          "credit_beta_r2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credit Beta R2"
+          },
           "inflation_beta": {
             "anyOf": [
               {
@@ -8619,6 +9330,17 @@
               }
             ],
             "title": "Inflation Beta"
+          },
+          "inflation_beta_r2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inflation Beta R2"
           },
           "crisis_alpha_score": {
             "anyOf": [
@@ -8635,12 +9357,17 @@
         "type": "object",
         "required": [
           "calc_date",
+          "cvar_95_1m",
+          "cvar_95_12m",
+          "var_95_1m",
           "return_1m",
           "return_3m",
           "return_1y",
           "return_3y_ann",
           "return_5y_ann",
           "volatility_1y",
+          "volatility_garch",
+          "vol_model",
           "max_drawdown_1y",
           "max_drawdown_3y",
           "sharpe_1y",
@@ -8651,14 +9378,11 @@
           "beta_1y",
           "information_ratio_1y",
           "tracking_error_1y",
-          "var_95_1m",
-          "cvar_95_1m",
-          "cvar_95_12m",
+          "upside_capture_1y",
+          "downside_capture_1y",
           "cvar_99_evt",
           "cvar_999_evt",
           "evt_xi_shape",
-          "volatility_garch",
-          "vol_model",
           "peer_strategy_label",
           "peer_sharpe_pctl",
           "peer_sortino_pctl",
@@ -8667,8 +9391,6 @@
           "peer_count",
           "manager_score",
           "elite_flag",
-          "downside_capture_1y",
-          "upside_capture_1y",
           "equity_correlation_252d"
         ],
         "title": "FundRiskOut",

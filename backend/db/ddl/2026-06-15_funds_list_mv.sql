@@ -53,6 +53,7 @@ SELECT
     r.peer_drawdown_pctl,
     r.peer_count,
     r.manager_score,
+    r.blended_momentum_score,
     r.elite_flag,
     r.downside_capture_1y,
     r.upside_capture_1y,

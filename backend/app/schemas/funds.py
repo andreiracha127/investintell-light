@@ -87,6 +87,7 @@ class FundListItem(BaseModel):
     max_drawdown_1y: float | None
     peer_sharpe_pctl: float | None
     manager_score: float | None
+    blended_momentum_score: float | None = None
     elite_flag: bool | None
     # Investment adviser, resolved per page from the N-CEN crosswalk
     # (series_id -> sec_fund_adviser -> sec_managers firm name via CRD); not
@@ -115,12 +116,24 @@ class FundRiskOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     calc_date: dt.date
+    cvar_95_1m: float | None
+    cvar_95_3m: float | None = None
+    cvar_95_6m: float | None = None
+    cvar_95_12m: float | None
+    var_95_1m: float | None
+    var_95_3m: float | None = None
+    var_95_6m: float | None = None
+    var_95_12m: float | None = None
     return_1m: float | None
     return_3m: float | None
+    return_6m: float | None = None
     return_1y: float | None
     return_3y_ann: float | None
     return_5y_ann: float | None
+    return_10y_ann: float | None = None
     volatility_1y: float | None
+    volatility_garch: float | None
+    vol_model: str | None
     max_drawdown_1y: float | None
     max_drawdown_3y: float | None
     sharpe_1y: float | None
@@ -131,14 +144,18 @@ class FundRiskOut(BaseModel):
     beta_1y: float | None
     information_ratio_1y: float | None
     tracking_error_1y: float | None
-    var_95_1m: float | None
-    cvar_95_1m: float | None
-    cvar_95_12m: float | None
+    upside_capture_1y: float | None
+    downside_capture_1y: float | None
+    sharpe_cf: float | None = None
+    sharpe_cf_skew: float | None = None
+    sharpe_cf_kurt: float | None = None
+    sharpe_cf_ci_lower: float | None = None
+    sharpe_cf_ci_upper: float | None = None
     cvar_99_evt: float | None
     cvar_999_evt: float | None
     evt_xi_shape: float | None
-    volatility_garch: float | None
-    vol_model: str | None
+    fed_funds_rate_at_calc: float | None = None
+    data_quality_flags: dict[str, object] | None = None
     peer_strategy_label: str | None
     peer_sharpe_pctl: float | None
     peer_sortino_pctl: float | None
@@ -147,13 +164,61 @@ class FundRiskOut(BaseModel):
     peer_count: int | None
     manager_score: float | None
     elite_flag: bool | None
-    downside_capture_1y: float | None
-    upside_capture_1y: float | None
     equity_correlation_252d: float | None
+    active_share_normalized: float | None = None
+    overlap_normalized: float | None = None
+    overlap_nav_raw: float | None = None
+    fund_cusip_coverage_nav: float | None = None
+    benchmark_cusip_coverage_nav: float | None = None
+    n_fund_holdings: int | None = None
+    n_benchmark_holdings: int | None = None
+    n_common_holdings: int | None = None
+    n_fund_only: int | None = None
+    n_benchmark_only: int | None = None
+    holdings_jaccard: float | None = None
+    fund_report_age_days: int | None = None
+    benchmark_report_age_days: int | None = None
+    report_date_gap_days: int | None = None
+    active_share_benchmark_instrument_id: uuid.UUID | None = None
+    active_share_benchmark_series_id: str | None = None
+    active_share_fund_report_date: dt.date | None = None
+    active_share_benchmark_report_date: dt.date | None = None
+    score_components: dict[str, object] | None = None
+    dtw_drift_score: float | None = None
+    rsi_14: float | None = None
+    bb_position: float | None = None
+    nav_momentum_score: float | None = None
+    flow_momentum_score: float | None = None
+    blended_momentum_score: float | None = None
+    cvar_95_conditional: float | None = None
+    elite_rank_within_strategy: int | None = None
+    elite_target_count_per_strategy: int | None = None
+    yield_proxy_12m: float | None = None
+    duration_adj_drawdown_1y: float | None = None
+    scoring_model: str | None = None
+    seven_day_net_yield: float | None = None
+    nav_per_share_mmf: float | None = None
+    pct_weekly_liquid: float | None = None
+    weighted_avg_maturity_days: int | None = None
+    peer_overall_quartile: int | None = None
+    peer_band_low: float | None = None
+    peer_band_mid: float | None = None
+    peer_band_high: float | None = None
+    nav_quality_ok: bool | None = None
+    nav_glitch_count: int | None = None
+    flow_momentum_as_of: dt.date | None = None
+    flow_momentum_observation_count: int | None = None
+    nport_flow_momentum_score: float | None = None
+    nport_flow_as_of: dt.date | None = None
+    nport_flow_staleness_days: int | None = None
+    nport_flow_observation_count: int | None = None
     # Class-specific regression metrics (dimensionless betas / decimal fractions).
     empirical_duration: float | None = None
+    empirical_duration_r2: float | None = None
     credit_beta: float | None = None
+    credit_beta_r2: float | None = None
     inflation_beta: float | None = None
+    inflation_beta_r2: float | None = None
     crisis_alpha_score: float | None = None
 
 

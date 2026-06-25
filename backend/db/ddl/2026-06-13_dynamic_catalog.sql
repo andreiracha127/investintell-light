@@ -115,19 +115,28 @@ SELECT add_continuous_aggregate_policy('cagg_nav_weekly',
 DROP MATERIALIZED VIEW IF EXISTS fund_risk_latest_mv;
 CREATE MATERIALIZED VIEW fund_risk_latest_mv AS
 SELECT DISTINCT ON (instrument_id)
-       instrument_id, calc_date,
-       return_1m, return_3m, return_1y, return_3y_ann, return_5y_ann,
+       instrument_id, calc_date, organization_id,
+       cvar_95_1m, cvar_95_3m, cvar_95_6m, cvar_95_12m,
+       var_95_1m, var_95_3m, var_95_6m, var_95_12m,
+       return_1m, return_3m, return_6m, return_1y,
+       return_3y_ann, return_5y_ann, return_10y_ann,
        volatility_1y, volatility_garch, vol_model,
        max_drawdown_1y, max_drawdown_3y,
        sharpe_1y, sharpe_3y, sortino_1y, calmar_ratio_3y,
        alpha_1y, beta_1y, information_ratio_1y, tracking_error_1y,
-       var_95_1m, cvar_95_1m, cvar_95_12m,
+       upside_capture_1y, downside_capture_1y,
+       sharpe_cf, sharpe_cf_skew, sharpe_cf_kurt,
+       sharpe_cf_ci_lower, sharpe_cf_ci_upper,
        cvar_99_evt, cvar_999_evt, evt_xi_shape,
+       fed_funds_rate_at_calc, data_quality_flags,
        peer_sharpe_pctl, peer_sortino_pctl, peer_return_pctl, peer_drawdown_pctl,
-       manager_score, downside_capture_1y, upside_capture_1y,
+       peer_overall_quartile, peer_band_low, peer_band_mid, peer_band_high,
+       manager_score,
        equity_correlation_252d, peer_strategy_label, peer_count, elite_flag,
-       empirical_duration, credit_beta, inflation_beta, crisis_alpha_score,
-       nav_quality_ok, nav_glitch_count,
+       empirical_duration, empirical_duration_r2,
+       credit_beta, credit_beta_r2,
+       inflation_beta, inflation_beta_r2,
+       crisis_alpha_score, scoring_model,
        -- Active-share / overlap columns (db-first A5). These live on
        -- fund_risk_metrics (seeded by the active-share worker) and are
        -- projected here so the dossier reads active share off the same latest
@@ -138,7 +147,19 @@ SELECT DISTINCT ON (instrument_id)
        n_fund_only, n_benchmark_only, holdings_jaccard,
        fund_report_age_days, benchmark_report_age_days, report_date_gap_days,
        active_share_benchmark_instrument_id, active_share_benchmark_series_id,
-       active_share_fund_report_date, active_share_benchmark_report_date
+       active_share_fund_report_date, active_share_benchmark_report_date,
+       score_components,
+       dtw_drift_score, rsi_14, bb_position,
+       nav_momentum_score, flow_momentum_score, blended_momentum_score,
+       cvar_95_conditional,
+       elite_rank_within_strategy, elite_target_count_per_strategy,
+       yield_proxy_12m, duration_adj_drawdown_1y,
+       seven_day_net_yield, nav_per_share_mmf,
+       pct_weekly_liquid, weighted_avg_maturity_days,
+       nav_quality_ok, nav_glitch_count,
+       flow_momentum_as_of, flow_momentum_observation_count,
+       nport_flow_momentum_score, nport_flow_as_of,
+       nport_flow_staleness_days, nport_flow_observation_count
 FROM fund_risk_metrics
 WHERE organization_id IS NULL
 ORDER BY instrument_id, calc_date DESC;

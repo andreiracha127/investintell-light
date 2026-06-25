@@ -6,6 +6,18 @@ DDL_PATH = (
     / "ddl"
     / "2026-06-13_dynamic_catalog.sql"
 )
+FULL_RISK_LATEST_DDL_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "db"
+    / "ddl"
+    / "2026-06-25_fund_risk_latest_full_mv.sql"
+)
+FUNDS_LIST_DDL_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "db"
+    / "ddl"
+    / "2026-06-15_funds_list_mv.sql"
+)
 BENCHMARK_DDL_PATH = (
     Path(__file__).resolve().parents[1]
     / "db"
@@ -105,6 +117,65 @@ def test_fund_risk_latest_mv_projects_active_share_columns() -> None:
         "active_share_benchmark_report_date",
     ):
         assert column in body, column
+
+
+def test_fund_risk_latest_mv_projects_full_worker_snapshot_columns() -> None:
+    sql = DDL_PATH.read_text(encoding="utf-8")
+    create_start = sql.index("CREATE MATERIALIZED VIEW fund_risk_latest_mv AS")
+    create_end = sql.index(
+        "CREATE UNIQUE INDEX IF NOT EXISTS fund_risk_latest_mv_pk", create_start
+    )
+    body = sql[create_start:create_end]
+
+    for column in (
+        "organization_id",
+        "cvar_95_3m",
+        "cvar_95_6m",
+        "var_95_12m",
+        "return_6m",
+        "return_10y_ann",
+        "sharpe_cf",
+        "fed_funds_rate_at_calc",
+        "data_quality_flags",
+        "score_components",
+        "cvar_95_conditional",
+        "elite_rank_within_strategy",
+        "yield_proxy_12m",
+        "duration_adj_drawdown_1y",
+        "seven_day_net_yield",
+        "nav_per_share_mmf",
+        "pct_weekly_liquid",
+        "weighted_avg_maturity_days",
+        "peer_band_high",
+        "nport_flow_momentum_score",
+    ):
+        assert column in body, column
+
+
+def test_full_risk_latest_migration_uses_blue_green_swap() -> None:
+    sql = FULL_RISK_LATEST_DDL_PATH.read_text(encoding="utf-8")
+
+    assert "CREATE MATERIALIZED VIEW fund_risk_latest_mv_new AS" in sql
+    assert "CREATE MATERIALIZED VIEW funds_list_mv_new AS" in sql
+    assert "CREATE MATERIALIZED VIEW fund_class_resolution_mv_new AS" in sql
+    assert "DROP MATERIALIZED VIEW IF EXISTS fund_class_resolution_mv;" in sql
+    assert "DROP MATERIALIZED VIEW IF EXISTS funds_list_mv;" in sql
+    assert "DROP MATERIALIZED VIEW IF EXISTS fund_risk_latest_mv;" in sql
+    assert "ALTER MATERIALIZED VIEW fund_risk_latest_mv_new RENAME TO fund_risk_latest_mv;" in sql
+    assert "ALTER MATERIALIZED VIEW funds_list_mv_new RENAME TO funds_list_mv;" in sql
+    assert (
+        "ALTER MATERIALIZED VIEW fund_class_resolution_mv_new "
+        "RENAME TO fund_class_resolution_mv;"
+    ) in sql
+    assert "blended_momentum_score" in sql
+
+
+def test_funds_list_mv_keeps_momentum_score_but_stays_narrow() -> None:
+    sql = FUNDS_LIST_DDL_PATH.read_text(encoding="utf-8")
+
+    assert "r.blended_momentum_score" in sql
+    assert "r.score_components" not in sql
+    assert "r.data_quality_flags" not in sql
 
 
 def test_funds_v_manual_strategy_overrides_win_source_labels() -> None:
