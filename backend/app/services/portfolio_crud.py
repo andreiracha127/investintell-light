@@ -372,6 +372,7 @@ async def select_last_two_closes(
     tickers: Sequence[str],
     *,
     use_mv: bool | None = None,
+    fallback_missing: bool = True,
 ) -> dict[str, list[tuple[dt.date, float]]]:
     """Two most recent (date, close) per ticker, newest first.
 
@@ -412,6 +413,8 @@ async def select_last_two_closes(
         closes[ticker] = series
 
     missing = [t for t in tickers if t not in closes]
+    if missing and not fallback_missing:
+        return closes
     if missing:
         closes.update(await _select_last_two_closes_legacy(session, missing))
     return closes

@@ -30,7 +30,7 @@ from typing import Any
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.fund import Fund, FundListRow
+from app.models.fund import Fund, FundClassResolution, FundListRow
 
 DIMENSIONS = ("issuer", "asset_class", "sector", "currency")
 SYNTHETIC_PREFIXES = ("IS:", "LE:", "H:", "CIK:")
@@ -149,10 +149,29 @@ async def get_fund_series_by_ticker(
     """ticker → series_id for the tickers that are funds in the local universe."""
     if not tickers:
         return {}
+    unique = list(dict.fromkeys(tickers))
     result = await session.execute(
-        select(Fund.ticker, Fund.series_id).where(Fund.ticker.in_(tickers))
+        select(FundClassResolution.class_ticker, FundClassResolution.series_id)
+        .where(FundClassResolution.class_ticker.in_(unique))
+        .order_by(
+            FundClassResolution.class_ticker,
+            FundClassResolution.instrument_id,
+        )
     )
-    return {ticker: series_id for ticker, series_id in result.all()}
+    out: dict[str, str] = {}
+    for ticker, series_id in result.all():
+        out.setdefault(ticker, series_id)
+    remaining = [ticker for ticker in unique if ticker not in out]
+    if remaining:
+        result = await session.execute(
+            select(FundListRow.ticker, FundListRow.series_id)
+            .where(FundListRow.ticker.in_(remaining))
+            .order_by(FundListRow.ticker, FundListRow.instrument_id)
+        )
+        for ticker, series_id in result.all():
+            if ticker is not None:
+                out.setdefault(ticker, series_id)
+    return out
 
 
 async def get_fund_labels_by_series(

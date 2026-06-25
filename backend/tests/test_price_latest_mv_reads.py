@@ -60,6 +60,19 @@ async def test_mv_path_falls_back_to_base_for_missing_ticker():
 
 
 @pytest.mark.asyncio
+async def test_mv_path_can_skip_base_fallback_for_known_fund_tickers():
+    session = _FakeSession(mv_rows=[("AAPL", _LAST, 110.0, _PREV, 105.0)])
+    out = await portfolio_crud.select_last_two_closes(
+        session,
+        ["AAPL", "VBIAX"],
+        use_mv=True,
+        fallback_missing=False,
+    )
+    assert out == {"AAPL": [(_LAST, 110.0), (_PREV, 105.0)]}
+    assert all("eod_prices" not in q for q in session.executed)
+
+
+@pytest.mark.asyncio
 async def test_flag_off_uses_legacy_only():
     session = _FakeSession(legacy_rows=[("AAPL", _LAST, 110.0), ("AAPL", _PREV, 105.0)])
     out = await portfolio_crud.select_last_two_closes(session, ["AAPL"], use_mv=False)

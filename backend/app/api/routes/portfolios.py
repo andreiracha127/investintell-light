@@ -598,6 +598,7 @@ async def get_portfolio_news(
 )
 async def get_portfolio_lookthrough(
     portfolio_id: int,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     datalake: Annotated[AsyncSession, Depends(get_datalake_session)],
     user: Annotated[CurrentUser, Depends(get_current_user)],
@@ -609,7 +610,7 @@ async def get_portfolio_lookthrough(
         default=False,
         description="Include bounded asset-class/issuer/security drilldown nodes.",
     ),
-) -> PortfolioLookthroughResponse:
+) -> PortfolioLookthroughResponse | Response:
     """Exposição consolidada do portfólio atravessando os fundos (Frente C).
 
     DB-first: pesos vêm dos preços/NAVs já sincronizados localmente (sem
@@ -618,15 +619,21 @@ async def get_portfolio_lookthrough(
     data-lake. Posições não atravessadas (ações, fundos sem materialização)
     ficam EXPLÍCITAS em ``unexpanded`` — nunca somem silenciosamente.
     """
-    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, user.sub)
-    if portfolio is None:
-        raise HTTPException(
-            status_code=404, detail=f"Portfolio {portfolio_id} not found."
-        )
     if dimension is not None and dimension not in lookthrough.DIMENSIONS:
         raise HTTPException(
             status_code=422,
             detail=f"Unsupported dimension {dimension!r}.",
+        )
+
+    cache_key = _portfolio_cache_key(request, user.sub, portfolio_id, "lookthrough")
+    cached = await _cached_private_response(cache_key)
+    if cached is not None:
+        return cached
+
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, user.sub)
+    if portfolio is None:
+        raise HTTPException(
+            status_code=404, detail=f"Portfolio {portfolio_id} not found."
         )
 
     positions = list(portfolio.positions)
@@ -634,7 +641,20 @@ async def get_portfolio_lookthrough(
     series_by_ticker = await lookthrough.get_fund_series_by_ticker(
         session, tickers
     )
-    closes = await portfolio_crud.select_last_two_closes(session, tickers)
+    closes = await portfolio_crud.select_last_two_closes(
+        session,
+        tickers,
+        fallback_missing=False,
+    )
+    direct_missing = [
+        ticker
+        for ticker in tickers
+        if ticker not in series_by_ticker and ticker not in closes
+    ]
+    if direct_missing:
+        closes.update(
+            await portfolio_crud.select_last_two_closes(session, direct_missing)
+        )
     nav_tickers = [t for t in series_by_ticker if t not in closes]
     if nav_tickers:
         closes.update(
@@ -792,7 +812,7 @@ async def get_portfolio_lookthrough(
             + cash_weight_pct,
         ),
     )
-    return PortfolioLookthroughResponse(
+    payload = PortfolioLookthroughResponse(
         portfolio_id=portfolio.id,
         total_value=total_value,
         cash_weight_pct=cash_weight_pct,
@@ -814,3 +834,4 @@ async def get_portfolio_lookthrough(
             for node in tree
         ],
     )
+    return await _store_private_response(cache_key, payload.model_dump_json().encode())

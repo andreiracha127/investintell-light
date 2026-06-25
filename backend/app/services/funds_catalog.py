@@ -14,10 +14,12 @@ mother-DB value copied by the sync, served with the global staleness markers.
 """
 
 import datetime as dt
+import json
 import time
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field, fields
+from types import SimpleNamespace
 from typing import Any, cast
 
 from sqlalchemy import ColumnElement, Select, column, func, or_, select, table, text
@@ -560,6 +562,37 @@ class FundProfile:
     classes: list[FundClass] = field(default_factory=list)
 
 
+def _decode_json_value(value: Any) -> Any:
+    """Return JSON/JSONB values as Python objects across DB drivers."""
+    if value is None or isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
+
+
+def _as_namespace(value: Any) -> SimpleNamespace | None:
+    decoded = _decode_json_value(value)
+    if decoded is None:
+        return None
+    return SimpleNamespace(**decoded)
+
+
+def _profile_nav_points(value: Any) -> list[tuple[dt.date, float | None]]:
+    decoded = _decode_json_value(value) or []
+    points: list[tuple[dt.date, float | None]] = []
+    for item in decoded:
+        raw_date = item["date"]
+        nav_date = (
+            dt.date.fromisoformat(raw_date)
+            if isinstance(raw_date, str)
+            else cast(dt.date, raw_date)
+        )
+        raw_nav = item.get("nav")
+        points.append((nav_date, float(raw_nav) if raw_nav is not None else None))
+    return points
+
+
 async def fetch_fund_profile(
     session: AsyncSession, instrument_id: uuid.UUID
 ) -> FundProfile | None:
@@ -569,88 +602,143 @@ async def fetch_fund_profile(
     use the range-aware timeseries route so profile payload size stays bounded.
     Returns None when the instrument is not in the local universe.
     """
-    fund = await session.get(Fund, instrument_id)
+    row = (
+        await session.execute(
+            text(
+                """
+                WITH fund AS MATERIALIZED (
+                    SELECT *
+                    FROM funds_v
+                    WHERE instrument_id = :instrument_id
+                ),
+                risk AS MATERIALIZED (
+                    SELECT *
+                    FROM fund_risk_latest_mv
+                    WHERE instrument_id = :instrument_id
+                ),
+                max_nav AS MATERIALIZED (
+                    SELECT max(nav_date) AS max_nav_date
+                    FROM nav_timeseries
+                    WHERE instrument_id = :instrument_id
+                ),
+                nav_rows AS (
+                    SELECT n.nav_date, n.nav
+                    FROM nav_timeseries n
+                    CROSS JOIN max_nav m
+                    WHERE n.instrument_id = :instrument_id
+                      AND m.max_nav_date IS NOT NULL
+                      AND n.nav_date >= m.max_nav_date - (:nav_window_days * INTERVAL '1 day')
+                    ORDER BY n.nav_date
+                )
+                SELECT
+                    (SELECT to_jsonb(f) FROM fund f) AS fund,
+                    (
+                        SELECT to_jsonb(b)
+                        FROM fund_benchmark_candidates_v b
+                        JOIN fund f ON f.series_id = b.series_id
+                        LIMIT 1
+                    ) AS benchmark,
+                    (SELECT to_jsonb(r) FROM risk r) AS risk,
+                    (SELECT max_nav_date FROM max_nav) AS max_nav_date,
+                    (
+                        SELECT jsonb_agg(
+                            jsonb_build_object('date', nav_date, 'nav', nav)
+                            ORDER BY nav_date
+                        )
+                        FROM nav_rows
+                    ) AS nav
+                """
+            ),
+            {
+                "instrument_id": str(instrument_id),
+                "nav_window_days": NAV_WINDOW_DAYS,
+            },
+        )
+    ).mappings().one()
+
+    fund = _as_namespace(row["fund"])
     if fund is None:
         return None
-    benchmark = await session.get(FundBenchmarkCandidate, fund.series_id)
-    risk = await session.get(FundRiskLatest, instrument_id)
+    benchmark = _as_namespace(row["benchmark"])
+    risk = _as_namespace(row["risk"])
+    nav = decimate_nav(_profile_nav_points(row["nav"]))
 
-    max_nav_date = cast(
-        "dt.date | None",
-        await session.scalar(
-            text("SELECT max(nav_date) FROM nav_timeseries WHERE instrument_id = :iid"),
-            {"iid": str(instrument_id)},
-        ),
-    )
-    nav: list[tuple[dt.date, float | None]] = []
-    if max_nav_date is not None:
-        window_start = max_nav_date - dt.timedelta(days=NAV_WINDOW_DAYS)
-        result = await session.execute(
-            build_nav_series_select(instrument_id, window_start)
-        )
-        raw = [
-            (cast("dt.date", nav_date), float(value) if value is not None else None)
-            for nav_date, value in result.all()
-        ]
-        nav = decimate_nav(raw)
-
-    latest_report = await session.scalar(
-        select(func.max(FundHolding.report_date)).where(
-            FundHolding.series_id == fund.series_id
-        )
-    )
-    holdings: list[FundHolding] = []
-    pct_total: float | None = None
-    if latest_report is not None:
-        # HOLDINGS_CAP is a DISPLAY cap for the profile widget (top holdings
-        # by rank) — the full exposure lives in /funds/{id}/lookthrough.
-        holdings = list(
-            (
-                await session.execute(
-                    select(FundHolding)
-                    .where(
-                        FundHolding.series_id == fund.series_id,
-                        FundHolding.report_date == latest_report,
-                    )
-                    .order_by(FundHolding.rank)
-                    .limit(HOLDINGS_CAP)
+    details = (
+        await session.execute(
+            text(
+                """
+                WITH latest_report AS MATERIALIZED (
+                    SELECT max(report_date) AS report_date
+                    FROM fund_holdings_v
+                    WHERE series_id = :series_id
+                ),
+                holdings_limited AS (
+                    SELECT h.*
+                    FROM fund_holdings_v h
+                    WHERE h.series_id = :series_id
+                      AND h.report_date = (SELECT report_date FROM latest_report)
+                    ORDER BY h.rank
+                    LIMIT :holdings_cap
+                ),
+                class_rows AS (
+                    SELECT c.*
+                    FROM fund_classes_v c
+                    WHERE c.series_id = :series_id
+                    ORDER BY c.expense_ratio ASC NULLS LAST, c.ticker
                 )
-            ).scalars()
+                SELECT
+                    (SELECT report_date FROM latest_report) AS holdings_report_date,
+                    (
+                        SELECT jsonb_agg(to_jsonb(h) ORDER BY h.rank)
+                        FROM holdings_limited h
+                    ) AS holdings,
+                    (
+                        SELECT sum(h.pct_of_nav)
+                        FROM holdings_limited h
+                        WHERE h.pct_of_nav IS NOT NULL
+                    ) AS holdings_pct_of_nav_total,
+                    (
+                        SELECT jsonb_agg(
+                            to_jsonb(c)
+                            ORDER BY c.expense_ratio ASC NULLS LAST, c.ticker
+                        )
+                        FROM class_rows c
+                    ) AS classes
+                """
+            ),
+            {
+                "series_id": fund.series_id,
+                "holdings_cap": HOLDINGS_CAP,
+            },
         )
-        reported = [float(h.pct_of_nav) for h in holdings if h.pct_of_nav is not None]
-        pct_total = sum(reported) if reported else None
+    ).mappings().one()
 
-    # FundClass (fund_classes_v) is keyed by series_id — a class links to a
-    # fund via the series, not the instrument. Resolve through the loaded fund.
-    classes = list(
-        (
-            await session.execute(
-                select(FundClass)
-                .where(FundClass.series_id == fund.series_id)
-                .order_by(
-                    FundClass.expense_ratio.asc().nulls_last(), FundClass.ticker
-                )
-            )
-        ).scalars()
+    latest_report = cast("dt.date | None", details["holdings_report_date"])
+    holdings = _decode_json_value(details["holdings"]) or []
+    pct_total = (
+        float(details["holdings_pct_of_nav_total"])
+        if details["holdings_pct_of_nav_total"] is not None
+        else None
     )
+    classes = _decode_json_value(details["classes"]) or []
 
     # funds_v has no sync markers; derive the per-fund staleness the route
     # exposes from the dynamic sources (risk MV calc_date + latest NAV date).
     # Attached on the instance so the route serializes them unchanged (Task 2.4
     # finalizes the staleness source).
-    fund.synced_at = dt.datetime.now(dt.UTC)  # type: ignore[attr-defined]
-    fund.source_calc_date = risk.calc_date if risk is not None else None  # type: ignore[attr-defined]
-    fund.source_nav_max_date = max_nav_date  # type: ignore[attr-defined]
+    fund.synced_at = dt.datetime.now(dt.UTC)
+    fund.source_calc_date = risk.calc_date if risk is not None else None
+    fund.source_nav_max_date = row["max_nav_date"]
 
     return FundProfile(
-        fund=fund,
-        benchmark=benchmark,
-        risk=risk,
+        fund=cast(Fund, fund),
+        benchmark=cast("FundBenchmarkCandidate | None", benchmark),
+        risk=cast("FundRiskLatest | None", risk),
         nav=nav,
-        holdings=holdings,
+        holdings=cast("list[FundHolding]", holdings),
         holdings_report_date=latest_report,
         holdings_pct_of_nav_total=pct_total,
-        classes=classes,
+        classes=cast("list[FundClass]", classes),
     )
 
 

@@ -239,6 +239,38 @@ async def test_fetch_many_lookthroughs_batches_exposures() -> None:
 
 
 @pytest.mark.anyio
+async def test_get_fund_series_by_ticker_uses_mv_resolver_with_list_fallback() -> None:
+    class Result:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def all(self):
+            return self._rows
+
+    class FakeSession:
+        def __init__(self):
+            self.calls: list[str] = []
+
+        async def execute(self, stmt):
+            sql = str(stmt)
+            self.calls.append(sql)
+            assert "funds_v" not in sql
+            if "fund_class_resolution_mv" in sql:
+                return Result([("CLASSX", "S_CLASS")])
+            if "funds_list_mv" in sql:
+                return Result([("FUNDF", "S_FUND")])
+            raise AssertionError(f"unexpected SQL: {sql}")
+
+    session = FakeSession()
+    result = await lt.get_fund_series_by_ticker(
+        session, ["CLASSX", "FUNDF", "AAPL"]
+    )
+
+    assert result == {"CLASSX": "S_CLASS", "FUNDF": "S_FUND"}
+    assert len(session.calls) == 2
+
+
+@pytest.mark.anyio
 async def test_get_fund_taxonomy_by_series_uses_funds_list_projection() -> None:
     class Result:
         def all(self):
@@ -900,7 +932,7 @@ async def test_portfolio_lookthrough_consolidates_and_reports_unexpanded(
     async def fake_fund_series_by_ticker(session, tickers):
         return {"FUNDX": "S_A"}
 
-    async def fake_closes(session, tickers):
+    async def fake_closes(session, tickers, **kwargs):
         return {"AAPL": [(dt.date(2026, 6, 11), 10.0)]}
 
     async def fake_navs(session, tickers):
@@ -943,6 +975,52 @@ async def test_portfolio_lookthrough_consolidates_and_reports_unexpanded(
 
 
 @pytest.mark.anyio
+async def test_portfolio_lookthrough_uses_private_response_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    portfolio = SimpleNamespace(
+        id=8, name="P", cash=0.0, positions=[_position("FUNDX", 100.0)],
+    )
+    calls = {"portfolio": 0, "lookthrough": 0}
+
+    async def fake_get_portfolio(session, portfolio_id, owner_sub=None):
+        calls["portfolio"] += 1
+        assert portfolio_id == 8
+        return portfolio
+
+    async def fake_fund_series_by_ticker(session, tickers):
+        return {"FUNDX": "S_A"}
+
+    async def fake_closes(session, tickers, **kwargs):
+        return {}
+
+    async def fake_navs(session, tickers):
+        return {"FUNDX": [(dt.date(2026, 6, 11), 30.0)]}
+
+    async def fake_fetch_many(dl, series_ids, dimension=None):
+        calls["lookthrough"] += 1
+        return {"S_A": _series_lookthrough("S_A")}
+
+    monkeypatch.setattr(portfolio_crud, "get_portfolio", fake_get_portfolio)
+    monkeypatch.setattr(lt, "get_fund_series_by_ticker", fake_fund_series_by_ticker)
+    monkeypatch.setattr(portfolio_crud, "select_last_two_closes", fake_closes)
+    monkeypatch.setattr(portfolio_crud, "select_last_two_navs", fake_navs)
+    monkeypatch.setattr(lt, "fetch_many_lookthroughs", fake_fetch_many)
+    monkeypatch.setattr(lt, "build_portfolio_exposure_tree", _empty_tree)
+
+    async with _client() as client:
+        first = await client.get("/portfolios/8/lookthrough")
+        second = await client.get("/portfolios/8/lookthrough")
+
+    assert first.status_code == 200
+    assert first.headers["x-cache-private"] == "miss"
+    assert second.status_code == 200
+    assert second.headers["x-cache-private"] == "hit"
+    assert calls == {"portfolio": 1, "lookthrough": 1}
+    assert second.json() == first.json()
+
+
+@pytest.mark.anyio
 async def test_portfolio_lookthrough_tree_can_request_only_asset_class(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -956,7 +1034,7 @@ async def test_portfolio_lookthrough_tree_can_request_only_asset_class(
     async def fake_fund_series_by_ticker(session, tickers):
         return {"FUNDX": "S_A"}
 
-    async def fake_closes(session, tickers):
+    async def fake_closes(session, tickers, **kwargs):
         return {}
 
     async def fake_navs(session, tickers):
@@ -1031,7 +1109,7 @@ async def test_portfolio_lookthrough_tree_includes_direct_stocks_as_leaf_holding
     async def fake_fund_series_by_ticker(session, tickers):
         return {"FUNDX": "S_A"}
 
-    async def fake_closes(session, tickers):
+    async def fake_closes(session, tickers, **kwargs):
         return {"AAPL": [(dt.date(2026, 6, 11), 100.0)]}
 
     async def fake_navs(session, tickers):
@@ -1128,7 +1206,7 @@ async def test_portfolio_lookthrough_tree_includes_cash_as_final_leaf(
         assert tickers == []
         return {}
 
-    async def fake_closes(session, tickers):
+    async def fake_closes(session, tickers, **kwargs):
         assert tickers == []
         return {}
 
@@ -1213,7 +1291,7 @@ async def test_portfolio_lookthrough_fund_without_materialization_is_unexpanded(
     async def fake_navs(session, tickers):
         return {"FUNDX": [(dt.date(2026, 6, 11), 30.0)]}
 
-    async def fake_closes(session, tickers):
+    async def fake_closes(session, tickers, **kwargs):
         return {}
 
     async def fake_fetch_many(dl, series_ids, dimension=None):
@@ -1254,7 +1332,7 @@ async def test_portfolio_lookthrough_tree_keeps_unmaterialized_fund_as_final_lea
     async def fake_navs(session, tickers):
         return {"FUNDX": [(dt.date(2026, 6, 11), 30.0)]}
 
-    async def fake_closes(session, tickers):
+    async def fake_closes(session, tickers, **kwargs):
         return {}
 
     async def fake_fetch_many(dl, series_ids, dimension=None):
@@ -1323,7 +1401,7 @@ async def test_portfolio_lookthrough_missing_price_is_loud(
     async def fake_fund_series_by_ticker(session, tickers):
         return {}
 
-    async def fake_empty(session, tickers):
+    async def fake_empty(session, tickers, **kwargs):
         return {}
 
     monkeypatch.setattr(portfolio_crud, "get_portfolio", fake_get_portfolio)
