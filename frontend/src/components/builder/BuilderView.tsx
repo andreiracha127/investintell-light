@@ -41,7 +41,7 @@ import {
   objectivesForBroad,
   resolveObjectiveForBroad,
 } from "./assets";
-import { OBJECTIVE_COPY, FIELD_COPY, METHOD_ITEMS, METHOD_FOOTNOTE } from "./BuilderCopy";
+import { OBJECTIVE_COPY, FIELD_COPY } from "./BuilderCopy";
 import { UniverseCard } from "./UniverseCard";
 import { FundUniverseCard } from "./FundUniverseCard";
 import { ViewsCard, toApiView, type ViewDraft } from "./ViewsCard";
@@ -52,17 +52,14 @@ type BuilderMode = "simulate" | "universe";
 const MODES: {
   value: BuilderMode;
   label: string;
-  hint: string;
 }[] = [
   {
     value: "simulate",
-    label: "Test a basket",
-    hint: "Pick stocks & funds",
+    label: "Basket",
   },
   {
     value: "universe",
-    label: "Search the fund universe",
-    hint: "Optimize a filtered set",
+    label: "Fund universe",
   },
 ];
 
@@ -97,17 +94,6 @@ export function BuilderView() {
 
   /* ── Mode ──────────────────────────────────────────────────────────── */
   const [mode, setMode] = useState<BuilderMode>("simulate");
-
-  /* ── How it works panel ────────────────────────────────────────────── */
-  const [methodOpen, setMethodOpen] = useState(false);
-  useEffect(() => {
-    if (!methodOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMethodOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [methodOpen]);
 
   /* ── Simulate universe ─────────────────────────────────────────────── */
   const [assets, setAssets] = useState<UniverseAsset[]>([]);
@@ -339,8 +325,8 @@ export function BuilderView() {
       ? "Add at least two holdings to optimize."
       : "Resolve the highlighted inputs to optimize."
     : objective === "bl_utility" && views.length === 0
-      ? "Tip: add a view in Advanced to tilt away from market weights."
-      : "Re-optimizes with your current goal and guardrails.";
+      ? "No views: market-weight baseline."
+      : null;
 
   return (
     <div className="mx-auto max-w-[1400px] px-5 py-5">
@@ -351,18 +337,7 @@ export function BuilderView() {
             Portfolio builder
           </h1>
           <div className="mb-1.5 mt-2 h-[3px] w-[34px] bg-accent" />
-          <div className="max-w-[560px] text-[12px] text-text-secondary">
-            Pick holdings, set your risk, and get suggested weights.
-          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setMethodOpen(true)}
-          className="inline-flex h-[32px] items-center gap-[7px] border border-border-strong bg-field px-3 text-[12px] text-text-secondary transition-colors hover:bg-layer-hover"
-        >
-          <InfoDot tip="How the optimizer works" />
-          How it works
-        </button>
       </div>
 
       {/* ── Mode toggle + estimation chip ─────────────────────────────── */}
@@ -386,16 +361,11 @@ export function BuilderView() {
               }`}
             >
               <span className="block text-[12.5px] font-bold">{m.label}</span>
-              <span className="block text-[10.5px] font-normal opacity-85">
-                {m.hint}
-              </span>
             </button>
           ))}
         </div>
         <span className="inline-flex items-center gap-1.5 border border-border bg-field px-2.5 py-1 text-[11px] text-text-muted">
-          <span title="Estimates use daily prices and fund NAV history through the date shown.">
-            Estimation data
-          </span>{" "}
+          <span>Data</span>{" "}
           · {AS_OF}
         </span>
       </div>
@@ -469,16 +439,9 @@ export function BuilderView() {
             </label>
           </div>
 
-          <p className="ix-fs mb-0 mt-3 max-w-[680px] leading-relaxed text-text-secondary">
-            {objectiveCopy.description}
-          </p>
-
           {broadUniverse && (
-            <p className="ix-fs mb-0 mt-2 max-w-[680px] leading-relaxed text-text-muted">
-              Broad mode allocates on a pairwise covariance, so only
-              covariance-based goals are available — &ldquo;Smallest worst-case
-              loss&rdquo; (needs a common scenario window) and &ldquo;Follow my
-              views&rdquo; (return-based) are not.
+            <p className="ix-fs mb-0 mt-3 max-w-[680px] text-text-muted">
+              Broad mode: covariance objectives only.
             </p>
           )}
 
@@ -554,7 +517,7 @@ export function BuilderView() {
           >
             {mutation.isPending ? "Optimizing…" : "Suggest weights"}
           </button>
-          <span className="ix-fs text-text-muted">{runHint}</span>
+          {runHint && <span className="ix-fs text-text-muted">{runHint}</span>}
           {!cvarLimitOk && (
             <span className="ix-fs text-loss">
               &ldquo;Most return within a loss limit&rdquo; needs a daily loss
@@ -604,17 +567,10 @@ export function BuilderView() {
           />
         ) : (
           <p className="ix-pad ix-fs m-0 border border-border bg-surface-2 text-text-muted">
-            {mode === "simulate"
-              ? "Search and add stocks or funds (or import a saved portfolio), pick a goal, optionally add advanced views, then press Suggest weights."
-              : "Filter and rank the fund universe, pick a goal, then press Suggest weights — the optimizer selects the funds for you."}
+            No run yet.
           </p>
         )}
       </div>
-
-      {/* ── How it works side panel ───────────────────────────────────── */}
-      {methodOpen && (
-        <MethodPanel onClose={() => setMethodOpen(false)} />
-      )}
     </div>
   );
 }
@@ -692,50 +648,6 @@ function AffixField({
         </span>
       </div>
     </div>
-  );
-}
-
-function MethodPanel({ onClose }: { onClose: () => void }) {
-  return (
-    <>
-      <div
-        onClick={onClose}
-        className="fixed inset-0 z-[70] bg-black/30"
-        aria-hidden="true"
-      />
-      <aside
-        role="dialog"
-        aria-label="How it works"
-        className="fixed inset-y-0 right-0 z-[71] flex h-screen w-[380px] max-w-[92vw] flex-col overflow-auto border-l border-border-strong bg-surface-2 shadow-[-6px_0_24px_rgba(0,0,0,0.16)]"
-      >
-        <div className="sticky top-0 flex items-center justify-between gap-2.5 border-b border-border bg-surface-2 px-[var(--ix-pad)] py-4">
-          <h2 className="ix-title m-0 text-[16px]">How it works</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="border-0 bg-transparent text-[18px] text-text-muted hover:text-text-primary"
-          >
-            ×
-          </button>
-        </div>
-        <div className="ix-pad flex flex-col gap-4">
-          {METHOD_ITEMS.map((m) => (
-            <div key={m.title}>
-              <h3 className="m-0 mb-1 text-[12.5px] font-bold text-text-primary">
-                {m.title}
-              </h3>
-              <p className="m-0 text-[12px] leading-relaxed text-text-secondary">
-                {m.body}
-              </p>
-            </div>
-          ))}
-          <p className="m-0 border-t border-border pt-3 text-[10.5px] text-text-muted">
-            {METHOD_FOOTNOTE}
-          </p>
-        </div>
-      </aside>
-    </>
   );
 }
 

@@ -91,18 +91,12 @@ export function BacktestTab({
 
   return (
     <div className="flex flex-col gap-px">
-      <p className="ix-fs m-0 border-l-[3px] border-border-strong bg-surface-2 px-3 py-2 leading-relaxed text-text-secondary">
-        This re-runs the same strategy on rolling slices of history it had not
-        seen yet (walk-forward) — a check that the approach holds up
-        out-of-sample, not a replay of these exact weights.
-        {downgraded && (
-          <>
-            {" "}
-            Backtest runs without views; objective adjusted to{" "}
-            <span className="font-bold text-text-primary">min_cvar</span>.
-          </>
-        )}
-      </p>
+      {downgraded && (
+        <p className="ix-fs m-0 border-l-[3px] border-border-strong bg-surface-2 px-3 py-2 text-text-secondary">
+          Backtest objective adjusted to{" "}
+          <span className="font-bold text-text-primary">min_cvar</span>.
+        </p>
+      )}
 
       {mutation.isIdle || mutation.isPending ? (
         <TabSkeleton label="Running walk-forward backtest" />
@@ -185,7 +179,7 @@ function BacktestBody({
 
       <ChartCard
         title="Return path by test period"
-        subtitle="one line per period"
+        subtitle="periods"
         actions={
           <div className="flex items-stretch border border-border-strong">
             {(
@@ -271,7 +265,7 @@ function BacktestBody({
 
       <ChartCard
         title="Out-of-sample growth"
-        subtitle="net of costs; dashes mark each re-optimization"
+        subtitle="net of costs"
       >
         {oosOption ? (
           <HighchartsChart

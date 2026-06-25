@@ -163,12 +163,7 @@ export function PortfolioConstraintsSection({
   return (
     <section>
       <Card title="Construction constraints">
-        <p className="mt-1 text-[12px] text-text-secondary">
-          Limits used when rebuilding or rebalancing this portfolio. Leave a
-          field blank for no limit. Values are a percent of the portfolio.
-        </p>
-
-        <div className="mt-3 flex flex-wrap gap-x-[18px] gap-y-4">
+        <div className="flex flex-wrap gap-x-[18px] gap-y-4">
           <PctField
             label="Max per holding"
             ariaLabel="Max per holding"

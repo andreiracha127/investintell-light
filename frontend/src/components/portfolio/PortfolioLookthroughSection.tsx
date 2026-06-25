@@ -25,7 +25,7 @@ import { InfoDot, KpiTile } from "@/components/ui/panels";
 import { formatDate, formatNumber } from "@/lib/format";
 
 const LOOKTHROUGH_TIP =
-  "“Look-through”: sees through each fund/ETF in the portfolio down to its final underlying holdings, aggregating true exposure by asset class, fund series and CUSIP.";
+  "Final holdings aggregated across funds and ETFs.";
 
 export function PortfolioLookthroughSection({
   portfolioId,
@@ -48,12 +48,11 @@ export function PortfolioLookthroughSection({
     },
   });
 
-  const assetItems = query.data?.dimensions.asset_class ?? [];
-  const tree = query.data?.tree ?? [];
+  const data = query.data;
   const sunburstOption = useMemo(() => {
-    if (!colors || !query.data) return null;
-    return buildHcExposureSunburstOption(tree, assetItems, colors);
-  }, [colors, query.data, tree, assetItems]);
+    if (!colors || !data) return null;
+    return buildHcExposureSunburstOption(data.tree, data.dimensions.asset_class, colors);
+  }, [colors, data]);
 
   if (
     query.isError &&
@@ -81,7 +80,9 @@ export function PortfolioLookthroughSection({
     );
   }
 
-  const data = query.data;
+  if (!data) return null;
+  const assetItems = data.dimensions.asset_class;
+  const tree = data.tree;
   if (tree.length === 0 && assetItems.length === 0) return null;
 
   // ── KPIs (computed defensively from the dimensions that exist) ──────────
@@ -107,8 +108,7 @@ export function PortfolioLookthroughSection({
           <InfoDot tip={LOOKTHROUGH_TIP} />
         </h2>
         <p className="mt-0.5 text-[12px] text-text-secondary">
-          Aggregating the final holdings of every fund in the portfolio
-          {data.oldest_report_date ? ` · as of ${formatDate(data.oldest_report_date)}` : ""}
+          {data.oldest_report_date ? `As of ${formatDate(data.oldest_report_date)}` : "Latest"}
         </p>
       </div>
 
@@ -141,7 +141,7 @@ export function PortfolioLookthroughSection({
             Look-through sunburst
           </h3>
           <span className="text-[10.5px] text-text-muted">
-            Asset class → fund (series) → final holding
+            Asset class / fund / holding
           </span>
         </div>
         {sunburstOption && (

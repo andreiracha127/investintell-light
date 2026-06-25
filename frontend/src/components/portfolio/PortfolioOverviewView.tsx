@@ -374,7 +374,7 @@ function EmptyState({ onCreated }: { onCreated: (id: number) => void }) {
         No portfolios yet
       </h2>
       <p className="text-[13px] text-text-secondary">
-        Create your first portfolio to track positions, P&amp;L and news.
+        Create your first portfolio.
       </p>
       <CreatePortfolioForm onCreated={onCreated} autoFocus />
     </div>
@@ -996,7 +996,7 @@ function NavPanel({
         <div className="flex h-[200px] flex-1 items-center justify-center px-4 text-center text-[12px] text-text-muted">
           {isError
             ? "Could not load materialized portfolio NAV."
-            : "Portfolio NAV has not been materialized yet."}
+            : "NAV not materialized."}
         </div>
       )}
     </section>
@@ -1128,7 +1128,7 @@ function AllocationPanel({
   );
 
   return (
-    <Card title="Allocation" subtitle="· share by market value">
+    <Card title="Allocation" subtitle="market value">
       <HighchartsChart options={options} className="h-[360px] w-full" />
     </Card>
   );

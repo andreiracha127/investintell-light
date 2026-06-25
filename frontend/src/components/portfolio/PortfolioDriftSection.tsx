@@ -250,8 +250,7 @@ export function PortfolioDriftSection({
           </>
         ) : (
           <p className="mt-3 text-[12px] text-text-secondary">
-            No drift alerts — every position, asset class and overlap is within
-            its limits.
+            No drift alerts.
           </p>
         )}
       </Card>

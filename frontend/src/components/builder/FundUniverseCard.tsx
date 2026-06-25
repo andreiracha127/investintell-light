@@ -132,7 +132,7 @@ export function FundUniverseCard({
   const keptCount = previewFunds.length === 0 ? 0 : selected.size;
 
   return (
-    <Card title="Your universe" subtitle="filter & rank the funds — no manual tickers">
+    <Card title="Universe">
       <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
         <Select
           label="Fund type"
@@ -265,19 +265,16 @@ export function FundUniverseCard({
           </>
         ) : draft.broadUniverse ? (
           <>
-            ≈ <span className="font-bold tabular-nums">{formatNumber(total, 0)}</span>{" "}
-            funds in the universe → selecting ≈{" "}
-            <span className="font-bold tabular-nums">{draft.maxPositions}</span>{" "}
-            positions across risk clusters. Funds without enough overlapping NAV
-            history are excluded automatically.
+            <span className="font-bold tabular-nums">{formatNumber(total, 0)}</span>{" "}
+            match · target{" "}
+            <span className="font-bold tabular-nums">{draft.maxPositions}</span>
           </>
         ) : (
           <>
-            ≈ <span className="font-bold tabular-nums">{formatNumber(total, 0)}</span>{" "}
-            funds match · optimizing the top{" "}
+            <span className="font-bold tabular-nums">{formatNumber(total, 0)}</span>{" "}
+            match · top{" "}
             <span className="font-bold tabular-nums">{effectiveN}</span> by{" "}
-            {RANK_BY_LABELS[draft.rankBy]}. Funds without enough overlapping NAV
-            history are skipped automatically.
+            {RANK_BY_LABELS[draft.rankBy]}
           </>
         )}
       </p>
@@ -286,7 +283,7 @@ export function FundUniverseCard({
         <div className="mt-3">
           <div className="mb-1.5 flex items-center justify-between">
             <span className={FIELD_LABEL_CLASS}>
-              Preview — uncheck funds to exclude them
+              Preview
             </span>
             <span className="ix-fs tabular-nums text-text-muted">
               {keptCount === previewFunds.length

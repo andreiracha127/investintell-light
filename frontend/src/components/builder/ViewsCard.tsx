@@ -113,9 +113,9 @@ export function ViewsCard({
 
   const summary = showViews
     ? views.length === 0
-      ? "optional — add your own return expectations"
+      ? "optional"
       : `${views.length} view${views.length > 1 ? "s" : ""}`
-    : "model parameters";
+    : "parameters";
 
   return (
     <section className="border border-border bg-surface-2">
@@ -126,7 +126,7 @@ export function ViewsCard({
         className="ix-pad flex w-full items-center justify-between gap-2 text-left transition-colors hover:bg-layer-hover"
       >
         <h2 className="ix-label m-0">
-          Advanced — your market views
+          Advanced
           <span className="ml-2 font-normal normal-case tracking-normal text-text-secondary">
             · {summary}
           </span>
@@ -161,16 +161,9 @@ export function ViewsCard({
                 </button>
               </div>
 
-              <p className="ix-fs m-0 text-text-muted">
-                A view is your expectation for an asset (&ldquo;X returns 12% a
-                year&rdquo;) or a pair (&ldquo;X beats Y by 5%&rdquo;). Views need
-                a known AUM for every asset — funds only; equities and funds
-                without AUM are rejected (422).
-              </p>
               {blUtilityWithoutViews && (
                 <p role="status" className="ix-fs m-0 border-l-[3px] border-accent bg-accent-wash px-2.5 py-1.5 text-text-secondary">
-                  BL max utility with zero views reproduces the market-cap (AUM)
-                  weights — add a view to express a tilt.
+                  No views: market-weight baseline.
                 </p>
               )}
             </div>
@@ -193,10 +186,6 @@ export function ViewsCard({
                 placeholder="0.05"
               />
             </div>
-            <p className="ix-fs m-0 text-text-muted">
-              Black-Litterman tuning for the equilibrium prior. The defaults
-              (δ=2.5, τ=0.05) suit most cases — leave them unless you know why.
-            </p>
           </div>
         </div>
       )}

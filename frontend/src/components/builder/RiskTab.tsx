@@ -210,8 +210,8 @@ function RiskBody({
 
       <ChartCard
         title="Where the risk comes from"
-        subtitle="each holding's share of total portfolio risk"
-        tip="Each bubble is a holding's share of total portfolio risk — not the same as its weight. A small, volatile holding can carry outsized risk."
+        subtitle="risk contribution"
+        tip="Risk contribution by holding."
       >
         {contributionsOption ? (
           <HighchartsChart
@@ -229,7 +229,7 @@ function RiskBody({
 
       <ChartCard
         title="How holdings move together"
-        tip="Correlation from −1 (move opposite) to +1 (move together). Lower correlations mean more diversification."
+        tip="Correlation from -1 to +1."
       >
         {heatmapOption ? (
           <>

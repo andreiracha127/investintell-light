@@ -104,12 +104,7 @@ export function ProjectionTab({
 
   return (
     <div className="flex flex-col gap-px">
-      {/* ── Intro + stat switch ─────────────────────────────────────────── */}
-      <div className="ix-pad flex flex-wrap items-center justify-between gap-3 border border-border bg-surface-2">
-        <p className="ix-fs m-0 max-w-[560px] leading-relaxed text-text-secondary">
-          A range of where the portfolio could land over time, simulated from
-          its own history. This is a spread of scenarios, not a promise.
-        </p>
+      <div className="ix-pad flex flex-wrap items-center justify-end gap-3 border border-border bg-surface-2">
         <div className="flex items-stretch border border-border-strong">
           {STATISTICS.map(({ key, label }) => (
             <button
@@ -229,12 +224,6 @@ function ProjectionBody({
           </p>
         )}
       </ChartCard>
-
-      <p className="ix-fs m-0 px-1 pt-1 text-text-muted">
-        Block-bootstrap projection from the portfolio&apos;s common history with
-        target weights held; this is a distribution of scenarios, not a
-        guarantee.
-      </p>
     </div>
   );
 }

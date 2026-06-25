@@ -356,52 +356,10 @@ export function PortfolioRebalanceSection({
           <ProposalTable preview={preview} />
         )}
 
-        {/* Methodology accordion */}
-        <MethodologyAccordion objective={preview.proposal?.objective} />
-
-        {/* Advisory disclaimer footnote */}
         <p className="mt-3 text-[11px] text-text-muted">
-          Proposals are never executed automatically.
+          Advisory only.
         </p>
       </Card>
     </section>
-  );
-}
-
-/** Collapsible "How rebalancing is evaluated" explainer (design parity). */
-function MethodologyAccordion({ objective }: { objective?: string }) {
-  const [open, setOpen] = useState(false);
-  const objLabel = objective ? humanizeObjective(objective) : "selected";
-  return (
-    <div className="mt-4 border-t border-border pt-3">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="flex w-full items-center justify-between gap-2 text-left text-[12.5px] font-bold text-text-primary"
-      >
-        How rebalancing is evaluated
-        <span
-          aria-hidden
-          className={`text-text-muted transition-transform ${open ? "rotate-180" : ""}`}
-        >
-          ⌄
-        </span>
-      </button>
-      {open && (
-        <div className="mt-3 text-[12px] leading-relaxed text-text-secondary">
-          <p className="m-0">
-            The policy compares each asset&apos;s current weight with its target weight.
-            When the drift exceeds the <b>tolerance band</b> (absolute or relative), or a
-            calendar/macro trigger fires, the optimization engine generates a{" "}
-            <b>trade proposal</b>.
-          </p>
-          <p className="mt-2">
-            The <b>{objLabel}</b> objective seeks to minimize the portfolio&apos;s tail
-            risk. Proposals are advisory only — they are never executed automatically.
-          </p>
-        </div>
-      )}
-    </div>
   );
 }

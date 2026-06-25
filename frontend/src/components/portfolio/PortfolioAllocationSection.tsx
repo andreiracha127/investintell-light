@@ -37,7 +37,7 @@ export function PortfolioAllocationSection({
   if (rows.length === 0) return null;
 
   return (
-    <Card title="Allocation" subtitle="asset class / holding">
+    <Card title="Allocation" subtitle="asset class">
       <DataGrid
         options={weightsTreeGridOptions(rows)}
         className="h-[420px] w-full"

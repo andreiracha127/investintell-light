@@ -161,9 +161,6 @@ export function PortfolioPerformanceView({
             Portfolio NAV
             <InfoDot tip={NAV_TIP} />
           </h2>
-          <span className="text-[10.5px] text-text-muted">
-            Pick a range or drag the navigator
-          </span>
         </div>
         {isLoading && !hasNav ? (
           <div
@@ -179,14 +176,14 @@ export function PortfolioPerformanceView({
             emptyMessage={
               isError
                 ? "Could not load materialized portfolio NAV."
-                : "Portfolio NAV has not been materialized yet."
+                : "NAV not materialized."
             }
           />
         ) : (
           <div className="flex h-[360px] items-center justify-center px-4 text-center text-[13px] text-text-muted">
             {isError
               ? "Could not load materialized portfolio NAV."
-              : "Portfolio NAV has not been materialized yet."}
+              : "NAV not materialized."}
           </div>
         )}
       </section>
@@ -198,7 +195,6 @@ export function PortfolioPerformanceView({
           <p className="mb-2 mt-0.5 text-[11px] text-text-muted">
             {hasAttribution ? (
               <>
-                Per-holding P&amp;L bridging the selected period ·{" "}
                 <span className="font-bold text-gain">contributors</span> /{" "}
                 <span className="font-bold text-loss">detractors</span> · net{" "}
                 <span className={`font-bold tabular-nums ${valueTone(periodResult)}`}>
@@ -222,7 +218,7 @@ export function PortfolioPerformanceView({
           <h3 className="ix-label m-0">Return contributors</h3>
           <p className="mb-2 mt-0.5 text-[11px] text-text-muted">
             {hasAttribution
-              ? "Bubble area proportional to contribution to total return."
+              ? "By return contribution."
               : "Security-level attribution has not been materialized yet."}
           </p>
           {bubbleOption && (
