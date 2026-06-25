@@ -35,7 +35,7 @@ from app.schemas.portfolios import (
     PositionPriceSource,
 )
 
-# Hard cap on GET /portfolios — single-tenant, so no pagination, just a bound.
+# Hard cap on GET /portfolios — owner-scoped, so no pagination, just a bound.
 LIST_HARD_CAP = 100
 
 # Sentinel for "field absent from a partial update" — None can be a real value
@@ -57,7 +57,12 @@ class MissingPriceDataError(Exception):
 
 
 async def create_portfolio(
-    session: AsyncSession, payload: PortfolioCreate, *, origin: str = "manual"
+    session: AsyncSession,
+    payload: PortfolioCreate,
+    owner_sub: str,
+    org_id: str | None,
+    *,
+    origin: str = "manual",
 ) -> Portfolio:
     """Insert a portfolio (and its initial positions); return it fully loaded.
 
@@ -69,6 +74,8 @@ async def create_portfolio(
     """
     portfolio = Portfolio(
         name=payload.name,
+        owner_sub=owner_sub,
+        org_id=org_id,
         cash=payload.cash,
         inception_date=payload.inception_date,
         origin=origin,
@@ -94,23 +101,28 @@ async def create_portfolio(
         ) from exc
     # Re-select so server-set defaults (timestamps) and the positions
     # collection are loaded without tripping lazy="raise".
-    loaded = await get_portfolio(session, portfolio.id)
+    loaded = await get_portfolio(session, portfolio.id, owner_sub)
     if loaded is None:  # pragma: no cover — the row was just committed
         raise RuntimeError(f"Portfolio {portfolio.id} vanished after commit.")
     return loaded
 
 
-async def get_portfolio(session: AsyncSession, portfolio_id: int) -> Portfolio | None:
+async def get_portfolio(
+    session: AsyncSession, portfolio_id: int, owner_sub: str | None = None
+) -> Portfolio | None:
     """Load one portfolio WITH its positions (explicit selectinload — lazy='raise')."""
+    clauses = [Portfolio.id == portfolio_id]
+    if owner_sub is not None:
+        clauses.append(Portfolio.owner_sub == owner_sub)
     result = await session.execute(
         select(Portfolio)
         .options(selectinload(Portfolio.positions))
-        .where(Portfolio.id == portfolio_id)
+        .where(*clauses)
     )
     return result.scalar_one_or_none()
 
 
-async def list_portfolios(session: AsyncSession) -> Sequence[Row]:
+async def list_portfolios(session: AsyncSession, owner_sub: str) -> Sequence[Row]:
     """List rows of portfolio summary fields, id order, capped."""
     result = await session.execute(
         select(
@@ -122,6 +134,7 @@ async def list_portfolios(session: AsyncSession) -> Sequence[Row]:
             Portfolio.created_at,
         )
         .outerjoin(Position)
+        .where(Portfolio.owner_sub == owner_sub)
         .group_by(Portfolio.id)
         .order_by(Portfolio.id)
         .limit(LIST_HARD_CAP)
@@ -132,13 +145,14 @@ async def list_portfolios(session: AsyncSession) -> Sequence[Row]:
 async def update_portfolio(
     session: AsyncSession,
     portfolio_id: int,
+    owner_sub: str,
     *,
     name: str | None,
     cash: float | None,
     inception_date: dt.date | None | Any = UNSET,
 ) -> Portfolio | None:
     """Apply a partial update; return the reloaded portfolio, or None if missing."""
-    portfolio = await get_portfolio(session, portfolio_id)
+    portfolio = await get_portfolio(session, portfolio_id, owner_sub)
     if portfolio is None:
         return None
     if name is not None:
@@ -155,23 +169,35 @@ async def update_portfolio(
             f"A portfolio named {name!r} already exists."
         ) from exc
     # Re-select so the DB-computed updated_at is reflected in the response.
-    return await get_portfolio(session, portfolio_id)
+    return await get_portfolio(session, portfolio_id, owner_sub)
 
 
-async def delete_portfolio(session: AsyncSession, portfolio_id: int) -> bool:
+async def delete_portfolio(
+    session: AsyncSession, portfolio_id: int, owner_sub: str
+) -> bool:
     """Delete one portfolio; positions go with it via ON DELETE CASCADE."""
     result = cast(
         "CursorResult[Any]",
-        await session.execute(delete(Portfolio).where(Portfolio.id == portfolio_id)),
+        await session.execute(
+            delete(Portfolio).where(
+                Portfolio.id == portfolio_id,
+                Portfolio.owner_sub == owner_sub,
+            )
+        ),
     )
     await session.commit()
     return bool(result.rowcount)
 
 
-async def portfolio_exists(session: AsyncSession, portfolio_id: int) -> bool:
+async def portfolio_exists(
+    session: AsyncSession, portfolio_id: int, owner_sub: str | None = None
+) -> bool:
     """True when the portfolio row exists (positions not loaded)."""
+    clauses = [Portfolio.id == portfolio_id]
+    if owner_sub is not None:
+        clauses.append(Portfolio.owner_sub == owner_sub)
     found = await session.scalar(
-        select(Portfolio.id).where(Portfolio.id == portfolio_id)
+        select(Portfolio.id).where(*clauses)
     )
     return found is not None
 
@@ -273,16 +299,25 @@ async def update_position(
 
 
 async def delete_position(
-    session: AsyncSession, portfolio_id: int, ticker: str
+    session: AsyncSession,
+    portfolio_id: int,
+    ticker: str,
+    owner_sub: str | None = None,
 ) -> bool:
     """Delete one position; False when no row matched."""
+    clauses = [Position.portfolio_id == portfolio_id, Position.ticker == ticker]
+    if owner_sub is not None:
+        clauses.append(
+            Position.portfolio_id.in_(
+                select(Portfolio.id).where(
+                    Portfolio.id == portfolio_id,
+                    Portfolio.owner_sub == owner_sub,
+                )
+            )
+        )
     result = cast(
         "CursorResult[Any]",
-        await session.execute(
-            delete(Position).where(
-                Position.portfolio_id == portfolio_id, Position.ticker == ticker
-            )
-        ),
+        await session.execute(delete(Position).where(*clauses)),
     )
     await session.commit()
     return bool(result.rowcount)

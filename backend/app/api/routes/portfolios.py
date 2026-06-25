@@ -15,16 +15,18 @@ Error mapping (fail loud, never silently empty):
 """
 
 import datetime as dt
+import hashlib
 import logging
 from collections.abc import Mapping, Sequence
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api._shared import raise_news_fetch_error
-from app.core.auth import get_current_user
+from app.core.auth import CurrentUser, get_current_user
+from app.core.cache import portfolio_response_cache, response_cache_version
 from app.core.config import get_settings
 from app.core.datalake import get_datalake_session
 from app.core.db import get_session
@@ -66,6 +68,57 @@ router = APIRouter(
     tags=["portfolios"],
     dependencies=[Depends(get_current_user)],
 )
+
+
+def _owner_cache_token(owner_sub: str) -> str:
+    return hashlib.sha256(owner_sub.encode("utf-8")).hexdigest()[:16]
+
+
+def _portfolio_cache_prefix(owner_sub: str, portfolio_id: int) -> str:
+    return (
+        f"portfolio:{response_cache_version()}:"
+        f"{_owner_cache_token(owner_sub)}:{portfolio_id}:"
+    )
+
+
+def _portfolio_cache_key(
+    request: Request, owner_sub: str, portfolio_id: int, suffix: str
+) -> str:
+    query = "&".join(sorted(request.url.query.split("&"))) if request.url.query else ""
+    return f"{_portfolio_cache_prefix(owner_sub, portfolio_id)}{suffix}:{request.url.path}?{query}"
+
+
+async def _cached_private_response(key: str) -> Response | None:
+    cached = await portfolio_response_cache.get(key)
+    if cached is None:
+        return None
+    body, media_type = cached
+    return Response(
+        content=body,
+        media_type=media_type,
+        headers={"x-cache-private": "hit", "Cache-Control": "private, no-store"},
+    )
+
+
+async def _store_private_response(key: str, body: bytes) -> Response:
+    await portfolio_response_cache.set(
+        key,
+        body,
+        "application/json",
+        get_settings().portfolio_cache_ttl_seconds,
+    )
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={"x-cache-private": "miss", "Cache-Control": "private, no-store"},
+    )
+
+
+async def _invalidate_portfolio_cache(owner_sub: str, portfolio_id: int) -> None:
+    await portfolio_response_cache.delete_prefix(
+        _portfolio_cache_prefix(owner_sub, portfolio_id)
+    )
+
 
 def _normalize_ticker_or_422(ticker: str) -> str:
     try:
@@ -130,6 +183,7 @@ async def _select_nav_priced_fund_tickers(
 async def create_portfolio(
     payload: PortfolioCreate,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PortfolioOut:
     """Create a portfolio with optional initial positions.
 
@@ -141,7 +195,9 @@ async def create_portfolio(
             session, [p.ticker for p in payload.positions]
         )
     try:
-        portfolio = await portfolio_crud.create_portfolio(session, payload)
+        portfolio = await portfolio_crud.create_portfolio(
+            session, payload, user.sub, user.org_id
+        )
     except portfolio_crud.DuplicatePortfolioNameError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return PortfolioOut.model_validate(portfolio)
@@ -150,9 +206,10 @@ async def create_portfolio(
 @router.get("", response_model=list[PortfolioListItem])
 async def list_portfolios(
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> list[PortfolioListItem]:
     """List portfolios (id order), hard-capped at the service's LIST_HARD_CAP."""
-    rows = await portfolio_crud.list_portfolios(session)
+    rows = await portfolio_crud.list_portfolios(session, user.sub)
     return [PortfolioListItem.model_validate(row) for row in rows]
 
 
@@ -160,9 +217,10 @@ async def list_portfolios(
 async def get_portfolio(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PortfolioOut:
     """One portfolio with its positions (sorted by ticker)."""
-    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, user.sub)
     if portfolio is None:
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
     return PortfolioOut.model_validate(portfolio)
@@ -173,6 +231,7 @@ async def patch_portfolio(
     portfolio_id: int,
     payload: PortfolioPatch,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PortfolioOut:
     """Partially update name and/or cash."""
     try:
@@ -180,6 +239,7 @@ async def patch_portfolio(
         portfolio = await portfolio_crud.update_portfolio(
             session,
             portfolio_id,
+            user.sub,
             name=payload.name,
             cash=payload.cash,
             inception_date=(
@@ -192,6 +252,7 @@ async def patch_portfolio(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if portfolio is None:
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
+    await _invalidate_portfolio_cache(user.sub, portfolio_id)
     return PortfolioOut.model_validate(portfolio)
 
 
@@ -199,11 +260,13 @@ async def patch_portfolio(
 async def delete_portfolio(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> None:
     """Delete a portfolio; its positions cascade away at the DB level."""
-    deleted = await portfolio_crud.delete_portfolio(session, portfolio_id)
+    deleted = await portfolio_crud.delete_portfolio(session, portfolio_id, user.sub)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
+    await _invalidate_portfolio_cache(user.sub, portfolio_id)
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +280,7 @@ async def put_position(
     ticker: str,
     payload: PositionBody,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PositionOut:
     """Upsert one position.
 
@@ -229,7 +293,7 @@ async def put_position(
     on UPDATE; on INSERT basis defaults to 'reference'.
     """
     symbol = _normalize_ticker_or_422(ticker)
-    if not await portfolio_crud.portfolio_exists(session, portfolio_id):
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id, user.sub):
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
     provided = payload.model_fields_set
     position = await portfolio_crud.get_position(session, portfolio_id, symbol)
@@ -267,6 +331,7 @@ async def put_position(
                 else portfolio_crud.UNSET
             ),
         )
+    await _invalidate_portfolio_cache(user.sub, portfolio_id)
     return PositionOut.model_validate(position)
 
 
@@ -275,15 +340,17 @@ async def delete_position(
     portfolio_id: int,
     ticker: str,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> None:
     """Delete one position; 404 covers both a missing portfolio and a missing ticker."""
     symbol = _normalize_ticker_or_422(ticker)
-    deleted = await portfolio_crud.delete_position(session, portfolio_id, symbol)
+    deleted = await portfolio_crud.delete_position(session, portfolio_id, symbol, user.sub)
     if not deleted:
         raise HTTPException(
             status_code=404,
             detail=f"Position {symbol} not found in portfolio {portfolio_id}.",
         )
+    await _invalidate_portfolio_cache(user.sub, portfolio_id)
 
 
 # ---------------------------------------------------------------------------
@@ -298,9 +365,10 @@ async def delete_position(
 async def list_portfolio_transactions(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> list[PortfolioTransactionOut]:
     """List immutable buy/sell ledger events for a portfolio."""
-    if not await portfolio_crud.portfolio_exists(session, portfolio_id):
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id, user.sub):
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
     rows = await portfolio_ledger.list_transactions(session, portfolio_id)
     return [PortfolioTransactionOut.model_validate(row) for row in rows]
@@ -315,9 +383,10 @@ async def create_portfolio_transaction(
     portfolio_id: int,
     payload: PortfolioTransactionCreate,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> PortfolioTransactionOut:
     """Append a real buy/sell event and update the current position snapshot."""
-    if not await portfolio_crud.portfolio_exists(session, portfolio_id):
+    if not await portfolio_crud.portfolio_exists(session, portfolio_id, user.sub):
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
     await _require_local_trade_tickers(session, [payload.ticker])
     try:
@@ -333,6 +402,7 @@ async def create_portfolio_transaction(
     except portfolio_ledger.PortfolioNotFoundError as exc:
         await session.rollback()
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await _invalidate_portfolio_cache(user.sub, portfolio_id)
     return PortfolioTransactionOut.model_validate(row)
 
 
@@ -340,10 +410,11 @@ async def create_portfolio_transaction(
 async def get_portfolio_nav(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     end_date: Annotated[dt.date | None, Query(description="Last NAV date.")] = None,
 ) -> PortfolioNavResponse:
     """Persisted transaction-aware NAV index, rebased to 100 at inception."""
-    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, user.sub)
     if portfolio is None:
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
     rows = await portfolio_ledger.list_materialized_nav(
@@ -375,8 +446,10 @@ async def get_portfolio_nav(
 @router.get("/{portfolio_id}/overview", response_model=PortfolioOverviewResponse)
 async def get_portfolio_overview(
     portfolio_id: int,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> PortfolioOverviewResponse:
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> PortfolioOverviewResponse | Response:
     """Render-ready position table with P&L and column-header aggregates (D6).
 
     Baseline prices come from the two most recent local eod_prices rows per
@@ -384,7 +457,12 @@ async def get_portfolio_overview(
     marks positions that may receive a frontend live-tick overlay. An empty
     portfolio is a legitimate 200 with zeroed/null aggregates.
     """
-    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    cache_key = _portfolio_cache_key(request, user.sub, portfolio_id, "overview")
+    cached = await _cached_private_response(cache_key)
+    if cached is not None:
+        return cached
+
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, user.sub)
     if portfolio is None:
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
 
@@ -420,12 +498,13 @@ async def get_portfolio_overview(
         )
     except portfolio_crud.MissingPriceDataError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return PortfolioOverviewResponse(
+    payload = PortfolioOverviewResponse(
         id=portfolio.id,
         name=portfolio.name,
         positions=rows,
         aggregates=aggregates,
     )
+    return await _store_private_response(cache_key, payload.model_dump_json().encode())
 
 
 # ---------------------------------------------------------------------------
@@ -455,6 +534,7 @@ async def get_portfolio_news(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
     client: Annotated[TiingoClient, Depends(get_tiingo_client)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     limit: Annotated[int, Query(ge=1, le=50, description="Max articles returned.")] = 20,
 ) -> PortfolioNewsResponse:
     """Aggregated news across all portfolio tickers, newest first.
@@ -464,7 +544,7 @@ async def get_portfolio_news(
     GET /stocks/{ticker}/news exactly: refresh failure with cached articles
     serves them with ``stale=true``; with an empty cache it fails loud.
     """
-    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, user.sub)
     if portfolio is None:
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
 
@@ -515,6 +595,7 @@ async def get_portfolio_lookthrough(
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
     datalake: Annotated[AsyncSession, Depends(get_datalake_session)],
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     dimension: str | None = Query(
         default=None,
         description="Optional exposure dimension filter.",
@@ -532,7 +613,7 @@ async def get_portfolio_lookthrough(
     data-lake. Posições não atravessadas (ações, fundos sem materialização)
     ficam EXPLÍCITAS em ``unexpanded`` — nunca somem silenciosamente.
     """
-    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, user.sub)
     if portfolio is None:
         raise HTTPException(
             status_code=404, detail=f"Portfolio {portfolio_id} not found."

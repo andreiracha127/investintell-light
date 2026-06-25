@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     # TTL for cached catalog responses. The mirror refreshes once a day
     # (fund-catalog-sync 09:00 UTC), so minutes-level TTL is conservative.
     catalog_cache_ttl_seconds: int = 900
+    # Short-lived per-user portfolio response cache. These routes are private
+    # and explicitly invalidated on portfolio mutations; this TTL is only a
+    # tail-latency guard for repeated reads and concurrent misses.
+    portfolio_cache_ttl_seconds: int = 120
 
     # DB-first Grupo E2: cache de RESULTADO (respostas determinísticas das
     # ferramentas interativas), separado do cache de catálogo. Fail-open.

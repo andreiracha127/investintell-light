@@ -163,9 +163,9 @@ async def _load_series_map(
 
 
 async def _load_portfolio_or_404(
-    session: AsyncSession, portfolio_id: int
+    session: AsyncSession, portfolio_id: int, owner_sub: str | None = None
 ) -> Portfolio:
-    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, owner_sub)
     if portfolio is None:
         raise HTTPException(
             status_code=404, detail=f"Portfolio {portfolio_id} not found."
@@ -188,6 +188,7 @@ async def _load_portfolio_prices(
     portfolio_id: int,
     start: dt.date,
     end: dt.date,
+    owner_sub: str | None = None,
 ) -> tuple[Portfolio, dict[str, float], dict[str, pd.Series]]:
     """Load, validate and read prices for a portfolio in one call.
 
@@ -204,7 +205,7 @@ async def _load_portfolio_prices(
         InsufficientDataError: portfolio has no positions, or holds fund
             positions (NAV-priced — not supported by the EOD analyses yet).
     """
-    portfolio = await _load_portfolio_or_404(session, portfolio_id)
+    portfolio = await _load_portfolio_or_404(session, portfolio_id, owner_sub)
     quantities = _require_positions(portfolio)
     tickers = list(quantities)
     # Fund positions (F8.5 saved proposals) are NAV-priced and have no EOD
@@ -236,6 +237,7 @@ async def resolve_asset_returns(
     ref: AssetRef,
     start: dt.date,
     end: dt.date,
+    owner_sub: str | None = None,
 ) -> tuple[str, pd.Series]:
     """Resolve a pseudo-asset reference into ``(label, daily return series)``.
 
@@ -270,7 +272,7 @@ async def resolve_asset_returns(
         return ref.ticker, simple_returns(series)
 
     portfolio, quantities, series_by_ticker = await _load_portfolio_prices(
-        session, ref.id, start, end
+        session, ref.id, start, end, owner_sub
     )
     prices = _join_prices(series_by_ticker)
     _require_common_rows(
@@ -441,10 +443,15 @@ async def run_scenario(
     payload: ScenarioRequest,
     *,
     max_points: int,
+    owner_sub: str | None = None,
 ) -> ScenarioResponse:
     """Orchestrate the scenario: load portfolio, read local prices, assemble."""
     portfolio, quantities, series_by_ticker = await _load_portfolio_prices(
-        session, payload.portfolio_id, payload.start_date, payload.end_date
+        session,
+        payload.portfolio_id,
+        payload.start_date,
+        payload.end_date,
+        owner_sub,
     )
     return assemble_scenario(
         series_by_ticker,
@@ -461,13 +468,19 @@ class _VersionedScenario(BaseModel):
 
     request: ScenarioRequest
     portfolio_version: str
+    owner_sub: str | None = None
 
 
 @cached_result("stat_scenario")
 async def _run_scenario_cached(
     session: AsyncSession, payload: _VersionedScenario, *, max_points: int
 ) -> ScenarioResponse:
-    return await run_scenario(session, payload.request, max_points=max_points)
+    return await run_scenario(
+        session,
+        payload.request,
+        max_points=max_points,
+        owner_sub=payload.owner_sub,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -533,13 +546,14 @@ async def run_beta(
     payload: BetaRequest,
     *,
     max_points: int,
+    owner_sub: str | None = None,
 ) -> BetaResponse:
     """Orchestrate the beta scatter: resolve both pseudo-assets, assemble."""
     label_x, returns_x = await resolve_asset_returns(
-        session, payload.asset_x, payload.start_date, payload.end_date
+        session, payload.asset_x, payload.start_date, payload.end_date, owner_sub
     )
     label_y, returns_y = await resolve_asset_returns(
-        session, payload.asset_y, payload.start_date, payload.end_date
+        session, payload.asset_y, payload.start_date, payload.end_date, owner_sub
     )
     return assemble_beta(
         label_x, returns_x, label_y, returns_y, max_points=max_points
@@ -602,6 +616,7 @@ async def run_rolling_correlation(
     payload: CorrelationRequest,
     *,
     max_points: int,
+    owner_sub: str | None = None,
 ) -> CorrelationResponse:
     """Orchestrate rolling correlation: resolve with a lookback pad, assemble.
 
@@ -612,10 +627,10 @@ async def run_rolling_correlation(
         days=lookback_pad_days(payload.window)
     )
     label_x, returns_x = await resolve_asset_returns(
-        session, payload.asset_x, pad_start, payload.end_date
+        session, payload.asset_x, pad_start, payload.end_date, owner_sub
     )
     label_y, returns_y = await resolve_asset_returns(
-        session, payload.asset_y, pad_start, payload.end_date
+        session, payload.asset_y, pad_start, payload.end_date, owner_sub
     )
     return assemble_rolling_correlation(
         label_x,
@@ -669,6 +684,7 @@ def assemble_stock_correlation(
 async def run_stock_correlation(
     session: AsyncSession,
     payload: StockCorrelationRequest,
+    owner_sub: str | None = None,
 ) -> StockCorrelationResponse:
     """Orchestrate the holdings correlation matrix over a trailing window.
 
@@ -680,7 +696,7 @@ async def run_stock_correlation(
     end = payload.end_date or dt.date.today()
     pad_start = end - dt.timedelta(days=lookback_pad_days(payload.window + 1))
     _, _, series_by_ticker = await _load_portfolio_prices(
-        session, payload.portfolio_id, pad_start, end
+        session, payload.portfolio_id, pad_start, end, owner_sub
     )
     return assemble_stock_correlation(series_by_ticker, window=payload.window)
 
@@ -690,10 +706,13 @@ class _VersionedStockCorrelation(BaseModel):
 
     request: StockCorrelationRequest
     portfolio_version: str
+    owner_sub: str | None = None
 
 
 @cached_result("stat_stock_correlation")
 async def _run_stock_correlation_cached(
     session: AsyncSession, payload: _VersionedStockCorrelation
 ) -> StockCorrelationResponse:
-    return await run_stock_correlation(session, payload.request)
+    return await run_stock_correlation(
+        session, payload.request, owner_sub=payload.owner_sub
+    )

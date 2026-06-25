@@ -15,6 +15,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from app.core.auth import CurrentUser, get_current_user
 from app.core.db import get_session
 from app.main import create_app
 from app.services import statistics as statistics_service
@@ -54,6 +55,9 @@ END = dt.date.today().isoformat()
 def _app_with_overrides() -> FastAPI:
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
+    app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        sub="u-1", org_id=None, claims={}
+    )
     return app
 
 
@@ -69,7 +73,10 @@ def _install_stubs(
     ) -> list[AdjCloseRow]:
         return [r for r in rows_map.get(ticker, []) if start <= r[0] <= end]
 
-    async def fake_get_portfolio(session: Any, portfolio_id: int) -> Any | None:
+    async def fake_get_portfolio(
+        session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> Any | None:
+        assert owner_sub in ("u-1", None)
         if portfolio is not None and portfolio_id == portfolio.id:
             return portfolio
         return None

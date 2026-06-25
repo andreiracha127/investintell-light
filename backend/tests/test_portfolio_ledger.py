@@ -125,7 +125,9 @@ async def test_create_transaction_route_normalizes_checks_coverage_and_persists(
     received: list[Any] = []
     materialized: list[int] = []
 
-    async def fake_exists(session: Any, portfolio_id: int) -> bool:
+    async def fake_exists(
+        session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> bool:
         return True
 
     async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
@@ -180,7 +182,9 @@ async def test_create_transaction_route_skips_eod_check_for_funds(
 ) -> None:
     materialized: list[int] = []
 
-    async def fake_exists(session: Any, portfolio_id: int) -> bool:
+    async def fake_exists(
+        session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> bool:
         return True
 
     async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
@@ -237,7 +241,9 @@ async def test_create_transaction_route_maps_oversell_to_422(
 ) -> None:
     materialized: list[int] = []
 
-    async def fake_exists(session: Any, portfolio_id: int) -> bool:
+    async def fake_exists(
+        session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> bool:
         return True
 
     async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
@@ -278,7 +284,9 @@ async def test_nav_route_returns_transaction_aware_nav(
     d2 = dt.date(2026, 1, 2)
     d3 = dt.date(2026, 1, 3)
 
-    async def fake_get_portfolio(session: Any, portfolio_id: int) -> SimpleNamespace:
+    async def fake_get_portfolio(
+        session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> SimpleNamespace:
         return SimpleNamespace(id=portfolio_id, inception_date=dt.date(2025, 12, 31))
 
     async def fake_nav(
@@ -332,7 +340,9 @@ async def test_nav_route_returns_transaction_aware_nav(
 async def test_nav_route_empty_ledger_returns_empty_series(
     monkeypatch: pytest.MonkeyPatch, ensure_calls: list[list[str]]
 ) -> None:
-    async def fake_get_portfolio(session: Any, portfolio_id: int) -> SimpleNamespace:
+    async def fake_get_portfolio(
+        session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> SimpleNamespace:
         return SimpleNamespace(id=portfolio_id, inception_date=dt.date(2025, 12, 31))
 
     async def fake_nav(
@@ -373,7 +383,9 @@ async def test_materialize_portfolio_nav_rebuilds_daily_rows(
         async def flush(self) -> None:
             return None
 
-    async def fake_get_portfolio(session: Any, portfolio_id: int) -> SimpleNamespace:
+    async def fake_get_portfolio(
+        session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> SimpleNamespace:
         return SimpleNamespace(id=portfolio_id, inception_date=d1)
 
     async def fake_transactions(session: Any, portfolio_id: int) -> list[SimpleNamespace]:

@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.auth import CurrentUser, get_current_user
 from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.result_cache import portfolio_version_hash
@@ -48,14 +49,20 @@ from app.services.statistics import (
 )
 from app.services.stock_analysis import StockAnalysisError
 
-router = APIRouter(prefix="/statistics", tags=["statistics"])
+router = APIRouter(
+    prefix="/statistics",
+    tags=["statistics"],
+    dependencies=[Depends(get_current_user)],
+)
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
 @router.post("/scenario", response_model=ScenarioResponse)
 async def scenario(
-    payload: ScenarioRequest, session: SessionDep
+    payload: ScenarioRequest,
+    session: SessionDep,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> ScenarioResponse:
     """Historical replay of a persisted portfolio over an explicit window.
 
@@ -69,13 +76,18 @@ async def scenario(
             pf = (
                 await session.execute(
                     select(Portfolio)
-                    .where(Portfolio.id == payload.portfolio_id)
+                    .where(
+                        Portfolio.id == payload.portfolio_id,
+                        Portfolio.owner_sub == user.sub,
+                    )
                     .options(selectinload(Portfolio.positions))
                 )
             ).scalar_one_or_none()
             if pf is not None:
                 versioned = _VersionedScenario(
-                    request=payload, portfolio_version=portfolio_version_hash(pf)
+                    request=payload,
+                    portfolio_version=portfolio_version_hash(pf),
+                    owner_sub=user.sub,
                 )
                 return await _run_scenario_cached(
                     session, versioned, max_points=settings.price_series_max_points
@@ -84,6 +96,7 @@ async def scenario(
             session,
             payload,
             max_points=settings.price_series_max_points,
+            owner_sub=user.sub,
         )
     except StockAnalysisError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -91,7 +104,9 @@ async def scenario(
 
 @router.post("/beta", response_model=BetaResponse)
 async def beta_scatter(
-    payload: BetaRequest, session: SessionDep
+    payload: BetaRequest,
+    session: SessionDep,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> BetaResponse:
     """Daily-return scatter + OLS regression of two pseudo-assets (y on x)."""
     try:
@@ -99,6 +114,7 @@ async def beta_scatter(
             session,
             payload,
             max_points=get_settings().price_series_max_points,
+            owner_sub=user.sub,
         )
     except StockAnalysisError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -106,7 +122,9 @@ async def beta_scatter(
 
 @router.post("/correlation", response_model=CorrelationResponse)
 async def rolling_correlation(
-    payload: CorrelationRequest, session: SessionDep
+    payload: CorrelationRequest,
+    session: SessionDep,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> CorrelationResponse:
     """Rolling correlation of two pseudo-assets, warm from the window start."""
     try:
@@ -114,6 +132,7 @@ async def rolling_correlation(
             session,
             payload,
             max_points=get_settings().price_series_max_points,
+            owner_sub=user.sub,
         )
     except StockAnalysisError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -121,7 +140,9 @@ async def rolling_correlation(
 
 @router.post("/stock-correlation", response_model=StockCorrelationResponse)
 async def stock_correlation(
-    payload: StockCorrelationRequest, session: SessionDep
+    payload: StockCorrelationRequest,
+    session: SessionDep,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> StockCorrelationResponse:
     """Pairwise correlation matrix of a portfolio's holdings (trailing window)."""
     try:
@@ -129,15 +150,22 @@ async def stock_correlation(
             pf = (
                 await session.execute(
                     select(Portfolio)
-                    .where(Portfolio.id == payload.portfolio_id)
+                    .where(
+                        Portfolio.id == payload.portfolio_id,
+                        Portfolio.owner_sub == user.sub,
+                    )
                     .options(selectinload(Portfolio.positions))
                 )
             ).scalar_one_or_none()
             if pf is not None:
                 versioned = _VersionedStockCorrelation(
-                    request=payload, portfolio_version=portfolio_version_hash(pf)
+                    request=payload,
+                    portfolio_version=portfolio_version_hash(pf),
+                    owner_sub=user.sub,
                 )
                 return await _run_stock_correlation_cached(session, versioned)
-        return await statistics_service.run_stock_correlation(session, payload)
+        return await statistics_service.run_stock_correlation(
+            session, payload, owner_sub=user.sub
+        )
     except StockAnalysisError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

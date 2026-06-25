@@ -79,11 +79,17 @@ class MemoryCache:
             self._data.pop(next(iter(self._data)), None)
         self._data[key] = (time.monotonic() + ttl, body, media_type)
 
+    def delete_prefix(self, prefix: str) -> None:
+        for key in list(self._data):
+            if key.startswith(prefix):
+                self._data.pop(key, None)
+
 
 class CatalogCache:
     """Fachada Redis-com-fallback usada pelo middleware e pelo /health."""
 
-    def __init__(self) -> None:
+    def __init__(self, label: str = "cache de catálogo") -> None:
+        self._label = label
         self._memory = MemoryCache()
         self._redis: Any | None = None
         self._redis_failed_logged = False
@@ -108,10 +114,11 @@ class CatalogCache:
         if not self._redis_failed_logged:
             self._redis_failed_logged = True
             logger.warning(
-                "Redis indisponível (%s: %s) — cache de catálogo seguindo "
+                "Redis indisponível (%s: %s) — %s seguindo "
                 "em memória (fail-open). Próximas falhas não serão logadas.",
                 type(exc).__name__,
                 exc,
+                self._label,
             )
 
     async def get(self, key: str) -> tuple[bytes, str] | None:
@@ -147,6 +154,27 @@ class CatalogCache:
                 self._log_redis_failure_once(exc)
         self._memory.set(key, body, media_type, ttl)
 
+    async def delete_prefix(self, prefix: str) -> None:
+        client = None
+        try:
+            client = self._redis_client()
+        except Exception as exc:
+            self._log_redis_failure_once(exc)
+        if client is not None:
+            try:
+                cursor = 0
+                while True:
+                    cursor, keys = await client.scan(
+                        cursor=cursor, match=f"{prefix}*", count=100
+                    )
+                    if keys:
+                        await client.delete(*keys)
+                    if cursor == 0:
+                        break
+            except Exception as exc:
+                self._log_redis_failure_once(exc)
+        self._memory.delete_prefix(prefix)
+
     async def active_backend(self) -> str:
         """'redis' | 'memory' — exposto no /health para verificação externa."""
         try:
@@ -161,6 +189,11 @@ class CatalogCache:
 
 # Instância única do processo (o middleware e o /health compartilham).
 catalog_cache = CatalogCache()
+portfolio_response_cache = CatalogCache("cache privado de portfolio")
+
+
+def response_cache_version() -> str:
+    return _CACHE_VERSION
 
 
 def cache_key(request: Request) -> str:

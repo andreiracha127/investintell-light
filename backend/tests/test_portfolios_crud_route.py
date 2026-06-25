@@ -112,8 +112,14 @@ async def test_create_portfolio_201_normalizes_and_ensures(
 ) -> None:
     received: list[Any] = []
 
-    async def fake_create(session: Any, payload: Any) -> SimpleNamespace:
-        received.append(payload)
+    async def fake_create(
+        session: Any,
+        payload: Any,
+        owner_sub: str,
+        org_id: str | None,
+        **kwargs: Any,
+    ) -> SimpleNamespace:
+        received.append((payload, owner_sub, org_id, kwargs.get("origin", "manual")))
         return _portfolio(
             positions=[_position(), _position("MSFT", 5.0, None)]
         )
@@ -142,8 +148,10 @@ async def test_create_portfolio_201_normalizes_and_ensures(
         _position_json("MSFT", 5.0, None),
     ]
     # Name trimmed and tickers uppercased BEFORE the service sees them.
-    assert received[0].name == "Test"
-    assert [p.ticker for p in received[0].positions] == ["AAPL", "MSFT"]
+    persisted, owner_sub, org_id, origin = received[0]
+    assert persisted.name == "Test"
+    assert [p.ticker for p in persisted.positions] == ["AAPL", "MSFT"]
+    assert (owner_sub, org_id, origin) == ("u-1", None, "manual")
     # Tickers were validated against local EOD coverage in one DB check.
     assert ensure_calls == [["AAPL", "MSFT"]]
 
@@ -151,7 +159,9 @@ async def test_create_portfolio_201_normalizes_and_ensures(
 async def test_create_without_positions_skips_the_ensure(
     monkeypatch: pytest.MonkeyPatch, ensure_calls: list[list[str]]
 ) -> None:
-    async def fake_create(session: Any, payload: Any) -> SimpleNamespace:
+    async def fake_create(
+        session: Any, payload: Any, *_args: Any, **_kwargs: Any
+    ) -> SimpleNamespace:
         return _portfolio(name="Empty", cash=100.0)
 
     monkeypatch.setattr(portfolio_crud, "create_portfolio", fake_create)
@@ -166,7 +176,9 @@ async def test_create_without_positions_skips_the_ensure(
 async def test_create_duplicate_name_returns_409(
     monkeypatch: pytest.MonkeyPatch, ensure_calls: list[list[str]]
 ) -> None:
-    async def fake_create(session: Any, payload: Any) -> SimpleNamespace:
+    async def fake_create(
+        session: Any, payload: Any, *_args: Any, **_kwargs: Any
+    ) -> SimpleNamespace:
         raise portfolio_crud.DuplicatePortfolioNameError(
             "A portfolio named 'Test' already exists."
         )
@@ -190,7 +202,9 @@ async def test_create_with_missing_local_price_returns_404_before_persisting(
 
     created: list[Any] = []
 
-    async def fake_create(session: Any, payload: Any) -> SimpleNamespace:
+    async def fake_create(
+        session: Any, payload: Any, *_args: Any, **_kwargs: Any
+    ) -> SimpleNamespace:
         created.append(payload)
         return _portfolio()
 
@@ -299,7 +313,8 @@ async def test_list_portfolios_shape(monkeypatch: pytest.MonkeyPatch) -> None:
         ),
     ]
 
-    async def fake_list(session: Any) -> list[SimpleNamespace]:
+    async def fake_list(session: Any, owner_sub: str) -> list[SimpleNamespace]:
+        assert owner_sub == "u-1"
         return rows
 
     monkeypatch.setattr(portfolio_crud, "list_portfolios", fake_list)
@@ -322,7 +337,10 @@ async def test_list_portfolios_shape(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_get_portfolio_200(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_get(session: Any, portfolio_id: int) -> SimpleNamespace:
+    async def fake_get(
+        session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> SimpleNamespace:
+        assert owner_sub == "u-1"
         return _portfolio(pid=portfolio_id, positions=[_position()])
 
     monkeypatch.setattr(portfolio_crud, "get_portfolio", fake_get)
@@ -336,7 +354,10 @@ async def test_get_portfolio_200(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_get_portfolio_404(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_get(session: Any, portfolio_id: int) -> None:
+    async def fake_get(
+        session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> None:
+        assert owner_sub == "u-1"
         return None
 
     monkeypatch.setattr(portfolio_crud, "get_portfolio", fake_get)
@@ -358,11 +379,13 @@ async def test_patch_portfolio_200(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_update(
         session: Any,
         portfolio_id: int,
+        owner_sub: str,
         *,
         name: str | None,
         cash: float | None,
         inception_date: Any = portfolio_crud.UNSET,
     ) -> SimpleNamespace:
+        assert owner_sub == "u-1"
         received.append({"name": name, "cash": cash, "inception_date": inception_date})
         return _portfolio(pid=portfolio_id, name=name or "Test", cash=cash or 0.0)
 
@@ -385,11 +408,13 @@ async def test_patch_portfolio_inception_date_200(
     async def fake_update(
         session: Any,
         portfolio_id: int,
+        owner_sub: str,
         *,
         name: str | None,
         cash: float | None,
         inception_date: Any = portfolio_crud.UNSET,
     ) -> SimpleNamespace:
+        assert owner_sub == "u-1"
         received.append(inception_date)
         return _portfolio(
             pid=portfolio_id,
@@ -409,7 +434,10 @@ async def test_patch_portfolio_inception_date_200(
 
 
 async def test_patch_portfolio_404(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_update(session: Any, portfolio_id: int, **kwargs: Any) -> None:
+    async def fake_update(
+        session: Any, portfolio_id: int, owner_sub: str, **kwargs: Any
+    ) -> None:
+        assert owner_sub == "u-1"
         return None
 
     monkeypatch.setattr(portfolio_crud, "update_portfolio", fake_update)
@@ -420,7 +448,10 @@ async def test_patch_portfolio_404(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_patch_duplicate_name_returns_409(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_update(session: Any, portfolio_id: int, **kwargs: Any) -> None:
+    async def fake_update(
+        session: Any, portfolio_id: int, owner_sub: str, **kwargs: Any
+    ) -> None:
+        assert owner_sub == "u-1"
         raise portfolio_crud.DuplicatePortfolioNameError("taken")
 
     monkeypatch.setattr(portfolio_crud, "update_portfolio", fake_update)
@@ -444,7 +475,10 @@ async def test_patch_empty_body_returns_422() -> None:
 
 
 async def test_delete_portfolio_204(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_delete(session: Any, portfolio_id: int) -> bool:
+    async def fake_delete(
+        session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> bool:
+        assert owner_sub == "u-1"
         return True
 
     monkeypatch.setattr(portfolio_crud, "delete_portfolio", fake_delete)
@@ -456,7 +490,10 @@ async def test_delete_portfolio_204(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_delete_portfolio_404(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_delete(session: Any, portfolio_id: int) -> bool:
+    async def fake_delete(
+        session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> bool:
+        assert owner_sub == "u-1"
         return False
 
     monkeypatch.setattr(portfolio_crud, "delete_portfolio", fake_delete)
@@ -480,7 +517,10 @@ def _install_put_stubs(
 ) -> dict[str, list[Any]]:
     calls: dict[str, list[Any]] = {"insert": [], "update": []}
 
-    async def fake_exists(session: Any, portfolio_id: int) -> bool:
+    async def fake_exists(
+        session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> bool:
+        assert owner_sub == "u-1"
         return portfolio_found
 
     async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
@@ -709,7 +749,10 @@ async def test_put_position_invalid_body_422(
 async def test_delete_position_204(monkeypatch: pytest.MonkeyPatch) -> None:
     received: list[tuple[int, str]] = []
 
-    async def fake_delete(session: Any, portfolio_id: int, ticker: str) -> bool:
+    async def fake_delete(
+        session: Any, portfolio_id: int, ticker: str, owner_sub: str | None = None
+    ) -> bool:
+        assert owner_sub == "u-1"
         received.append((portfolio_id, ticker))
         return True
 
@@ -722,7 +765,10 @@ async def test_delete_position_204(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_delete_position_404(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_delete(session: Any, portfolio_id: int, ticker: str) -> bool:
+    async def fake_delete(
+        session: Any, portfolio_id: int, ticker: str, owner_sub: str | None = None
+    ) -> bool:
+        assert owner_sub == "u-1"
         return False
 
     monkeypatch.setattr(portfolio_crud, "delete_position", fake_delete)

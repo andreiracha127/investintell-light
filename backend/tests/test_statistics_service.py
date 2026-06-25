@@ -212,7 +212,9 @@ def _install_resolver_stubs(
         sliced = series[(series.index.date >= start) & (series.index.date <= end)]
         return [(ts.date(), float(v)) for ts, v in sliced.items()]
 
-    async def fake_get_portfolio(session: Any, portfolio_id: int) -> Any | None:
+    async def fake_get_portfolio(
+        session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> Any | None:
         return portfolio if portfolio is not None and portfolio.id == portfolio_id else None
 
     async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:

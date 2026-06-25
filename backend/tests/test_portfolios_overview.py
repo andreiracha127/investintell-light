@@ -75,7 +75,10 @@ def _install_stubs(
 ) -> list[list[str]]:
     coverage_checks: list[list[str]] = []
 
-    async def fake_get(session: Any, portfolio_id: int) -> SimpleNamespace | None:
+    async def fake_get(
+        session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> SimpleNamespace | None:
+        assert owner_sub == "u-1"
         return portfolio
 
     async def fake_closes(session: Any, tickers: Any) -> ClosesMap:
