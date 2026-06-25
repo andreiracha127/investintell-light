@@ -32,7 +32,15 @@ vi.mock("@/components/charts/HighchartsChart", () => ({
 }));
 
 vi.mock("@/components/funds/FundLookthroughSection", () => ({
-  FundLookthroughSection: () => <div data-testid="lookthrough-section" />,
+  FundLookthroughSection: ({
+    holdingsTop,
+  }: {
+    holdingsTop?: { top_holdings?: Array<{ sector_label?: string | null }> };
+  }) => (
+    <div data-testid="lookthrough-section">
+      {holdingsTop?.top_holdings?.[0]?.sector_label}
+    </div>
+  ),
 }));
 
 vi.mock("@/lib/charts/chartColors", () => ({

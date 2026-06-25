@@ -60,6 +60,9 @@ describe("StockChart wrapper", () => {
         onRangeChange={() => {}}
       />,
     );
+    expect(
+      document.querySelector(".highcharts-bindings-container"),
+    ).toBeInTheDocument();
     await vi.waitFor(() => expect(stockChart).toHaveBeenCalledTimes(1));
     unmount();
   });

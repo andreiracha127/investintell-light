@@ -1,16 +1,13 @@
 "use client";
 
 /**
- * Consolidated exposure (look-through) for the portfolio page — Claude Design.
+ * Consolidated exposure (look-through) for the portfolio page.
  *
  * Fetches one portfolio look-through hierarchy and renders the exposure view:
- * a KPI strip plus one Sunburst replacing the old four heavy dimension tabs.
- *
- * The shared `LookthroughPanel` (bar variant) stays in use by the fund pages;
- * this view is portfolio-specific so the funds UI is untouched. 404 → renders
+ * a KPI strip plus the shared Sunburst + Grid exposure map. 404 → renders
  * nothing; other errors use the standard error panel.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
@@ -18,8 +15,7 @@ import {
   fetchPortfolioLookthroughTree,
 } from "@/lib/api/client";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
-import { HighchartsChart } from "@/components/charts/HighchartsChart";
-import { buildHcExposureSunburstOption } from "@/lib/charts/hc/sunburst";
+import { ExposureSunburstGrid } from "@/components/lookthrough/ExposureSunburstGrid";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { InfoDot, KpiTile } from "@/components/ui/panels";
 import { formatDate, formatNumber } from "@/lib/format";
@@ -49,10 +45,6 @@ export function PortfolioLookthroughSection({
   });
 
   const data = query.data;
-  const sunburstOption = useMemo(() => {
-    if (!colors || !data) return null;
-    return buildHcExposureSunburstOption(data.tree, data.dimensions.asset_class, colors);
-  }, [colors, data]);
 
   if (
     query.isError &&
@@ -81,7 +73,7 @@ export function PortfolioLookthroughSection({
   }
 
   if (!data) return null;
-  const assetItems = data.dimensions.asset_class;
+  const assetItems = data.dimensions.asset_class ?? [];
   const tree = data.tree;
   if (tree.length === 0 && assetItems.length === 0) return null;
 
@@ -135,24 +127,16 @@ export function PortfolioLookthroughSection({
         />
       </div>
 
-      <section className="border border-border bg-surface-2 px-5 pb-6 pt-7">
-        <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-          <h3 className="ix-label m-0">
-            Look-through sunburst
-          </h3>
-          <span className="text-[10.5px] text-text-muted">
-            Asset class / fund / holding
-          </span>
-        </div>
-        {sunburstOption && (
-          <HighchartsChart
-            options={sunburstOption}
-            className="h-[520px] w-full md:h-[640px]"
-            isEmpty={tree.length === 0}
-            emptyMessage="No exposure hierarchy available."
-          />
-        )}
-      </section>
+      {colors && (
+        <ExposureSunburstGrid
+          title="Exposure map"
+          subtitle="Asset class / fund / holding"
+          rootName="Portfolio"
+          tree={tree}
+          assetItems={assetItems}
+          colors={colors}
+        />
+      )}
     </div>
   );
 }

@@ -325,7 +325,7 @@ export function StockChart({
   const badge = FEED_BADGE[feed];
 
   return (
-    <div className={`flex flex-col ${className ?? ""}`}>
+    <div className={`highcharts-bindings-container flex flex-col ${className ?? ""}`}>
       <div className="flex flex-wrap items-center gap-2 pb-2">
         <SymbolSearchInput active={null} onSelect={(item) => void addCompare(item)} />
         <div className="flex flex-wrap items-center gap-1">
@@ -368,7 +368,7 @@ export function StockChart({
           {badge.label}
         </span>
       </div>
-      <div className="relative flex-1">
+      <div className="relative min-h-0 flex-1 bg-surface-1">
         <div ref={containerRef} className="h-full w-full" />
         {showEmpty && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4 text-center text-[13px] text-text-muted">

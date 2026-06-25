@@ -108,34 +108,6 @@ function displayText(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
-const RAW_NPORT_SECTOR_CODES = new Set([
-  "ABS",
-  "CMO",
-  "CORP",
-  "GOVT",
-  "MBS",
-  "MUNI",
-  "OTHER",
-  "SUPRA",
-]);
-
-function friendlySectorText(value: string | null | undefined): string | null {
-  const text = displayText(value);
-  if (!text) return null;
-  return RAW_NPORT_SECTOR_CODES.has(text.toUpperCase()) ? null : text;
-}
-
-function holdingSectorLabel(
-  holding: FundHoldingsTop["top_holdings"][number],
-): string {
-  return (
-    friendlySectorText(holding.sector_label) ??
-    friendlySectorText(holding.gics_sector) ??
-    friendlySectorText(holding.sector) ??
-    "--"
-  );
-}
-
 function isUuidLike(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     value,
@@ -957,43 +929,11 @@ function HoldingsTab({
 }) {
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
-        <Card
-          title="Top holdings"
-          subtitle={
-            holdingsTopQuery.data?.report_date
-              ? `report ${formatDate(holdingsTopQuery.data.report_date)}`
-              : undefined
-          }
-        >
-          {holdingsTopQuery.data ? (
-            <HoldingsTable data={holdingsTopQuery.data} />
-          ) : (
-            <QueryMessage
-              query={holdingsTopQuery}
-              emptyMessage="No N-PORT holdings synced for this fund."
-              loadingMessage="Loading holdings..."
-            />
-          )}
-        </Card>
-
-        <div className="flex flex-col gap-4">
-          <ActiveSharePanel query={activeShareQuery} />
-          <Card title="Sector breakdown">
-            {holdingsTopQuery.data ? (
-              <SectorBreakdown data={holdingsTopQuery.data} />
-            ) : (
-              <QueryMessage
-                query={holdingsTopQuery}
-                emptyMessage="No sector exposure for this fund."
-                loadingMessage="Loading sector exposure..."
-              />
-            )}
-          </Card>
-        </div>
-      </div>
-
-      <FundLookthroughSection instrumentId={instrumentId} />
+      <FundLookthroughSection
+        instrumentId={instrumentId}
+        holdingsTop={holdingsTopQuery.data}
+      />
+      <ActiveSharePanel query={activeShareQuery} />
     </div>
   );
 }
@@ -1586,90 +1526,6 @@ function EmptyStatePanel({ reason, source }: { reason: string; source?: string |
     <div className="border border-border bg-field px-3 py-4 text-[13px] text-text-secondary">
       <p className="m-0">{reason}</p>
       {source && <p className="m-0 mt-1 text-[11px] text-text-muted">{source}</p>}
-    </div>
-  );
-}
-
-function HoldingsTable({ data }: { data: FundHoldingsTop }) {
-  if (data.top_holdings.length === 0) {
-    return <EmptyMessage message="No top holdings returned." />;
-  }
-
-  return (
-    <>
-      <table className="w-full border-collapse ix-fs tabular-nums lining-nums">
-        <thead>
-          <tr className="bg-field">
-            <Th className="w-10">#</Th>
-            <Th>Issuer / Issue</Th>
-            <Th>Sector</Th>
-            <Th align="right">% NAV</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.top_holdings.map((holding, index) => (
-            <tr
-              key={`${holding.rank}-${holding.cusip ?? holding.isin ?? index}`}
-              className={`border-b border-border transition-colors hover:bg-accent-wash ${
-                index % 2 === 1 ? "bg-zebra" : ""
-              }`}
-            >
-              <Td className="text-text-muted">{holding.rank}</Td>
-              <Td>
-                <span className="block max-w-[360px] truncate">
-                  {holding.issuer_name ?? "--"}
-                </span>
-                {(holding.cusip ?? holding.isin) && (
-                  <span className="block text-[10px] tabular-nums text-text-muted">
-                    {holding.cusip ? `CUSIP ${holding.cusip}` : `ISIN ${holding.isin}`}
-                  </span>
-                )}
-              </Td>
-              <Td className="text-text-secondary">
-                <span className="block max-w-[220px] truncate">
-                  {holdingSectorLabel(holding)}
-                </span>
-              </Td>
-              <Td align="right">
-                {holding.pct_of_nav != null ? `${formatNumber(holding.pct_of_nav)}%` : "--"}
-              </Td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="mt-2 text-[11px] text-text-muted">
-        {data.pct_of_nav_total != null
-          ? `Reported holdings sum to ${formatNumber(data.pct_of_nav_total, 1)}% of NAV`
-          : "Reported holdings total unavailable."}
-      </p>
-    </>
-  );
-}
-
-function SectorBreakdown({ data }: { data: FundHoldingsTop }) {
-  if (data.sector_breakdown.length === 0) {
-    return <EmptyMessage message="No sector breakdown returned." />;
-  }
-
-  const max = Math.max(...data.sector_breakdown.map((item) => item.total_pct), 0);
-  return (
-    <div className="space-y-2">
-      {data.sector_breakdown.map((item) => (
-        <div key={item.key}>
-          <div className="mb-1 flex items-center justify-between gap-3 text-[11px]">
-            <span className="truncate text-text-secondary">{item.label}</span>
-            <span className="tabular-nums font-bold text-text-primary">
-              {formatNumber(item.total_pct)}%
-            </span>
-          </div>
-          <div className="h-[8px] bg-field">
-            <div
-              className="h-full bg-accent"
-              style={{ width: `${max > 0 ? (item.total_pct / max) * 100 : 0}%` }}
-            />
-          </div>
-        </div>
-      ))}
     </div>
   );
 }

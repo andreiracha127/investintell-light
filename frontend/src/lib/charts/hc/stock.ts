@@ -133,7 +133,13 @@ export function buildStockOptions(input: StockOptionsInput): Options {
   });
 
   return {
-    chart: { spacingTop: 8, spacingRight: 8, spacingBottom: 8, spacingLeft: 8 },
+    chart: {
+      backgroundColor: "transparent",
+      spacingTop: 8,
+      spacingRight: 8,
+      spacingBottom: 8,
+      spacingLeft: 8,
+    },
     rangeSelector: {
       enabled: true,
       selected: selectedRangeIndex,

@@ -5,7 +5,7 @@
  * holding. Direct stocks can skip the fund series level and appear as final
  * holding leaves under asset class.
  */
-import type { Options, PointOptionsObject } from "highcharts";
+import type { Options, Point, PointOptionsObject } from "highcharts";
 
 import type { ExposureItem, PortfolioLookthrough } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
@@ -33,6 +33,7 @@ const ASSET_CLASS_LABELS: Record<string, string> = {
   UNKNOWN: "Unclassified",
 };
 
+const ROOT_ID = "portfolio-root";
 const round4 = (value: number) => parseFloat(value.toFixed(4));
 
 export function assetClassLabel(key: string, fallback?: string | null): string {
@@ -41,6 +42,13 @@ export function assetClassLabel(key: string, fallback?: string | null): string {
     ?? ASSET_CLASS_LABELS[trimmed.toUpperCase()]
     ?? fallback
     ?? key;
+}
+
+export interface ExposureSunburstOptions {
+  activeId?: string | null;
+  rootName?: string;
+  valueLabel?: string;
+  onPointFocus?: (id: string) => void;
 }
 
 function nodeLabel(node: PortfolioLookthrough["tree"][number]): string {
@@ -75,6 +83,7 @@ export function buildHcExposureSunburstOption(
   tree: PortfolioLookthrough["tree"],
   assetItems: ExposureItem[],
   colors: ChartColors,
+  opts: ExposureSunburstOptions = {},
 ): Options {
   const byId = new Map(tree.map((node) => [node.id, node]));
   const leaves = leafIds(tree);
@@ -96,7 +105,7 @@ export function buildHcExposureSunburstOption(
     {
       id: "portfolio-root",
       parent: "",
-      name: "Portfolio",
+      name: opts.rootName ?? "Portfolio",
       color: colors.surface,
       custom: {
         valuePct: assetItems.reduce((sum, item) => sum + item.total_pct, 0),
@@ -113,6 +122,9 @@ export function buildHcExposureSunburstOption(
         name: assetTotal?.label ?? nodeLabel(node),
         value: leaves.has(node.id) ? round4(node.value_pct) : undefined,
         color: colorByAsset.get(topId),
+        ...(node.id === opts.activeId
+          ? { borderColor: colors.accent, borderWidth: 3 }
+          : {}),
         custom: {
           rawKey: node.key,
           kind: node.kind,
@@ -146,7 +158,7 @@ export function buildHcExposureSunburstOption(
         return `<div style="font-size:12px"><b>${point.name}</b><br/>${formatNumber(
           value,
           2,
-        )}% of portfolio</div>`;
+        )}${opts.valueLabel ?? "% of NAV"}</div>`;
       },
     },
     plotOptions: {
@@ -154,6 +166,18 @@ export function buildHcExposureSunburstOption(
         borderColor: colors.surface,
         borderWidth: 1,
         cursor: "pointer",
+        point: {
+          events: {
+            click() {
+              const id = (this as Point).options.id;
+              if (id && id !== ROOT_ID) opts.onPointFocus?.(id);
+            },
+            mouseOver() {
+              const id = (this as Point).options.id;
+              if (id && id !== ROOT_ID) opts.onPointFocus?.(id);
+            },
+          },
+        },
         dataLabels: {
           formatter() {
             const point = (

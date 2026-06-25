@@ -83,6 +83,18 @@
 }
 .hcg-theme-graphite .ix-grid-elite { color: var(--color-accent); font-weight: 700; }
 
+/* Exposure Sunburst companion grid. */
+.hcg-theme-graphite .ix-grid-exposure,
+.hcg-theme-graphite .ix-grid-exposure-value {
+  display: block;
+  cursor: default;
+}
+.hcg-theme-graphite .ix-grid-exposure.ix-grid-active .ix-grid-trunc,
+.hcg-theme-graphite .ix-grid-exposure-value.ix-grid-active {
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
 /* Portfolio positions cell renderers. */
 .hcg-theme-graphite .ix-grid-sub { display: block; font-size: 11px; }
 .hcg-theme-graphite .ix-grid-name { display: block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--color-text-muted); }
