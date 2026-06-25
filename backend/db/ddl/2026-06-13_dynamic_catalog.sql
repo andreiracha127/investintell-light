@@ -358,7 +358,10 @@ SELECT CASE
         THEN 'Leveraged'
     WHEN text_blob ~ '\m(buffer|defined outcome|option strategy|option income|yieldmax|yieldboost|covered call|weeklypay|income strategy)\M'
         THEN 'Defined Outcome / Option Income'
-    WHEN text_blob ~ '\m(managed futures|merger arbitrage|alternative|multi strategy|hedge|long short|market neutral)\M'
+    WHEN text_blob ~ '\m(long short)\M'
+      AND text_blob ~ '\m(equity|stock|shares)\M'
+        THEN 'Long/Short Equity'
+    WHEN text_blob ~ '\m(managed futures|merger arbitrage|alternative|multi strategy|hedge|market neutral)\M'
         THEN 'Alternative'
     WHEN text_blob ~ '\m(real estate|reit)\M'
         THEN 'Real Estate'
@@ -657,7 +660,14 @@ SELECT
     ) AS name,
     CASE
         WHEN etf.series_id IS NOT NULL
-          OR (e.ticker IS NOT NULL AND etp.ticker IS NOT NULL) THEN 'etf'
+          OR (e.ticker IS NOT NULL AND etp.ticker IS NOT NULL)
+          OR lower(COALESCE(
+                 NULLIF(btrim(fc.series_name), ''),
+                 NULLIF(btrim(rf.fund_name), ''),
+                 NULLIF(btrim(etf.fund_name), ''),
+                 NULLIF(btrim(u.name), ''),
+                 ''
+             )) ~ '\m(etf|exchange traded fund)\M' THEN 'etf'
         WHEN mmf.series_id IS NOT NULL THEN 'mmf'
         ELSE 'mutual_fund'
     END AS fund_type,
@@ -666,6 +676,13 @@ SELECT
         CASE
             WHEN etf.series_id IS NOT NULL
               OR (e.ticker IS NOT NULL AND etp.ticker IS NOT NULL)
+              OR lower(COALESCE(
+                     NULLIF(btrim(fc.series_name), ''),
+                     NULLIF(btrim(rf.fund_name), ''),
+                     NULLIF(btrim(etf.fund_name), ''),
+                     NULLIF(btrim(u.name), ''),
+                     ''
+                 )) ~ '\m(etf|exchange traded fund)\M'
             THEN public.etf_strategy_label_from_identity(
                 e.ticker,
                 COALESCE(

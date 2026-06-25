@@ -72,6 +72,12 @@ SECTOR_CONVERTIBLE_OVERRIDES_DDL_PATH = (
     / "ddl"
     / "2026-06-21_sector_convertible_strategy_overrides.sql"
 )
+CLASSIFICATION_RECONCILIATION_DDL_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "db"
+    / "ddl"
+    / "2026-06-25_fund_classification_reconciliation.sql"
+)
 
 
 def test_stage_labels_sql_prefers_manual_overrides() -> None:
@@ -241,6 +247,29 @@ def test_funds_v_manual_strategy_overrides_win_source_labels() -> None:
     assert strategy_expr.index("manual_stage.label") < strategy_expr.index("rf.strategy_label")
 
 
+def test_funds_v_recovers_etf_identity_and_long_short_labels() -> None:
+    sql = DDL_PATH.read_text(encoding="utf-8")
+
+    function_start = sql.index(
+        "CREATE OR REPLACE FUNCTION public.etf_strategy_label_from_identity"
+    )
+    function_end = sql.index("CREATE OR REPLACE VIEW funds_v AS", function_start)
+    identity_function = sql[function_start:function_end]
+
+    assert "THEN 'Long/Short Equity'" in identity_function
+    assert identity_function.index("THEN 'Long/Short Equity'") < identity_function.index(
+        "THEN 'Alternative'"
+    )
+
+    fund_type_expr = sql[sql.index(") AS name,") : sql.index("END AS fund_type,")]
+    assert r"\m(etf|exchange traded fund)\M" in fund_type_expr
+    assert "fc.series_name" in fund_type_expr
+
+    strategy_expr = sql[sql.index("END AS fund_type,") : sql.index(") AS strategy_label,")]
+    assert r"\m(etf|exchange traded fund)\M" in strategy_expr
+    assert "public.etf_strategy_label_from_identity" in strategy_expr
+
+
 def test_dynamic_catalog_knows_alternative_sublabels() -> None:
     sql = DDL_PATH.read_text(encoding="utf-8")
 
@@ -372,6 +401,26 @@ def test_sector_convertible_override_migration_splits_broad_buckets() -> None:
     assert "('Financials Equity', 'XLF'" in benchmark_sql
     assert "('Preferred Securities', 'PFF'" in benchmark_sql
     assert "('Sector Rotation Equity', 'EQL'" in benchmark_sql
+
+
+def test_classification_reconciliation_uses_nport_lookthrough_guardrails() -> None:
+    sql = CLASSIFICATION_RECONCILIATION_DDL_PATH.read_text(encoding="utf-8")
+
+    assert "nport_lookthrough_exposures" in sql
+    assert "nport_lookthrough_summary" in sql
+    assert "f.strategy_label = 'Large Blend'" in sql
+    assert "f.asset_class = 'equity'" in sql
+    assert "coverage_pct >= 80" in sql
+    assert "fi_cash_pct >= 70" in sql
+    assert "coalesce(equity_pct, 0) < 50" in sql
+    assert "'Inverse / Hedge'" in sql
+    assert "'Defined Outcome / Option Income'" in sql
+    assert "'Structured Credit'" in sql
+    assert "'Intermediate-Term Bond'" in sql
+    assert "tax.?exempt" in sql
+    assert "large_blend_reconcile_debt_holdings" in sql
+    assert "existing.classification_source = 'manual_override'" in sql
+    assert "REFRESH MATERIALIZED VIEW public.funds_list_mv" in sql
 
 
 def test_funds_v_name_prefers_series_name_for_trusts() -> None:
