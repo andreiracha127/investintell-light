@@ -24,6 +24,7 @@ import math
 from collections.abc import Hashable, Iterable, Mapping
 
 import pandas as pd
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics import (
     MIN_IN_RANGE_RETURNS,
@@ -67,6 +68,8 @@ from app.services._series import (
 from app.services._series import (
     series_points as _series_points,
 )
+
+import app.services.series_sql as series_sql
 
 _HISTOGRAM_BINS = 20
 
@@ -337,5 +340,193 @@ def assemble_analysis(
             counts=histogram.counts,
             counts_normalized=histogram.counts_normalized,
         ),
+        stats=stats,
+    )
+
+
+async def assemble_analysis_sql(
+    session: AsyncSession,
+    asset: pd.DataFrame,
+    benchmark_adj_close: pd.Series,
+    *,
+    ticker: str,
+    name: str | None,
+    benchmark: str,
+    range_key: RangeKey,
+    window: int,
+    start: dt.date,
+    end: dt.date,
+    max_candles: int,
+) -> StockAnalysisResponse:
+    """SQL-backed analysis: rolling vol/beta/corr, histogram, VaR(95/99), CVaR(95)
+    come from fn_* functions; candles/cumulative/header/scalars stay in Python
+    (NOT in the §8 series-function set). Validates the same gates as
+    assemble_analysis before reading SQL series.
+
+    The Python-kept scalars (annualized_volatility, total_return, beta,
+    correlation, max_drawdown peak/trough, best/worst day) and the
+    candles/cumulative-return series remain pandas — they are intentionally
+    outside the moved series set. The legacy stock path emits NO drawdown LINE
+    series, so fn_drawdown is not used here.
+    """
+    # --- validation + returns (verbatim from assemble_analysis) ---
+    if len(asset) < 2:
+        raise InsufficientDataError(
+            f"Only {len(asset)} price rows available for {ticker} — "
+            "not enough history to compute returns."
+        )
+    if len(benchmark_adj_close) < 2:
+        raise InsufficientDataError(
+            f"Only {len(benchmark_adj_close)} price rows available for benchmark "
+            f"{benchmark} — not enough history to compute returns."
+        )
+
+    start_ts = pd.Timestamp(start)
+    asset_returns = simple_returns(asset["adj_close"])
+    bench_returns = simple_returns(benchmark_adj_close)
+
+    in_range_returns = asset_returns[asset_returns.index > start_ts]
+    if len(in_range_returns) < MIN_IN_RANGE_RETURNS:
+        raise InsufficientDataError(
+            f"Only {len(in_range_returns)} in-range daily returns for {ticker} over range "
+            f"{range_key} — at least {MIN_IN_RANGE_RETURNS} are required for the stats "
+            "block. Use a wider range or a ticker with more history."
+        )
+
+    try:
+        aligned_asset, aligned_bench = align_returns(asset_returns, bench_returns)
+    except ValueError as exc:
+        raise InsufficientDataError(
+            f"{ticker} and benchmark {benchmark} share too few trading days: {exc}"
+        ) from exc
+
+    in_mask = aligned_asset.index > start_ts
+    aligned_in_asset = aligned_asset[in_mask]
+    aligned_in_bench = aligned_bench[in_mask]
+    if len(aligned_in_asset) < MIN_IN_RANGE_RETURNS:
+        raise InsufficientDataError(
+            f"Only {len(aligned_in_asset)} in-range trading days shared by {ticker} and "
+            f"benchmark {benchmark} — at least {MIN_IN_RANGE_RETURNS} are required for "
+            "beta/correlation."
+        )
+    if len(asset_returns) < window or len(aligned_asset) < window:
+        raise InsufficientDataError(
+            f"Rolling window of {window} trading days exceeds the available padded history "
+            f"({len(asset_returns)} asset returns, {len(aligned_asset)} aligned with "
+            f"{benchmark}). Reduce the window or use a ticker/benchmark with more history."
+        )
+
+    # Header (verbatim).
+    last_close = float(asset["close"].iloc[-1])
+    prev_close = float(asset["close"].iloc[-2])
+    change = last_close - prev_close
+    header = AnalysisHeader(
+        ticker=ticker,
+        name=name,
+        last_close=last_close,
+        prev_close=prev_close,
+        change=change,
+        change_pct=change / prev_close,
+        as_of=_to_date(asset.index[-1]),
+    )
+
+    # Candles (verbatim).
+    weekly_display = range_key in _WEEKLY_DISPLAY_RANGES
+    visible = asset[asset.index >= start_ts]
+    candle_frame = _weekly_candles(visible) if weekly_display else visible
+    if len(candle_frame) > max_candles:
+        raise PayloadTooLargeError(
+            f"Range {range_key} for {ticker} would emit {len(candle_frame)} candles, "
+            f"exceeding the maximum of {max_candles}."
+        )
+
+    # Cumulative returns (verbatim).
+    if weekly_display:
+        cumulative = CumulativeReturns(
+            asset=_rebased_cumulative_weekly(aligned_in_asset),
+            benchmark=_rebased_cumulative_weekly(aligned_in_bench),
+        )
+    else:
+        cumulative = CumulativeReturns(
+            asset=_rebased_cumulative(aligned_in_asset),
+            benchmark=_rebased_cumulative(aligned_in_bench),
+        )
+
+    # Rolling series via SQL (the moved set). Slice strict + weekly downsample
+    # without pandas, mirroring the legacy `date > start` + W-FRI semantics.
+    vol_full, _ = await series_sql.rolling_metrics_points(
+        session, ticker=ticker, window=window, start=start, end=end
+    )
+    beta_full, corr_full = await series_sql.rolling_beta_corr_points(
+        session, ticker=ticker, benchmark=benchmark, window=window, start=start, end=end
+    )
+
+    def _sl(points: list[series_sql.SeriesPoint]) -> list[series_sql.SeriesPoint]:
+        out = series_sql.slice_strict(points, start)
+        return series_sql.week_downsample(out) if weekly_display else out
+
+    rolling_vol_points = _sl(vol_full)
+    rolling_beta_points = _sl(beta_full)
+    rolling_corr_points = _sl(corr_full)
+
+    _all_line_series = [
+        cumulative.asset,
+        cumulative.benchmark,
+        rolling_vol_points,
+        rolling_beta_points,
+        rolling_corr_points,
+    ]
+    longest = max(len(s) for s in _all_line_series)
+    if longest > max_candles:
+        raise PayloadTooLargeError(
+            f"Range {range_key} for {ticker}: longest line series has {longest} points, "
+            f"exceeding the maximum of {max_candles}."
+        )
+
+    histogram = await series_sql.histogram_out(
+        session, ticker=ticker, bins=_HISTOGRAM_BINS, start=start, end=end
+    )
+    var_95, cvar_95 = await series_sql.var_cvar(
+        session, ticker=ticker, level=0.95, start=start, end=end
+    )
+    var_99, _ = await series_sql.var_cvar(
+        session, ticker=ticker, level=0.99, start=start, end=end
+    )
+
+    # Scalars that stay in Python (verbatim from assemble_analysis).
+    drawdown = max_drawdown(visible["adj_close"])
+    best_worst = best_worst_day(in_range_returns)
+    stats = AnalysisStats(
+        annualized_volatility=annualized_volatility(in_range_returns),
+        var_95=var_95,
+        var_99=var_99,
+        cvar_95=cvar_95,
+        total_return=total_return(in_range_returns),
+        beta=beta(aligned_in_asset, aligned_in_bench),
+        correlation=correlation(aligned_in_asset, aligned_in_bench),
+        max_drawdown=DrawdownOut(
+            depth=drawdown.depth,
+            peak_date=drawdown.peak_date,
+            trough_date=drawdown.trough_date,
+        ),
+        best_day=DatedValue(date=best_worst.best_date, value=best_worst.best_return),
+        worst_day=DatedValue(date=best_worst.worst_date, value=best_worst.worst_return),
+    )
+
+    return StockAnalysisResponse(
+        params=AnalysisParams(
+            range=range_key,
+            benchmark=benchmark,
+            window=window,
+            start_date=start,
+            end_date=end,
+        ),
+        header=header,
+        candles=_candles(candle_frame),
+        cumulative_returns=cumulative,
+        rolling_volatility=rolling_vol_points,
+        rolling_beta=rolling_beta_points,
+        rolling_correlation=rolling_corr_points,
+        histogram=histogram,
         stats=stats,
     )

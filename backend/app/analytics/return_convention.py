@@ -36,8 +36,9 @@ def to_simple_returns(
     simple). ``return_types=None`` treats every element as ``"log"`` (the fund
     default). NaN propagates positionally. A ``pd.Series`` keeps its index.
     """
-    is_series = isinstance(values, pd.Series)
-    index = values.index if is_series else None
+    index: pd.Index | None = None
+    if isinstance(values, pd.Series):
+        index = values.index
     arr = np.asarray(values, dtype=float)
 
     if return_types is None:
@@ -56,6 +57,6 @@ def to_simple_returns(
     out[log_mask] = np.expm1(out[log_mask])
     # arithmetic entries are left as-is (already simple).
 
-    if is_series:
+    if index is not None:
         return pd.Series(out, index=index)
     return out

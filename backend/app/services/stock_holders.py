@@ -14,10 +14,12 @@ from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from typing import Any, cast
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
+from app.models.stock_holders_mv import StockFundHolderRow, StockInstitutionalHolder
 from app.schemas.fund_analysis import EmptyState
 from app.schemas.stock_holders import (
     FundFamily,
@@ -116,23 +118,9 @@ def _empty(reason: str, source: str | None = None) -> EmptyState:
     return EmptyState(reason=reason, source=source)
 
 
-async def fetch_stock_holders(
-    datalake: AsyncSession,
-    ticker: str,
+def _build_holders_response(
+    norm: str, rows: Sequence[Mapping[str, Any]]
 ) -> StockHoldersResponse:
-    norm = ticker.strip().upper()
-    if not norm:
-        raise ValueError("Ticker must not be empty.")
-
-    try:
-        rows = (
-            await datalake.execute(_HOLDERS_SQL, {"ticker": norm})
-        ).mappings().all()
-    except SQLAlchemyError as exc:
-        raise StockHoldersSourceError(
-            f"Failed to read 13F holders for {norm}."
-        ) from exc
-
     if not rows:
         return StockHoldersResponse(
             ticker=norm,
@@ -141,7 +129,6 @@ async def fetch_stock_holders(
                 "sec_13f_holdings",
             ),
         )
-
     typed = cast(Sequence[Mapping[str, Any]], rows)
     # shares_outstanding is the same scalar on every row (latest fundamentals);
     # used to express each holder's stake as % of shares outstanding (ownership).
@@ -185,6 +172,75 @@ async def fetch_stock_holders(
         shares_outstanding=shares_out,
         holders=holders,
     )
+
+
+async def _fetch_stock_holders_legacy(
+    datalake: AsyncSession, norm: str
+) -> StockHoldersResponse:
+    try:
+        rows = (
+            await datalake.execute(_HOLDERS_SQL, {"ticker": norm})
+        ).mappings().all()
+    except SQLAlchemyError as exc:
+        raise StockHoldersSourceError(
+            f"Failed to read 13F holders for {norm}."
+        ) from exc
+    return _build_holders_response(norm, cast(Sequence[Mapping[str, Any]], rows))
+
+
+async def fetch_stock_holders(
+    datalake: AsyncSession,
+    ticker: str,
+    *,
+    use_db_first: bool | None = None,
+) -> StockHoldersResponse:
+    """Latest-period 13F institutional holders for a ticker.
+
+    Source = stock_institutional_holders_mv (datalake) when use_holders_db_first
+    is on, with a fallback to the legacy hypertable SQL for tickers absent from
+    the MV (covers refresh lag and the MV not yet being deployed). The MV is
+    refreshed on a cron by the matview_refresh worker, so a freshly-ingested 13F
+    holding surfaces only after the next refresh; freshness is exposed to the
+    frontend via the response period/report_date fields. Reshape is the same
+    helper for both paths, so payloads are identical.
+    """
+    norm = ticker.strip().upper()
+    if not norm:
+        raise ValueError("Ticker must not be empty.")
+    if use_db_first is None:
+        use_db_first = get_settings().use_holders_db_first
+    if not use_db_first:
+        return await _fetch_stock_holders_legacy(datalake, norm)
+
+    try:
+        rows = (
+            await datalake.execute(
+                select(
+                    StockInstitutionalHolder.cik,
+                    StockInstitutionalHolder.manager_name,
+                    StockInstitutionalHolder.report_date,
+                    StockInstitutionalHolder.cusip,
+                    StockInstitutionalHolder.issuer_name,
+                    StockInstitutionalHolder.shares,
+                    StockInstitutionalHolder.market_value,
+                    StockInstitutionalHolder.entry_date,
+                    StockInstitutionalHolder.shares_outstanding,
+                    StockInstitutionalHolder.entry_price,
+                    StockInstitutionalHolder.current_price,
+                )
+                .where(StockInstitutionalHolder.ticker == norm)
+                .order_by(StockInstitutionalHolder.market_value.desc().nullslast())
+            )
+        ).mappings().all()
+    except SQLAlchemyError as exc:
+        raise StockHoldersSourceError(
+            f"Failed to read 13F holders for {norm}."
+        ) from exc
+    if not rows:
+        # MV vazio para este ticker → fallback ao SQL legado (cobre lag de refresh
+        # e MV ainda não aplicada).
+        return await _fetch_stock_holders_legacy(datalake, norm)
+    return _build_holders_response(norm, cast(Sequence[Mapping[str, Any]], rows))
 
 
 # Registered funds (N-PORT) holding the CUSIP, named via the SEC series-class
@@ -243,23 +299,9 @@ _FUND_HOLDERS_SQL = text(
 )
 
 
-async def fetch_stock_fund_holders(
-    datalake: AsyncSession,
-    ticker: str,
+def _build_fund_holders_response(
+    norm: str, rows: Sequence[Mapping[str, Any]]
 ) -> StockFundHoldersResponse:
-    norm = ticker.strip().upper()
-    if not norm:
-        raise ValueError("Ticker must not be empty.")
-
-    try:
-        rows = (
-            await datalake.execute(_FUND_HOLDERS_SQL, {"ticker": norm})
-        ).mappings().all()
-    except SQLAlchemyError as exc:
-        raise StockHoldersSourceError(
-            f"Failed to read N-PORT fund holders for {norm}."
-        ) from exc
-
     if not rows:
         return StockFundHoldersResponse(
             ticker=norm,
@@ -268,7 +310,6 @@ async def fetch_stock_fund_holders(
                 "sec_nport_holdings",
             ),
         )
-
     typed = cast(Sequence[Mapping[str, Any]], rows)
     families: dict[str, FundFamily] = {}
     for row in typed:
@@ -307,4 +348,79 @@ async def fetch_stock_fund_holders(
         fund_count=len(typed),
         total_market_value=total_mv or None,
         families=ordered,
+    )
+
+
+async def _fetch_stock_fund_holders_legacy(
+    datalake: AsyncSession, norm: str
+) -> StockFundHoldersResponse:
+    try:
+        rows = (
+            await datalake.execute(_FUND_HOLDERS_SQL, {"ticker": norm})
+        ).mappings().all()
+    except SQLAlchemyError as exc:
+        raise StockHoldersSourceError(
+            f"Failed to read N-PORT fund holders for {norm}."
+        ) from exc
+    return _build_fund_holders_response(
+        norm, cast(Sequence[Mapping[str, Any]], rows)
+    )
+
+
+async def fetch_stock_fund_holders(
+    datalake: AsyncSession,
+    ticker: str,
+    *,
+    use_db_first: bool | None = None,
+) -> StockFundHoldersResponse:
+    """Registered-fund (N-PORT) holders of a ticker, grouped into a family tree.
+
+    Source = stock_fund_holders_mv (datalake) when use_holders_db_first is on,
+    with a fallback to the legacy hypertable SQL for tickers absent from the MV
+    (covers refresh lag and the MV not yet being deployed). The MV is refreshed
+    on a cron by the matview_refresh worker; the family→funds grouping is plain
+    Python assembly (no compute) shared by both paths, so payloads are identical.
+    """
+    norm = ticker.strip().upper()
+    if not norm:
+        raise ValueError("Ticker must not be empty.")
+    if use_db_first is None:
+        use_db_first = get_settings().use_holders_db_first
+    if not use_db_first:
+        return await _fetch_stock_fund_holders_legacy(datalake, norm)
+
+    try:
+        rows = (
+            await datalake.execute(
+                select(
+                    StockFundHolderRow.registrant_cik,
+                    StockFundHolderRow.family,
+                    StockFundHolderRow.series_id,
+                    StockFundHolderRow.fund_name,
+                    StockFundHolderRow.instrument_id,
+                    StockFundHolderRow.issuer_name,
+                    StockFundHolderRow.quantity,
+                    StockFundHolderRow.market_value,
+                    StockFundHolderRow.pct_of_nav,
+                    StockFundHolderRow.pct_nav_q1,
+                    StockFundHolderRow.pct_nav_q2,
+                    StockFundHolderRow.pct_nav_q3,
+                    StockFundHolderRow.report_date,
+                    StockFundHolderRow.cusip,
+                )
+                .where(StockFundHolderRow.ticker == norm)
+                .order_by(
+                    StockFundHolderRow.family,
+                    StockFundHolderRow.market_value.desc().nullslast(),
+                )
+            )
+        ).mappings().all()
+    except SQLAlchemyError as exc:
+        raise StockHoldersSourceError(
+            f"Failed to read N-PORT fund holders for {norm}."
+        ) from exc
+    if not rows:
+        return await _fetch_stock_fund_holders_legacy(datalake, norm)
+    return _build_fund_holders_response(
+        norm, cast(Sequence[Mapping[str, Any]], rows)
     )

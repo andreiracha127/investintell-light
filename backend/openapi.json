@@ -2906,7 +2906,7 @@
           "funds"
         ],
         "summary": "Get Fund Active Share",
-        "description": "Tier B holdings-based active share against a benchmark fund.",
+        "description": "Tier B holdings-based active share against the fund's primary benchmark.",
         "operationId": "get_fund_active_share_funds__instrument_id__active_share_get",
         "parameters": [
           {
@@ -2918,25 +2918,6 @@
               "format": "uuid",
               "title": "Instrument Id"
             }
-          },
-          {
-            "name": "benchmark_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Benchmark fund UUID with N-PORT holdings.",
-              "title": "Benchmark Id"
-            },
-            "description": "Benchmark fund UUID with N-PORT holdings."
           }
         ],
         "responses": {
@@ -3480,7 +3461,7 @@
           "backtest"
         ],
         "summary": "Walk Forward",
-        "description": "Walk-forward / out-of-sample backtest of a mu-free objective.\n\nRe-optimizes the objective on each expanding TimeSeriesSplit train fold and\nscores the held-out test fold (Sharpe, CVaR 95, max drawdown), folding in a\none-way transaction cost on the L1 weight change vs the previous fold. The\nresponse reports per-fold metrics plus the ``positive_folds`` consistency\ncount. All fractional fields are decimal fractions (0.05 = 5%).",
+        "description": "Walk-forward / out-of-sample backtest of a mu-free objective.\n\nRe-optimizes the objective on each expanding TimeSeriesSplit train fold and\nscores the held-out test fold (Sharpe, CVaR 95, max drawdown), folding in a\none-way transaction cost on the L1 weight change vs the previous fold. The\nresponse reports per-fold metrics plus the ``positive_folds`` consistency\ncount. All fractional fields are decimal fractions (0.05 = 5%).\n\nWhen ``use_async_jobs`` is on and ``n_splits`` is large, the computation is\nenqueued as a job (HTTP 202 + job id) and served via GET /jobs/{id}; the\nsynchronous path (cached) is otherwise unchanged.",
         "operationId": "walk_forward_backtest_walk_forward_post",
         "requestBody": {
           "content": {
@@ -3499,6 +3480,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WalkForwardResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobEnqueuedResponse"
                 }
               }
             }
@@ -3824,7 +3815,7 @@
           "monte-carlo"
         ],
         "summary": "Project Portfolio Monte Carlo",
-        "description": "Block-bootstrap Monte Carlo over a synthetic portfolio NAV.\n\nBuilds the portfolio return series from the positions' common-history\naligned returns (target weights held = implicit rebalancing) and runs the\nsame block-bootstrap core as the single-instrument projection. Drawdown/\nreturn fields are decimal fractions (0.05 = 5%); sharpe is unitless.\n\nError mapping (fail loud):\n- request shape / weight bounds / position count -> 422 (Pydantic)\n- unknown asset / no history in window           -> 422\n- insufficient common observations               -> 422\n- history too short for the requested horizon    -> 422",
+        "description": "Block-bootstrap Monte Carlo over a synthetic portfolio NAV.\n\nBuilds the portfolio return series from the positions' common-history\naligned returns (target weights held = implicit rebalancing) and runs the\nsame block-bootstrap core as the single-instrument projection. Drawdown/\nreturn fields are decimal fractions (0.05 = 5%); sharpe is unitless.\n\nError mapping (fail loud):\n- request shape / weight bounds / position count -> 422 (Pydantic)\n- unknown asset / no history in window           -> 422\n- insufficient common observations               -> 422\n- history too short for the requested horizon    -> 422\n\nWhen ``use_async_jobs`` is on and ``n_simulations`` is large, the run is\nenqueued as a job (HTTP 202 + job id), served via GET /jobs/{id}.",
         "operationId": "project_portfolio_monte_carlo_monte_carlo_portfolio_post",
         "requestBody": {
           "content": {
@@ -3843,6 +3834,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PortfolioMonteCarloResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobEnqueuedResponse"
                 }
               }
             }
@@ -4056,6 +4057,49 @@
                     "$ref": "#/components/schemas/SymbolSearchResult"
                   },
                   "title": "Response Search Symbols Search Symbols Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Get Job Status",
+        "operationId": "get_job_status_jobs__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatusResponse"
                 }
               }
             }
@@ -5839,18 +5883,6 @@
             "format": "uuid",
             "title": "Instrument Id"
           },
-          "benchmark_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Benchmark Id"
-          },
           "benchmark_name": {
             "anyOf": [
               {
@@ -5861,6 +5893,17 @@
               }
             ],
             "title": "Benchmark Name"
+          },
+          "benchmark_series_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Series Id"
           },
           "active_share": {
             "anyOf": [
@@ -5928,7 +5971,7 @@
           "instrument_id"
         ],
         "title": "FundActiveShareResponse",
-        "description": "Holdings-based active share versus a benchmark fund."
+        "description": "Holdings-based active share versus the fund's PRIMARY benchmark."
       },
       "FundAnalysisHeader": {
         "properties": {
@@ -10086,6 +10129,82 @@
         ],
         "title": "InstitutionalOverlapSecurity",
         "description": "One fund holding with matching 13F institutional ownership."
+      },
+      "JobEnqueuedResponse": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "pending | running | succeeded | failed"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "status",
+          "kind"
+        ],
+        "title": "JobEnqueuedResponse",
+        "description": "Returned with HTTP 202 when a heavy computation is queued."
+      },
+      "JobStatusResponse": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result",
+            "description": "Servi\u00e7o result quando succeeded."
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Mensagem quando failed."
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "status",
+          "kind"
+        ],
+        "title": "JobStatusResponse",
+        "description": "Polling payload for GET /jobs/{job_id}."
       },
       "LeaderRow": {
         "properties": {

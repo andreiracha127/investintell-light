@@ -52,6 +52,7 @@ from app.services._series import (
 from app.services.stock_analysis import (
     StockAnalysisError,
     assemble_analysis,
+    assemble_analysis_sql,
     build_adj_close_series,
     build_price_frame,
     lookback_pad_days,
@@ -295,6 +296,20 @@ async def get_stock_analysis(
     name = await _select_instrument_name(session, symbol)
 
     try:
+        if get_settings().use_series_db_first:
+            return await assemble_analysis_sql(
+                session,
+                build_price_frame(asset_rows),
+                build_adj_close_series(bench_rows),
+                ticker=symbol,
+                name=name,
+                benchmark=bench_symbol,
+                range_key=range_,
+                window=window,
+                start=start,
+                end=end,
+                max_candles=get_settings().price_series_max_points,
+            )
         return assemble_analysis(
             build_price_frame(asset_rows),
             build_adj_close_series(bench_rows),

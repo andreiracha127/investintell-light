@@ -14,7 +14,7 @@ import datetime as dt
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal, cast
 
 import numpy as np
 import pandas as pd
@@ -121,7 +121,7 @@ async def _load_fund_returns(
     *,
     convention: Literal["log", "simple"] = "log",
 ) -> pd.Series:
-    cols = [FundNav.nav_date, FundNav.nav, FundNav.return_1d]
+    cols: list[Any] = [FundNav.nav_date, FundNav.nav, FundNav.return_1d]
     if convention == "simple":
         cols.append(FundNav.return_type)
     stmt = select(*cols).where(FundNav.instrument_id == ref.id)
@@ -246,7 +246,7 @@ async def _load_equity_returns(
     if convention == "simple":
         from app.analytics.return_convention import to_simple_returns
 
-        return to_simple_returns(log_returns)
+        return cast(pd.Series, to_simple_returns(log_returns))
     return log_returns
 
 

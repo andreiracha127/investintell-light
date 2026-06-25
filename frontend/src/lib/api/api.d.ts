@@ -914,7 +914,7 @@ export interface paths {
         };
         /**
          * Get Fund Active Share
-         * @description Tier B holdings-based active share against a benchmark fund.
+         * @description Tier B holdings-based active share against the fund's primary benchmark.
          */
         get: operations["get_fund_active_share_funds__instrument_id__active_share_get"];
         put?: never;
@@ -1137,6 +1137,10 @@ export interface paths {
          *     one-way transaction cost on the L1 weight change vs the previous fold. The
          *     response reports per-fold metrics plus the ``positive_folds`` consistency
          *     count. All fractional fields are decimal fractions (0.05 = 5%).
+         *
+         *     When ``use_async_jobs`` is on and ``n_splits`` is large, the computation is
+         *     enqueued as a job (HTTP 202 + job id) and served via GET /jobs/{id}; the
+         *     synchronous path (cached) is otherwise unchanged.
          */
         post: operations["walk_forward_backtest_walk_forward_post"];
         delete?: never;
@@ -1352,6 +1356,9 @@ export interface paths {
          *     - unknown asset / no history in window           -> 422
          *     - insufficient common observations               -> 422
          *     - history too short for the requested horizon    -> 422
+         *
+         *     When ``use_async_jobs`` is on and ``n_simulations`` is large, the run is
+         *     enqueued as a job (HTTP 202 + job id), served via GET /jobs/{id}.
          */
         post: operations["project_portfolio_monte_carlo_monte_carlo_portfolio_post"];
         delete?: never;
@@ -1416,6 +1423,23 @@ export interface paths {
          * @description Sugestões para o Compare: ações (universe) e fundos com ticker.
          */
         get: operations["search_symbols_search_symbols_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Job Status */
+        get: operations["get_job_status_jobs__job_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2292,7 +2316,7 @@ export interface components {
         };
         /**
          * FundActiveShareResponse
-         * @description Holdings-based active share versus a benchmark fund.
+         * @description Holdings-based active share versus the fund's PRIMARY benchmark.
          */
         FundActiveShareResponse: {
             /**
@@ -2300,10 +2324,10 @@ export interface components {
              * Format: uuid
              */
             instrument_id: string;
-            /** Benchmark Id */
-            benchmark_id?: string | null;
             /** Benchmark Name */
             benchmark_name?: string | null;
+            /** Benchmark Series Id */
+            benchmark_series_id?: string | null;
             /** Active Share */
             active_share?: number | null;
             /** Overlap */
@@ -3683,6 +3707,51 @@ export interface components {
             institution_count: number;
             /** Top Managers */
             top_managers?: string[];
+        };
+        /**
+         * JobEnqueuedResponse
+         * @description Returned with HTTP 202 when a heavy computation is queued.
+         */
+        JobEnqueuedResponse: {
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /**
+             * Status
+             * @description pending | running | succeeded | failed
+             */
+            status: string;
+            /** Kind */
+            kind: string;
+        };
+        /**
+         * JobStatusResponse
+         * @description Polling payload for GET /jobs/{job_id}.
+         */
+        JobStatusResponse: {
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /** Status */
+            status: string;
+            /** Kind */
+            kind: string;
+            /**
+             * Result
+             * @description Serviço result quando succeeded.
+             */
+            result?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Error
+             * @description Mensagem quando failed.
+             */
+            error?: string | null;
         };
         /** LeaderRow */
         LeaderRow: {
@@ -7734,10 +7803,7 @@ export interface operations {
     };
     get_fund_active_share_funds__instrument_id__active_share_get: {
         parameters: {
-            query?: {
-                /** @description Benchmark fund UUID with N-PORT holdings. */
-                benchmark_id?: string | null;
-            };
+            query?: never;
             header?: never;
             path: {
                 instrument_id: string;
@@ -8086,6 +8152,15 @@ export interface operations {
                     "application/json": components["schemas"]["WalkForwardResponse"];
                 };
             };
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobEnqueuedResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -8343,6 +8418,15 @@ export interface operations {
                     "application/json": components["schemas"]["PortfolioMonteCarloResponse"];
                 };
             };
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobEnqueuedResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -8470,6 +8554,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SymbolSearchResult"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_job_status_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStatusResponse"];
                 };
             };
             /** @description Validation Error */

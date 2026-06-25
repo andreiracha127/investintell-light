@@ -127,7 +127,18 @@ SELECT DISTINCT ON (instrument_id)
        manager_score, downside_capture_1y, upside_capture_1y,
        equity_correlation_252d, peer_strategy_label, peer_count, elite_flag,
        empirical_duration, credit_beta, inflation_beta, crisis_alpha_score,
-       nav_quality_ok, nav_glitch_count
+       nav_quality_ok, nav_glitch_count,
+       -- Active-share / overlap columns (db-first A5). These live on
+       -- fund_risk_metrics (seeded by the active-share worker) and are
+       -- projected here so the dossier reads active share off the same latest
+       -- MV instead of a standalone fund_active_share_mv (now removed).
+       active_share_normalized, overlap_normalized, overlap_nav_raw,
+       fund_cusip_coverage_nav, benchmark_cusip_coverage_nav,
+       n_fund_holdings, n_benchmark_holdings, n_common_holdings,
+       n_fund_only, n_benchmark_only, holdings_jaccard,
+       fund_report_age_days, benchmark_report_age_days, report_date_gap_days,
+       active_share_benchmark_instrument_id, active_share_benchmark_series_id,
+       active_share_fund_report_date, active_share_benchmark_report_date
 FROM fund_risk_metrics
 WHERE organization_id IS NULL
 ORDER BY instrument_id, calc_date DESC;

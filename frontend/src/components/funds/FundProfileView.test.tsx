@@ -385,15 +385,15 @@ function makeEntityAnalytics(): client.FundEntityAnalytics {
 function makeActiveShare(): client.FundActiveShare {
   return {
     instrument_id: FUND_ID,
-    benchmark_id: null,
-    benchmark_name: null,
-    active_share: null,
-    overlap: null,
+    benchmark_name: "Vanguard Total Stock Market ETF",
+    benchmark_series_id: "S000000999",
+    active_share: 0.12,
+    overlap: 0.88,
     n_portfolio_positions: 1,
-    n_benchmark_positions: 0,
-    n_common_positions: 0,
-    as_of_date: null,
-    empty_state: { reason: "benchmark_id is required", source: "request" },
+    n_benchmark_positions: 500,
+    n_common_positions: 1,
+    as_of_date: "2026-03-31",
+    empty_state: null,
   };
 }
 
@@ -481,22 +481,7 @@ function mockDossierResponses() {
   mocked.fetchFundStyleDrift.mockResolvedValue(makeStyleDrift());
   mocked.fetchFundRiskTimeseries.mockResolvedValue(makeRiskTimeseries());
   mocked.fetchFundEntityAnalytics.mockResolvedValue(makeEntityAnalytics());
-  mocked.fetchFundActiveShare.mockImplementation(async (_instrumentId, query) => {
-    const benchmarkId = query?.benchmark_id ?? null;
-    return {
-      ...makeActiveShare(),
-      benchmark_id: benchmarkId,
-      benchmark_name: benchmarkId ? "Vanguard Total Stock Market ETF" : null,
-      active_share: benchmarkId ? 0.12 : null,
-      overlap: benchmarkId ? 0.88 : null,
-      n_benchmark_positions: benchmarkId ? 500 : 0,
-      n_common_positions: benchmarkId ? 1 : 0,
-      as_of_date: benchmarkId ? "2026-03-31" : null,
-      empty_state: benchmarkId
-        ? null
-        : { reason: "benchmark_id is required", source: "request" },
-    };
-  });
+  mocked.fetchFundActiveShare.mockResolvedValue(makeActiveShare());
   mocked.fetchFundInstitutionalReveal.mockResolvedValue(makeInstitutionalReveal());
   mocked.fetchHoldingReverseLookup.mockResolvedValue(makeReverseLookup());
 }
@@ -577,9 +562,14 @@ describe("FundProfileView", () => {
     );
     expect(mocked.fetchFundActiveShare).toHaveBeenCalledWith(
       FUND_ID,
-      {},
       expect.any(AbortSignal),
     );
+    // A5: active-share never carries benchmark_id (product change, primary benchmark only).
+    for (const call of mocked.fetchFundActiveShare.mock.calls) {
+      for (const arg of call) {
+        expect(arg).not.toMatchObject({ benchmark_id: expect.anything() });
+      }
+    }
     expect(screen.getAllByText("Information Technology").length).toBeGreaterThan(0);
     expect(screen.queryByText("CORP")).not.toBeInTheDocument();
 

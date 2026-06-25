@@ -20,6 +20,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics import (
+    BestWorst,
+    DrawdownResult,
     MIN_IN_RANGE_RETURNS,
     annualized_volatility,
     best_worst_day,
@@ -32,6 +34,7 @@ from app.analytics import (
     total_return,
 )
 from app.analytics._validation import to_date
+from app.core.config import get_settings
 from app.models.fund import Fund, FundHolding, FundNav, FundRiskLatest
 from app.schemas.analysis import DatedValue, DrawdownOut, HistogramOut, RangeKey
 from app.schemas.fund_analysis import (
@@ -46,7 +49,7 @@ from app.schemas.fund_analysis import (
     FundSectorExposure,
     FundTopHolding,
 )
-from app.services import lookthrough
+from app.services import lookthrough, series_sql
 from app.services._series import RANGE_DAYS, resample_weekly, series_points
 from app.services.funds_catalog import UNCLASSIFIED_LABEL
 from app.services.stock_analysis import lookback_pad_days
@@ -258,6 +261,106 @@ def assemble_fund_analysis(
     )
 
 
+SeriesPoint = tuple[dt.date, float]
+
+
+async def assemble_fund_analysis_sql(
+    session: AsyncSession,
+    *,
+    fund: FundIdentity,
+    range_key: RangeKey,
+    window: int,
+    start: dt.date,
+    end: dt.date,
+    last_nav: float,
+    prev_nav: float,
+    nav_visible_points: list[SeriesPoint],   # (date, nav) for date >= start, ascending
+    monthly_returns: list[SeriesPoint],      # computed in Python (kept)
+    ann_vol: float,
+    total_ret: float,
+    max_dd: DrawdownResult,                  # kept in Python
+    best_worst: BestWorst,                   # kept in Python
+    max_points: int,
+) -> FundAnalysisResponse:
+    """Assemble the fund analysis payload using SQL series (no pandas math).
+
+    Moved to SQL (fn_*): drawdown series, rolling vol/sharpe, histogram, VaR-95,
+    CVaR-95. The Python-kept scalars/series (monthly returns, annualized_vol,
+    total_return, max_drawdown peak/trough dates, best/worst day, growth-of-100)
+    are intentionally NOT in the §8 series-function set; they remain pandas and
+    are passed in by the caller. growth-of-100 is plain list math here (no pandas).
+    """
+    weekly = range_key in _WEEKLY_DISPLAY_RANGES
+
+    # Growth-of-100 over visible NAV (cheap, Python list math, NOT pandas).
+    base = nav_visible_points[0][1]
+    growth = [(d, (v / base) * 100.0) for d, v in nav_visible_points]
+    growth = series_sql.week_downsample(growth) if weekly else growth
+
+    # Drawdown over the full visible NAV via fn_drawdown, sliced to date > start.
+    dd_full = await series_sql.drawdown_points(
+        session, instrument_id=fund.instrument_id, start=start, end=end
+    )
+    drawdown_pts = series_sql.slice_strict(dd_full, start)
+    drawdown_pts = series_sql.week_downsample(drawdown_pts) if weekly else drawdown_pts
+
+    vol_full, sharpe_full = await series_sql.rolling_metrics_points(
+        session, instrument_id=fund.instrument_id, window=window, start=start, end=end
+    )
+    rolling_vol = series_sql.slice_strict(vol_full, start)
+    rolling_sharpe = series_sql.slice_strict(sharpe_full, start)
+    if weekly:
+        rolling_vol = series_sql.week_downsample(rolling_vol)
+        rolling_sharpe = series_sql.week_downsample(rolling_sharpe)
+
+    histogram = await series_sql.histogram_out(
+        session, instrument_id=fund.instrument_id, bins=_HISTOGRAM_BINS,
+        start=start, end=end,
+    )
+    var_95, cvar_95 = await series_sql.var_cvar(
+        session, instrument_id=fund.instrument_id, level=0.95, start=start, end=end
+    )
+
+    _assert_series_budget(
+        max_points,
+        [
+            ("growth_of_100", growth),
+            ("drawdown", drawdown_pts),
+            ("monthly_returns", monthly_returns),
+            ("rolling_volatility", rolling_vol),
+            ("rolling_sharpe", rolling_sharpe),
+        ],
+    )
+
+    return FundAnalysisResponse(
+        params=FundAnalysisParams(
+            range=range_key, window=window, start_date=start, end_date=end
+        ),
+        header=FundAnalysisHeader(
+            instrument_id=fund.instrument_id, ticker=fund.ticker, name=fund.name,
+            last_nav=last_nav, prev_nav=prev_nav, change=last_nav - prev_nav,
+            change_pct=(last_nav - prev_nav) / prev_nav, as_of=end,
+        ),
+        growth_of_100=growth,
+        monthly_returns=monthly_returns,
+        rolling_volatility=rolling_vol,
+        rolling_sharpe=rolling_sharpe,
+        drawdown=drawdown_pts,
+        histogram=histogram,
+        stats=FundAnalysisStats(
+            annualized_volatility=ann_vol,
+            var_95=var_95,
+            cvar_95=cvar_95,
+            total_return=total_ret,
+            max_drawdown=DrawdownOut(
+                depth=max_dd.depth, peak_date=max_dd.peak_date, trough_date=max_dd.trough_date,
+            ),
+            best_day=DatedValue(date=best_worst.best_date, value=best_worst.best_return),
+            worst_day=DatedValue(date=best_worst.worst_date, value=best_worst.worst_return),
+        ),
+    )
+
+
 async def select_nav_date_bounds(
     session: AsyncSession, instrument_id: uuid.UUID
 ) -> tuple[dt.date | None, dt.date | None]:
@@ -309,13 +412,49 @@ async def fetch_fund_analysis(
     start = first_date if range_key == "MAX" else end - dt.timedelta(days=RANGE_DAYS[range_key])
     query_start = start - dt.timedelta(days=lookback_pad_days(window))
     nav = build_nav_series(await select_nav_rows(session, instrument_id, query_start, end))
-    return assemble_fund_analysis(
-        nav,
+
+    if not get_settings().use_series_db_first:
+        return assemble_fund_analysis(
+            nav,
+            fund=FundIdentity(fund.instrument_id, fund.ticker, fund.name),
+            range_key=range_key,
+            window=window,
+            start=start,
+            end=end,
+            max_points=max_points,
+        )
+
+    # SQL path: validate the same gates as the legacy assembler, compute the
+    # Python-kept scalars/series (monthly, ann_vol, total_return, max_dd,
+    # best_worst) from the in-range returns, and read the moved series via SQL.
+    if len(nav) < 2:
+        raise InsufficientFundDataError(
+            f"Only {len(nav)} NAV rows available for fund {instrument_id}."
+        )
+    start_ts = pd.Timestamp(start)
+    visible = nav[nav.index >= start_ts]
+    returns = simple_returns(nav)
+    in_range_returns = returns[returns.index > start_ts]
+    if (
+        len(visible) < 2
+        or len(in_range_returns) < MIN_IN_RANGE_RETURNS
+        or len(returns) < window
+    ):
+        raise InsufficientFundDataError(
+            f"Insufficient NAV history for fund {instrument_id} over range {range_key}."
+        )
+    nav_visible_points = [(to_date(idx), float(v)) for idx, v in visible.items()]
+    return await assemble_fund_analysis_sql(
+        session,
         fund=FundIdentity(fund.instrument_id, fund.ticker, fund.name),
-        range_key=range_key,
-        window=window,
-        start=start,
-        end=end,
+        range_key=range_key, window=window, start=start, end=end,
+        last_nav=float(nav.iloc[-1]), prev_nav=float(nav.iloc[-2]),
+        nav_visible_points=nav_visible_points,
+        monthly_returns=_monthly_return_points(visible),
+        ann_vol=annualized_volatility(in_range_returns),
+        total_ret=total_return(in_range_returns),
+        max_dd=max_drawdown(visible),
+        best_worst=best_worst_day(in_range_returns),
         max_points=max_points,
     )
 
@@ -414,6 +553,71 @@ async def _gics_sector_by_cusip(
 
 
 async def fetch_fund_holdings_top(
+    session: AsyncSession,
+    datalake: AsyncSession | None,
+    instrument_id: uuid.UUID,
+    *,
+    limit: int,
+    use_db_first: bool | None = None,
+) -> FundHoldingsTopResponse | None:
+    """Top holdings + sector breakdown. DB-first lê top holdings de
+    fund_top_holdings_mv (GICS já resolvido); sector breakdown continua de
+    nport_lookthrough_exposures. Fallback ao legado quando a flag está off.
+    """
+    if use_db_first is None:
+        use_db_first = get_settings().use_fund_analytics_db_first
+    if not use_db_first:
+        return await _fetch_fund_holdings_top_legacy(
+            session, datalake, instrument_id, limit=limit
+        )
+
+    fund = await session.get(Fund, instrument_id)
+    if fund is None:
+        return None
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT report_date, rank, issuer_name, cusip, isin,
+                       asset_class, sector, gics_sector, market_value, pct_of_nav
+                FROM fund_top_holdings_mv
+                WHERE series_id = :series_id
+                  AND rank <= :limit
+                ORDER BY rank
+                """
+            ),
+            {"series_id": fund.series_id, "limit": limit},
+        )
+    ).mappings().all()
+
+    report_date = rows[0]["report_date"] if rows else None
+    sector_breakdown = await _sector_breakdown_from_lookthrough(datalake, fund.series_id)
+    reported = [float(r["pct_of_nav"]) for r in rows if r["pct_of_nav"] is not None]
+    return FundHoldingsTopResponse(
+        instrument_id=instrument_id,
+        series_id=fund.series_id,
+        report_date=report_date,
+        top_holdings=[
+            FundTopHolding(
+                rank=r["rank"],
+                issuer_name=r["issuer_name"],
+                cusip=r["cusip"],
+                isin=r["isin"],
+                asset_class=r["asset_class"],
+                sector=r["sector"],
+                gics_sector=r["gics_sector"],
+                sector_label=r["gics_sector"] or r["sector"],
+                market_value=_float(r["market_value"]),
+                pct_of_nav=_float(r["pct_of_nav"]),
+            )
+            for r in rows
+        ],
+        sector_breakdown=sector_breakdown,
+        pct_of_nav_total=sum(reported) if reported else None,
+    )
+
+
+async def _fetch_fund_holdings_top_legacy(
     session: AsyncSession,
     datalake: AsyncSession | None,
     instrument_id: uuid.UUID,

@@ -75,6 +75,38 @@ def test_dynamic_catalog_creates_daily_eod_cagg() -> None:
     assert "add_continuous_aggregate_policy('cagg_eod_daily'" in sql
 
 
+def test_fund_risk_latest_mv_projects_active_share_columns() -> None:
+    sql = DDL_PATH.read_text(encoding="utf-8")
+
+    create_start = sql.index("CREATE MATERIALIZED VIEW fund_risk_latest_mv AS")
+    create_end = sql.index(
+        "CREATE UNIQUE INDEX IF NOT EXISTS fund_risk_latest_mv_pk", create_start
+    )
+    body = sql[create_start:create_end]
+
+    for column in (
+        "active_share_normalized",
+        "overlap_normalized",
+        "overlap_nav_raw",
+        "fund_cusip_coverage_nav",
+        "benchmark_cusip_coverage_nav",
+        "n_fund_holdings",
+        "n_benchmark_holdings",
+        "n_common_holdings",
+        "n_fund_only",
+        "n_benchmark_only",
+        "holdings_jaccard",
+        "fund_report_age_days",
+        "benchmark_report_age_days",
+        "report_date_gap_days",
+        "active_share_benchmark_instrument_id",
+        "active_share_benchmark_series_id",
+        "active_share_fund_report_date",
+        "active_share_benchmark_report_date",
+    ):
+        assert column in body, column
+
+
 def test_funds_v_manual_strategy_overrides_win_source_labels() -> None:
     sql = DDL_PATH.read_text(encoding="utf-8")
 

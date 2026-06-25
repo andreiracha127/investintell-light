@@ -186,6 +186,16 @@ async def test_create_transaction_route_skips_eod_check_for_funds(
     async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
         return {"VFIAX"}
 
+    async def fake_taxonomy(session: Any, tickers: Any) -> dict[str, Any]:
+        return {
+            "VFIAX": portfolio_crud.PositionTaxonomy(
+                asset_class="equity",
+                strategy_label=None,
+                instrument_id=None,
+                fund_type="mutual_fund",
+            )
+        }
+
     async def fake_create(session: Any, portfolio_id: int, payload: Any) -> SimpleNamespace:
         return _tx(
             payload.ticker,
@@ -201,6 +211,7 @@ async def test_create_transaction_route_skips_eod_check_for_funds(
 
     monkeypatch.setattr(portfolio_crud, "portfolio_exists", fake_exists)
     monkeypatch.setattr(portfolio_crud, "select_fund_tickers", fake_fund_tickers)
+    monkeypatch.setattr(portfolio_crud, "resolve_position_taxonomy", fake_taxonomy)
     monkeypatch.setattr(portfolio_ledger, "create_transaction", fake_create)
     monkeypatch.setattr(portfolio_ledger, "materialize_portfolio_nav", fake_materialize)
 

@@ -93,12 +93,14 @@ from app.services._series import (
 from app.services._series import (
     shortest_history_ticker as _shortest_history_ticker,
 )
+from app.core.result_cache import cached_result, portfolio_version_hash
 from app.services.stock_analysis import (
     InsufficientDataError,
     PayloadTooLargeError,
     build_adj_close_series,
     lookback_pad_days,
 )
+from pydantic import BaseModel
 
 _HISTOGRAM_BINS = 20
 
@@ -454,6 +456,20 @@ async def run_scenario(
     )
 
 
+class _VersionedScenario(BaseModel):
+    """Payload de cache: request + hash de versão do portfólio (invalida ao editar)."""
+
+    request: ScenarioRequest
+    portfolio_version: str
+
+
+@cached_result("stat_scenario")
+async def _run_scenario_cached(
+    session: AsyncSession, payload: _VersionedScenario, *, max_points: int
+) -> ScenarioResponse:
+    return await run_scenario(session, payload.request, max_points=max_points)
+
+
 # ---------------------------------------------------------------------------
 # POST /statistics/beta
 # ---------------------------------------------------------------------------
@@ -511,6 +527,7 @@ def assemble_beta(
     )
 
 
+@cached_result("stat_beta")
 async def run_beta(
     session: AsyncSession,
     payload: BetaRequest,
@@ -579,6 +596,7 @@ def assemble_rolling_correlation(
     )
 
 
+@cached_result("stat_rolling_correlation")
 async def run_rolling_correlation(
     session: AsyncSession,
     payload: CorrelationRequest,
@@ -665,3 +683,17 @@ async def run_stock_correlation(
         session, payload.portfolio_id, pad_start, end
     )
     return assemble_stock_correlation(series_by_ticker, window=payload.window)
+
+
+class _VersionedStockCorrelation(BaseModel):
+    """Payload de cache: request + hash de versão do portfólio (invalida ao editar)."""
+
+    request: StockCorrelationRequest
+    portfolio_version: str
+
+
+@cached_result("stat_stock_correlation")
+async def _run_stock_correlation_cached(
+    session: AsyncSession, payload: _VersionedStockCorrelation
+) -> StockCorrelationResponse:
+    return await run_stock_correlation(session, payload.request)

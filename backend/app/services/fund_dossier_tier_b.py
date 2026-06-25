@@ -22,7 +22,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics import simple_returns
-from app.models.fund import Fund, FundHolding
+from app.core.config import get_settings
+from app.models.fund import Fund, FundHolding, FundListRow, FundRiskLatest
+from app.models.stock_holders_mv import HoldingReverseLookupRow
 from app.schemas.analysis import SeriesPoint
 from app.schemas.fund_analysis import (
     EmptyState,
@@ -57,6 +59,8 @@ from app.schemas.fund_analysis import (
     ReverseLookupFundExposure,
     ReverseLookupInstitution,
 )
+from app.core.config import get_settings
+from app.services import series_sql
 from app.services.fund_analysis import (
     FundAnalysisError,
     InsufficientFundDataError,
@@ -368,28 +372,104 @@ async def _style_bias(
     return row["as_of"], biases, None
 
 
+async def _style_bias_db_first(
+    datalake: AsyncSession,
+    instrument_id: uuid.UUID,
+) -> tuple[dt.date | None, list[FundStyleBias], EmptyState | None]:
+    """Style-bias z-scores lidos de fund_style_bias_v (latest as_of do fundo).
+
+    Mesmo shape de _style_bias; o cálculo z = (value−avg)/stddev já vive na view.
+    """
+    try:
+        rows = (
+            await datalake.execute(
+                text(
+                    """
+                    WITH latest AS (
+                        SELECT max(as_of) AS as_of
+                        FROM fund_style_bias_v
+                        WHERE instrument_id = :iid
+                    )
+                    SELECT as_of, factor, value, z_score
+                    FROM fund_style_bias_v
+                    WHERE instrument_id = :iid
+                      AND as_of = (SELECT as_of FROM latest)
+                    """
+                ),
+                {"iid": str(instrument_id)},
+            )
+        ).mappings().all()
+    except SQLAlchemyError as exc:
+        raise _source_error("fund_style_bias_v", exc) from exc
+    if not rows:
+        return (
+            None,
+            [],
+            _empty(
+                "No equity_characteristics_monthly row for this fund.",
+                "fund_style_bias_v",
+            ),
+        )
+    as_of = rows[0]["as_of"]
+    biases = [
+        FundStyleBias(
+            factor=row["factor"],
+            value=_float(row["value"]),
+            z_score=_float(row["z_score"]),
+            as_of=row["as_of"],
+        )
+        for row in rows
+    ]
+    return as_of, biases, None
+
+
 async def fetch_fund_factors(
     session: AsyncSession,
     datalake: AsyncSession,
     instrument_id: uuid.UUID,
+    *,
+    use_db_first: bool | None = None,
 ) -> FundFactorsResponse | None:
     fund = await _fund_or_none(session, instrument_id)
     if fund is None:
         return None
+    if use_db_first is None:
+        use_db_first = get_settings().use_fund_analytics_db_first
 
-    first_date, last_date = await select_nav_date_bounds(session, instrument_id)
-    nav = pd.Series(dtype=float)
-    if first_date is not None and last_date is not None:
-        nav = build_nav_series(await select_nav_rows(session, instrument_id, first_date, last_date))
-    monthly_returns = (
-        nav.resample("ME").last().pct_change().dropna()
-        if len(nav)
-        else pd.Series(dtype=float)
-    )
-
-    factor_as_of, factors = await _latest_factor_fit(datalake)
-    sensitivities = _ols_market_sensitivities(monthly_returns, factors)
-    style_as_of, style_bias, style_empty = await _style_bias(datalake, instrument_id)
+    if use_db_first:
+        rows = (
+            await datalake.execute(
+                text(
+                    """
+                    SELECT factor, beta, t_stat, significance, as_of
+                    FROM fund_factor_exposures_latest_mv
+                    WHERE instrument_id = :iid
+                    ORDER BY factor
+                    """
+                ),
+                {"iid": str(instrument_id)},
+            )
+        ).mappings().all()
+        sensitivities = [
+            FundMarketSensitivity(
+                factor=r["factor"], beta=_float(r["beta"]),
+                t_stat=_float(r["t_stat"]), significance=r["significance"],
+            )
+            for r in rows
+        ]
+        factor_as_of = rows[0]["as_of"] if rows else None
+        style_as_of, style_bias, style_empty = await _style_bias_db_first(datalake, instrument_id)
+    else:
+        first_date, last_date = await select_nav_date_bounds(session, instrument_id)
+        nav = pd.Series(dtype=float)
+        if first_date is not None and last_date is not None:
+            nav = build_nav_series(await select_nav_rows(session, instrument_id, first_date, last_date))
+        monthly_returns = (
+            nav.resample("ME").last().pct_change().dropna() if len(nav) else pd.Series(dtype=float)
+        )
+        factor_as_of, factors = await _latest_factor_fit(datalake)
+        sensitivities = _ols_market_sensitivities(monthly_returns, factors)
+        style_as_of, style_bias, style_empty = await _style_bias(datalake, instrument_id)
 
     metadata = [
         FundSourceMetadata(
@@ -416,6 +496,99 @@ async def fetch_fund_factors(
 
 
 async def fetch_fund_style_drift(
+    session: AsyncSession,
+    datalake: AsyncSession,
+    instrument_id: uuid.UUID,
+    *,
+    quarters: int,
+    use_db_first: bool | None = None,
+) -> FundStyleDriftResponse | None:
+    """Historical N-PORT sector drift. DB-first lê de fund_style_drift_mv
+    (mesma agregação, weight em percent-points → /100 aqui); fallback ao legado.
+    """
+    if use_db_first is None:
+        use_db_first = get_settings().use_fund_analytics_db_first
+    if not use_db_first:
+        return await _fetch_fund_style_drift_legacy(
+            session, datalake, instrument_id, quarters=quarters
+        )
+
+    fund = await _fund_or_none(session, instrument_id)
+    if fund is None:
+        return None
+    try:
+        rows = (
+            await datalake.execute(
+                text(
+                    """
+                    WITH q AS (
+                        SELECT DISTINCT report_date
+                        FROM fund_style_drift_mv
+                        WHERE series_id = :series_id
+                        ORDER BY report_date DESC
+                        LIMIT :quarters
+                    )
+                    SELECT m.report_date, m.sector, m.weight
+                    FROM fund_style_drift_mv m
+                    JOIN q ON q.report_date = m.report_date
+                    WHERE m.series_id = :series_id
+                    ORDER BY m.report_date ASC, m.weight DESC NULLS LAST
+                    """
+                ),
+                {"series_id": fund.series_id, "quarters": quarters},
+            )
+        ).mappings().all()
+    except SQLAlchemyError as exc:
+        raise _source_error("fund_style_drift_mv", exc) from exc
+
+    periods: list[FundStyleDriftPeriod] = []
+    current_date: dt.date | None = None
+    current_weights: list[FundStyleSectorWeight] = []
+    for row in rows:
+        report_date = row["report_date"]
+        if report_date != current_date:
+            if current_date is not None:
+                periods.append(
+                    FundStyleDriftPeriod(
+                        report_date=current_date,
+                        quarter=f"{current_date.year}Q{((current_date.month - 1) // 3) + 1}",
+                        sectors=current_weights,
+                    )
+                )
+            current_date = report_date
+            current_weights = []
+        current_weights.append(
+            FundStyleSectorWeight(
+                sector=row["sector"],
+                weight=(
+                    (_float(row["weight"]) or 0.0) / 100.0
+                    if row["weight"] is not None
+                    else None
+                ),
+            )
+        )
+    if current_date is not None:
+        periods.append(
+            FundStyleDriftPeriod(
+                report_date=current_date,
+                quarter=f"{current_date.year}Q{((current_date.month - 1) // 3) + 1}",
+                sectors=current_weights,
+            )
+        )
+
+    return FundStyleDriftResponse(
+        instrument_id=instrument_id,
+        series_id=fund.series_id,
+        periods=periods,
+        empty_state=(
+            None
+            if periods
+            else _empty("No historical N-PORT holdings for this fund series.", "fund_style_drift_mv")
+        ),
+    )
+
+
+async def _fetch_fund_style_drift_legacy(
     session: AsyncSession,
     datalake: AsyncSession,
     instrument_id: uuid.UUID,
@@ -1019,6 +1192,81 @@ def assemble_entity_analytics(
     )
 
 
+async def assemble_entity_analytics_sql(
+    session: AsyncSession,
+    nav: pd.Series,
+    *,
+    fund: Fund,
+    window: WindowKey,
+    benchmark_nav: pd.Series | None = None,
+    benchmark_id: uuid.UUID | None = None,
+    benchmark_label: str | None = None,
+    insider_data: InsiderData | None = None,
+) -> FundEntityAnalyticsResponse:
+    """Series-only DB-first: drawdown SERIES (fn_drawdown) and distribution
+    var/cvar (fn_var_cvar) come from SQL; rolling_returns, FD histogram edges/
+    counts, skew/kurt and ALL scalars stay in Python (not in the §8 set).
+
+    The drawdown-PERIOD episode detection (_drawdown_periods) and the scalar
+    min/current drawdown stay pandas (episode extraction, not a series). The
+    distribution FD bins + skew/kurt also stay pandas; only var_95/cvar_95 are
+    replaced by the SQL fn_var_cvar over the exact visible window.
+    """
+    visible_nav = _window_nav(nav.dropna(), window)
+    if len(visible_nav) < 10:
+        raise InsufficientFundDataError(
+            f"Only {len(visible_nav)} NAV rows available for fund {fund.instrument_id}."
+        )
+    returns = simple_returns(visible_nav)
+    benchmark_returns = (
+        simple_returns(_window_nav(benchmark_nav.dropna(), window))
+        if benchmark_nav is not None and len(benchmark_nav) >= 2
+        else None
+    )
+    w_start = visible_nav.index[0].date()
+    w_end = visible_nav.index[-1].date()
+
+    dd_pts = await series_sql.drawdown_points(
+        session, instrument_id=fund.instrument_id, start=w_start, end=w_end
+    )
+    # legacy still needed for scalar min/current + drawdown-period episodes;
+    # reuse the SQL points for the emitted dates/values (parity-checked).
+    drawdown_series = _max_drawdown_series(visible_nav)  # for min/current/episodes
+
+    # Distribution: keep FD bins + skew/kurt in Python; replace var/cvar with SQL.
+    # When the legacy distribution early-returns empty (fewer than 10 in-window
+    # returns), keep it empty for parity rather than injecting SQL var/cvar.
+    base_dist = _distribution(returns)
+    if base_dist.bin_edges:
+        var_95, cvar_95 = await series_sql.var_cvar(
+            session, instrument_id=fund.instrument_id, level=0.95, start=w_start, end=w_end
+        )
+        distribution = base_dist.model_copy(update={"var_95": var_95, "cvar_95": cvar_95})
+    else:
+        distribution = base_dist
+
+    return FundEntityAnalyticsResponse(
+        instrument_id=fund.instrument_id,
+        name=fund.name,
+        as_of_date=w_end,
+        window=window,
+        risk_statistics=_risk_statistics(returns, drawdown_series, benchmark_returns),
+        drawdown=FundDrawdownAnalysis(
+            dates=[d for d, _ in dd_pts],
+            values=[v for _, v in dd_pts],
+            max_drawdown=float(drawdown_series.min()),
+            current_drawdown=float(drawdown_series.iloc[-1]),
+            worst_periods=_drawdown_periods(visible_nav),
+        ),
+        capture=_capture(returns, benchmark_returns, benchmark_id, benchmark_label),
+        rolling_returns=_rolling_returns(returns),
+        distribution=distribution,
+        return_statistics=_return_statistics(returns),
+        tail_risk=_tail_risk(returns),
+        insider_data=insider_data,
+    )
+
+
 async def _nav_for_window(
     session: AsyncSession,
     instrument_id: uuid.UUID,
@@ -1131,6 +1379,17 @@ async def fetch_fund_entity_analytics(
             session, benchmark_id, window
         )
     insider_data = await fetch_fund_insider_data(session, datalake, fund)
+    if get_settings().use_series_db_first:
+        return await assemble_entity_analytics_sql(
+            session,
+            nav,
+            fund=fund,
+            window=window,
+            benchmark_nav=benchmark_nav,
+            benchmark_id=benchmark_id,
+            benchmark_label=benchmark_label,
+            insider_data=insider_data,
+        )
     return assemble_entity_analytics(
         nav,
         fund=fund,
@@ -1401,7 +1660,73 @@ async def _read_cached_reveal(
         return None
 
 
+def _date_or_none(value: str | None) -> dt.date | None:
+    return dt.date.fromisoformat(value[:10]) if value else None
+
+
 async def fetch_fund_institutional_reveal(
+    session: AsyncSession,
+    datalake: AsyncSession,
+    instrument_id: uuid.UUID,
+    *,
+    use_db_first: bool | None = None,
+) -> FundInstitutionalRevealResponse | None:
+    if use_db_first is None:
+        use_db_first = get_settings().use_fund_analytics_db_first
+    if not use_db_first:
+        return await _fetch_fund_institutional_reveal_legacy(
+            session, datalake, instrument_id
+        )
+
+    fund = await _fund_or_none(session, instrument_id)
+    if fund is None:
+        return None
+    row = (
+        await datalake.execute(
+            text(
+                """
+                SELECT as_of, payload
+                FROM fund_institutional_reveal_latest_mv
+                WHERE series_id = :series_id
+                """
+            ),
+            {"series_id": fund.series_id},
+        )
+    ).mappings().first()
+    if row is None:
+        return FundInstitutionalRevealResponse(
+            instrument_id=fund.instrument_id,
+            series_id=fund.series_id,
+            fund_name=fund.name,
+            holdings_report_date=None,
+            period=None,
+            top_holders=[],
+            overlap=[],
+            holder_network=_empty_network(fund),
+            empty_state=_empty(
+                "No institutional-reveal artifact for this fund series.",
+                "fund_institutional_reveal_latest_mv",
+            ),
+        )
+    payload = row["payload"]
+    network = payload["holder_network"]
+    return FundInstitutionalRevealResponse(
+        instrument_id=fund.instrument_id,
+        series_id=fund.series_id,
+        fund_name=fund.name,
+        holdings_report_date=row["as_of"],
+        period=_date_or_none(payload.get("period")),
+        top_holders=[InstitutionalHolder(**h) for h in payload["top_holders"]],
+        overlap=[InstitutionalOverlapSecurity(**o) for o in payload["overlap"]],
+        holder_network=HolderNetwork(
+            nodes=[HolderNetworkNode(**n) for n in network["nodes"]],
+            edges=[HolderNetworkEdge(**e) for e in network["edges"]],
+        ),
+        empty_state=None,
+    )
+
+
+async def _fetch_fund_institutional_reveal_legacy(
     session: AsyncSession,
     datalake: AsyncSession,
     instrument_id: uuid.UUID,
@@ -1523,34 +1848,12 @@ async def _fund_exposures_for_cusip(
     ]
 
 
-async def fetch_holding_reverse_lookup(
-    session: AsyncSession,
-    datalake: AsyncSession,
-    cusip: str,
+def _build_reverse_lookup_response(
+    normalized: str,
+    institution_rows: Sequence[Mapping[str, Any]],
+    fund_exposures: list[ReverseLookupFundExposure],
+    source_empty_state: EmptyState | None,
 ) -> HoldingReverseLookupResponse:
-    normalized = _normalize_cusip(cusip)
-    if normalized is None:
-        raise ValueError(f"Invalid CUSIP {cusip!r}.")
-
-    fund_exposures = await _fund_exposures_for_cusip(session, normalized)
-    empty_state: EmptyState | None = None
-    try:
-        rows = (
-            await datalake.execute(
-                text(_REVERSE_LOOKUP_SQL),
-                {"cusip": normalized},
-            )
-        ).mappings().all()
-    except SQLAlchemyError as exc:
-        if _is_missing_relation(exc):
-            rows = []
-            empty_state = _empty(
-                "SEC 13F holdings tables are not deployed yet.",
-                "sec_13f_holdings",
-            )
-        else:
-            raise _source_error("sec_13f_holdings", exc) from exc
-
     institutions = [
         ReverseLookupInstitution(
             cik=row["cik"],
@@ -1560,18 +1863,23 @@ async def fetch_holding_reverse_lookup(
             period=row["period"],
             report_date=row["report_date"],
         )
-        for row in rows
+        for row in institution_rows
     ]
     security_name = (
-        rows[0]["name"]
-        if rows
+        institution_rows[0]["name"]
+        if institution_rows
         else (fund_exposures[0].issuer_name if fund_exposures else None)
     )
-    period = rows[0]["period"] if rows else None
+    period = institution_rows[0]["period"] if institution_rows else None
+    empty_state = source_empty_state
     if empty_state is None and not institutions:
-        empty_state = _empty("No 13F institutional holders matched this CUSIP.", "sec_13f_holdings")
+        empty_state = _empty(
+            "No 13F institutional holders matched this CUSIP.", "sec_13f_holdings"
+        )
     if not institutions and not fund_exposures:
-        empty_state = _empty("No fund exposure or 13F institutional holder matched this CUSIP.")
+        empty_state = _empty(
+            "No fund exposure or 13F institutional holder matched this CUSIP."
+        )
     return HoldingReverseLookupResponse(
         cusip=normalized,
         security_name=security_name,
@@ -1579,6 +1887,95 @@ async def fetch_holding_reverse_lookup(
         institutions=institutions,
         fund_exposures=fund_exposures,
         empty_state=empty_state,
+    )
+
+
+async def _reverse_lookup_institutions_legacy(
+    datalake: AsyncSession, normalized: str
+) -> tuple[list[Mapping[str, Any]], EmptyState | None]:
+    try:
+        rows = (
+            await datalake.execute(text(_REVERSE_LOOKUP_SQL), {"cusip": normalized})
+        ).mappings().all()
+    except SQLAlchemyError as exc:
+        if _is_missing_relation(exc):
+            return [], _empty(
+                "SEC 13F holdings tables are not deployed yet.", "sec_13f_holdings"
+            )
+        raise _source_error("sec_13f_holdings", exc) from exc
+    return list(cast(Sequence[Mapping[str, Any]], rows)), None
+
+
+async def fetch_holding_reverse_lookup(
+    session: AsyncSession,
+    datalake: AsyncSession,
+    cusip: str,
+    *,
+    use_db_first: bool | None = None,
+) -> HoldingReverseLookupResponse:
+    """Institutional + fund holders of a CUSIP (reverse lookup).
+
+    SPLIT: the fund-exposure side (fund_holdings/funds_v) is ALWAYS read
+    on-demand from the app DB — it is an org-scoped dynamic catalogue not
+    materialized in this migration. The 13F institutional side reads from
+    holding_reverse_lookup_mv (datalake) when use_holders_db_first is on, with a
+    fallback to the legacy hypertable SQL for CUSIPs absent from the MV (covers
+    refresh lag and the MV not yet being deployed). The MV is refreshed on a cron
+    by the matview_refresh worker, so a freshly-ingested 13F holding surfaces
+    only after the next refresh; the institution reshape is the same helper for
+    both paths, so payloads are identical. Freshness is exposed to the frontend
+    via the response period/report_date fields.
+    """
+    normalized = _normalize_cusip(cusip)
+    if normalized is None:
+        raise ValueError(f"Invalid CUSIP {cusip!r}.")
+    if use_db_first is None:
+        use_db_first = get_settings().use_holders_db_first
+
+    # Lado de exposições de fundo: SEMPRE on-demand no app DB (catálogo dinâmico,
+    # não materializado nesta migração — split documentado no plano/spec §7 B3).
+    fund_exposures = await _fund_exposures_for_cusip(session, normalized)
+
+    # Lado institucional: MV quando habilitado, com fallback ao SQL legado.
+    institution_rows: list[Mapping[str, Any]] = []
+    source_empty_state: EmptyState | None = None
+    if use_db_first:
+        try:
+            rows = (
+                await datalake.execute(
+                    select(
+                        HoldingReverseLookupRow.cik,
+                        HoldingReverseLookupRow.manager_name,
+                        HoldingReverseLookupRow.period,
+                        HoldingReverseLookupRow.report_date,
+                        HoldingReverseLookupRow.name,
+                        HoldingReverseLookupRow.value_usd,
+                        HoldingReverseLookupRow.shares,
+                    )
+                    .where(HoldingReverseLookupRow.cusip == normalized)
+                    .order_by(HoldingReverseLookupRow.value_usd.desc().nullslast())
+                    .limit(100)
+                )
+            ).mappings().all()
+        except SQLAlchemyError as exc:
+            if _is_missing_relation(exc):
+                rows = []
+            else:
+                raise _source_error("sec_13f_holdings", exc) from exc
+        if rows:
+            institution_rows = list(cast(Sequence[Mapping[str, Any]], rows))
+        else:
+            # MV vazio/ausente → fallback ao SQL legado.
+            institution_rows, source_empty_state = (
+                await _reverse_lookup_institutions_legacy(datalake, normalized)
+            )
+    else:
+        institution_rows, source_empty_state = (
+            await _reverse_lookup_institutions_legacy(datalake, normalized)
+        )
+
+    return _build_reverse_lookup_response(
+        normalized, institution_rows, fund_exposures, source_empty_state
     )
 
 
@@ -1682,13 +2079,22 @@ async def fetch_fund_risk_timeseries(
         raise InsufficientFundDataError(
             f"Only {len(nav)} NAV rows available in risk-timeseries window."
         )
-    drawdown = _max_drawdown_series(nav) * 100.0
     returns = simple_returns(nav)
     vol, model = _conditional_volatility(returns)
     regimes, regime_empty = await _regime_bands(datalake, nav.index[0].date(), nav.index[-1].date())
+
+    if get_settings().use_series_db_first:
+        dd_pts = await series_sql.drawdown_points(
+            session, instrument_id=instrument_id,
+            start=nav.index[0].date(), end=nav.index[-1].date(),
+        )
+        drawdown_points_out = [(d, v * 100.0) for d, v in dd_pts]
+    else:
+        drawdown_points_out = _series_points(_max_drawdown_series(nav) * 100.0)
+
     return FundRiskTimeseriesResponse(
         instrument_id=instrument_id,
-        drawdown=_series_points(drawdown),
+        drawdown=drawdown_points_out,
         conditional_volatility=vol,
         volatility_model=model,
         regime_bands=regimes,
@@ -1830,6 +2236,92 @@ async def fetch_fund_active_share(
     datalake: AsyncSession,
     instrument_id: uuid.UUID,
     *,
+    use_db_first: bool | None = None,
+) -> FundActiveShareResponse | None:
+    """Active share vs the fund's PRIMARY benchmark (spec §6 A5 — benchmark_id
+    removido). DB-first lê as colunas active-share de fund_risk_latest_mv (não
+    há mais fund_active_share_mv standalone). Com a flag off, cai ao corpo
+    legado (benchmark_id=None → empty-state), preservado só para a transição.
+    """
+    if use_db_first is None:
+        use_db_first = get_settings().use_fund_analytics_db_first
+    if not use_db_first:
+        return await _fetch_fund_active_share_legacy(
+            session, datalake, instrument_id, benchmark_id=None
+        )
+
+    fund = await _fund_or_none(session, instrument_id)
+    if fund is None:
+        return None
+    try:
+        risk = await session.get(FundRiskLatest, instrument_id)
+        if risk is None or risk.active_share_normalized is None:
+            return FundActiveShareResponse(
+                instrument_id=instrument_id,
+                empty_state=_empty(
+                    "No active-share computed for this fund.",
+                    "fund_risk_latest_mv",
+                ),
+            )
+        benchmark_name = await _resolve_benchmark_name(
+            session,
+            series_id=risk.active_share_benchmark_series_id,
+            instrument_id=risk.active_share_benchmark_instrument_id,
+        )
+    except SQLAlchemyError:
+        return await _fetch_fund_active_share_legacy(
+            session, datalake, instrument_id, benchmark_id=None
+        )
+    return FundActiveShareResponse(
+        instrument_id=instrument_id,
+        benchmark_name=benchmark_name,
+        benchmark_series_id=risk.active_share_benchmark_series_id,
+        active_share=_float(risk.active_share_normalized),
+        overlap=_float(risk.overlap_normalized),
+        n_portfolio_positions=risk.n_fund_holdings or 0,
+        n_benchmark_positions=risk.n_benchmark_holdings or 0,
+        n_common_positions=risk.n_common_holdings or 0,
+        as_of_date=risk.active_share_fund_report_date,
+    )
+
+
+async def _resolve_benchmark_name(
+    session: AsyncSession,
+    *,
+    series_id: str | None,
+    instrument_id: uuid.UUID | None,
+) -> str | None:
+    """Human label for the benchmark proxy: prefer the fund name from
+    funds_list_mv (by series_id), then the proxy ETF ticker from
+    instruments_universe (by instrument_id), else the raw series_id."""
+    if series_id is not None:
+        name = (
+            await session.execute(
+                select(FundListRow.name).where(FundListRow.series_id == series_id)
+            )
+        ).scalar_one_or_none()
+        if name:
+            return name
+    if instrument_id is not None:
+        ticker = (
+            await session.execute(
+                text(
+                    "SELECT ticker FROM instruments_universe "
+                    "WHERE instrument_id = :iid LIMIT 1"
+                ),
+                {"iid": instrument_id},
+            )
+        ).scalar()
+        if ticker:
+            return str(ticker)
+    return series_id
+
+
+async def _fetch_fund_active_share_legacy(
+    session: AsyncSession,
+    datalake: AsyncSession,
+    instrument_id: uuid.UUID,
+    *,
     benchmark_id: uuid.UUID | None,
 ) -> FundActiveShareResponse | None:
     fund = await _fund_or_none(session, instrument_id)
@@ -1847,7 +2339,6 @@ async def fetch_fund_active_share(
     if benchmark_target is None or not benchmark_target.series_ids:
         return FundActiveShareResponse(
             instrument_id=instrument_id,
-            benchmark_id=benchmark_id,
             benchmark_name=benchmark_target.name if benchmark_target else None,
             empty_state=_empty(
                 "Benchmark instrument could not be resolved to N-PORT holdings.",
@@ -1863,7 +2354,6 @@ async def fetch_fund_active_share(
     if not portfolio.weights:
         return FundActiveShareResponse(
             instrument_id=instrument_id,
-            benchmark_id=benchmark_id,
             benchmark_name=benchmark_target.name,
             as_of_date=portfolio.as_of,
             empty_state=_empty("Portfolio fund has no N-PORT holdings.", "sec_nport_holdings"),
@@ -1871,7 +2361,6 @@ async def fetch_fund_active_share(
     if not benchmark_weights.weights:
         return FundActiveShareResponse(
             instrument_id=instrument_id,
-            benchmark_id=benchmark_id,
             benchmark_name=benchmark_target.name,
             n_portfolio_positions=len(portfolio.weights),
             as_of_date=portfolio.as_of,
@@ -1885,7 +2374,6 @@ async def fetch_fund_active_share(
     )
     return FundActiveShareResponse(
         instrument_id=instrument_id,
-        benchmark_id=benchmark_id,
         benchmark_name=benchmark_target.name,
         active_share=active_share,
         overlap=overlap,

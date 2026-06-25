@@ -1,5 +1,4 @@
 import type {
-  FundActiveShareQuery,
   FundAnalysisQuery,
   FundEntityAnalyticsQuery,
   FundHoldingsTopQuery,
@@ -155,8 +154,8 @@ export function normalizeEntityAnalyticsParams(
   };
 }
 
-export function normalizeActiveShareParams(query: FundActiveShareQuery | { benchmark_id?: QueryValue } = {}) {
-  return { benchmark_id: cleanString(query.benchmark_id) };
+export function normalizeActiveShareParams(_query: { benchmark_id?: QueryValue } = {}) {
+  return {} as Record<string, never>;
 }
 
 export function normalizeFundResourceParams(
@@ -255,7 +254,7 @@ function paramPairs(resource: FundDossierSubresource, params: Record<string, Que
         ["benchmark_id", params.benchmark_id],
       ] as const;
     case "active-share":
-      return [["benchmark_id", params.benchmark_id]] as const;
+      return [] as const;
   }
 }
 
@@ -439,10 +438,7 @@ export const dossierQueryKeys = {
     const params = normalizeEntityAnalyticsParams(query);
     return ["fund-entity-analytics", instrumentId, params.window, params.benchmark_id] as const;
   },
-  activeShare: (instrumentId: string, query: FundActiveShareQuery | { benchmark_id?: QueryValue } = {}) => {
-    const params = normalizeActiveShareParams(query);
-    return ["fund-active-share", instrumentId, params.benchmark_id] as const;
-  },
+  activeShare: (instrumentId: string) => ["fund-active-share", instrumentId] as const,
   institutionalReveal: (instrumentId: string) => ["fund-institutional-reveal", instrumentId] as const,
   holdingReverseLookup: (cusip: QueryValue) => ["holding-reverse-lookup", normalizeCusip(cusip)] as const,
 } as const;

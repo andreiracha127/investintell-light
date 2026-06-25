@@ -395,9 +395,8 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
   });
 
   const activeShareQuery = useQuery({
-    queryKey: dossierQueryKeys.activeShare(instrumentId, benchmarkQuery),
-    queryFn: ({ signal }) =>
-      fetchFundActiveShare(instrumentId, benchmarkQuery, signal),
+    queryKey: dossierQueryKeys.activeShare(instrumentId),
+    queryFn: ({ signal }) => fetchFundActiveShare(instrumentId, signal),
     staleTime: FUND_DOSSIER_STALE_TIME_MS["active-share"],
     enabled: isHoldingsTab,
     retry: retryPolicy,
@@ -1561,7 +1560,10 @@ function ActiveSharePanel({ query }: { query: UseQueryResult<FundActiveShare, Er
             <KpiTile label="Portfolio positions" value={String(query.data.n_portfolio_positions)} />
             <KpiTile
               label="Benchmark"
-              value={benchmarkMetricLabel(query.data.benchmark_id, query.data.benchmark_name)}
+              value={benchmarkMetricLabel(
+                query.data.benchmark_series_id,
+                query.data.benchmark_name,
+              )}
             />
             <KpiTile label="Benchmark positions" value={String(query.data.n_benchmark_positions)} />
             <KpiTile label="Common positions" value={String(query.data.n_common_positions)} />

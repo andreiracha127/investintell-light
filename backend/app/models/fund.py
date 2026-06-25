@@ -233,6 +233,37 @@ class FundRiskLatest(Base):
     nav_quality_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     nav_glitch_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Active-share / overlap vs the fund's PRIMARY benchmark proxy (db-first A5).
+    # Seeded onto fund_risk_metrics by the active-share worker and projected onto
+    # fund_risk_latest_mv; read by the dossier instead of a standalone
+    # fund_active_share_mv. All nullable — NULL means the fund is not covered.
+    active_share_normalized: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    overlap_normalized: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    overlap_nav_raw: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    fund_cusip_coverage_nav: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    benchmark_cusip_coverage_nav: Mapped[Decimal | None] = mapped_column(
+        Numeric, nullable=True
+    )
+    n_fund_holdings: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_benchmark_holdings: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_common_holdings: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_fund_only: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    n_benchmark_only: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    holdings_jaccard: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    fund_report_age_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    benchmark_report_age_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    report_date_gap_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    active_share_benchmark_instrument_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, nullable=True
+    )
+    active_share_benchmark_series_id: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )
+    active_share_fund_report_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    active_share_benchmark_report_date: Mapped[date | None] = mapped_column(
+        Date, nullable=True
+    )
+
 
 class FundListRow(Base):
     # MV-backed rowset for GET /funds. The dynamic funds_v lineage remains the
