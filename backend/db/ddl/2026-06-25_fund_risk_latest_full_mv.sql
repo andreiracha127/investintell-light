@@ -10,7 +10,39 @@ DROP MATERIALIZED VIEW IF EXISTS funds_list_mv_new;
 DROP MATERIALIZED VIEW IF EXISTS fund_risk_latest_mv_new;
 
 CREATE MATERIALIZED VIEW fund_risk_latest_mv_new AS
-SELECT DISTINCT ON (instrument_id)
+WITH latest_global AS (
+    SELECT DISTINCT ON (instrument_id) *
+    FROM fund_risk_metrics
+    WHERE organization_id IS NULL
+    ORDER BY instrument_id, calc_date DESC
+),
+latest_active_share AS (
+    SELECT DISTINCT ON (instrument_id)
+           instrument_id AS active_instrument_id,
+           active_share_normalized AS as_active_share_normalized,
+           overlap_normalized AS as_overlap_normalized,
+           overlap_nav_raw AS as_overlap_nav_raw,
+           fund_cusip_coverage_nav AS as_fund_cusip_coverage_nav,
+           benchmark_cusip_coverage_nav AS as_benchmark_cusip_coverage_nav,
+           n_fund_holdings AS as_n_fund_holdings,
+           n_benchmark_holdings AS as_n_benchmark_holdings,
+           n_common_holdings AS as_n_common_holdings,
+           n_fund_only AS as_n_fund_only,
+           n_benchmark_only AS as_n_benchmark_only,
+           holdings_jaccard AS as_holdings_jaccard,
+           fund_report_age_days AS as_fund_report_age_days,
+           benchmark_report_age_days AS as_benchmark_report_age_days,
+           report_date_gap_days AS as_report_date_gap_days,
+           active_share_benchmark_instrument_id AS as_active_share_benchmark_instrument_id,
+           active_share_benchmark_series_id AS as_active_share_benchmark_series_id,
+           active_share_fund_report_date AS as_active_share_fund_report_date,
+           active_share_benchmark_report_date AS as_active_share_benchmark_report_date
+    FROM fund_risk_metrics
+    WHERE organization_id IS NULL
+      AND active_share_normalized IS NOT NULL
+    ORDER BY instrument_id, active_share_fund_report_date DESC NULLS LAST, calc_date DESC
+)
+SELECT
        instrument_id,
        calc_date,
        organization_id,
@@ -67,24 +99,24 @@ SELECT DISTINCT ON (instrument_id)
        credit_beta,
        crisis_alpha_score,
        inflation_beta,
-       active_share_normalized,
-       overlap_normalized,
-       overlap_nav_raw,
-       fund_cusip_coverage_nav,
-       benchmark_cusip_coverage_nav,
-       n_fund_holdings,
-       n_benchmark_holdings,
-       n_common_holdings,
-       n_fund_only,
-       n_benchmark_only,
-       holdings_jaccard,
-       fund_report_age_days,
-       benchmark_report_age_days,
-       report_date_gap_days,
-       active_share_benchmark_instrument_id,
-       active_share_benchmark_series_id,
-       active_share_fund_report_date,
-       active_share_benchmark_report_date,
+       COALESCE(active_share_normalized, as_active_share_normalized) AS active_share_normalized,
+       COALESCE(overlap_normalized, as_overlap_normalized) AS overlap_normalized,
+       COALESCE(overlap_nav_raw, as_overlap_nav_raw) AS overlap_nav_raw,
+       COALESCE(fund_cusip_coverage_nav, as_fund_cusip_coverage_nav) AS fund_cusip_coverage_nav,
+       COALESCE(benchmark_cusip_coverage_nav, as_benchmark_cusip_coverage_nav) AS benchmark_cusip_coverage_nav,
+       COALESCE(n_fund_holdings, as_n_fund_holdings) AS n_fund_holdings,
+       COALESCE(n_benchmark_holdings, as_n_benchmark_holdings) AS n_benchmark_holdings,
+       COALESCE(n_common_holdings, as_n_common_holdings) AS n_common_holdings,
+       COALESCE(n_fund_only, as_n_fund_only) AS n_fund_only,
+       COALESCE(n_benchmark_only, as_n_benchmark_only) AS n_benchmark_only,
+       COALESCE(holdings_jaccard, as_holdings_jaccard) AS holdings_jaccard,
+       COALESCE(fund_report_age_days, as_fund_report_age_days) AS fund_report_age_days,
+       COALESCE(benchmark_report_age_days, as_benchmark_report_age_days) AS benchmark_report_age_days,
+       COALESCE(report_date_gap_days, as_report_date_gap_days) AS report_date_gap_days,
+       COALESCE(active_share_benchmark_instrument_id, as_active_share_benchmark_instrument_id) AS active_share_benchmark_instrument_id,
+       COALESCE(active_share_benchmark_series_id, as_active_share_benchmark_series_id) AS active_share_benchmark_series_id,
+       COALESCE(active_share_fund_report_date, as_active_share_fund_report_date) AS active_share_fund_report_date,
+       COALESCE(active_share_benchmark_report_date, as_active_share_benchmark_report_date) AS active_share_benchmark_report_date,
        score_components,
        dtw_drift_score,
        rsi_14,
@@ -117,9 +149,9 @@ SELECT DISTINCT ON (instrument_id)
        nport_flow_as_of,
        nport_flow_staleness_days,
        nport_flow_observation_count
-FROM fund_risk_metrics
-WHERE organization_id IS NULL
-ORDER BY instrument_id, calc_date DESC;
+FROM latest_global
+LEFT JOIN latest_active_share
+  ON active_instrument_id = instrument_id;
 
 CREATE UNIQUE INDEX fund_risk_latest_mv_new_pk
     ON fund_risk_latest_mv_new (instrument_id);

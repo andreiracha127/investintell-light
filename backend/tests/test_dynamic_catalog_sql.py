@@ -108,6 +108,14 @@ def test_fund_risk_latest_mv_projects_active_share_columns() -> None:
     )
     body = sql[create_start:create_end]
 
+    assert "latest_active_share AS" in body
+    assert "active_share_normalized IS NOT NULL" in body
+    assert "active_share_fund_report_date DESC NULLS LAST" in body
+    assert (
+        "COALESCE(active_share_normalized, as_active_share_normalized) "
+        "AS active_share_normalized"
+    ) in body
+
     for column in (
         "active_share_normalized",
         "overlap_normalized",
@@ -129,6 +137,22 @@ def test_fund_risk_latest_mv_projects_active_share_columns() -> None:
         "active_share_benchmark_report_date",
     ):
         assert column in body, column
+
+
+def test_full_fund_risk_latest_mv_backfills_active_share_from_latest_covered_row() -> None:
+    sql = FULL_RISK_LATEST_DDL_PATH.read_text(encoding="utf-8")
+
+    assert "latest_active_share AS" in sql
+    assert "active_share_normalized IS NOT NULL" in sql
+    assert "active_share_fund_report_date DESC NULLS LAST" in sql
+    assert (
+        "COALESCE(active_share_normalized, as_active_share_normalized) "
+        "AS active_share_normalized"
+    ) in sql
+    assert (
+        "COALESCE(active_share_benchmark_series_id, "
+        "as_active_share_benchmark_series_id) AS active_share_benchmark_series_id"
+    ) in sql
 
 
 def test_fund_risk_latest_mv_projects_full_worker_snapshot_columns() -> None:
