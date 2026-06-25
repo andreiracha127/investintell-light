@@ -28,7 +28,10 @@ SELECT
     ns.source_nav_max_date,
     r.return_1m,
     r.return_3m,
-    r.return_1y,
+    CASE
+        WHEN r.return_1y IS NULL OR abs(r.return_1y) > 10 THEN NULL
+        ELSE r.return_1y
+    END AS return_1y,
     r.return_3y_ann,
     r.return_5y_ann,
     r.volatility_1y,
@@ -61,7 +64,8 @@ SELECT
 FROM funds_v f
 LEFT JOIN fund_risk_latest_mv r ON r.instrument_id = f.instrument_id
 CROSS JOIN nav_staleness ns
-WHERE f.strategy_label IS DISTINCT FROM 'Unclassified';
+WHERE f.strategy_label IS DISTINCT FROM 'Unclassified'
+  AND f.aum_usd IS NOT NULL;
 
 CREATE UNIQUE INDEX funds_list_mv_pk
     ON funds_list_mv (instrument_id);

@@ -227,12 +227,16 @@ def test_full_risk_latest_migration_uses_blue_green_swap() -> None:
         "RENAME TO fund_class_resolution_mv;"
     ) in sql
     assert "blended_momentum_score" in sql
+    assert "f.aum_usd IS NOT NULL" in sql
+    assert "abs(r.return_1y) > 10" in sql
 
 
 def test_funds_list_mv_keeps_momentum_score_but_stays_narrow() -> None:
     sql = FUNDS_LIST_DDL_PATH.read_text(encoding="utf-8")
 
     assert "r.blended_momentum_score" in sql
+    assert "f.aum_usd IS NOT NULL" in sql
+    assert "abs(r.return_1y) > 10" in sql
     assert "r.score_components" not in sql
     assert "r.data_quality_flags" not in sql
 

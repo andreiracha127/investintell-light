@@ -52,7 +52,7 @@ from app.schemas.fund_analysis import (
 )
 from app.services import lookthrough, series_sql
 from app.services._series import RANGE_DAYS, resample_weekly, series_points
-from app.services.funds_catalog import UNCLASSIFIED_LABEL
+from app.services.funds_catalog import MAX_CATALOG_RETURN_1Y_ABS, UNCLASSIFIED_LABEL
 from app.services.stock_analysis import lookback_pad_days
 
 logger = logging.getLogger(__name__)
@@ -754,7 +754,9 @@ async def fetch_funds_scatter(session: AsyncSession, *, limit: int) -> FundScatt
         .join(FundRiskLatest, FundRiskLatest.instrument_id == Fund.instrument_id)
         .where(
             Fund.strategy_label.is_distinct_from(UNCLASSIFIED_LABEL),
+            Fund.aum_usd.is_not(None),
             FundRiskLatest.return_1y.is_not(None),
+            func.abs(FundRiskLatest.return_1y) <= MAX_CATALOG_RETURN_1Y_ABS,
             FundRiskLatest.volatility_1y.is_not(None),
             FundRiskLatest.cvar_95_12m.is_not(None),
         )

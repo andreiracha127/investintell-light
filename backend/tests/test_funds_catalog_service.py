@@ -77,14 +77,20 @@ def test_list_sort_whitelist_excludes_columns_absent_from_the_mv() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_no_filters_yields_only_unclassified_exclusion() -> None:
-    """Baseline: with no active filters the ONLY predicate is the
-    unconditional 'Unclassified' exclusion (never listed; profiles stay
-    reachable by direct id)."""
+def test_no_filters_yields_catalog_quality_gates() -> None:
+    """Baseline: catalog universes always require classified funds with AUM.
+
+    Direct profile pages stay reachable by id; list/candidate universes suppress
+    rows whose missing Assets can make upstream risk returns explode.
+    """
     conditions = catalog.filter_conditions(catalog.FundFilters())
-    assert len(conditions) == 1
-    sql = str(conditions[0].compile(compile_kwargs={"literal_binds": True}))
+    assert len(conditions) == 2
+    sql = " ".join(
+        str(condition.compile(compile_kwargs={"literal_binds": True}))
+        for condition in conditions
+    )
     assert "Unclassified" in sql
+    assert "funds_profile_mv.aum_usd IS NOT NULL" in sql
 
 
 def test_every_filter_contributes_one_condition() -> None:
@@ -101,15 +107,15 @@ def test_every_filter_contributes_one_condition() -> None:
         max_drawdown_1y_min=-0.2,
     )
     conditions = catalog.filter_conditions(filters)
-    # +1: the unconditional Unclassified exclusion precedes the 10 filters.
-    assert len(conditions) - 1 == len(catalog.FILTER_FIELD_NAMES) == 10
+    # +2: unconditional Unclassified + missing-AUM exclusions precede filters.
+    assert len(conditions) - 2 == len(catalog.FILTER_FIELD_NAMES) == 10
 
 
 def test_search_wildcards_are_escaped() -> None:
-    # conditions[0] is the Unclassified exclusion; the search predicate follows.
+    # conditions[0:2] are the fixed catalog gates; search follows.
     conditions = catalog.filter_conditions(catalog.FundFilters(search="100%_a"))
     sql = str(
-        conditions[1].compile(compile_kwargs={"literal_binds": True})
+        conditions[2].compile(compile_kwargs={"literal_binds": True})
     )
     assert "100\\%\\_a" in sql
 
@@ -124,8 +130,24 @@ def test_build_funds_select_compiles_with_filters_and_sort() -> None:
     )
     sql = str(stmt)
     assert "funds_list_mv" in sql
+    assert "funds_list_mv.aum_usd IS NOT NULL" in sql
     assert "ORDER BY funds_list_mv.sharpe_1y DESC NULLS LAST" in sql
     assert "LIMIT" in sql and "OFFSET" in sql
+
+
+def test_return_1y_projection_and_sort_suppress_glitch_values() -> None:
+    stmt = catalog.build_funds_select(
+        catalog.FundFilters(return_1y_min=0.0),
+        sort="return_1y",
+        direction="desc",
+        limit=20,
+        offset=0,
+    )
+    sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "CASE WHEN" in sql
+    assert "abs(funds_list_mv.return_1y) > 10.0" in sql
+    assert "AS return_1y" in sql
+    assert "ORDER BY return_1y DESC NULLS LAST" in sql
 
 
 def test_fund_profile_uses_materialized_benchmark_snapshot() -> None:

@@ -22,7 +22,7 @@ from dataclasses import dataclass, field, fields
 from types import SimpleNamespace
 from typing import Any, cast
 
-from sqlalchemy import ColumnElement, Select, column, func, or_, select, table, text
+from sqlalchemy import ColumnElement, Select, case, column, func, or_, select, table, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
@@ -51,6 +51,11 @@ NAV_TARGET_POINTS = 260
 
 # Top-50 cap of the N-PORT source (defense in depth — the sync stores <= 50).
 HOLDINGS_CAP = 50
+
+# Catalog display guard: NAV glitches can surface absurd annual returns while
+# deeper source repair is pending. Keep extreme but plausible leveraged funds
+# (e.g. < 10x) and suppress impossible values from ranking/list payloads.
+MAX_CATALOG_RETURN_1Y_ABS = 10.0
 
 
 # Investment-adviser crosswalk (no ORM models in the Light; referenced ad-hoc).
@@ -107,6 +112,17 @@ def _build_manager_name_expr() -> ColumnElement[Any]:
 
 _MANAGER_NAME: ColumnElement[Any] = _build_manager_name_expr()
 
+_CATALOG_RETURN_1Y: ColumnElement[Any] = case(
+    (
+        or_(
+            FundListRow.return_1y.is_(None),
+            func.abs(FundListRow.return_1y) > MAX_CATALOG_RETURN_1Y_ABS,
+        ),
+        None,
+    ),
+    else_=FundListRow.return_1y,
+).label("return_1y")
+
 
 class UnknownSortColumnError(Exception):
     """Raised when a sort column is outside the whitelist (routes -> 422)."""
@@ -150,6 +166,7 @@ LIST_SORT_WHITELIST: dict[str, ColumnElement[Any]] = {
         for name in _RISK_SORT_FIELDS
         if hasattr(FundListRow, name)
     },
+    "return_1y": _CATALOG_RETURN_1Y,
     # Resolved per query (correlated subquery, not a stored column) — sortable
     # all the same, so the Manager column behaves like the rest.
     "manager_name": _MANAGER_NAME,
@@ -214,6 +231,10 @@ def filter_conditions(filters: FundFilters) -> list[ColumnElement[bool]]:
     comparisons are falsy, so funds without that metric drop out by
     definition (a fund that cannot be ranked never matches a bound on it).
 
+    Funds without a stored AUM are excluded from catalog-style universes
+    UNCONDITIONALLY. Missing AUM is a quality hole in the upstream NAV/risk
+    lineage and can make return metrics explode.
+
     'Unclassified' funds are excluded from the listing UNCONDITIONALLY
     (decisão do dono, 2026-06-12): the residual ~1% the reclassification
     pipeline could not label has no strategy/peer context and pollutes the
@@ -221,7 +242,8 @@ def filter_conditions(filters: FundFilters) -> list[ColumnElement[bool]]:
     fetch does not go through these conditions).
     """
     conditions: list[ColumnElement[bool]] = [
-        Fund.strategy_label.is_distinct_from(UNCLASSIFIED_LABEL)
+        Fund.strategy_label.is_distinct_from(UNCLASSIFIED_LABEL),
+        Fund.aum_usd.is_not(None),
     ]
     if filters.search:
         pattern = f"%{_escape_like(filters.search)}%"
@@ -260,7 +282,8 @@ def filter_conditions(filters: FundFilters) -> list[ColumnElement[bool]]:
 def _list_filter_conditions(filters: FundFilters) -> list[ColumnElement[bool]]:
     """SQL predicates for GET /funds over the materialized list projection."""
     conditions: list[ColumnElement[bool]] = [
-        FundListRow.strategy_label.is_distinct_from(UNCLASSIFIED_LABEL)
+        FundListRow.strategy_label.is_distinct_from(UNCLASSIFIED_LABEL),
+        FundListRow.aum_usd.is_not(None),
     ]
     if filters.search:
         pattern = f"%{_escape_like(filters.search)}%"
@@ -288,7 +311,7 @@ def _list_filter_conditions(filters: FundFilters) -> list[ColumnElement[bool]]:
     if filters.volatility_1y_max is not None:
         conditions.append(FundListRow.volatility_1y <= filters.volatility_1y_max)
     if filters.return_1y_min is not None:
-        conditions.append(FundListRow.return_1y >= filters.return_1y_min)
+        conditions.append(_CATALOG_RETURN_1Y >= filters.return_1y_min)
     if filters.max_drawdown_1y_min is not None:
         conditions.append(FundListRow.max_drawdown_1y >= filters.max_drawdown_1y_min)
     return conditions
@@ -310,7 +333,7 @@ _ITEM_COLUMNS: tuple[
     ("is_index", FundListRow.is_index),
     ("expense_ratio", FundListRow.expense_ratio),
     ("aum_usd", FundListRow.aum_usd),
-    ("return_1y", FundListRow.return_1y),
+    ("return_1y", _CATALOG_RETURN_1Y),
     ("volatility_1y", FundListRow.volatility_1y),
     ("sharpe_1y", FundListRow.sharpe_1y),
     ("max_drawdown_1y", FundListRow.max_drawdown_1y),
@@ -406,7 +429,10 @@ async def fetch_strategies(session: AsyncSession) -> list[str]:
     labels on the loaded page.
     """
     result = await session.execute(
-        select(FundListRow.strategy_label).distinct().order_by(FundListRow.strategy_label)
+        select(FundListRow.strategy_label)
+        .where(*_list_filter_conditions(FundFilters()))
+        .distinct()
+        .order_by(FundListRow.strategy_label)
     )
     return [row[0] for row in result.all() if row[0]]
 
