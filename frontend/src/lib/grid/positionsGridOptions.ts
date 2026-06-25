@@ -145,6 +145,7 @@ export function positionsGridColumns(callbacks?: PositionsCallbacks): GridColumn
       id: "trade_date",
       header: { format: "Buy date" },
       className: "ix-grid-cell-text",
+      dataType: "string",
       cells: {
         formatter: dateFormatter,
         events: {
