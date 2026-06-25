@@ -4,6 +4,7 @@ import type {
   FundEntityAnalytics,
   FundFactors,
   FundInstitutionalReveal,
+  FundPeers,
   FundRiskTimeseries,
   FundStyleDrift,
   FundsScatter,
@@ -16,6 +17,7 @@ import {
   buildHcInsiderSentimentOption,
   buildHcInstitutionalHolderOption,
   buildHcInstitutionalOverlapOption,
+  buildHcPeerBubbleOption,
   buildHcRiskTimeseriesOption,
   buildHcStyleBiasOption,
   buildHcStyleDriftOption,
@@ -216,6 +218,43 @@ function scatter(): FundsScatter {
   };
 }
 
+function peers(): FundPeers {
+  return {
+    instrument_id: "fund-id",
+    cohort_label: "Large blend",
+    count: 2,
+    classification_note: "Test cohort",
+    items: [
+      {
+        instrument_id: "fund-id",
+        ticker: "FND",
+        name: "Fund",
+        strategy_label: "Large blend",
+        expense_ratio: 0.001,
+        return_1y: 0.12,
+        volatility_1y: 0.18,
+        sharpe_1y: 1.1,
+        max_drawdown_1y: -0.08,
+        cvar_95_12m: -0.04,
+        is_target: true,
+      },
+      {
+        instrument_id: "peer-id",
+        ticker: "PER",
+        name: "Peer",
+        strategy_label: "Large blend",
+        expense_ratio: 0.002,
+        return_1y: -0.04,
+        volatility_1y: 0.1,
+        sharpe_1y: 0.6,
+        max_drawdown_1y: -0.06,
+        cvar_95_12m: -0.03,
+        is_target: false,
+      },
+    ],
+  };
+}
+
 describe("fund dossier Highcharts builders", () => {
   it("builds a stacked style drift area with one series per sector", () => {
     const option = buildHcStyleDriftOption(styleDrift(), colors);
@@ -303,6 +342,18 @@ describe("fund dossier Highcharts builders", () => {
       data: [
         { id: "fund-id", x: 0.18, y: 0.12 },
         { id: "peer-id", x: 0.1, y: 0.08 },
+      ],
+    });
+  });
+
+  it("builds peer bubbles from the same twenty-row peer cohort payload", () => {
+    const option = buildHcPeerBubbleOption(peers(), colors);
+
+    expect(option.series?.[0]).toMatchObject({
+      type: "bubble",
+      data: [
+        { id: "fund-id", x: 0.18, y: 1.1, z: 12 },
+        { id: "peer-id", x: 0.1, y: 0.6, z: 4 },
       ],
     });
   });

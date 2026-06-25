@@ -13,9 +13,8 @@ Error mapping (fail loud, never silently empty):
 - an empty funds table on /funds                -> 200 with total=0 and
   null staleness (a legitimately empty universe, not an error).
 
-Classification caveat: ``strategy_label`` mirrors the mother DB, whose
-automatic classifier has known errors — every response carries the fixed
-``classification_note`` disclaimer (no per-row provenance is stored).
+Classification labels mirror the local catalog. ``classification_note`` remains
+in the response contract for compatibility, without a default disclaimer.
 
 ETF exception: GET /funds/{id}/history may reuse local stock OHLCV rows when
 the ETF ticker is present in eod_prices; otherwise it degrades to the local

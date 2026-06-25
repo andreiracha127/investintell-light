@@ -8141,7 +8141,7 @@
           "classification_note": {
             "type": "string",
             "title": "Classification Note",
-            "default": "Labels da fonte podem conter erros do classificador autom\u00e1tico"
+            "default": ""
           }
         },
         "type": "object",
@@ -8386,7 +8386,7 @@
           "classification_note": {
             "type": "string",
             "title": "Classification Note",
-            "default": "Labels da fonte podem conter erros do classificador autom\u00e1tico"
+            "default": ""
           }
         },
         "type": "object",
@@ -10162,7 +10162,7 @@
           "classification_note": {
             "type": "string",
             "title": "Classification Note",
-            "default": "Labels da fonte podem conter erros do classificador autom\u00e1tico"
+            "default": ""
           }
         },
         "type": "object",
@@ -10671,7 +10671,7 @@
           "classification_note": {
             "type": "string",
             "title": "Classification Note",
-            "default": "Labels da fonte podem conter erros do classificador autom\u00e1tico"
+            "default": ""
           }
         },
         "type": "object",

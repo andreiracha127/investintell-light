@@ -47,6 +47,7 @@ import {
   formatNumber,
   formatPercent,
 } from "@/lib/format";
+import { visibleClassificationNote } from "@/lib/funds/classificationNote";
 
 const PAGE_SIZE = 30;
 type SortDir = "asc" | "desc";
@@ -695,9 +696,9 @@ function FundsTable({
         </div>
       )}
 
-      {data.classification_note && (
+      {visibleClassificationNote(data.classification_note) && (
         <p className="border-t border-border px-[var(--ix-pad)] py-2 text-[11px] text-text-muted">
-          {data.classification_note}
+          {visibleClassificationNote(data.classification_note)}
         </p>
       )}
 

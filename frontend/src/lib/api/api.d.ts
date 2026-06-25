@@ -3109,10 +3109,7 @@ export interface components {
             count: number;
             /** Items */
             items: components["schemas"]["FundPeerItem"][];
-            /**
-             * Classification Note
-             * @default Labels da fonte podem conter erros do classificador automático
-             */
+            /** Classification Note */
             classification_note: string;
         };
         /**
@@ -3170,10 +3167,7 @@ export interface components {
             holdings: components["schemas"]["FundHoldingsOut"];
             /** Classes */
             classes: components["schemas"]["FundClassOut"][];
-            /**
-             * Classification Note
-             * @default Labels da fonte podem conter erros do classificador automático
-             */
+            /** Classification Note */
             classification_note: string;
         };
         /** FundRefIn */
@@ -3569,10 +3563,7 @@ export interface components {
             tail_risks: number[];
             /** Strategies */
             strategies: string[];
-            /**
-             * Classification Note
-             * @default Labels da fonte podem conter erros do classificador automático
-             */
+            /** Classification Note */
             classification_note: string;
         };
         /**
@@ -3728,10 +3719,7 @@ export interface components {
             /** Page Size */
             page_size: number;
             staleness: components["schemas"]["FundsStaleness"];
-            /**
-             * Classification Note
-             * @default Labels da fonte podem conter erros do classificador automático
-             */
+            /** Classification Note */
             classification_note: string;
         };
         /**

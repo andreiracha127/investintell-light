@@ -15,7 +15,7 @@ export const FUND_DOSSIER_DEFAULTS = {
   range: "1Y" as RangePreset,
   analysisWindow: 252,
   holdingsTopLimit: 25,
-  peersLimit: 10,
+  peersLimit: 20,
   scatterLimit: 250,
   styleDriftQuarters: 40,
   entityWindow: "1Y",

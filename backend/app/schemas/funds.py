@@ -3,10 +3,8 @@
 Scale contract (project-wide): percent-like values are decimal fractions
 (0.05 = 5%), copied verbatim from the mother DB — the Light NEVER recomputes.
 
-Classification caveat (mother-DB inventory 2026-06-11): `strategy_label`
-largely comes from the source's automatic description classifier, which has
-visible errors. Every list/profile response carries a fixed
-``classification_note`` so the UI can disclaim it.
+Classification labels mirror the source catalog. ``classification_note`` is
+kept for compatibility with older clients, but has no default display text.
 """
 
 import datetime as dt
@@ -14,11 +12,7 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-# Fixed disclaimer — the sync mirrors the source faithfully and we do not
-# store per-row provenance, so the caveat applies to the whole column.
-CLASSIFICATION_NOTE = (
-    "Labels da fonte podem conter erros do classificador automático"
-)
+CLASSIFICATION_NOTE = ""
 
 # Adviser names arrive ALL-CAPS from the Form ADV (sec_managers) source. We
 # present them in title case for legibility. Legal-suffix / abbreviation tokens

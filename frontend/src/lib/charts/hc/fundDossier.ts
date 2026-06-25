@@ -10,6 +10,7 @@ import type {
   FundEntityAnalytics,
   FundFactors,
   FundInstitutionalReveal,
+  FundPeers,
   FundRiskTimeseries,
   FundStyleDrift,
   FundsScatter,
@@ -569,6 +570,98 @@ export function buildHcFundsScatterOption(
           color: categoryColor(colors, index),
         })),
         marker: { radius: 4 },
+      },
+    ],
+  };
+}
+
+export function buildHcPeerBubbleOption(
+  peers: FundPeers,
+  colors: ChartColors,
+): Options {
+  const rows = peers.items
+    .slice(0, 20)
+    .filter(
+      (peer) =>
+        peer.return_1y != null &&
+        peer.volatility_1y != null &&
+        peer.sharpe_1y != null,
+    );
+
+  return {
+    chart: { type: "bubble", spacing: [12, 18, 12, 10] },
+    legend: { enabled: false },
+    xAxis: {
+      title: { text: "Volatility 1Y" },
+      min: 0,
+      gridLineColor: colors.grid,
+      labels: {
+        formatter() {
+          return formatPercent(this.value as number, 1);
+        },
+      },
+    },
+    yAxis: {
+      title: { text: "Sharpe 1Y" },
+      gridLineColor: colors.grid,
+      plotLines: [{ value: 0, color: colors.barMute, width: 1 }],
+      labels: {
+        formatter() {
+          return formatNumber(this.value as number, 1);
+        },
+      },
+    },
+    tooltip: {
+      formatter(this: Point) {
+        const peer = rows[this.index];
+        return (
+          `${peer?.name ?? "Peer"}<br/>` +
+          `Return 1Y: <b>${formatPercent(peer?.return_1y ?? 0, 2, { signed: true })}</b><br/>` +
+          `Vol 1Y: <b>${formatPercent(peer?.volatility_1y ?? 0, 2)}</b><br/>` +
+          `Sharpe: <b>${formatNumber(peer?.sharpe_1y ?? 0, 2)}</b>`
+        );
+      },
+    },
+    plotOptions: {
+      bubble: {
+        minSize: 24,
+        maxSize: 92,
+        marker: {
+          lineColor: colors.surface,
+          lineWidth: 1.5,
+          fillOpacity: 0.82,
+        },
+        dataLabels: {
+          enabled: true,
+          formatter() {
+            return this.name ?? "";
+          },
+          allowOverlap: false,
+          style: {
+            color: colors.text,
+            fontSize: "9px",
+            fontWeight: "700",
+            textOutline: "none",
+          },
+        },
+      },
+    },
+    series: [
+      {
+        type: "bubble",
+        name: "Peers",
+        data: rows.map((peer, index) => ({
+          id: peer.instrument_id,
+          name: peer.ticker ?? peer.name,
+          x: peer.volatility_1y ?? 0,
+          y: peer.sharpe_1y ?? 0,
+          z: Math.max(Math.abs(peer.return_1y ?? 0), 0.002) * 100,
+          color: peer.is_target
+            ? colors.accent
+            : peer.return_1y != null && peer.return_1y < 0
+              ? colors.loss
+              : categoryColor(colors, index),
+        })),
       },
     ],
   };

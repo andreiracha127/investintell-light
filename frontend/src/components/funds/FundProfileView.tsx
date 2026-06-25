@@ -27,7 +27,6 @@ import {
   fetchFundRiskTimeseries,
   fetchFundStyleDrift,
   fetchFundTimeseries,
-  fetchFundsScatter,
   fundTimeseriesToHistoryBars,
   type FundActiveShare,
   type FundAnalysis,
@@ -43,8 +42,8 @@ import {
 } from "@/lib/api/client";
 import {
   buildHcFactorSensitivityOption,
-  buildHcFundsScatterOption,
   buildHcInsiderSentimentOption,
+  buildHcPeerBubbleOption,
   buildHcRiskTimeseriesOption,
   buildHcStyleBiasOption,
   buildHcStyleDriftOption,
@@ -60,6 +59,7 @@ import {
   FUND_DOSSIER_DEFAULTS,
   FUND_DOSSIER_STALE_TIME_MS,
 } from "@/lib/funds/dossierQueries";
+import { visibleClassificationNote } from "@/lib/funds/classificationNote";
 import {
   formatCompact,
   formatDate,
@@ -297,17 +297,6 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     retry: retryPolicy,
   });
 
-  const scatterQuery = useQuery({
-    queryKey: dossierQueryKeys.scatter({
-      limit: FUND_DOSSIER_DEFAULTS.scatterLimit,
-    }),
-    queryFn: ({ signal }) =>
-      fetchFundsScatter({ limit: FUND_DOSSIER_DEFAULTS.scatterLimit }, signal),
-    staleTime: FUND_DOSSIER_STALE_TIME_MS.scatter,
-    enabled: isPeersTab,
-    retry: retryPolicy,
-  });
-
   const factorsQuery = useQuery({
     queryKey: dossierQueryKeys.factors(instrumentId),
     queryFn: ({ signal }) => fetchFundFactors(instrumentId, signal),
@@ -445,10 +434,10 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     return buildHcFactorRadarOption(factorsQuery.data, colors);
   }, [factorsQuery.data, colors]);
 
-  const scatterOption = useMemo(() => {
-    if (!colors || !scatterQuery.data || scatterQuery.data.count === 0) return null;
-    return buildHcFundsScatterOption(scatterQuery.data, colors);
-  }, [scatterQuery.data, colors]);
+  const peerBubbleOption = useMemo(() => {
+    if (!colors || !peersQuery.data || peersQuery.data.items.length === 0) return null;
+    return buildHcPeerBubbleOption(peersQuery.data, colors);
+  }, [peersQuery.data, colors]);
 
   const tailRiskOption = useMemo(() => {
     if (!colors || !entityAnalyticsQuery.data) return null;
@@ -663,12 +652,15 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
       {activeTab === "peers" && (
         <PeersTab
           peersQuery={peersQuery}
-          scatterQuery={scatterQuery}
-          scatterOption={scatterOption}
+          bubbleOption={peerBubbleOption}
         />
       )}
 
-      <p className="mt-4 text-[11px] text-text-muted">{fund.classification_note}</p>
+      {visibleClassificationNote(fund.classification_note) && (
+        <p className="mt-4 text-[11px] text-text-muted">
+          {visibleClassificationNote(fund.classification_note)}
+        </p>
+      )}
 
       {deepOpen && (
         <DeepAnalysisModal
@@ -936,15 +928,17 @@ function FactorsTab({
 
 function PeersTab({
   peersQuery,
-  scatterQuery,
-  scatterOption,
+  bubbleOption,
 }: {
   peersQuery: UseQueryResult<FundPeers, Error>;
-  scatterQuery: UseQueryResult<unknown, Error>;
-  scatterOption: Highcharts.Options | null;
+  bubbleOption: Highcharts.Options | null;
 }) {
+  const targetPeer = peersQuery.data?.items.find((peer) => peer.is_target)
+    ?? peersQuery.data?.items[0]
+    ?? null;
+
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+    <div className="grid gap-4">
       <Card
         title="Peer cohort"
         subtitle={peersQuery.data ? peersQuery.data.cohort_label : undefined}
@@ -959,13 +953,32 @@ function PeersTab({
           />
         )}
       </Card>
-      <ChartCard
-        title="Risk-return universe"
-        option={scatterOption}
-        query={scatterQuery}
-        emptyMessage="No scatter payload returned for the funds universe."
-        className="h-[360px]"
-      />
+
+      <Card title="Peer bubble map" subtitle="Volatility, Sharpe and 1Y return scale">
+        {peersQuery.data ? (
+          <div className="grid gap-3">
+            {targetPeer && (
+              <div className="grid gap-px border border-border bg-border md:grid-cols-4">
+                <KpiTile label="Focus" value={targetPeer.ticker ?? targetPeer.name} />
+                <KpiTile label="Return 1Y" value={signedPct(targetPeer.return_1y)} />
+                <KpiTile label="Vol 1Y" value={pct(targetPeer.volatility_1y)} />
+                <KpiTile label="Sharpe" value={num(targetPeer.sharpe_1y)} />
+              </div>
+            )}
+            {bubbleOption ? (
+              <HighchartsChart options={bubbleOption} className="h-[420px] w-full" />
+            ) : (
+              <EmptyMessage message="No peer bubble payload returned for this cohort." />
+            )}
+          </div>
+        ) : (
+          <QueryMessage
+            query={peersQuery}
+            emptyMessage="No peer cohort returned for this fund."
+            loadingMessage="Loading peer bubble..."
+          />
+        )}
+      </Card>
     </div>
   );
 }
@@ -1307,41 +1320,53 @@ function PeersTable({ data }: { data: FundPeers }) {
 
   return (
     <>
-      <table className="w-full border-collapse ix-fs tabular-nums lining-nums">
-        <thead>
-          <tr className="bg-field">
-            <Th>Fund</Th>
-            <Th align="right">Return 1Y</Th>
-            <Th align="right">Vol 1Y</Th>
-            <Th align="right">Sharpe</Th>
-            <Th align="right">CVaR</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.items.map((peer, index) => (
-            <tr
-              key={peer.instrument_id}
-              className={`border-b border-border transition-colors hover:bg-accent-wash ${
-                peer.is_target ? "bg-accent-wash" : index % 2 === 1 ? "bg-zebra" : ""
-              }`}
-            >
-              <Td>
-                <Link href={`/funds/${peer.instrument_id}`} className="font-bold hover:text-accent">
-                  {peer.ticker ?? peer.name}
-                </Link>
-                <span className="block max-w-[280px] truncate text-[10px] text-text-muted">
-                  {peer.name}
-                </span>
-              </Td>
-              <Td align="right">{signedPct(peer.return_1y)}</Td>
-              <Td align="right">{pct(peer.volatility_1y)}</Td>
-              <Td align="right">{num(peer.sharpe_1y)}</Td>
-              <Td align="right">{pct(peer.cvar_95_12m)}</Td>
+      <div className="overflow-x-auto">
+        <table className="min-w-[980px] w-full border-collapse ix-fs tabular-nums lining-nums">
+          <thead>
+            <tr className="bg-field">
+              <Th>Fund</Th>
+              <Th>Strategy</Th>
+              <Th align="right">Expense</Th>
+              <Th align="right">Return 1Y</Th>
+              <Th align="right">Vol 1Y</Th>
+              <Th align="right">Sharpe</Th>
+              <Th align="right">Max DD</Th>
+              <Th align="right">CVaR</Th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="mt-2 text-[11px] text-text-muted">{data.classification_note}</p>
+          </thead>
+          <tbody>
+            {data.items.slice(0, 20).map((peer, index) => (
+              <tr
+                key={peer.instrument_id}
+                className={`border-b border-border transition-colors hover:bg-accent-wash ${
+                  peer.is_target ? "bg-accent-wash" : index % 2 === 1 ? "bg-zebra" : ""
+                }`}
+              >
+                <Td>
+                  <Link href={`/funds/${peer.instrument_id}`} className="font-bold hover:text-accent">
+                    {peer.ticker ?? peer.name}
+                  </Link>
+                  <span className="block max-w-[280px] truncate text-[10px] text-text-muted">
+                    {peer.name}
+                  </span>
+                </Td>
+                <Td>{peer.strategy_label}</Td>
+                <Td align="right">{pct(peer.expense_ratio)}</Td>
+                <Td align="right">{signedPct(peer.return_1y)}</Td>
+                <Td align="right">{pct(peer.volatility_1y)}</Td>
+                <Td align="right">{num(peer.sharpe_1y)}</Td>
+                <Td align="right">{pct(peer.max_drawdown_1y)}</Td>
+                <Td align="right">{pct(peer.cvar_95_12m)}</Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {visibleClassificationNote(data.classification_note) && (
+        <p className="mt-2 text-[11px] text-text-muted">
+          {visibleClassificationNote(data.classification_note)}
+        </p>
+      )}
     </>
   );
 }

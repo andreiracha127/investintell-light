@@ -236,20 +236,6 @@ function makePeers(): client.FundPeers {
   };
 }
 
-function makeScatter(): client.FundsScatter {
-  return {
-    count: 1,
-    instrument_ids: [FUND_ID],
-    names: ["Vanguard 500 Index Fund"],
-    tickers: ["VFINX"],
-    expected_returns: [0.12],
-    volatilities: [0.11],
-    tail_risks: [-0.03],
-    strategies: ["Large blend"],
-    classification_note: "Scatter classification note",
-  };
-}
-
 function makeFactors(): client.FundFactors {
   return {
     instrument_id: FUND_ID,
@@ -418,7 +404,6 @@ function mockDossierResponses() {
   mocked.fetchFundAnalysis.mockResolvedValue(makeAnalysis());
   mocked.fetchFundHoldingsTop.mockResolvedValue(makeHoldingsTop());
   mocked.fetchFundPeers.mockResolvedValue(makePeers());
-  mocked.fetchFundsScatter.mockResolvedValue(makeScatter());
   mocked.fetchFundFactors.mockResolvedValue(makeFactors());
   mocked.fetchFundStyleDrift.mockResolvedValue(makeStyleDrift());
   mocked.fetchFundRiskTimeseries.mockResolvedValue(makeRiskTimeseries());
@@ -534,14 +519,11 @@ describe("FundProfileView", () => {
     await waitFor(() =>
       expect(mocked.fetchFundPeers).toHaveBeenCalledWith(
         FUND_ID,
-        { limit: 10 },
+        { limit: 20 },
         expect.any(AbortSignal),
       ),
     );
-    expect(mocked.fetchFundsScatter).toHaveBeenCalledWith(
-      { limit: 250 },
-      expect.any(AbortSignal),
-    );
+    expect(mocked.fetchFundsScatter).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Deep Analysis" }));
     await waitFor(() =>
