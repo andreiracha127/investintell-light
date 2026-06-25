@@ -30,7 +30,7 @@ from app.ingestion.news import ensure_news
 from app.models.eod_price import EodPrice
 from app.models.instrument import Instrument
 from app.models.news_item import NewsItem
-from app.schemas.analysis import RangeKey, StockAnalysisResponse
+from app.schemas.analysis import AnalysisHeader, RangeKey, StockAnalysisResponse
 from app.schemas.market import HistoryBar, HistoryResponse, MarketOverviewResponse
 from app.schemas.news import NewsArticle, NewsResponse
 from app.schemas.prices import PricePoint, PriceSeriesResponse
@@ -192,6 +192,18 @@ async def _select_ohlcv_rows(
     return list(result.tuples().all())
 
 
+async def _select_latest_quote_rows(
+    session: AsyncSession, ticker: str
+) -> list[tuple[dt.date, float]]:
+    """Read the latest two raw closes for the stock header strip."""
+    result = await session.execute(
+        select(EodPrice.date, EodPrice.close)
+        .where(EodPrice.ticker == ticker)
+        .order_by(EodPrice.date.desc())
+        .limit(2)
+    )
+    return [(date, float(close)) for date, close in result.tuples().all()]
+
 
 @router.get("/{ticker}/history", response_model=HistoryResponse)
 async def get_stock_history(
@@ -255,6 +267,40 @@ async def get_stock_timeseries(
 async def _select_instrument_name(session: AsyncSession, ticker: str) -> str | None:
     """Read the instrument display name, if known."""
     return await session.scalar(select(Instrument.name).where(Instrument.ticker == ticker))
+
+
+@router.get("/{ticker}/quote", response_model=AnalysisHeader)
+async def get_stock_quote(
+    ticker: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AnalysisHeader:
+    """Fast header payload for stock pages.
+
+    This endpoint is intentionally tiny: it reads only the two latest raw EOD
+    closes and the display name, so the LCP price can paint before the heavier
+    analytics payload finishes.
+    """
+    symbol = ticker.strip().upper()
+    rows = await _select_latest_quote_rows(session, symbol)
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"No price data available for {symbol}.")
+    if len(rows) < 2:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Not enough price history for {symbol} to compute a one-day change.",
+        )
+    (last_date, last_close), (_, prev_close) = rows
+    name = await _select_instrument_name(session, symbol)
+    change = last_close - prev_close
+    return AnalysisHeader(
+        ticker=symbol,
+        name=name,
+        last_close=last_close,
+        prev_close=prev_close,
+        change=change,
+        change_pct=change / prev_close,
+        as_of=last_date,
+    )
 
 
 @router.get("/{ticker}/analysis", response_model=StockAnalysisResponse)

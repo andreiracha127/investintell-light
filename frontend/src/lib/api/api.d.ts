@@ -116,6 +116,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/stocks/{ticker}/quote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stock Quote
+         * @description Fast header payload for stock pages.
+         *
+         *     This endpoint is intentionally tiny: it reads only the two latest raw EOD
+         *     closes and the display name, so the LCP price can paint before the heavier
+         *     analytics payload finishes.
+         */
+        get: operations["get_stock_quote_stocks__ticker__quote_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/stocks/{ticker}/analysis": {
         parameters: {
             query?: never;
@@ -6383,6 +6407,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OhlcSeriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_stock_quote_stocks__ticker__quote_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisHeader"];
                 };
             };
             /** @description Validation Error */

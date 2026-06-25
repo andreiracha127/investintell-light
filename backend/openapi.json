@@ -246,6 +246,49 @@
         }
       }
     },
+    "/stocks/{ticker}/quote": {
+      "get": {
+        "tags": [
+          "stocks"
+        ],
+        "summary": "Get Stock Quote",
+        "description": "Fast header payload for stock pages.\n\nThis endpoint is intentionally tiny: it reads only the two latest raw EOD\ncloses and the display name, so the LCP price can paint before the heavier\nanalytics payload finishes.",
+        "operationId": "get_stock_quote_stocks__ticker__quote_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisHeader"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/stocks/{ticker}/analysis": {
       "get": {
         "tags": [

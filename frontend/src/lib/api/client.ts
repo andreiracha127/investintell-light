@@ -14,6 +14,7 @@ import {
 } from "@/lib/funds/dossierQueries";
 
 type AnalysisOperation = paths["/stocks/{ticker}/analysis"]["get"];
+type StockQuoteOperation = paths["/stocks/{ticker}/quote"]["get"];
 type PricesOperation = paths["/stocks/{ticker}/prices"]["get"];
 type NewsOperation = paths["/stocks/{ticker}/news"]["get"];
 type PortfolioAnalysisOperation = paths["/portfolio/analysis"]["post"];
@@ -116,6 +117,8 @@ export type SymbolSearchResult =
 
 export type StockAnalysis =
   AnalysisOperation["responses"]["200"]["content"]["application/json"];
+export type StockQuote =
+  StockQuoteOperation["responses"]["200"]["content"]["application/json"];
 export type AnalysisQuery = NonNullable<AnalysisOperation["parameters"]["query"]>;
 export type RangePreset = NonNullable<AnalysisQuery["range"]>;
 export type PriceSeries =
@@ -572,6 +575,16 @@ export function fetchStockAnalysis(
   const qs = params.toString();
   return request<StockAnalysis>(
     `/stocks/${encodeURIComponent(ticker)}/analysis${qs ? `?${qs}` : ""}`,
+    signal,
+  );
+}
+
+export function fetchStockQuote(
+  ticker: string,
+  signal?: AbortSignal,
+): Promise<StockQuote> {
+  return requestPublic<StockQuote>(
+    `/stocks/${encodeURIComponent(ticker)}/quote`,
     signal,
   );
 }

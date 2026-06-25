@@ -13,10 +13,12 @@ import {
   ApiError,
   fetchStockAnalysis,
   fetchStockHistory,
+  fetchStockQuote,
   isRangePreset,
   type HistoryBar,
   type RangePreset,
   type StockAnalysis,
+  type StockQuote,
 } from "@/lib/api/client";
 import { buildHcBellCurveOption } from "@/lib/charts/hc/stats-bellcurve";
 import { buildHcRollingOption } from "@/lib/charts/hc/rolling";
@@ -34,9 +36,11 @@ import { HoldersTab } from "@/components/stocks/HoldersTab";
 import { NewsPanel } from "@/components/stocks/NewsPanel";
 import { useLiveTicks } from "@/lib/livefeed/useLiveTicks";
 import { Card, KpiTile, StatRow, valueTone } from "@/components/ui/panels";
-
-/** Rolling window in trading days — fixed at the backend default for now (F7 may add a control). */
-const ROLLING_WINDOW = 63;
+import {
+  STOCK_DATA_STALE_TIME_MS,
+  STOCK_ROLLING_WINDOW,
+  stockQueryKeys,
+} from "@/lib/stocks/queries";
 
 export function StockAnalysisView({
   ticker,
@@ -56,12 +60,25 @@ export function StockAnalysisView({
     setColors(chartColors());
   }, []);
 
+  const quote = useQuery({
+    queryKey: stockQueryKeys.quote(ticker),
+    queryFn: ({ signal }) => fetchStockQuote(ticker, signal),
+    staleTime: STOCK_DATA_STALE_TIME_MS,
+    retry: (failureCount, err) =>
+      !(err instanceof ApiError && err.status >= 400 && err.status < 500) &&
+      failureCount < 2,
+  });
+
   const { data, error, isPending, isFetching, isPlaceholderData, refetch } =
     useQuery({
-    queryKey: ["analysis", ticker, range, ROLLING_WINDOW],
+    queryKey: stockQueryKeys.analysis(ticker, range, STOCK_ROLLING_WINDOW),
     queryFn: ({ signal }) =>
-      fetchStockAnalysis(ticker, { range, window: ROLLING_WINDOW }, signal),
-    staleTime: 60 * 60 * 1000, // EOD data updates once per day; 1h prevents pointless refetches on range toggling
+      fetchStockAnalysis(
+        ticker,
+        { range, window: STOCK_ROLLING_WINDOW },
+        signal,
+      ),
+    staleTime: STOCK_DATA_STALE_TIME_MS,
     retry: (failureCount, err) =>
       !(err instanceof ApiError && err.status >= 400 && err.status < 500) &&
       failureCount < 2,
@@ -71,9 +88,9 @@ export function StockAnalysisView({
   // client-side over the whole window, so changing the range preset must not
   // refetch bars (only the `analysis` KPIs above are range-scoped).
   const history = useQuery({
-    queryKey: ["stock-history-full", ticker],
+    queryKey: stockQueryKeys.historyFull(ticker),
     queryFn: ({ signal }) => fetchStockHistory(ticker, 2520, signal),
-    staleTime: 60 * 60 * 1000,
+    staleTime: STOCK_DATA_STALE_TIME_MS,
     retry: (failureCount, err) =>
       !(err instanceof ApiError && err.status >= 400 && err.status < 500) &&
       failureCount < 2,
@@ -116,6 +133,15 @@ export function StockAnalysisView({
   }
 
   if (isPending || !data || !colors) {
+    const fastHeader = data?.header ?? quote.data;
+    if (fastHeader) {
+      return (
+        <div className="mx-auto flex max-w-[1360px] flex-col px-[clamp(14px,3vw,28px)] pb-10 pt-5">
+          <StockHeaderBar header={fastHeader} />
+          <AnalysisBodySkeleton />
+        </div>
+      );
+    }
     return <LoadingSkeleton />;
   }
 
@@ -191,57 +217,9 @@ function AnalysisContent({
     [data.histogram, stats.var_95, colors],
   );
 
-  const { ticks, status: feedStatus } = useLiveTicks([header.ticker]);
-  const live = ticks[header.ticker];
-  const shownLast = live?.price ?? header.last_close;
-  // Baseline do live = header.last_close (último close do banco): durante o
-  // pregão é o close de ontem → variação de HOJE. Sem tick, EOD do payload.
-  const shownChange = live ? shownLast - header.last_close : header.change;
-  const shownChangePct =
-    live && header.last_close > 0 ? shownLast / header.last_close - 1 : header.change_pct;
-
-  const changeTone =
-    shownChange > 0
-      ? "text-gain"
-      : shownChange < 0
-        ? "text-loss"
-        : "text-neutral-value";
-
   return (
     <div className="mx-auto flex max-w-[1360px] flex-col px-[clamp(14px,3vw,28px)] pb-10 pt-5">
-      {/* ── Header row ── */}
-      <div className="mb-[18px] flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex flex-wrap items-baseline gap-2.5">
-            <h1 className="m-0 font-serif text-[clamp(24px,4vw,30px)] font-bold tracking-[-0.01em] text-text-primary">
-              {header.ticker}
-            </h1>
-            {header.name && (
-              <span className="text-[14px] text-text-secondary">{header.name}</span>
-            )}
-          </div>
-          <div className="mt-2 flex flex-wrap items-baseline gap-3 tabular-nums">
-            <span className="text-[30px] font-bold text-text-primary">
-              {formatCurrency(shownLast)}
-            </span>
-            <span className={`text-[15px] font-bold ${changeTone}`}>
-              {formatCurrency(shownChange, { signed: true })}{" "}
-              ({formatPercent(shownChangePct, 2, { signed: true })})
-            </span>
-            {feedStatus === "live" && live ? (
-              <span className="inline-flex items-center gap-1.5 border border-border bg-field px-2 py-[3px] text-[11px] text-text-muted">
-                <span className="h-[7px] w-[7px] rounded-full bg-gain animate-pulse" />
-                <span className="font-bold text-gain">LIVE</span>
-              </span>
-            ) : (
-              <span className="border border-border bg-field px-[7px] py-[2px] text-[10.5px] text-text-muted">
-                EOD · {formatDate(header.as_of)}
-              </span>
-            )}
-          </div>
-        </div>
-        <AddToPortfolio ticker={header.ticker} price={shownLast} variant="button" />
-      </div>
+      <StockHeaderBar header={header} />
 
       {/* ── Tab bar (Analysis | Holders) ── */}
       <div className="mb-px flex gap-px border-b border-border" role="tablist">
@@ -407,6 +385,61 @@ function AnalysisContent({
   );
 }
 
+function StockHeaderBar({ header }: { header: StockQuote }) {
+  const { ticks, status: feedStatus } = useLiveTicks([header.ticker]);
+  const live = ticks[header.ticker];
+  const shownLast = live?.price ?? header.last_close;
+  // Baseline do live = header.last_close (ultimo close do banco): durante o
+  // pregao e o close de ontem -> variacao de HOJE. Sem tick, EOD do payload.
+  const shownChange = live ? shownLast - header.last_close : header.change;
+  const shownChangePct =
+    live && header.last_close > 0
+      ? shownLast / header.last_close - 1
+      : header.change_pct;
+
+  const changeTone =
+    shownChange > 0
+      ? "text-gain"
+      : shownChange < 0
+        ? "text-loss"
+        : "text-neutral-value";
+
+  return (
+    <div className="mb-[18px] flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <div className="flex flex-wrap items-baseline gap-2.5">
+          <h1 className="m-0 font-serif text-[clamp(24px,4vw,30px)] font-bold tracking-[-0.01em] text-text-primary">
+            {header.ticker}
+          </h1>
+          {header.name && (
+            <span className="text-[14px] text-text-secondary">{header.name}</span>
+          )}
+        </div>
+        <div className="mt-2 flex flex-wrap items-baseline gap-3 tabular-nums">
+          <span className="text-[30px] font-bold text-text-primary">
+            {formatCurrency(shownLast)}
+          </span>
+          <span className={`text-[15px] font-bold ${changeTone}`}>
+            {formatCurrency(shownChange, { signed: true })}{" "}
+            ({formatPercent(shownChangePct, 2, { signed: true })})
+          </span>
+          {feedStatus === "live" && live ? (
+            <span className="inline-flex items-center gap-1.5 border border-border bg-field px-2 py-[3px] text-[11px] text-text-muted">
+              <span className="h-[7px] w-[7px] rounded-full bg-gain animate-pulse" />
+              <span className="font-bold text-gain">LIVE</span>
+            </span>
+          ) : (
+            <span className="border border-border bg-field px-[7px] py-[2px] text-[10.5px] text-text-muted">
+              EOD · {formatDate(header.as_of)}
+            </span>
+          )}
+        </div>
+      </div>
+      <AddToPortfolio ticker={header.ticker} price={shownLast} variant="button" />
+    </div>
+  );
+}
+
 /* ── Presentational helpers ───────────────────────────────────────────────── */
 
 function StatePanel({
@@ -421,6 +454,33 @@ function StatePanel({
       <div className="w-full max-w-[520px] border border-border border-l-[3px] border-l-[var(--color-loss)] bg-surface-2 px-8 py-6">
         <h1 className="mb-3 text-lg font-bold text-text-primary">{title}</h1>
         {children}
+      </div>
+    </div>
+  );
+}
+
+function AnalysisBodySkeleton() {
+  return (
+    <div
+      aria-busy="true"
+      aria-label="Loading analysis details"
+      className="animate-pulse"
+    >
+      <div className="mb-px h-9 border-b border-border bg-surface-2" />
+      <div className="mb-px h-[420px] border border-border bg-surface-2" />
+      <div className="mb-px grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
+        {Array.from({ length: 6 }, (_, i) => (
+          <div key={i} className="h-[72px] bg-surface-2" />
+        ))}
+      </div>
+      <div className="mb-px grid grid-cols-1 gap-px bg-border lg:grid-cols-3">
+        <div className="h-[200px] bg-surface-2" />
+        <div className="h-[200px] bg-surface-2" />
+        <div className="h-[200px] bg-surface-2" />
+      </div>
+      <div className="grid grid-cols-1 gap-px bg-border lg:grid-cols-2">
+        <div className="h-[280px] bg-surface-2" />
+        <div className="h-[280px] bg-surface-2" />
       </div>
     </div>
   );
