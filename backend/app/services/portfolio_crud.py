@@ -14,7 +14,7 @@ from collections.abc import Mapping, Sequence
 from decimal import Decimal
 from typing import Any, NamedTuple, Protocol, cast
 
-from sqlalchemy import CursorResult, Row, delete, func, select
+from sqlalchemy import CursorResult, Row, delete, func, select, union_all
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +30,7 @@ from app.schemas.portfolios import (
     PortfolioCreate,
     PositionBasis,
     PositionOverview,
+    PositionPriceSource,
 )
 
 # Hard cap on GET /portfolios — owner-scoped, so no pagination, just a bound.
@@ -60,6 +61,7 @@ async def create_portfolio(
     org_id: str | None,
     *,
     origin: str = "manual",
+    commit: bool = True,
 ) -> Portfolio:
     """Insert a portfolio (and its initial positions); return it fully loaded.
 
@@ -90,7 +92,10 @@ async def create_portfolio(
     )
     session.add(portfolio)
     try:
-        await session.commit()
+        if commit:
+            await session.commit()
+        else:
+            await session.flush()
     except IntegrityError as exc:
         await session.rollback()
         raise DuplicatePortfolioNameError(
@@ -333,22 +338,21 @@ async def select_last_two_closes(
     Raw ``close`` (not adj_close): last/prev power the quote-style price,
     change and market-value columns, which display traded prices.
     """
-    if not tickers:
+    symbols = sorted(set(tickers))
+    if not symbols:
         return {}
-    rn = (
-        func.row_number()
-        .over(partition_by=EodPrice.ticker, order_by=EodPrice.date.desc())
-        .label("rn")
-    )
-    latest = (
-        select(EodPrice.ticker, EodPrice.date, EodPrice.close, rn)
-        .where(EodPrice.ticker.in_(tickers))
-        .subquery()
-    )
+    branches = [
+        select(EodPrice.ticker, EodPrice.date, EodPrice.close)
+        .where(EodPrice.ticker == ticker)
+        .order_by(EodPrice.date.desc())
+        .limit(2)
+        for ticker in symbols
+    ]
+    latest = union_all(*branches).subquery()
     result = await session.execute(
-        select(latest.c.ticker, latest.c.date, latest.c.close)
-        .where(latest.c.rn <= 2)
-        .order_by(latest.c.ticker, latest.c.date.desc())
+        select(latest.c.ticker, latest.c.date, latest.c.close).order_by(
+            latest.c.ticker, latest.c.date.desc()
+        )
     )
     closes: dict[str, list[tuple[dt.date, float]]] = {}
     for ticker, date_, close in result.all():
@@ -381,6 +385,7 @@ class PositionTaxonomy(NamedTuple):
     asset_class: str | None
     strategy_label: str | None
     instrument_id: uuid.UUID | None
+    fund_type: str | None = None
 
 
 async def _fund_instrument_by_ticker(
@@ -419,6 +424,20 @@ async def _fund_instrument_by_ticker(
     return instrument_by_ticker
 
 
+async def _fund_type_by_instrument(
+    session: AsyncSession, instrument_ids: Sequence[Any]
+) -> dict[Any, str]:
+    """instrument_id -> fund_type for resolved fund holdings."""
+    if not instrument_ids:
+        return {}
+    result = await session.execute(
+        select(Fund.instrument_id, Fund.fund_type).where(
+            Fund.instrument_id.in_(instrument_ids)
+        )
+    )
+    return {instrument_id: fund_type for instrument_id, fund_type in result.all()}
+
+
 async def resolve_position_taxonomy(
     session: AsyncSession, tickers: Sequence[str]
 ) -> dict[str, PositionTaxonomy]:
@@ -435,6 +454,7 @@ async def resolve_position_taxonomy(
     instrument_ids = list({iid for iid in instrument_by_ticker.values()})
     asset_class_of = await optimizer_data.load_fund_asset_class(session, instrument_ids)
     strategy_of = await optimizer_data.load_fund_strategy_label(session, instrument_ids)
+    fund_type_of = await _fund_type_by_instrument(session, instrument_ids)
     out: dict[str, PositionTaxonomy] = {}
     for ticker in tickers:
         iid = instrument_by_ticker.get(ticker)
@@ -442,7 +462,10 @@ async def resolve_position_taxonomy(
             out[ticker] = PositionTaxonomy("equity", None, None)
         else:
             out[ticker] = PositionTaxonomy(
-                asset_class_of.get(iid), strategy_of.get(iid), iid
+                asset_class_of.get(iid),
+                strategy_of.get(iid),
+                iid,
+                fund_type_of.get(iid),
             )
     return out
 
@@ -482,23 +505,21 @@ async def select_last_two_navs(
     for ticker, instrument_id in instrument_by_ticker.items():
         tickers_by_instrument.setdefault(instrument_id, []).append(ticker)
 
-    rn = (
-        func.row_number()
-        .over(partition_by=FundNav.instrument_id, order_by=FundNav.nav_date.desc())
-        .label("rn")
-    )
-    latest = (
-        select(FundNav.instrument_id, FundNav.nav_date, FundNav.nav, rn)
+    branches = [
+        select(FundNav.instrument_id, FundNav.nav_date, FundNav.nav)
         .where(
-            FundNav.instrument_id.in_(list(instrument_by_ticker.values())),
+            FundNav.instrument_id == instrument_id,
             FundNav.nav.is_not(None),
         )
-        .subquery()
-    )
+        .order_by(FundNav.nav_date.desc())
+        .limit(2)
+        for instrument_id in sorted(set(instrument_by_ticker.values()), key=str)
+    ]
+    latest = union_all(*branches).subquery()
     result = await session.execute(
-        select(latest.c.instrument_id, latest.c.nav_date, latest.c.nav)
-        .where(latest.c.rn <= 2)
-        .order_by(latest.c.instrument_id, latest.c.nav_date.desc())
+        select(latest.c.instrument_id, latest.c.nav_date, latest.c.nav).order_by(
+            latest.c.instrument_id, latest.c.nav_date.desc()
+        )
     )
     navs: dict[str, list[tuple[dt.date, float]]] = {}
     for instrument_id, nav_date, nav in result.all():
@@ -590,6 +611,7 @@ def build_overview(
     names_by_ticker: dict[str, str | None],
     cash: float,
     taxonomy_by_ticker: Mapping[str, PositionTaxonomy] | None = None,
+    nav_tickers: set[str] | None = None,
 ) -> tuple[list[PositionOverview], OverviewAggregates]:
     """Assemble the render-ready overview rows + aggregates (no I/O).
 
@@ -621,6 +643,13 @@ def build_overview(
         tax = (taxonomy_by_ticker or {}).get(
             position.ticker, PositionTaxonomy(None, None, None)
         )
+        fund_type = tax.fund_type.lower() if tax.fund_type else None
+        price_source: PositionPriceSource = (
+            "nav" if position.ticker in (nav_tickers or set()) else "eod"
+        )
+        live_price_eligible = price_source == "eod" and (
+            tax.instrument_id is None or fund_type == "etf"
+        )
         rows.append(
             PositionOverview(
                 ticker=position.ticker,
@@ -628,6 +657,9 @@ def build_overview(
                 asset_class=tax.asset_class,
                 strategy_label=tax.strategy_label,
                 instrument_id=tax.instrument_id,
+                fund_type=fund_type,
+                price_source=price_source,
+                live_price_eligible=live_price_eligible,
                 quantity=position.quantity,
                 acq_price=position.acq_price,
                 basis=cast("PositionBasis", position.basis),

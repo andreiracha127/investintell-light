@@ -125,6 +125,73 @@ def test_build_transaction_nav_rejects_oversell() -> None:
         )
 
 
+async def test_seed_initial_position_buys_from_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inception = dt.date(2026, 1, 2)
+    added: list[Any] = []
+    flushed = False
+
+    class FakeSession:
+        def add(self, row: Any) -> None:
+            added.append(row)
+
+        async def flush(self) -> None:
+            nonlocal flushed
+            flushed = True
+
+    async def fake_transactions(session: Any, portfolio_id: int) -> list[Any]:
+        return []
+
+    async def fake_get_portfolio(
+        session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=portfolio_id,
+            inception_date=inception,
+            positions=[
+                SimpleNamespace(
+                    ticker="AAPL",
+                    quantity=10.0,
+                    acq_price=100.0,
+                    commission=1.25,
+                    trade_date=None,
+                ),
+                SimpleNamespace(
+                    ticker="MSFT",
+                    quantity=5.0,
+                    acq_price=None,
+                    commission=None,
+                    trade_date=dt.date(2026, 1, 3),
+                ),
+            ],
+        )
+
+    async def fake_closes(session: Any, tickers: Any) -> dict[str, Any]:
+        assert tickers == ["MSFT"]
+        return {"MSFT": [(dt.date(2026, 1, 3), 250.0)]}
+
+    async def fake_navs(session: Any, tickers: Any) -> dict[str, Any]:
+        assert tickers == []
+        return {}
+
+    monkeypatch.setattr(portfolio_ledger, "list_transactions", fake_transactions)
+    monkeypatch.setattr(portfolio_crud, "get_portfolio", fake_get_portfolio)
+    monkeypatch.setattr(portfolio_crud, "select_last_two_closes", fake_closes)
+    monkeypatch.setattr(portfolio_crud, "select_last_two_navs", fake_navs)
+
+    transactions = await portfolio_ledger.seed_initial_position_buys(FakeSession(), 7)
+
+    assert transactions == added
+    assert flushed is True
+    assert [(tx.ticker, tx.side, tx.quantity, tx.price, tx.trade_date) for tx in added] == [
+        ("AAPL", "buy", 10.0, 100.0, inception),
+        ("MSFT", "buy", 5.0, 250.0, dt.date(2026, 1, 3)),
+    ]
+    assert float(added[0].commission) == pytest.approx(1.25)
+    assert float(added[1].commission) == pytest.approx(0.0)
+
+
 async def test_create_transaction_route_normalizes_ensures_and_persists(
     monkeypatch: pytest.MonkeyPatch, ensure_calls: list[list[str]]
 ) -> None:
@@ -196,6 +263,14 @@ async def test_create_transaction_route_skips_ensure_for_funds(
     async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
         return {"VFIAX"}
 
+    async def fake_taxonomy(session: Any, tickers: Any) -> dict[str, Any]:
+        return {
+            ticker: portfolio_crud.PositionTaxonomy(
+                None, None, None, "mutual_fund"
+            )
+            for ticker in tickers
+        }
+
     async def fake_create(session: Any, portfolio_id: int, payload: Any) -> SimpleNamespace:
         return _tx(
             payload.ticker,
@@ -211,6 +286,7 @@ async def test_create_transaction_route_skips_ensure_for_funds(
 
     monkeypatch.setattr(portfolio_crud, "portfolio_exists", fake_exists)
     monkeypatch.setattr(portfolio_crud, "select_fund_tickers", fake_fund_tickers)
+    monkeypatch.setattr(portfolio_crud, "resolve_position_taxonomy", fake_taxonomy)
     monkeypatch.setattr(portfolio_ledger, "create_transaction", fake_create)
     monkeypatch.setattr(portfolio_ledger, "materialize_portfolio_nav", fake_materialize)
 

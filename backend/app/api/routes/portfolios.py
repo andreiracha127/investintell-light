@@ -19,7 +19,7 @@ Error mapping (fail loud, never silently empty):
 import datetime as dt
 import hashlib
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -158,11 +158,37 @@ async def _ensure_trade_tickers(
     if not tickers:
         return
     symbols = sorted(set(tickers))
-    fund_tickers = await portfolio_crud.select_fund_tickers(session, symbols)
-    ensure_tickers = [ticker for ticker in symbols if ticker not in fund_tickers]
+    nav_fund_tickers = await _select_nav_priced_fund_tickers(session, symbols)
+    ensure_tickers = [
+        ticker for ticker in symbols if ticker not in nav_fund_tickers
+    ]
     if ensure_tickers:
         start, end = _ensure_window()
         await ensure_eod_or_http_error(session, client, ensure_tickers, start, end)
+
+
+def _is_etf_taxonomy(
+    taxonomy: Mapping[str, portfolio_crud.PositionTaxonomy], ticker: str
+) -> bool:
+    tax = taxonomy.get(ticker)
+    return bool(tax and (tax.fund_type or "").lower() == "etf")
+
+
+async def _select_nav_priced_fund_tickers(
+    session: AsyncSession, tickers: Sequence[str]
+) -> set[str]:
+    """Fund tickers that should use NAV snapshots instead of traded closes."""
+    if not tickers:
+        return set()
+    fund_tickers = await portfolio_crud.select_fund_tickers(session, tickers)
+    if not fund_tickers:
+        return set()
+    taxonomy = await portfolio_crud.resolve_position_taxonomy(session, list(fund_tickers))
+    return {
+        ticker
+        for ticker in fund_tickers
+        if not _is_etf_taxonomy(taxonomy, ticker)
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -179,21 +205,28 @@ async def create_portfolio(
 ) -> PortfolioOut:
     """Create a portfolio with optional initial positions.
 
-    Position tickers are validated against Tiingo via the EOD ensure — a typo
+    Traded tickers are validated against Tiingo via the EOD ensure — a typo
     fails loud (404) BEFORE anything is persisted — which also warms the EOD
-    cache for the overview.
+    cache for the overview. NAV-priced fund tickers are validated locally.
     """
     if payload.positions:
-        start, end = _ensure_window()
-        await ensure_eod_or_http_error(
-            session, client, [p.ticker for p in payload.positions], start, end
-        )
+        await _ensure_trade_tickers(session, client, [p.ticker for p in payload.positions])
     try:
         portfolio = await portfolio_crud.create_portfolio(
-            session, payload, user.sub, user.org_id
+            session, payload, user.sub, user.org_id, commit=False
         )
+        if payload.positions:
+            await portfolio_ledger.seed_initial_position_buys(session, portfolio.id)
+            await portfolio_ledger.materialize_portfolio_nav(session, portfolio.id)
+        await session.commit()
     except portfolio_crud.DuplicatePortfolioNameError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except portfolio_ledger.MissingLedgerPriceDataError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except portfolio_ledger.PortfolioNotFoundError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return PortfolioOut.model_validate(portfolio)
 
 
@@ -399,11 +432,10 @@ async def put_position(
     provided = payload.model_fields_set
     position = await portfolio_crud.get_position(session, portfolio_id, symbol)
     if position is None:
-        # Fund tickers (synced funds/fund_classes tables) are valid positions
-        # priced from fund_nav — they must NOT be validated against Tiingo
-        # (F8.5; class tickers use the series NAV as a proxy, F8.6b).
-        is_fund = bool(await portfolio_crud.select_fund_tickers(session, [symbol]))
-        if not is_fund:
+        # NAV-priced funds/classes are valid local positions. ETFs remain
+        # traded tickers, so they still warm/validate via EOD closes.
+        nav_fund_tickers = await _select_nav_priced_fund_tickers(session, [symbol])
+        if symbol not in nav_fund_tickers:
             start, end = _ensure_window()
             await ensure_eod_or_http_error(session, client, [symbol], start, end)
         position = await portfolio_crud.insert_position(
@@ -568,8 +600,9 @@ async def get_portfolio_overview(
 ) -> PortfolioOverviewResponse | Response:
     """Render-ready position table with P&L and column-header aggregates (D6).
 
-    Last/prev closes come from the two most recent eod_prices rows per ticker;
-    the EOD ensure runs first so stale tickers are refreshed.  An empty
+    Baseline prices come from the two most recent local eod_prices rows per
+    traded ticker, or fund NAV rows for NAV-priced holdings. The payload also
+    marks positions that may receive a frontend live-tick overlay. An empty
     portfolio is a legitimate 200 with zeroed/null aggregates.
     """
     key = _portfolio_cache_key(request, user.sub, portfolio_id, "overview")
@@ -583,30 +616,28 @@ async def get_portfolio_overview(
 
     tickers = [position.ticker for position in portfolio.positions]
     fund_tickers: set[str] = set()
+    nav_fund_tickers: set[str] = set()
     closes = await portfolio_crud.select_last_two_closes(session, tickers)
+    taxonomy = await portfolio_crud.resolve_position_taxonomy(session, tickers)
     if tickers:
-        # Fund-aware pricing (F8.5): tickers known to the synced funds table
-        # are priced from fund_nav and skipped by the Tiingo ensure. Miss
-        # performance is local-first: existing local rows are used as-is, and
-        # only truly cold non-fund tickers trigger a synchronous ensure.
+        # Fund-aware pricing (F8.5): NAV-priced funds/classes are priced from
+        # fund_nav. ETFs remain traded tickers and must already have local EOD
+        # rows warmed by create/transaction flows or background workers. This
+        # read route stays DB-only so cache misses do not block the page on
+        # synchronous ingestion.
         fund_tickers = await portfolio_crud.select_fund_tickers(session, tickers)
-        ensure_tickers = [
-            t for t in tickers if t not in fund_tickers and not closes.get(t)
-        ]
-        if ensure_tickers:
-            start, end = _ensure_window()
-            await ensure_eod_or_http_error(session, client, ensure_tickers, start, end)
-            closes.update(
-                await portfolio_crud.select_last_two_closes(session, ensure_tickers)
-            )
+        nav_fund_tickers = {
+            ticker
+            for ticker in fund_tickers
+            if not _is_etf_taxonomy(taxonomy, ticker)
+        }
 
     names = await portfolio_crud.select_instrument_names(session, tickers)
-    nav_tickers = [t for t in fund_tickers if t not in closes]
+    nav_tickers = [t for t in nav_fund_tickers if t not in closes]
     if nav_tickers:
         closes.update(await portfolio_crud.select_last_two_navs(session, nav_tickers))
         fund_names = await portfolio_crud.select_fund_names(session, nav_tickers)
         names = {**fund_names, **names}
-    taxonomy = await portfolio_crud.resolve_position_taxonomy(session, tickers)
     try:
         rows, aggregates = portfolio_crud.build_overview(
             portfolio.positions,
@@ -614,6 +645,7 @@ async def get_portfolio_overview(
             names,
             cash=portfolio.cash,
             taxonomy_by_ticker=taxonomy,
+            nav_tickers=set(nav_tickers),
         )
     except portfolio_crud.MissingPriceDataError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

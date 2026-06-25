@@ -19,7 +19,7 @@ from app.core.db import get_session
 from app.core.tiingo_provider import get_tiingo_client
 from app.ingestion.service import EnsureReport
 from app.main import create_app
-from app.services import portfolio_crud
+from app.services import portfolio_crud, portfolio_ledger
 from app.tiingo.exceptions import TiingoNotFoundError
 
 _CREATED = dt.datetime(2026, 6, 10, 12, 0, tzinfo=dt.UTC)
@@ -80,9 +80,17 @@ def _portfolio(
     )
 
 
+class _SessionStub:
+    async def commit(self) -> None:
+        return None
+
+    async def rollback(self) -> None:
+        return None
+
+
 def _client() -> AsyncClient:
     app = create_app()
-    app.dependency_overrides[get_session] = lambda: None
+    app.dependency_overrides[get_session] = lambda: _SessionStub()
     app.dependency_overrides[get_tiingo_client] = lambda: object()
     app.dependency_overrides[get_current_user] = lambda: CurrentUser(
         sub="u-1", org_id=None, claims={}
@@ -101,7 +109,11 @@ def ensure_calls(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         calls.append(list(tickers))
         return EnsureReport()
 
+    async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
+        return set()
+
     monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
+    monkeypatch.setattr(portfolio_crud, "select_fund_tickers", fake_fund_tickers)
     return calls
 
 
@@ -122,13 +134,29 @@ async def test_create_portfolio_201_normalizes_and_ensures(
         org_id: str | None,
         *,
         origin: str = "manual",
+        commit: bool = True,
     ) -> SimpleNamespace:
-        received.append((payload, owner_sub, org_id, origin))
+        received.append((payload, owner_sub, org_id, origin, commit))
         return _portfolio(
             positions=[_position(), _position("MSFT", 5.0, None)]
         )
 
+    seeded: list[int] = []
+    materialized: list[int] = []
+
+    async def fake_seed_initial_buys(session: Any, portfolio_id: int) -> list[Any]:
+        seeded.append(portfolio_id)
+        return []
+
+    async def fake_materialize(session: Any, portfolio_id: int) -> Any:
+        materialized.append(portfolio_id)
+        return None
+
     monkeypatch.setattr(portfolio_crud, "create_portfolio", fake_create)
+    monkeypatch.setattr(
+        portfolio_ledger, "seed_initial_position_buys", fake_seed_initial_buys
+    )
+    monkeypatch.setattr(portfolio_ledger, "materialize_portfolio_nav", fake_materialize)
     async with _client() as ac:
         response = await ac.post(
             "/portfolios",
@@ -152,10 +180,13 @@ async def test_create_portfolio_201_normalizes_and_ensures(
         _position_json("MSFT", 5.0, None),
     ]
     # Name trimmed and tickers uppercased BEFORE the service sees them.
-    persisted, owner_sub, org_id, origin = received[0]
+    persisted, owner_sub, org_id, origin, commit = received[0]
     assert persisted.name == "Test"
     assert [p.ticker for p in persisted.positions] == ["AAPL", "MSFT"]
     assert (owner_sub, org_id, origin) == ("u-1", None, "manual")
+    assert commit is False
+    assert seeded == [1]
+    assert materialized == [1]
     # Tickers were validated/warmed against Tiingo in one ensure call.
     assert ensure_calls == [["AAPL", "MSFT"]]
 
@@ -170,6 +201,7 @@ async def test_create_without_positions_skips_the_ensure(
         org_id: str | None,
         *,
         origin: str = "manual",
+        commit: bool = True,
     ) -> SimpleNamespace:
         return _portfolio(name="Empty", cash=100.0)
 
@@ -182,6 +214,49 @@ async def test_create_without_positions_skips_the_ensure(
     assert ensure_calls == []
 
 
+async def test_create_with_unpriced_initial_position_returns_422(
+    monkeypatch: pytest.MonkeyPatch, ensure_calls: list[list[str]]
+) -> None:
+    async def fake_create(
+        session: Any,
+        payload: Any,
+        owner_sub: str,
+        org_id: str | None,
+        *,
+        origin: str = "manual",
+        commit: bool = True,
+    ) -> SimpleNamespace:
+        return _portfolio(positions=[_position("AAPL", 1.0, None)])
+
+    async def fake_seed_initial_buys(session: Any, portfolio_id: int) -> list[Any]:
+        raise portfolio_ledger.MissingLedgerPriceDataError(
+            "No reference price available to seed initial BUY for AAPL."
+        )
+
+    materialized: list[int] = []
+
+    async def fake_materialize(session: Any, portfolio_id: int) -> Any:
+        materialized.append(portfolio_id)
+        return None
+
+    monkeypatch.setattr(portfolio_crud, "create_portfolio", fake_create)
+    monkeypatch.setattr(
+        portfolio_ledger, "seed_initial_position_buys", fake_seed_initial_buys
+    )
+    monkeypatch.setattr(portfolio_ledger, "materialize_portfolio_nav", fake_materialize)
+
+    async with _client() as ac:
+        response = await ac.post(
+            "/portfolios",
+            json={"name": "Needs price", "positions": [{"ticker": "AAPL", "quantity": 1}]},
+        )
+
+    assert response.status_code == 422
+    assert "No reference price available" in response.json()["detail"]
+    assert materialized == []
+    assert ensure_calls == [["AAPL"]]
+
+
 async def test_create_duplicate_name_returns_409(
     monkeypatch: pytest.MonkeyPatch, ensure_calls: list[list[str]]
 ) -> None:
@@ -192,6 +267,7 @@ async def test_create_duplicate_name_returns_409(
         org_id: str | None,
         *,
         origin: str = "manual",
+        commit: bool = True,
     ) -> SimpleNamespace:
         raise portfolio_crud.DuplicatePortfolioNameError(
             "A portfolio named 'Test' already exists."
@@ -211,6 +287,9 @@ async def test_create_with_tiingo_unknown_ticker_returns_404_before_persisting(
     async def fake_ensure(*args: Any, **kwargs: Any) -> EnsureReport:
         raise TiingoNotFoundError("404 from Tiingo")
 
+    async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
+        return set()
+
     created: list[Any] = []
 
     async def fake_create(
@@ -220,11 +299,13 @@ async def test_create_with_tiingo_unknown_ticker_returns_404_before_persisting(
         org_id: str | None,
         *,
         origin: str = "manual",
+        commit: bool = True,
     ) -> SimpleNamespace:
         created.append(payload)
         return _portfolio()
 
     monkeypatch.setattr(api_shared, "ensure_eod_data", fake_ensure)
+    monkeypatch.setattr(portfolio_crud, "select_fund_tickers", fake_fund_tickers)
     monkeypatch.setattr(portfolio_crud, "create_portfolio", fake_create)
     async with _client() as ac:
         response = await ac.post(
@@ -535,6 +616,7 @@ def _install_put_stubs(
     existing: SimpleNamespace | None,
     portfolio_found: bool = True,
     fund_tickers: set[str] | None = None,
+    fund_types: dict[str, str] | None = None,
 ) -> dict[str, list[Any]]:
     calls: dict[str, list[Any]] = {"insert": [], "update": []}
 
@@ -546,7 +628,24 @@ def _install_put_stubs(
     async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
         return (fund_tickers or set()) & set(tickers)
 
+    async def fake_taxonomy(session: Any, tickers: Any) -> dict[str, Any]:
+        fund_set = fund_tickers or set()
+        return {
+            ticker: (
+                portfolio_crud.PositionTaxonomy(
+                    None,
+                    None,
+                    None,
+                    (fund_types or {}).get(ticker, "mutual_fund"),
+                )
+                if ticker in fund_set
+                else portfolio_crud.PositionTaxonomy("equity", None, None)
+            )
+            for ticker in tickers
+        }
+
     monkeypatch.setattr(portfolio_crud, "select_fund_tickers", fake_fund_tickers)
+    monkeypatch.setattr(portfolio_crud, "resolve_position_taxonomy", fake_taxonomy)
 
     async def fake_get_position(
         session: Any, portfolio_id: int, ticker: str
@@ -652,6 +751,27 @@ async def test_put_position_fund_ticker_insert_skips_tiingo_ensure(
     assert response.json() == _position_json("VFIAX", 10.0, 450.0)
     assert ensure_calls == []  # fund ticker — Tiingo never consulted
     assert calls["insert"] == [(1, "VFIAX", 10.0, 450.0, "reference", None, None)]
+
+
+async def test_put_position_etf_fund_ticker_insert_still_ensures_tiingo(
+    monkeypatch: pytest.MonkeyPatch, ensure_calls: list[list[str]]
+) -> None:
+    """ETFs may exist in the funds catalog, but they remain traded tickers."""
+    calls = _install_put_stubs(
+        monkeypatch,
+        existing=None,
+        fund_tickers={"VTI"},
+        fund_types={"VTI": "etf"},
+    )
+    async with _client() as ac:
+        response = await ac.put(
+            "/portfolios/1/positions/vti", json={"quantity": 3, "acq_price": 220}
+        )
+
+    assert response.status_code == 200
+    assert response.json() == _position_json("VTI", 3.0, 220.0)
+    assert ensure_calls == [["VTI"]]
+    assert calls["insert"] == [(1, "VTI", 3.0, 220.0, "reference", None, None)]
 
 
 async def test_put_position_executed_fill_fields_pass_through(

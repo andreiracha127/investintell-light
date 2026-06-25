@@ -20,6 +20,7 @@ from app.schemas._tickers import normalize_ticker
 from app.schemas.news import NewsArticle
 
 AssetClass = Literal["equity", "fixed_income", "cash", "alternatives", "multi_asset"]
+PositionPriceSource = Literal["eod", "nav"]
 
 MAX_POSITIONS = 50
 MAX_NAME_LENGTH = 80
@@ -281,6 +282,20 @@ class PositionOverview(BaseModel):
         default=None,
         description="Fund instrument_id (for the dossier link); None for "
         "non-fund holdings.",
+    )
+    fund_type: str | None = Field(
+        default=None,
+        description="Fund type from the fund catalog, e.g. etf/mutual_fund/mmf; "
+        "None for direct stock/non-fund holdings.",
+    )
+    price_source: PositionPriceSource = Field(
+        description="Baseline price source used for the backend overview: "
+        "eod for traded closes, nav for fund NAV snapshots."
+    )
+    live_price_eligible: bool = Field(
+        description="True when the frontend may overlay real-time ticks on top "
+        "of the EOD baseline. Stocks and ETFs are eligible; NAV-priced funds "
+        "remain EOD."
     )
     quantity: float
     acq_price: float | None = Field(

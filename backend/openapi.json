@@ -468,7 +468,7 @@
           "portfolios"
         ],
         "summary": "Create Portfolio",
-        "description": "Create a portfolio with optional initial positions.\n\nPosition tickers are validated against Tiingo via the EOD ensure \u2014 a typo\nfails loud (404) BEFORE anything is persisted \u2014 which also warms the EOD\ncache for the overview.",
+        "description": "Create a portfolio with optional initial positions.\n\nTraded tickers are validated against Tiingo via the EOD ensure \u2014 a typo\nfails loud (404) BEFORE anything is persisted \u2014 which also warms the EOD\ncache for the overview. NAV-priced fund tickers are validated locally.",
         "operationId": "create_portfolio_portfolios_post",
         "requestBody": {
           "content": {
@@ -1100,7 +1100,7 @@
           "portfolios"
         ],
         "summary": "Get Portfolio Overview",
-        "description": "Render-ready position table with P&L and column-header aggregates (D6).\n\nLast/prev closes come from the two most recent eod_prices rows per ticker;\nthe EOD ensure runs first so stale tickers are refreshed.  An empty\nportfolio is a legitimate 200 with zeroed/null aggregates.",
+        "description": "Render-ready position table with P&L and column-header aggregates (D6).\n\nBaseline prices come from the two most recent local eod_prices rows per\ntraded ticker, or fund NAV rows for NAV-priced holdings. The payload also\nmarks positions that may receive a frontend live-tick overlay. An empty\nportfolio is a legitimate 200 with zeroed/null aggregates.",
         "operationId": "get_portfolio_overview_portfolios__portfolio_id__overview_get",
         "security": [
           {
@@ -12928,6 +12928,32 @@
             "title": "Instrument Id",
             "description": "Fund instrument_id (for the dossier link); None for non-fund holdings."
           },
+          "fund_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fund Type",
+            "description": "Fund type from the fund catalog, e.g. etf/mutual_fund/mmf; None for direct stock/non-fund holdings."
+          },
+          "price_source": {
+            "type": "string",
+            "enum": [
+              "eod",
+              "nav"
+            ],
+            "title": "Price Source",
+            "description": "Baseline price source used for the backend overview: eod for traded closes, nav for fund NAV snapshots."
+          },
+          "live_price_eligible": {
+            "type": "boolean",
+            "title": "Live Price Eligible",
+            "description": "True when the frontend may overlay real-time ticks on top of the EOD baseline. Stocks and ETFs are eligible; NAV-priced funds remain EOD."
+          },
           "quantity": {
             "type": "number",
             "title": "Quantity"
@@ -13071,6 +13097,8 @@
         "required": [
           "ticker",
           "name",
+          "price_source",
+          "live_price_eligible",
           "quantity",
           "acq_price",
           "basis",

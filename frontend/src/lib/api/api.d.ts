@@ -215,9 +215,9 @@ export interface paths {
          * Create Portfolio
          * @description Create a portfolio with optional initial positions.
          *
-         *     Position tickers are validated against Tiingo via the EOD ensure — a typo
+         *     Traded tickers are validated against Tiingo via the EOD ensure — a typo
          *     fails loud (404) BEFORE anything is persisted — which also warms the EOD
-         *     cache for the overview.
+         *     cache for the overview. NAV-priced fund tickers are validated locally.
          */
         post: operations["create_portfolio_portfolios_post"];
         delete?: never;
@@ -398,8 +398,9 @@ export interface paths {
          * Get Portfolio Overview
          * @description Render-ready position table with P&L and column-header aggregates (D6).
          *
-         *     Last/prev closes come from the two most recent eod_prices rows per ticker;
-         *     the EOD ensure runs first so stale tickers are refreshed.  An empty
+         *     Baseline prices come from the two most recent local eod_prices rows per
+         *     traded ticker, or fund NAV rows for NAV-priced holdings. The payload also
+         *     marks positions that may receive a frontend live-tick overlay. An empty
          *     portfolio is a legitimate 200 with zeroed/null aggregates.
          */
         get: operations["get_portfolio_overview_portfolios__portfolio_id__overview_get"];
@@ -5054,6 +5055,22 @@ export interface components {
              * @description Fund instrument_id (for the dossier link); None for non-fund holdings.
              */
             instrument_id?: string | null;
+            /**
+             * Fund Type
+             * @description Fund type from the fund catalog, e.g. etf/mutual_fund/mmf; None for direct stock/non-fund holdings.
+             */
+            fund_type?: string | null;
+            /**
+             * Price Source
+             * @description Baseline price source used for the backend overview: eod for traded closes, nav for fund NAV snapshots.
+             * @enum {string}
+             */
+            price_source: "eod" | "nav";
+            /**
+             * Live Price Eligible
+             * @description True when the frontend may overlay real-time ticks on top of the EOD baseline. Stocks and ETFs are eligible; NAV-priced funds remain EOD.
+             */
+            live_price_eligible: boolean;
             /** Quantity */
             quantity: number;
             /**
