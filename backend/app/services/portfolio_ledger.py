@@ -203,6 +203,72 @@ async def list_transactions(
     return list(result.scalars().all())
 
 
+async def _fallback_seed_prices(
+    session: AsyncSession, positions: Sequence[Position]
+) -> dict[str, float]:
+    """Latest local EOD/NAV prices for initial positions without cost basis."""
+    tickers = sorted(
+        {
+            position.ticker
+            for position in positions
+            if not position.acq_price or float(position.acq_price) <= EPSILON
+        }
+    )
+    if not tickers:
+        return {}
+
+    closes = await portfolio_crud.select_last_two_closes(session, tickers)
+    missing = [ticker for ticker in tickers if not closes.get(ticker)]
+    navs = await portfolio_crud.select_last_two_navs(session, missing) if missing else {}
+
+    prices: dict[str, float] = {}
+    for ticker in tickers:
+        rows = closes.get(ticker) or navs.get(ticker)
+        if rows:
+            prices[ticker] = float(rows[0][1])
+    return prices
+
+
+async def seed_initial_position_buys(
+    session: AsyncSession,
+    portfolio_id: int,
+) -> list[PortfolioTransaction]:
+    """Seed one inception BUY per current position when a portfolio is born."""
+    if await list_transactions(session, portfolio_id):
+        return []
+
+    portfolio = await portfolio_crud.get_portfolio(session, portfolio_id)
+    if portfolio is None:
+        raise PortfolioNotFoundError(f"Portfolio {portfolio_id} not found.")
+
+    positions = list(portfolio.positions)
+    if not positions:
+        return []
+
+    fallback_prices = await _fallback_seed_prices(session, positions)
+    transactions: list[PortfolioTransaction] = []
+    for position in positions:
+        price = float(position.acq_price or fallback_prices.get(position.ticker) or 0.0)
+        if price <= EPSILON:
+            raise MissingLedgerPriceDataError(
+                f"No reference price available to seed initial BUY for {position.ticker}."
+            )
+        transaction = PortfolioTransaction(
+            portfolio_id=portfolio_id,
+            ticker=position.ticker,
+            side="buy",
+            quantity=position.quantity,
+            price=price,
+            commission=Decimal(str(position.commission or 0.0)),
+            trade_date=position.trade_date or portfolio.inception_date or dt.date.today(),
+        )
+        session.add(transaction)
+        transactions.append(transaction)
+
+    await session.flush()
+    return transactions
+
+
 async def create_transaction(
     session: AsyncSession,
     portfolio_id: int,

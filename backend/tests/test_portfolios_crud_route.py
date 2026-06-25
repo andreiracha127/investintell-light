@@ -16,7 +16,7 @@ from httpx import ASGITransport, AsyncClient
 from app.core.auth import CurrentUser, get_current_user
 from app.core.db import get_session
 from app.main import create_app
-from app.services import portfolio_crud
+from app.services import portfolio_crud, portfolio_ledger
 
 _CREATED = dt.datetime(2026, 6, 10, 12, 0, tzinfo=dt.UTC)
 
@@ -76,9 +76,17 @@ def _portfolio(
     )
 
 
+class _SessionStub:
+    async def commit(self) -> None:
+        return None
+
+    async def rollback(self) -> None:
+        return None
+
+
 def _client() -> AsyncClient:
     app = create_app()
-    app.dependency_overrides[get_session] = lambda: None
+    app.dependency_overrides[get_session] = lambda: _SessionStub()
     app.dependency_overrides[get_current_user] = lambda: CurrentUser(
         sub="u-1", org_id=None, claims={}
     )
@@ -119,12 +127,35 @@ async def test_create_portfolio_201_normalizes_and_ensures(
         org_id: str | None,
         **kwargs: Any,
     ) -> SimpleNamespace:
-        received.append((payload, owner_sub, org_id, kwargs.get("origin", "manual")))
+        received.append(
+            (
+                payload,
+                owner_sub,
+                org_id,
+                kwargs.get("origin", "manual"),
+                kwargs.get("commit", True),
+            )
+        )
         return _portfolio(
             positions=[_position(), _position("MSFT", 5.0, None)]
         )
 
+    seeded: list[int] = []
+    materialized: list[int] = []
+
+    async def fake_seed_initial_buys(session: Any, portfolio_id: int) -> list[Any]:
+        seeded.append(portfolio_id)
+        return []
+
+    async def fake_materialize(session: Any, portfolio_id: int) -> Any:
+        materialized.append(portfolio_id)
+        return None
+
     monkeypatch.setattr(portfolio_crud, "create_portfolio", fake_create)
+    monkeypatch.setattr(
+        portfolio_ledger, "seed_initial_position_buys", fake_seed_initial_buys
+    )
+    monkeypatch.setattr(portfolio_ledger, "materialize_portfolio_nav", fake_materialize)
     async with _client() as ac:
         response = await ac.post(
             "/portfolios",
@@ -148,10 +179,13 @@ async def test_create_portfolio_201_normalizes_and_ensures(
         _position_json("MSFT", 5.0, None),
     ]
     # Name trimmed and tickers uppercased BEFORE the service sees them.
-    persisted, owner_sub, org_id, origin = received[0]
+    persisted, owner_sub, org_id, origin, commit = received[0]
     assert persisted.name == "Test"
     assert [p.ticker for p in persisted.positions] == ["AAPL", "MSFT"]
     assert (owner_sub, org_id, origin) == ("u-1", None, "manual")
+    assert commit is False
+    assert seeded == [1]
+    assert materialized == [1]
     # Tickers were validated against local EOD coverage in one DB check.
     assert ensure_calls == [["AAPL", "MSFT"]]
 
@@ -171,6 +205,43 @@ async def test_create_without_positions_skips_the_ensure(
     assert response.status_code == 201
     assert response.json()["positions"] == []
     assert ensure_calls == []
+
+
+async def test_create_with_unpriced_initial_position_returns_422(
+    monkeypatch: pytest.MonkeyPatch, ensure_calls: list[list[str]]
+) -> None:
+    async def fake_create(
+        session: Any, payload: Any, *_args: Any, **_kwargs: Any
+    ) -> SimpleNamespace:
+        return _portfolio(positions=[_position("AAPL", 1.0, None)])
+
+    async def fake_seed_initial_buys(session: Any, portfolio_id: int) -> list[Any]:
+        raise portfolio_ledger.MissingLedgerPriceDataError(
+            "No reference price available to seed initial BUY for AAPL."
+        )
+
+    materialized: list[int] = []
+
+    async def fake_materialize(session: Any, portfolio_id: int) -> Any:
+        materialized.append(portfolio_id)
+        return None
+
+    monkeypatch.setattr(portfolio_crud, "create_portfolio", fake_create)
+    monkeypatch.setattr(
+        portfolio_ledger, "seed_initial_position_buys", fake_seed_initial_buys
+    )
+    monkeypatch.setattr(portfolio_ledger, "materialize_portfolio_nav", fake_materialize)
+
+    async with _client() as ac:
+        response = await ac.post(
+            "/portfolios",
+            json={"name": "Needs price", "positions": [{"ticker": "AAPL", "quantity": 1}]},
+        )
+
+    assert response.status_code == 422
+    assert "No reference price available" in response.json()["detail"]
+    assert materialized == []
+    assert ensure_calls == [["AAPL"]]
 
 
 async def test_create_duplicate_name_returns_409(

@@ -62,6 +62,7 @@ async def create_portfolio(
     org_id: str | None,
     *,
     origin: str = "manual",
+    commit: bool = True,
 ) -> Portfolio:
     """Insert a portfolio (and its initial positions); return it fully loaded.
 
@@ -92,7 +93,10 @@ async def create_portfolio(
     )
     session.add(portfolio)
     try:
-        await session.commit()
+        if commit:
+            await session.commit()
+        else:
+            await session.flush()
     except IntegrityError as exc:
         await session.rollback()
         raise DuplicatePortfolioNameError(

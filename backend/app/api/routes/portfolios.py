@@ -196,10 +196,20 @@ async def create_portfolio(
         )
     try:
         portfolio = await portfolio_crud.create_portfolio(
-            session, payload, user.sub, user.org_id
+            session, payload, user.sub, user.org_id, commit=False
         )
+        if payload.positions:
+            await portfolio_ledger.seed_initial_position_buys(session, portfolio.id)
+            await portfolio_ledger.materialize_portfolio_nav(session, portfolio.id)
+        await session.commit()
     except portfolio_crud.DuplicatePortfolioNameError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except portfolio_ledger.MissingLedgerPriceDataError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except portfolio_ledger.PortfolioNotFoundError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return PortfolioOut.model_validate(portfolio)
 
 
