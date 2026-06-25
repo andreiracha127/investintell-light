@@ -30,6 +30,12 @@ BENCHMARK_MV_DDL_PATH = (
     / "ddl"
     / "2026-06-25_fund_benchmark_candidates_mv.sql"
 )
+PROFILE_READ_MODELS_DDL_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "db"
+    / "ddl"
+    / "2026-06-25_fund_profile_read_models_mv.sql"
+)
 ALTERNATIVE_OVERRIDES_DDL_PATH = (
     Path(__file__).resolve().parents[1]
     / "db"
@@ -417,3 +423,17 @@ def test_fund_benchmark_candidates_mv_materializes_request_path_snapshot() -> No
     assert "fund_benchmark_candidates_mv_pk" in sql
     assert "ON fund_benchmark_candidates_mv (series_id)" in sql
     assert "REFRESH MATERIALIZED VIEW fund_benchmark_candidates_mv" in sql
+
+
+def test_fund_profile_read_models_materialize_request_path_sources() -> None:
+    sql = PROFILE_READ_MODELS_DDL_PATH.read_text(encoding="utf-8")
+
+    assert "CREATE MATERIALIZED VIEW funds_profile_mv AS" in sql
+    assert "FROM funds_v" in sql
+    assert "CREATE UNIQUE INDEX funds_profile_mv_pk" in sql
+    assert "ON funds_profile_mv (instrument_id)" in sql
+    assert "CREATE MATERIALIZED VIEW fund_classes_latest_mv AS" in sql
+    assert "FROM fund_classes_v" in sql
+    assert "CREATE UNIQUE INDEX fund_classes_latest_mv_pk" in sql
+    assert "REFRESH MATERIALIZED VIEW funds_profile_mv" in sql
+    assert "REFRESH MATERIALIZED VIEW fund_classes_latest_mv" in sql

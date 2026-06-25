@@ -5,8 +5,8 @@ All read-only; the fund snapshots are retired in favour of dynamic
 VIEWs/MVs on Tiger (db/ddl/2026-06-13_dynamic_catalog.sql) derived live from
 the source tables — never written in any request path:
 
-- `funds_v` — identity + classification + fees, one row per eligible
-  instrument_id (criterion: dispatch F8 §3 F8.1-2). Dynamic VIEW.
+- `funds_profile_mv` — identity + classification + fees, one row per eligible
+  instrument_id, refreshed from the dynamic `funds_v` lineage view.
 - `fund_risk_latest_mv` — latest fund_risk_metrics calc_date per instrument
   (precomputed; the Light NEVER recomputes). Materialized view.
 - `nav_timeseries` — live daily NAV hypertable (the FundNav model reads it
@@ -15,9 +15,9 @@ the source tables — never written in any request path:
   Dynamic VIEW; uncapped (the source is 100% of holdings — the profile route
   display-caps to top-50; the consolidated exposure comes from the data-lake
   look-through).
-- `fund_classes_v` — share classes (DISTINCT ON class_id, latest period).
-  Dynamic VIEW keyed by series_id (no instrument_id — readers resolve
-  series→instrument through funds_v).
+- `fund_classes_latest_mv` — share classes (DISTINCT ON class_id, latest
+  period), refreshed from the dynamic `fund_classes_v` lineage view. Keyed by
+  series_id (no instrument_id — readers resolve through funds_profile_mv).
 """
 
 import uuid
@@ -40,13 +40,11 @@ from app.models.base import Base
 
 
 class Fund(Base):
-    # Dynamic catalog VIEW (db/ddl/2026-06-13_dynamic_catalog.sql) — a faithful
-    # SQL port of the retired sync_funds.py `funds` snapshot, derived live from
-    # instrument_identity / sec_* / fund_risk_metrics / nav_timeseries on Tiger.
-    # A view has no sync markers, so synced_at / source_calc_date /
+    # Request-path materialized read model over the dynamic funds_v lineage
+    # view. It has no sync markers, so synced_at / source_calc_date /
     # source_nav_max_date are NOT columns here; the catalog service derives
     # staleness from the risk MV + NAV (Task 2.4 finalizes the staleness source).
-    __tablename__ = "funds_v"
+    __tablename__ = "funds_profile_mv"
 
     # Canonical mother-DB instrument UUID (instrument_identity.instrument_id).
     instrument_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
@@ -133,7 +131,7 @@ class FundBenchmarkCandidate(Base):
 
 
 class FundClass(Base):
-    """Share-class catalog (F8.6b) — dynamic VIEW over sec_fund_classes.
+    """Share-class catalog (F8.6b) — materialized from sec_fund_classes.
 
     The mother DB prices ONE instrument per fund series (a representative
     class, e.g. AGTHX for the Growth Fund of America); the remaining classes
@@ -141,20 +139,21 @@ class FundClass(Base):
     ticker therefore uses the series NAV (the representative class) as a
     PROXY — a documented approximation, also disclosed in the UI.
 
-    Now backed by the fund_classes_v VIEW (db/ddl/2026-06-13_dynamic_catalog.sql,
-    Task 2.5): DISTINCT ON (class_id) over sec_fund_classes, latest period per
-    class. A class links to a fund via series_id — there is NO instrument_id
-    column; readers resolve series→instrument through funds_v (the Fund model).
+    Backed by fund_classes_latest_mv, refreshed from fund_classes_v
+    (db/ddl/2026-06-13_dynamic_catalog.sql, Task 2.5): DISTINCT ON (class_id)
+    over sec_fund_classes, latest period per class. A class links to a fund via
+    series_id — there is NO instrument_id column; readers resolve
+    series→instrument through funds_profile_mv (the Fund model).
     """
 
-    __tablename__ = "fund_classes_v"
+    __tablename__ = "fund_classes_latest_mv"
 
     # SEC class id ('C000...') — globally unique in the source.
     class_id: Mapped[str] = mapped_column(String, primary_key=True)
 
     # Series the class belongs to (the NAV proxy anchor, joins to
-    # funds_v.series_id). The source always carries it; nullable kept for the
-    # ORM since a view has no NOT NULL enforcement.
+    # funds_profile_mv.series_id). The source always carries it; nullable kept
+    # for the ORM since a materialized view has no NOT NULL enforcement.
     series_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     class_name: Mapped[str | None] = mapped_column(String, nullable=True)
 

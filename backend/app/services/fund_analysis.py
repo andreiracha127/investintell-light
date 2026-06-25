@@ -2,7 +2,8 @@
 
 The route layer owns HTTP status mapping; this module owns DB reads and pure
 assembly. Fund analytics are computed from ``nav_timeseries`` and catalog
-metrics are read from ``funds_v`` / ``fund_risk_latest_mv`` / ``fund_holdings_v``.
+metrics are read from ``funds_profile_mv`` / ``fund_risk_latest_mv`` /
+``fund_top_holdings_mv`` where the DB-first flag applies.
 """
 
 import datetime as dt
@@ -20,9 +21,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics import (
+    MIN_IN_RANGE_RETURNS,
     BestWorst,
     DrawdownResult,
-    MIN_IN_RANGE_RETURNS,
     annualized_volatility,
     best_worst_day,
     historical_cvar,

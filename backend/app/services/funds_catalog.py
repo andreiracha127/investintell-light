@@ -608,7 +608,7 @@ async def fetch_fund_profile(
                 """
                 WITH fund AS MATERIALIZED (
                     SELECT *
-                    FROM funds_v
+                    FROM funds_profile_mv
                     WHERE instrument_id = :instrument_id
                 ),
                 risk AS MATERIALIZED (
@@ -667,27 +667,21 @@ async def fetch_fund_profile(
         await session.execute(
             text(
                 """
-                WITH latest_report AS MATERIALIZED (
-                    SELECT max(report_date) AS report_date
-                    FROM fund_holdings_v
-                    WHERE series_id = :series_id
-                ),
-                holdings_limited AS (
+                WITH holdings_limited AS MATERIALIZED (
                     SELECT h.*
-                    FROM fund_holdings_v h
+                    FROM fund_top_holdings_mv h
                     WHERE h.series_id = :series_id
-                      AND h.report_date = (SELECT report_date FROM latest_report)
+                      AND h.rank <= :holdings_cap
                     ORDER BY h.rank
-                    LIMIT :holdings_cap
                 ),
                 class_rows AS (
                     SELECT c.*
-                    FROM fund_classes_v c
+                    FROM fund_classes_latest_mv c
                     WHERE c.series_id = :series_id
                     ORDER BY c.expense_ratio ASC NULLS LAST, c.ticker
                 )
                 SELECT
-                    (SELECT report_date FROM latest_report) AS holdings_report_date,
+                    (SELECT max(report_date) FROM holdings_limited) AS holdings_report_date,
                     (
                         SELECT jsonb_agg(to_jsonb(h) ORDER BY h.rank)
                         FROM holdings_limited h
@@ -722,8 +716,8 @@ async def fetch_fund_profile(
     )
     classes = _decode_json_value(details["classes"]) or []
 
-    # funds_v has no sync markers; derive the per-fund staleness the route
-    # exposes from the dynamic sources (risk MV calc_date + latest NAV date).
+    # funds_profile_mv has no sync markers; derive per-fund staleness from
+    # dynamic sources (risk MV calc_date + latest NAV date).
     # Attached on the instance so the route serializes them unchanged (Task 2.4
     # finalizes the staleness source).
     fund.synced_at = dt.datetime.now(dt.UTC)

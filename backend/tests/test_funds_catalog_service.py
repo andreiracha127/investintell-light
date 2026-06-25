@@ -130,8 +130,14 @@ def test_build_funds_select_compiles_with_filters_and_sort() -> None:
 
 def test_fund_profile_uses_materialized_benchmark_snapshot() -> None:
     source = inspect.getsource(catalog.fetch_fund_profile)
+    assert "funds_profile_mv" in source
+    assert "fund_top_holdings_mv" in source
+    assert "fund_classes_latest_mv" in source
     assert "fund_benchmark_candidates_mv" in source
     assert "fund_benchmark_candidates_v" not in source
+    assert "funds_v" not in source
+    assert "fund_holdings_v" not in source
+    assert "fund_classes_v" not in source
 
 
 def test_build_funds_select_rejects_non_whitelisted_sort() -> None:

@@ -134,8 +134,9 @@ async def load_fund_classes(
     """
     if not fund_ids:
         return {}
-    # FundClass (fund_classes_v) is keyed by series_id, not instrument_id;
-    # recover the instrument by joining funds_v on series_id (Task 2.5).
+    # FundClass (fund_classes_latest_mv) is keyed by series_id, not
+    # instrument_id; recover the instrument by joining funds_profile_mv on
+    # series_id (Task 2.5).
     result = await session.execute(
         select(Fund.instrument_id, FundClass.ticker, FundClass.class_name)
         .join(FundClass, FundClass.series_id == Fund.series_id)

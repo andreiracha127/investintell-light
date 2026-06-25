@@ -448,30 +448,30 @@ def test_portfolios_origin_column() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Fund universe models (Tasks 2.2-2.5, 4.3) — funds_v / fund_risk_latest_mv /
-# nav_timeseries / fund_holdings_v / fund_classes_v.
+# Fund universe models (Tasks 2.2-2.5, 4.3) — funds_profile_mv /
+# fund_risk_latest_mv / nav_timeseries / fund_holdings_v /
+# fund_classes_latest_mv.
 # Ported from the retired test_funds_sync.py (Task 4.2): these assert the live
 # ORM model contracts (Base.metadata), independent of the deleted fund sync.
 # ---------------------------------------------------------------------------
 
 def test_fund_tables_registered() -> None:
-    # funds_v / fund_risk_latest_mv / fund_holdings_v / fund_classes_v are now
-    # dynamic VIEWs/MVs (Tasks 2.2-2.5); fund_benchmark_candidates_v is the
-    # read-only benchmark resolution view; FundNav is repointed to the live
-    # nav_timeseries hypertable (Task 4.3) — the fund_nav snapshot is retired.
+    # Request-path fund identity/classes are materialized read models; the
+    # lineage views still feed their refresh SQL. FundNav is repointed to the
+    # live nav_timeseries hypertable (Task 4.3) — the fund_nav snapshot is
+    # retired.
     for name in (
-        "funds_v", "fund_risk_latest_mv", "nav_timeseries",
-        "fund_holdings_v", "fund_classes_v", "fund_benchmark_candidates_v",
+        "funds_profile_mv", "fund_risk_latest_mv", "nav_timeseries",
+        "fund_holdings_v", "fund_classes_latest_mv", "fund_benchmark_candidates_v",
     ):
         assert name in Base.metadata.tables
 
 
 def test_funds_pk_and_columns() -> None:
-    # Fund is now the dynamic VIEW funds_v (Task 2.3): instrument_id is the PK;
+    # Fund is now the funds_profile_mv read model: instrument_id is the PK;
     # the staleness columns (synced_at / source_calc_date / source_nav_max_date)
-    # were dropped (a view has no sync markers — the catalog service derives
-    # staleness from the risk MV + NAV instead).
-    table = _table("funds_v")
+    # are absent (the catalog service derives staleness from the risk MV + NAV).
+    table = _table("funds_profile_mv")
     assert [c.name for c in table.primary_key.columns] == ["instrument_id"]
     for col in ("synced_at", "source_calc_date", "source_nav_max_date"):
         assert col not in table.c, col
@@ -481,9 +481,9 @@ def test_funds_pk_and_columns() -> None:
 
 def test_funds_filter_columns_are_indexed() -> None:
     # The model still declares index=True on the filter columns; these Index
-    # objects live in metadata for the funds_v-mapped class (the physical view
-    # ignores them, but the ORM contract is preserved for consistency).
-    indexed = {c.name for idx in _table("funds_v").indexes for c in idx.columns}
+    # objects live in metadata for the funds_profile_mv-mapped class; the actual
+    # migration creates matching MV indexes.
+    indexed = {c.name for idx in _table("funds_profile_mv").indexes for c in idx.columns}
     assert {"series_id", "fund_type", "strategy_label"} <= indexed
 
 
@@ -505,11 +505,11 @@ def test_fund_benchmark_candidates_columns() -> None:
 
 
 def test_fund_classes_pk_fk_and_columns() -> None:
-    """FundClass model lockstep. Now the fund_classes_v VIEW (Task 2.5) keyed by
-    series_id — the instrument_id column was DROPPED (a class links to a fund via
-    series_id; readers resolve series→instrument through funds_v). A view cannot
-    be a FK target, so there are no foreign keys."""
-    table = _table("fund_classes_v")
+    """FundClass model lockstep. The fund_classes_latest_mv read model is keyed
+    by series_id — the instrument_id column is absent (a class links to a fund
+    via series_id; readers resolve series→instrument through funds_profile_mv).
+    A materialized view cannot be a FK target, so there are no foreign keys."""
+    table = _table("fund_classes_latest_mv")
     assert [c.name for c in table.primary_key.columns] == ["class_id"]
     assert not table.foreign_keys
     assert "instrument_id" not in table.c

@@ -59,7 +59,6 @@ from app.schemas.fund_analysis import (
     ReverseLookupFundExposure,
     ReverseLookupInstitution,
 )
-from app.core.config import get_settings
 from app.services import series_sql
 from app.services.fund_analysis import (
     FundAnalysisError,
@@ -463,7 +462,10 @@ async def fetch_fund_factors(
         first_date, last_date = await select_nav_date_bounds(session, instrument_id)
         nav = pd.Series(dtype=float)
         if first_date is not None and last_date is not None:
-            nav = build_nav_series(await select_nav_rows(session, instrument_id, first_date, last_date))
+            nav_rows = await select_nav_rows(
+                session, instrument_id, first_date, last_date
+            )
+            nav = build_nav_series(nav_rows)
         monthly_returns = (
             nav.resample("ME").last().pct_change().dropna() if len(nav) else pd.Series(dtype=float)
         )
@@ -583,7 +585,10 @@ async def fetch_fund_style_drift(
         empty_state=(
             None
             if periods
-            else _empty("No historical N-PORT holdings for this fund series.", "fund_style_drift_mv")
+            else _empty(
+                "No historical N-PORT holdings for this fund series.",
+                "fund_style_drift_mv",
+            )
         ),
     )
 
@@ -1824,7 +1829,7 @@ async def _fund_exposures_for_cusip(
                 FROM fund_holdings h
                 JOIN latest l
                   ON l.series_id = h.series_id AND l.report_date = h.report_date
-                JOIN funds_v f ON f.series_id = h.series_id
+                JOIN funds_profile_mv f ON f.series_id = h.series_id
                 WHERE upper(h.cusip) = :cusip
                 ORDER BY h.pct_of_nav DESC NULLS LAST, f.name
                 LIMIT 50
@@ -1915,7 +1920,7 @@ async def fetch_holding_reverse_lookup(
 ) -> HoldingReverseLookupResponse:
     """Institutional + fund holders of a CUSIP (reverse lookup).
 
-    SPLIT: the fund-exposure side (fund_holdings/funds_v) is ALWAYS read
+    SPLIT: the fund-exposure side (fund_holdings/funds_profile_mv) is ALWAYS read
     on-demand from the app DB — it is an org-scoped dynamic catalogue not
     materialized in this migration. The 13F institutional side reads from
     holding_reverse_lookup_mv (datalake) when use_holders_db_first is on, with a

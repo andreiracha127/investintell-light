@@ -1,7 +1,8 @@
 """Fund universe endpoints (F8.2): navigable list, full profile and CSV.
 
 DB-only contract: every read is served from the local catalog sources
-(`funds_v`, `fund_risk_latest_mv`, `nav_timeseries`, `fund_holdings`) — these
+(`funds_profile_mv`, `fund_risk_latest_mv`, `nav_timeseries`,
+`fund_top_holdings_mv`) — these
 routes NEVER talk to the mother DB or Tiingo. Routes are thin: SQL, the sort
 whitelist and the pure CSV/decimation helpers live in
 ``app.services.funds_catalog``.
@@ -515,7 +516,7 @@ async def get_fund_profile(
         inception_date=fund.inception_date,
         domicile=fund.domicile,
         currency=fund.currency,
-        # funds_v (a VIEW) carries no sync markers; the catalog service derives
+        # funds_profile_mv carries no sync markers; the catalog service derives
         # and attaches these on the fund instance (Task 2.4 finalizes staleness).
         synced_at=getattr(fund, "synced_at", None),
         source_calc_date=getattr(fund, "source_calc_date", None),
