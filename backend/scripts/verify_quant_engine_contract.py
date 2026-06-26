@@ -44,8 +44,11 @@ def main() -> int:
     ok = bool(verdict["ok"])
 
     src = qe.load_source_metadata()
-    if src.get("bundle_sha256") != verdict["bundle_sha256"]:
-        print(f"FAIL SOURCE.json bundle_sha256 != manifest: {src.get('bundle_sha256')}")
+    if not verdict["source_bundle_sha256_match"]:
+        print(
+            "FAIL SOURCE.json bundle_sha256 != recomputed bundle: "
+            f"{src.get('bundle_sha256')}"
+        )
         ok = False
     if src.get("governance", {}).get("runtime_activation") is not False:
         print("FAIL SOURCE.json governance.runtime_activation is not False")

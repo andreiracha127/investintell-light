@@ -140,6 +140,7 @@ def verify_bundle(
     """
     root = Path(directory) if directory is not None else bundle_dir()
     manifest = load_manifest(root)
+    source = load_source_metadata(root)
     recorded = {f["path"]: f["sha256"] for f in manifest.get("files", [])}
 
     actual = {
@@ -153,12 +154,17 @@ def verify_bundle(
         p for p in (set(recorded) & set(actual)) if recorded[p] != actual[p]
     )
 
-    expected_files = [{"path": p, "sha256": s} for p, s in recorded.items()]
-    recomputed = bundle_sha256(expected_files)
+    actual_files = [{"path": p, "sha256": s} for p, s in actual.items()]
+    recomputed = bundle_sha256(actual_files)
     manifest_sha = manifest.get("bundle_sha256")
+    source_sha = source.get("bundle_sha256")
     bundle_sha256_match = manifest_sha == recomputed
     expected_match = (
         expected_bundle_sha256 is None or manifest_sha == expected_bundle_sha256
+    )
+    source_bundle_sha256_match = source_sha == recomputed
+    source_expected_match = (
+        expected_bundle_sha256 is None or source_sha == expected_bundle_sha256
     )
 
     ok = (
@@ -167,10 +173,13 @@ def verify_bundle(
         and not mismatched
         and bundle_sha256_match
         and expected_match
+        and source_bundle_sha256_match
+        and source_expected_match
     )
     return {
         "contract_version": manifest.get("contract_version"),
         "bundle_sha256": manifest_sha,
+        "source_bundle_sha256": source_sha,
         "recomputed_bundle_sha256": recomputed,
         "expected_bundle_sha256": expected_bundle_sha256,
         "missing": missing,
@@ -178,5 +187,7 @@ def verify_bundle(
         "mismatched": mismatched,
         "bundle_sha256_match": bundle_sha256_match,
         "expected_match": expected_match,
+        "source_bundle_sha256_match": source_bundle_sha256_match,
+        "source_expected_match": source_expected_match,
         "ok": ok,
     }
