@@ -9,7 +9,7 @@ import pytest
 from app.contracts import quant_engine_v1
 
 EXPECTED_BUNDLE_SHA256 = (
-    "sha256:2cdea4d41608562bb3eff1cddd56769450adeb17e84899e31272d81a8f43b0d8"
+    "sha256:a0770412040a582aebd3cc8e37de532739916cb239833e07fe23ba9cca683277"
 )
 
 _SCHEMA_BY_PREFIX = {
@@ -51,6 +51,7 @@ def test_job_request_contract_requires_offline_execution() -> None:
 
     assert schema["properties"]["offline"]["const"] is True
     assert "engine_image_digest" in schema["required"]
+    assert schema["properties"]["engine_image_digest"]["pattern"] == "^sha256:[0-9a-f]{64}$"
     assert "input_bundle_logical_hash" in schema["required"]
 
 

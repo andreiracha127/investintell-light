@@ -1,11 +1,11 @@
 {
   "contract_name": "quant-engine",
   "contract_version": "v1",
-  "bundle_sha256": "sha256:2cdea4d41608562bb3eff1cddd56769450adeb17e84899e31272d81a8f43b0d8",
+  "bundle_sha256": "sha256:a0770412040a582aebd3cc8e37de532739916cb239833e07fe23ba9cca683277",
   "source_repo": "investintell-datalake-workers-quant-engine",
   "source_branch": "feat/quant-engine-isolation",
-  "source_contract_commit": "1086e5266b9044aad9fa91c6f3c92788f07aa782",
-  "source_evidence_commit": "59a35279ad44f4405cbf8b15986a2cbdafff3602",
+  "source_contract_commit": "d1f1b48fd3e616b3067e7152d444076ec003c2eb",
+  "source_evidence_commit": "17de7367c762fb407815570a2802697319b58995",
   "synced_at": "2026-06-26",
   "governance": {
     "a3_status": "open_macro_v03",

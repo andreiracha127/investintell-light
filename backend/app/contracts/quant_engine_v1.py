@@ -22,7 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 MANIFEST_NAME = "manifest.json"
 SOURCE_NAME = "SOURCE.json"
@@ -32,13 +32,15 @@ SOURCE_NAME = "SOURCE.json"
 # ``bundle_sha256`` and ``SOURCE.json``'s ``bundle_sha256``. Updating it is a
 # deliberate, reviewed contract re-sync, never an incidental edit.
 EXPECTED_BUNDLE_SHA256 = (
-    "sha256:2cdea4d41608562bb3eff1cddd56769450adeb17e84899e31272d81a8f43b0d8"
+    "sha256:a0770412040a582aebd3cc8e37de532739916cb239833e07fe23ba9cca683277"
 )
 
 # Per-schema hashes kept for back-compat with the original mirror tests.
 SCHEMA_SHA256: dict[str, str] = {
-    "engine-manifest.schema.json": "26757f96bdff5ac90b0e6422f213faac0db5b5289def9c2f0eae7b7f9fa45b9f",
-    "job-request.schema.json": "a143bafe60f8414a3b1c04cc93b4ae8568ad51264c8f7e55d83ce9b3a633d593",
+    "engine-manifest.schema.json": (
+        "26757f96bdff5ac90b0e6422f213faac0db5b5289def9c2f0eae7b7f9fa45b9f"
+    ),
+    "job-request.schema.json": "9f7e50b4c1537b22fa28298fd08a945b00cf42b1644728ac24e133faa66816f6",
     "job-result.schema.json": "95626166653241b6fed455c18b530b057cb66837e920dbfd6fe1d71880ea4fe7",
 }
 
@@ -59,7 +61,14 @@ def schema_path(name: str) -> Path:
 
 
 def load_schema(name: str) -> dict[str, Any]:
-    return json.loads(schema_path(name).read_text(encoding="utf-8"))
+    return _load_json_object(schema_path(name))
+
+
+def _load_json_object(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"{path} did not contain a JSON object")
+    return cast(dict[str, Any], payload)
 
 
 def compute_file_sha256(path: str | Path) -> str:
@@ -110,12 +119,12 @@ def bundle_sha256(files: list[dict[str, str]]) -> str:
 
 def load_manifest(directory: str | Path | None = None) -> dict[str, Any]:
     root = Path(directory) if directory is not None else bundle_dir()
-    return json.loads((root / MANIFEST_NAME).read_text(encoding="utf-8"))
+    return _load_json_object(root / MANIFEST_NAME)
 
 
 def load_source_metadata(directory: str | Path | None = None) -> dict[str, Any]:
     root = Path(directory) if directory is not None else bundle_dir()
-    return json.loads((root / SOURCE_NAME).read_text(encoding="utf-8"))
+    return _load_json_object(root / SOURCE_NAME)
 
 
 def verify_bundle(
