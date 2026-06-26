@@ -20,6 +20,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 # compute_screener_metrics, enrich_sectors, evaluate_rebalance, etc.).
 # tests/alembic continuam fora (migrations rodam fora do container).
 COPY app ./app
+COPY contracts ./contracts
 COPY scripts ./scripts
 
 EXPOSE 8000
