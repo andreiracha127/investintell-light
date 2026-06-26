@@ -71,8 +71,11 @@ def test_quant_engine_contract_bundle_sha256_matches_manifest() -> None:
     assert verdict["mismatched"] == [], verdict
     assert verdict["bundle_sha256_match"] is True
     assert verdict["expected_match"] is True
+    assert verdict["source_bundle_sha256_match"] is True
+    assert verdict["source_expected_match"] is True
     assert (
         verdict["bundle_sha256"]
+        == verdict["source_bundle_sha256"]
         == verdict["recomputed_bundle_sha256"]
         == EXPECTED_BUNDLE_SHA256
     )
@@ -109,6 +112,8 @@ def test_bundle_drift_guard_detects_tampered_fixture(tmp_path: Path) -> None:
     verdict = quant_engine_v1.verify_bundle(dst)
     assert verdict["ok"] is False
     assert "fixtures/valid/job-request.minimal.json" in verdict["mismatched"]
+    assert verdict["bundle_sha256_match"] is False
+    assert verdict["recomputed_bundle_sha256"] != EXPECTED_BUNDLE_SHA256
 
 
 def test_bundle_drift_guard_detects_extra_file(tmp_path: Path) -> None:
@@ -133,6 +138,24 @@ def test_bundle_drift_guard_detects_stale_expected_constant(tmp_path: Path) -> N
     )
     assert verdict["expected_match"] is False
     assert verdict["ok"] is False
+
+
+def test_bundle_drift_guard_detects_stale_source_metadata(tmp_path: Path) -> None:
+    """SOURCE.json is part of the governance verdict, not an optional script check."""
+    src = quant_engine_v1.bundle_dir()
+    dst = tmp_path / "v1"
+    shutil.copytree(src, dst)
+
+    source_path = dst / "SOURCE.json"
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    source["bundle_sha256"] = "sha256:" + "1" * 64
+    source_path.write_text(json.dumps(source, indent=2), encoding="utf-8")
+
+    verdict = quant_engine_v1.verify_bundle(dst)
+    assert verdict["ok"] is False
+    assert verdict["bundle_sha256_match"] is True
+    assert verdict["source_bundle_sha256_match"] is False
+    assert verdict["source_expected_match"] is False
 
 
 # ── Consumer-side schema validation of the bundled fixtures ───────────────────
