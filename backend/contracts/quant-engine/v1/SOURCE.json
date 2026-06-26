@@ -1,0 +1,18 @@
+{
+  "contract_name": "quant-engine",
+  "contract_version": "v1",
+  "bundle_sha256": "sha256:a0770412040a582aebd3cc8e37de532739916cb239833e07fe23ba9cca683277",
+  "source_repo": "investintell-datalake-workers-quant-engine",
+  "source_branch": "feat/quant-engine-isolation",
+  "source_contract_commit": "d1f1b48fd3e616b3067e7152d444076ec003c2eb",
+  "source_evidence_commit": "17de7367c762fb407815570a2802697319b58995",
+  "synced_at": "2026-06-26",
+  "governance": {
+    "a3_status": "open_macro_v03",
+    "a4_status": "harness_ready_provisional_A3",
+    "a5_status": "blocked",
+    "freeze_ready": false,
+    "runtime_activation": false
+  },
+  "note": "Formal contract handshake. This is a contract-boundary mirror only: the backend stores and re-verifies the bundle but performs no engine execution, no container invocation, and no allocator/builder runtime change. Updating bundle_sha256 or the source commits requires a deliberate, reviewed re-sync."
+}
