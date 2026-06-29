@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Final, Mapping, cast
+from typing import Any, Final, cast
 
 SOURCE_NAME: Final = "SOURCE.json"
 RUNTIME_SKELETON_ID: Final = "open_macro_v03_runtime_skeleton_001"
@@ -40,7 +41,9 @@ PINNED_IDENTITY: Final[dict[str, object]] = {
     "contract_bundle_sha256": "4ff92bba49ccd178348e4646bd4ba0afe45c7d6036a72f00c52bc02c29ea683a",
     "contract_version": "1.0.0",
     "engine_commit": "ee39adbe6cb6541d4fdfa78f1428478ffffaf638",
-    "engine_image_digest": "sha256:cdcf05768ad6e44543567cd0b5106ecc2b88a2f49ef5080c25c52a601a91598b",
+    "engine_image_digest": (
+        "sha256:cdcf05768ad6e44543567cd0b5106ecc2b88a2f49ef5080c25c52a601a91598b"
+    ),
 }
 
 COMMON_PINS: Final[dict[str, object]] = {
@@ -162,7 +165,9 @@ def verify_source_metadata() -> dict[str, Any]:
 
     schema_hashes = source.get("schema_sha256")
     if schema_hashes != SCHEMA_SHA256:
-        raise RuntimeSkeletonContractError("SOURCE.json schema_sha256 does not match mirror constants")
+        raise RuntimeSkeletonContractError(
+            "SOURCE.json schema_sha256 does not match mirror constants"
+        )
 
     governance = source.get("governance")
     if not isinstance(governance, Mapping):
@@ -211,8 +216,13 @@ def validate_result_manifest(payload: Mapping[str, Any]) -> None:
     if status == "not_executed":
         if failure_class is not None:
             raise RuntimeSkeletonContractError("not_executed result cannot carry failure_class")
-        if "side_effect_attempt_count" in payload or "side_effect_attempt_evidence_sha256" in payload:
-            raise RuntimeSkeletonContractError("not_executed result cannot carry side-effect evidence")
+        if (
+            "side_effect_attempt_count" in payload
+            or "side_effect_attempt_evidence_sha256" in payload
+        ):
+            raise RuntimeSkeletonContractError(
+                "not_executed result cannot carry side-effect evidence"
+            )
         return
 
     if failure_class not in FAILURE_CLASSES:
@@ -254,7 +264,12 @@ def _validate_identity_drift(payload: Mapping[str, Any]) -> None:
 def _validate_contract_drift(payload: Mapping[str, Any]) -> None:
     expected = {
         key: PINNED_IDENTITY[key]
-        for key in ("contract_bundle_sha256", "contract_version", "engine_commit", "engine_image_digest")
+        for key in (
+            "contract_bundle_sha256",
+            "contract_version",
+            "engine_commit",
+            "engine_image_digest",
+        )
     }
     _require_pins(payload, expected)
     observed = {
@@ -288,7 +303,9 @@ def _require_equal(payload: Mapping[str, Any], key: str, expected: object) -> No
     if key not in payload:
         raise RuntimeSkeletonContractError(f"missing required field: {key}")
     if payload[key] != expected:
-        raise RuntimeSkeletonContractError(f"{key} mismatch: expected {expected!r}, got {payload[key]!r}")
+        raise RuntimeSkeletonContractError(
+            f"{key} mismatch: expected {expected!r}, got {payload[key]!r}"
+        )
 
 
 def _require_string(payload: Mapping[str, Any], key: str, *, min_length: int) -> str:
@@ -319,7 +336,9 @@ def _require_sha256_hex(payload: Mapping[str, Any], key: str) -> str:
     return value
 
 
-def _require_observed_drift(payload: Mapping[str, Any], observed_to_pinned: Mapping[str, object]) -> None:
+def _require_observed_drift(
+    payload: Mapping[str, Any], observed_to_pinned: Mapping[str, object]
+) -> None:
     drifted = False
     for key, pinned in observed_to_pinned.items():
         if key not in payload:
@@ -327,4 +346,6 @@ def _require_observed_drift(payload: Mapping[str, Any], observed_to_pinned: Mapp
         if payload[key] != pinned:
             drifted = True
     if not drifted:
-        raise RuntimeSkeletonContractError("drift rejection must include at least one observed value that differs from pins")
+        raise RuntimeSkeletonContractError(
+            "drift rejection must include at least one observed value that differs from pins"
+        )
