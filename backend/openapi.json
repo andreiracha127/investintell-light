@@ -10113,7 +10113,7 @@
           "regime_bands"
         ],
         "title": "FundRiskTimeseriesResponse",
-        "description": "Drawdown, conditional volatility, and regime overlay series."
+        "description": "Drawdown, conditional volatility, benchmark drawdown, and regime overlay series."
       },
       "FundRollingReturns": {
         "properties": {

@@ -3109,7 +3109,10 @@ export interface components {
             count: number;
             /** Items */
             items: components["schemas"]["FundPeerItem"][];
-            /** Classification Note */
+            /**
+             * Classification Note
+             * @default
+             */
             classification_note: string;
         };
         /**
@@ -3167,7 +3170,10 @@ export interface components {
             holdings: components["schemas"]["FundHoldingsOut"];
             /** Classes */
             classes: components["schemas"]["FundClassOut"][];
-            /** Classification Note */
+            /**
+             * Classification Note
+             * @default
+             */
             classification_note: string;
         };
         /** FundRefIn */
@@ -3496,7 +3502,7 @@ export interface components {
         };
         /**
          * FundRiskTimeseriesResponse
-         * @description Drawdown, conditional volatility, and regime overlay series.
+         * @description Drawdown, conditional volatility, benchmark drawdown, and regime overlay series.
          */
         FundRiskTimeseriesResponse: {
             /**
@@ -3574,7 +3580,10 @@ export interface components {
             tail_risks: number[];
             /** Strategies */
             strategies: string[];
-            /** Classification Note */
+            /**
+             * Classification Note
+             * @default
+             */
             classification_note: string;
         };
         /**
@@ -3730,7 +3739,10 @@ export interface components {
             /** Page Size */
             page_size: number;
             staleness: components["schemas"]["FundsStaleness"];
-            /** Classification Note */
+            /**
+             * Classification Note
+             * @default
+             */
             classification_note: string;
         };
         /**
