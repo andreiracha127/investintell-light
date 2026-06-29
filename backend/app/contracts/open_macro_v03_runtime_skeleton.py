@@ -22,7 +22,7 @@ SCHEMA_SHA256: Final[dict[str, str]] = {
         "1bb904ff44f8afaf08f51bcf15195547054dba9c1a9ceaf343d8ff902d96d110"
     ),
     "runtime_result_manifest.schema.json": (
-        "51eeabfdece3936f12826f7dc3feae14aa585149954a71e4f6b6d598bafe9cfa"
+        "73ba16f8a22b42839a7460351e47e2345de6f0d647ce040d3f3187fa869ae433"
     ),
 }
 
@@ -113,6 +113,9 @@ OBSERVED_CONTRACT_DRIFT_FIELDS: Final[frozenset[str]] = frozenset(
 OBSERVED_DRIFT_FIELDS: Final[frozenset[str]] = (
     OBSERVED_IDENTITY_DRIFT_FIELDS | OBSERVED_CONTRACT_DRIFT_FIELDS
 )
+SIDE_EFFECT_EVIDENCE_FIELDS: Final[frozenset[str]] = frozenset(
+    {"side_effect_attempt_count", "side_effect_attempt_evidence_sha256"}
+)
 
 ENVELOPE_ALLOWED_KEYS: Final[frozenset[str]] = frozenset(
     set(ENVELOPE_PINS) | {"request_id", "correlation_id", "execution_id", "output_artifact_uri"}
@@ -194,11 +197,15 @@ def verify_source_metadata() -> dict[str, Any]:
     if not isinstance(governance, Mapping):
         raise RuntimeSkeletonContractError("SOURCE.json governance must be an object")
     for key, expected in {
+        "A3": "open_macro_v03",
+        "A4": "runtime_skeleton_prepared",
         "A5": "blocked",
         "runtime_activation": False,
         "freeze_ready": False,
         "official_result": False,
+        "feature_flag_name": "open_macro_v03_runtime_activation",
         "feature_flag_default": False,
+        "backend_runtime_wiring": "none",
         "backend_runtime_execution": "none",
         "db_writes": "none",
         "allocator_publish": "none",
@@ -272,6 +279,11 @@ def validate_result_manifest(payload: Mapping[str, Any]) -> None:
 def _validate_identity_drift(payload: Mapping[str, Any]) -> None:
     _reject_present(
         payload,
+        SIDE_EFFECT_EVIDENCE_FIELDS,
+        "identity_drift result cannot carry side-effect evidence",
+    )
+    _reject_present(
+        payload,
         OBSERVED_CONTRACT_DRIFT_FIELDS - OBSERVED_IDENTITY_DRIFT_FIELDS,
         "identity_drift result cannot carry contract drift evidence",
     )
@@ -299,6 +311,11 @@ def _validate_identity_drift(payload: Mapping[str, Any]) -> None:
 
 
 def _validate_contract_drift(payload: Mapping[str, Any]) -> None:
+    _reject_present(
+        payload,
+        SIDE_EFFECT_EVIDENCE_FIELDS,
+        "contract_drift result cannot carry side-effect evidence",
+    )
     _reject_present(
         payload,
         OBSERVED_IDENTITY_DRIFT_FIELDS - OBSERVED_CONTRACT_DRIFT_FIELDS,

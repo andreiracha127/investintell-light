@@ -86,6 +86,26 @@ def test_runtime_skeleton_source_metadata_preserves_inert_governance() -> None:
     assert governance["production_endpoint_activation"] == "none"
 
 
+@pytest.mark.parametrize(
+    ("field", "bad"),
+    [
+        ("A3", "different_strategy"),
+        ("A4", "runtime_active"),
+        ("feature_flag_name", "different_flag"),
+        ("backend_runtime_wiring", "enabled"),
+    ],
+)
+def test_runtime_skeleton_source_metadata_pins_all_inert_governance(
+    monkeypatch: pytest.MonkeyPatch, field: str, bad: object
+) -> None:
+    source = runtime_skeleton.load_source_metadata()
+    source["governance"][field] = bad
+    monkeypatch.setattr(runtime_skeleton, "load_source_metadata", lambda: source)
+
+    with pytest.raises(runtime_skeleton.RuntimeSkeletonContractError):
+        runtime_skeleton.verify_source_metadata()
+
+
 def test_runtime_skeleton_valid_fixtures_pass_schema_and_offline_validator() -> None:
     fixtures = sorted((CONTRACT_ROOT / "fixtures" / "valid").glob("*.json"))
     assert fixtures
@@ -220,6 +240,16 @@ def test_runtime_skeleton_not_executed_result_rejects_observed_drift_evidence(
         runtime_skeleton.validate_result_manifest(result)
 
 
+def test_runtime_skeleton_schema_rejects_not_executed_observed_drift_evidence() -> None:
+    result = _valid_result()
+    result["observed_engine_commit"] = "3" * 40
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(
+            result, runtime_skeleton.load_schema("runtime_result_manifest.schema.json")
+        )
+
+
 def test_runtime_skeleton_result_rejects_side_effect_evidence_without_rejection() -> None:
     result = _valid_result()
     result["side_effect_attempt_count"] = 1
@@ -257,6 +287,24 @@ def test_runtime_skeleton_side_effect_rejection_rejects_observed_drift_evidence(
         runtime_skeleton.validate_result_manifest(result)
 
 
+def test_runtime_skeleton_schema_rejects_observed_drift_on_side_effect_rejection() -> None:
+    result = _valid_result()
+    result.update(
+        {
+            "status": "rejected",
+            "failure_class": "allocator_publish_attempt",
+            "side_effect_attempt_count": 1,
+            "side_effect_attempt_evidence_sha256": "a" * 64,
+            "observed_engine_commit": "1" * 40,
+        }
+    )
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(
+            result, runtime_skeleton.load_schema("runtime_result_manifest.schema.json")
+        )
+
+
 def test_runtime_skeleton_result_rejects_identity_drift_without_actual_drift() -> None:
     drift = _fixture("valid", "runtime-result.identity-drift.json")
     drift.update(
@@ -272,6 +320,30 @@ def test_runtime_skeleton_result_rejects_identity_drift_without_actual_drift() -
 
     with pytest.raises(runtime_skeleton.RuntimeSkeletonContractError):
         runtime_skeleton.validate_result_manifest(drift)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("side_effect_attempt_count", 1),
+        ("side_effect_attempt_evidence_sha256", "a" * 64),
+        ("observed_contract_bundle_sha256", "0" * 64),
+        ("observed_contract_version", "2.0.0"),
+    ],
+)
+def test_runtime_skeleton_identity_drift_rejects_incompatible_evidence(
+    field: str, value: object
+) -> None:
+    drift = _fixture("valid", "runtime-result.identity-drift.json")
+    drift[field] = value
+
+    with pytest.raises(runtime_skeleton.RuntimeSkeletonContractError):
+        runtime_skeleton.validate_result_manifest(drift)
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(
+            drift, runtime_skeleton.load_schema("runtime_result_manifest.schema.json")
+        )
 
 
 @pytest.mark.parametrize(
@@ -299,6 +371,32 @@ def test_runtime_skeleton_identity_drift_rejects_malformed_observed_evidence(
 
 def test_runtime_skeleton_contract_drift_result_passes_with_well_formed_evidence() -> None:
     runtime_skeleton.validate_result_manifest(_valid_contract_drift_result())
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("side_effect_attempt_count", 1),
+        ("side_effect_attempt_evidence_sha256", "a" * 64),
+        ("observed_input_pack_id", "open_macro_v03_certified_input_pack_drifted"),
+        ("observed_input_pack_sha256", "0" * 64),
+        ("observed_calibration_id", "open_macro_v03_calibration_drifted"),
+        ("observed_calibration_config_sha256", "1" * 64),
+    ],
+)
+def test_runtime_skeleton_contract_drift_rejects_incompatible_evidence(
+    field: str, value: object
+) -> None:
+    drift = _valid_contract_drift_result()
+    drift[field] = value
+
+    with pytest.raises(runtime_skeleton.RuntimeSkeletonContractError):
+        runtime_skeleton.validate_result_manifest(drift)
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(
+            drift, runtime_skeleton.load_schema("runtime_result_manifest.schema.json")
+        )
 
 
 @pytest.mark.parametrize(

@@ -127,7 +127,15 @@
         "not": {
           "anyOf": [
             {"required": ["side_effect_attempt_count"]},
-            {"required": ["side_effect_attempt_evidence_sha256"]}
+            {"required": ["side_effect_attempt_evidence_sha256"]},
+            {"required": ["observed_input_pack_id"]},
+            {"required": ["observed_input_pack_sha256"]},
+            {"required": ["observed_calibration_id"]},
+            {"required": ["observed_calibration_config_sha256"]},
+            {"required": ["observed_contract_bundle_sha256"]},
+            {"required": ["observed_contract_version"]},
+            {"required": ["observed_engine_commit"]},
+            {"required": ["observed_engine_image_digest"]}
           ]
         }
       }
@@ -141,7 +149,19 @@
         "required": [
           "side_effect_attempt_count",
           "side_effect_attempt_evidence_sha256"
-        ]
+        ],
+        "not": {
+          "anyOf": [
+            {"required": ["observed_input_pack_id"]},
+            {"required": ["observed_input_pack_sha256"]},
+            {"required": ["observed_calibration_id"]},
+            {"required": ["observed_calibration_config_sha256"]},
+            {"required": ["observed_contract_bundle_sha256"]},
+            {"required": ["observed_contract_version"]},
+            {"required": ["observed_engine_commit"]},
+            {"required": ["observed_engine_image_digest"]}
+          ]
+        }
       }
     },
     {
@@ -164,6 +184,14 @@
           "observed_engine_commit",
           "observed_engine_image_digest"
         ],
+        "not": {
+          "anyOf": [
+            {"required": ["side_effect_attempt_count"]},
+            {"required": ["side_effect_attempt_evidence_sha256"]},
+            {"required": ["observed_contract_bundle_sha256"]},
+            {"required": ["observed_contract_version"]}
+          ]
+        },
         "anyOf": [
           {"properties": {"observed_input_pack_id": {"not": {"const": "open_macro_v03_certified_input_pack_001"}}}},
           {"properties": {"observed_input_pack_sha256": {"not": {"const": "ae8b76e5959cb5e9c10ced7b33fc13a01a3484865deeead56c5b83b1c440e08f"}}}},
@@ -190,6 +218,16 @@
           "observed_engine_commit",
           "observed_engine_image_digest"
         ],
+        "not": {
+          "anyOf": [
+            {"required": ["side_effect_attempt_count"]},
+            {"required": ["side_effect_attempt_evidence_sha256"]},
+            {"required": ["observed_input_pack_id"]},
+            {"required": ["observed_input_pack_sha256"]},
+            {"required": ["observed_calibration_id"]},
+            {"required": ["observed_calibration_config_sha256"]}
+          ]
+        },
         "anyOf": [
           {"properties": {"observed_contract_bundle_sha256": {"not": {"const": "4ff92bba49ccd178348e4646bd4ba0afe45c7d6036a72f00c52bc02c29ea683a"}}}},
           {"properties": {"observed_contract_version": {"not": {"const": "1.0.0"}}}},
