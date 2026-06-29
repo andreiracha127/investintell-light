@@ -23,7 +23,7 @@ import pandas as pd
 from app.optimizer.engine import sigma_ledoit_wolf
 
 _LW_CACHE_MAX = 256
-_lw_cache: "OrderedDict[str, np.ndarray]" = OrderedDict()
+_lw_cache: OrderedDict[str, np.ndarray] = OrderedDict()
 
 
 def asset_set_key(labels: Sequence[str], window_days: int | None) -> str:

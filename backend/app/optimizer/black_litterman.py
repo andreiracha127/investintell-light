@@ -515,7 +515,7 @@ def solve_bl_vol_target(
         try:
             floor_prob.solve()
         except cp.error.SolverError:  # pragma: no cover - solver-dependent
-            raise exc
+            raise exc from None
         if floor_w.value is not None and str(floor_prob.status) == cp.OPTIMAL:
             floor_vol = float(np.sqrt(floor_w.value @ sigma_ann @ floor_w.value))
             if floor_vol > vol_target + 1e-6:

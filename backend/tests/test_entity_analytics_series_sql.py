@@ -1,4 +1,3 @@
-import datetime as dt
 import uuid
 
 import numpy as np
@@ -35,7 +34,7 @@ async def test_drawdown_series_sql_matches_max_drawdown_series():
         _S(), instrument_id=uuid.uuid4(), start=dates[0].date(), end=dates[-1].date()
     )
     assert len(pts) == len(legacy)
-    for (d, v), (idx, lv) in zip(pts, legacy.items()):
+    for (_d, v), (_idx, lv) in zip(pts, legacy.items(), strict=False):
         assert abs(v - float(lv)) < 1e-10
 
 

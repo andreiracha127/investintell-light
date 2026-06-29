@@ -3,7 +3,6 @@ import uuid
 from typing import Any
 
 import numpy as np
-import pytest
 
 from app.optimizer import data as optimizer_data
 from app.optimizer.data import _fund_simple_return_series

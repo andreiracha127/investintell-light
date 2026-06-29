@@ -58,7 +58,7 @@ def _validate_scenarios(scenarios: np.ndarray, func_name: str, min_rows: int) ->
     if scen.shape[1] < 1:
         raise ValueError(f"{func_name} requires at least 1 column, got {scen.shape[1]}")
     if not np.isfinite(scen).all():
-        raise ValueError(f"{func_name} received NaN or infinite values in input; clean the data first")
+        raise ValueError(f"{func_name} received NaN or infinite values in input; clean the data first")  # noqa: E501
     return scen
 
 

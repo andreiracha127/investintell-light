@@ -48,7 +48,7 @@ async def test_db_first_reads_top_holdings_from_mv(monkeypatch):
          "asset_class": "EC", "sector": None, "gics_sector": "Information Technology",
          "market_value": 1000.0, "pct_of_nav": 5.0},
     ])
-    out = await svc.fetch_fund_holdings_top(session, _FakeSession(), _IID, limit=25, use_db_first=True)
+    out = await svc.fetch_fund_holdings_top(session, _FakeSession(), _IID, limit=25, use_db_first=True)  # noqa: E501
     assert out.report_date == _RD
     assert out.top_holdings[0].issuer_name == "Apple Inc"
     assert out.top_holdings[0].gics_sector == "Information Technology"
@@ -67,6 +67,6 @@ async def test_flag_off_uses_legacy(monkeypatch):
             top_holdings=[], sector_breakdown=[], pct_of_nav_total=None,
         )
     monkeypatch.setattr(svc, "_fetch_fund_holdings_top_legacy", _legacy)
-    out = await svc.fetch_fund_holdings_top(_FakeSession(), _FakeSession(), _IID, limit=25, use_db_first=False)
+    out = await svc.fetch_fund_holdings_top(_FakeSession(), _FakeSession(), _IID, limit=25, use_db_first=False)  # noqa: E501
     assert called["legacy"] is True
     assert out.top_holdings == []

@@ -19,8 +19,8 @@ from app.schemas.fund_analysis import (
     FundDrawdownAnalysis,
     FundEntityAnalyticsResponse,
     FundFactorsResponse,
-    FundMarketSensitivity,
     FundInstitutionalRevealResponse,
+    FundMarketSensitivity,
     FundRegimeBand,
     FundReturnDistribution,
     FundReturnStatistics,
@@ -28,6 +28,11 @@ from app.schemas.fund_analysis import (
     FundRiskTimeseriesResponse,
     FundRollingReturns,
     FundSourceMetadata,
+    FundStyleBias,
+    FundStyleDriftPeriod,
+    FundStyleDriftResponse,
+    FundStyleSectorWeight,
+    FundTailRiskMetrics,
     HolderNetwork,
     HolderNetworkEdge,
     HolderNetworkNode,
@@ -38,11 +43,6 @@ from app.schemas.fund_analysis import (
     InstitutionalOverlapSecurity,
     ReverseLookupFundExposure,
     ReverseLookupInstitution,
-    FundStyleBias,
-    FundStyleDriftPeriod,
-    FundStyleDriftResponse,
-    FundStyleSectorWeight,
-    FundTailRiskMetrics,
 )
 from app.services import fund_dossier_tier_b as tier_b
 
@@ -206,7 +206,7 @@ def _institutional_payload() -> FundInstitutionalRevealResponse:
         holder_network=HolderNetwork(
             nodes=[
                 HolderNetworkNode(id=f"fund:{_FUND_ID}", label="Sample Fund", type="fund"),
-                HolderNetworkNode(id="institution:1067983", label="Berkshire Hathaway", type="institution"),
+                HolderNetworkNode(id="institution:1067983", label="Berkshire Hathaway", type="institution"),  # noqa: E501
                 HolderNetworkNode(id="security:037833100", label="APPLE INC", type="security"),
             ],
             edges=[
@@ -336,7 +336,7 @@ async def test_fund_entity_analytics_invalid_benchmark_422(
 async def test_fund_risk_timeseries_success(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = {}
 
-    async def fake_fetch(session, datalake, instrument_id, *, from_date, to_date, benchmark_id=None):
+    async def fake_fetch(session, datalake, instrument_id, *, from_date, to_date, benchmark_id=None):  # noqa: E501
         seen.update(
             instrument_id=instrument_id,
             from_date=from_date,
@@ -431,7 +431,7 @@ async def test_fund_institutional_reveal_empty_state(
             top_holders=[],
             overlap=[],
             holder_network=HolderNetwork(
-                nodes=[HolderNetworkNode(id=f"fund:{instrument_id}", label="Sample Fund", type="fund")],
+                nodes=[HolderNetworkNode(id=f"fund:{instrument_id}", label="Sample Fund", type="fund")],  # noqa: E501
                 edges=[],
             ),
             empty_state=EmptyState(
@@ -481,7 +481,7 @@ async def test_holding_reverse_lookup_empty_state(
             cusip="037833100",
             institutions=[],
             fund_exposures=[],
-            empty_state=EmptyState(reason="No fund exposure or 13F institutional holder matched this CUSIP."),
+            empty_state=EmptyState(reason="No fund exposure or 13F institutional holder matched this CUSIP."),  # noqa: E501
         )
 
     monkeypatch.setattr(tier_b, "fetch_holding_reverse_lookup", fake_fetch)

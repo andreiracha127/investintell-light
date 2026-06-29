@@ -1,6 +1,3 @@
-import datetime as dt
-import math
-import uuid
 
 import numpy as np
 import pandas as pd
@@ -38,7 +35,7 @@ async def test_rolling_beta_sql_matches_pandas():
         start=dates[0].date(), end=dates[-1].date(),
     )
     assert len(beta) == len(legacy)
-    for (d, v), (idx, lv) in zip(beta, legacy.items()):
+    for (_d, v), (_idx, lv) in zip(beta, legacy.items(), strict=False):
         assert abs(v - float(lv)) < 1e-10
 
 

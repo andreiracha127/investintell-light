@@ -27,8 +27,7 @@ from app.schemas.macro_scorecards import (
     MacroRegionalResponse,
     RegionScorecardOut,
 )
-from app.services import macro_regime
-from app.services import macro_scorecards
+from app.services import macro_regime, macro_scorecards
 
 router = APIRouter(tags=["macro"])
 

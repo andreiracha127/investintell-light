@@ -224,11 +224,11 @@ def test_view_consistency_relative_view_uses_predictive_dispersion() -> None:
 
 # ── T3F-3: robust / ellipsoidal mean-uncertainty SOCP ────────────────────────
 
-import pytest as _pytest
-from scipy.stats import chi2 as _chi2
+import pytest as _pytest  # noqa: E402
+from scipy.stats import chi2 as _chi2  # noqa: E402
 
-from app.optimizer import black_litterman as _bl
-from app.optimizer.engine import OptimizerError as _OptErr
+from app.optimizer import black_litterman as _bl  # noqa: E402
+from app.optimizer.engine import OptimizerError as _OptErr  # noqa: E402
 
 
 def test_kappa_from_chi2_matches_sqrt_ppf() -> None:

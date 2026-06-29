@@ -13,7 +13,6 @@ from app.schemas.correlation_regime import (
     PairCorrelationOut,
 )
 
-
 # ── T3F-6: schema validation ─────────────────────────────────────────────────
 
 
@@ -90,11 +89,11 @@ def test_request_window_days_bounds() -> None:
 
 # ── T3F-7: route ─────────────────────────────────────────────────────────────
 
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient  # noqa: E402
 
-from app.core.db import get_session
-from app.main import create_app
-from app.services import correlation_regime as cr_service
+from app.core.db import get_session  # noqa: E402
+from app.main import create_app  # noqa: E402
+from app.services import correlation_regime as cr_service  # noqa: E402
 
 
 def _route_client() -> AsyncClient:

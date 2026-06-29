@@ -18,7 +18,7 @@ import datetime as dt
 import hashlib
 import logging
 from collections.abc import Mapping, Sequence
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import Select, select
@@ -45,6 +45,7 @@ from app.schemas.lookthrough import (
 from app.schemas.news import NewsArticle
 from app.schemas.portfolios import (
     AlertsView,
+    AssetClass,
     BreachesView,
     ClassLimitItem,
     ConstraintsPut,
@@ -314,7 +315,7 @@ async def get_portfolio_constraints(
         overlap_cap=constraints.overlap_cap,
         class_limits=[
             ClassLimitItem(
-                asset_class=limit.asset_class,
+                asset_class=cast(AssetClass, limit.asset_class),
                 min_weight=limit.min_weight,
                 max_weight=limit.max_weight,
             )

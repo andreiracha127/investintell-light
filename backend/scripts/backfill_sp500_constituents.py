@@ -27,17 +27,22 @@ CREATE TABLE IF NOT EXISTS sp500_constituents (
   loaded_at  timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS sp500_constituents_ticker_idx ON sp500_constituents (ticker);
-CREATE INDEX IF NOT EXISTS sp500_constituents_range_idx  ON sp500_constituents (start_date, end_date);
+CREATE INDEX IF NOT EXISTS sp500_constituents_range_idx
+  ON sp500_constituents (start_date, end_date);
 """
 
 MATCH_SQL = """
 WITH t AS (SELECT DISTINCT ticker FROM sp500_constituents),
 m AS (
   SELECT t.ticker,
-    EXISTS (SELECT 1 FROM sec_cusip_ticker_map x WHERE x.ticker = t.ticker)                  AS exact,
-    EXISTS (SELECT 1 FROM sec_cusip_ticker_map x WHERE x.ticker = replace(t.ticker,'.','/')) AS slash,
-    EXISTS (SELECT 1 FROM sec_cusip_ticker_map x WHERE x.ticker = replace(t.ticker,'.','-')) AS dash,
-    EXISTS (SELECT 1 FROM sec_cusip_ticker_map x WHERE x.ticker = replace(t.ticker,'.',''))  AS glued
+    EXISTS (SELECT 1 FROM sec_cusip_ticker_map x
+      WHERE x.ticker = t.ticker)                 AS exact,
+    EXISTS (SELECT 1 FROM sec_cusip_ticker_map x
+      WHERE x.ticker = replace(t.ticker,'.','/')) AS slash,
+    EXISTS (SELECT 1 FROM sec_cusip_ticker_map x
+      WHERE x.ticker = replace(t.ticker,'.','-')) AS dash,
+    EXISTS (SELECT 1 FROM sec_cusip_ticker_map x
+      WHERE x.ticker = replace(t.ticker,'.',''))  AS glued
   FROM t)
 SELECT count(*)                                                       AS total,
        count(*) FILTER (WHERE exact)                                  AS exact_match,

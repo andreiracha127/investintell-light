@@ -45,7 +45,7 @@ async def test_rolling_vol_sql_matches_pandas(monkeypatch):
         start=dates[0].date(), end=dates[-1].date(),
     )
     assert len(vol) == len(legacy)
-    for (d, v), (idx, lv) in zip(vol, legacy.items()):
+    for (d, v), (idx, lv) in zip(vol, legacy.items(), strict=False):
         assert d == idx.date()
         assert abs(v - float(lv)) < 1e-10
 

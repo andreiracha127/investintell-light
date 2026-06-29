@@ -98,8 +98,8 @@ def derive_cusip(cusip, isin):
 
 def parse_csv(text):
     lines = text.splitlines()
-    hi = next((i for i, l in enumerate(lines)
-               if l.lower().lstrip('"').startswith("ticker")), None)
+    hi = next((i for i, ln in enumerate(lines)
+               if ln.lower().lstrip('"').startswith("ticker")), None)
     if hi is None:
         return []
     out = []
@@ -280,7 +280,7 @@ def load(dsn):
         conn.commit()
         cur.execute("SELECT count(*), count(DISTINCT as_of_date), "
                     "min(as_of_date), max(as_of_date) FROM sp500_index_weights;")
-        print("LOADED rows=%s dates=%s range=%s..%s" % cur.fetchone())
+        print("LOADED rows={} dates={} range={}..{}".format(*cur.fetchone()))
     finally:
         conn.close()
 

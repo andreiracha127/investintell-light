@@ -16,15 +16,22 @@ Views: momentum 12-1 anualizado, confidence 0.5 (sinal sistemático, igual p/ ga
 """
 import os
 import sys
+
 import numpy as np
 import pandas as pd
 
 sys.path.insert(0, ".")
-from app.optimizer.engine import solve_min_cvar, solve_min_vol, sigma_ledoit_wolf, OptimizerError
 from app.optimizer.black_litterman import (
-    equilibrium, build_view_matrices, omega_idzorek, posterior,
-    historical_mean_ann, recenter_scenarios, solve_bl_utility, AbsoluteView,
+    AbsoluteView,
+    build_view_matrices,
+    equilibrium,
+    historical_mean_ann,
+    omega_idzorek,
+    posterior,
+    recenter_scenarios,
+    solve_bl_utility,
 )
+from app.optimizer.engine import OptimizerError, sigma_ledoit_wolf, solve_min_cvar, solve_min_vol
 
 CSV = "_navdata.csv"
 GATE_DAYS = 504
@@ -39,17 +46,17 @@ MOM_LB, MOM_SKIP = 252, 21
 # Market weights do BL: AUM real via cascata funds_v (snapshot atual como proxy
 # constante — AUM histórico por data não existe; pesos relativos são estáveis).
 AUM = {
-    "5cb06f3a-1466-4129-abc3-b43b14289b68": 44059740, "ec318a68-3480-4776-9969-5c7d5e00c0f6": 3084291035,
-    "173e3c05-7868-4c0e-b587-3b89140c7150": 137300000, "a3451875-04b9-4a7f-ab22-2c3b7bbab6f5": 301500000,
-    "b095cac2-895d-4755-be4d-3e49f65624fb": 1886359815, "e7eeb21b-4f6b-4bfd-b840-426aa836cefd": 329310530,
-    "b492f90c-6f06-43c7-b4d7-25063a79a83b": 260127649, "44407097-a64e-4a42-8731-9f0930a379b4": 24209870,
-    "8086c3c5-838d-43ce-b0fa-75d0b8cd785d": 1547264215, "54aff312-54ad-4633-be5f-1e354dd061b7": 1314868675,
-    "354c95ba-c013-406b-aa43-543296391b73": 59764166, "0375c508-3e76-45c8-ac77-769f2d02d7ba": 191068711,
-    "cc0aefb4-7bfc-4c09-b655-86cecdcca754": 719648014, "d29489fa-2f31-4f45-8f62-5ab5949392a3": 49163578,
-    "1d78509b-b2d0-47b7-8b69-86b548612607": 150200046, "35643b8f-50e0-4d7a-9be7-2c5170bef6fd": 24958946,
-    "2a69f1d5-5591-45c8-a9ed-69cd516a4d98": 936017060, "315d04c6-63da-4f2f-8dcf-4aef77b0d3cb": 86913193,
-    "3a12e8e0-b23e-4432-80c2-55775d4072bf": 1344207001, "4201cb6a-0208-4632-a532-f4e1a0d6d47b": 101332719,
-    "87fbe2b6-a852-4447-ae3a-5583d19e05e2": 226055908, "f4f95e76-75af-4fc3-b5a7-dc68893f4e0c": 419582608,
+    "5cb06f3a-1466-4129-abc3-b43b14289b68": 44059740, "ec318a68-3480-4776-9969-5c7d5e00c0f6": 3084291035,  # noqa: E501
+    "173e3c05-7868-4c0e-b587-3b89140c7150": 137300000, "a3451875-04b9-4a7f-ab22-2c3b7bbab6f5": 301500000,  # noqa: E501
+    "b095cac2-895d-4755-be4d-3e49f65624fb": 1886359815, "e7eeb21b-4f6b-4bfd-b840-426aa836cefd": 329310530,  # noqa: E501
+    "b492f90c-6f06-43c7-b4d7-25063a79a83b": 260127649, "44407097-a64e-4a42-8731-9f0930a379b4": 24209870,  # noqa: E501
+    "8086c3c5-838d-43ce-b0fa-75d0b8cd785d": 1547264215, "54aff312-54ad-4633-be5f-1e354dd061b7": 1314868675,  # noqa: E501
+    "354c95ba-c013-406b-aa43-543296391b73": 59764166, "0375c508-3e76-45c8-ac77-769f2d02d7ba": 191068711,  # noqa: E501
+    "cc0aefb4-7bfc-4c09-b655-86cecdcca754": 719648014, "d29489fa-2f31-4f45-8f62-5ab5949392a3": 49163578,  # noqa: E501
+    "1d78509b-b2d0-47b7-8b69-86b548612607": 150200046, "35643b8f-50e0-4d7a-9be7-2c5170bef6fd": 24958946,  # noqa: E501
+    "2a69f1d5-5591-45c8-a9ed-69cd516a4d98": 936017060, "315d04c6-63da-4f2f-8dcf-4aef77b0d3cb": 86913193,  # noqa: E501
+    "3a12e8e0-b23e-4432-80c2-55775d4072bf": 1344207001, "4201cb6a-0208-4632-a532-f4e1a0d6d47b": 101332719,  # noqa: E501
+    "87fbe2b6-a852-4447-ae3a-5583d19e05e2": 226055908, "f4f95e76-75af-4fc3-b5a7-dc68893f4e0c": 419582608,  # noqa: E501
 }
 
 
@@ -136,11 +143,11 @@ def scenario(R, rebal, label, cap, methods):
             m = run_strategy(R, rebal, method, mode, cap)
             res[mode] = m
             print(f"{method:7} {mode:4} | CAGR {m['CAGR']*100:6.2f}% | Vol {m['Vol']*100:5.2f}% | "
-                  f"Sharpe {m['Sharpe']:5.2f} | MaxDD {m['MaxDD']*100:7.2f}% | turn {m['turnover']:.3f} | "
+                  f"Sharpe {m['Sharpe']:5.2f} | MaxDD {m['MaxDD']*100:7.2f}% | turn {m['turnover']:.3f} | "  # noqa: E501
                   f"pos {m['active']:.1f} | ok {m['n_ok']} fb {m['n_fb']}")
         g, f = res["gate"], res["full"]
         print(f"        Δ full−gate | CAGR {(f['CAGR']-g['CAGR'])*100:+6.2f}pp | "
-              f"Sharpe {f['Sharpe']-g['Sharpe']:+5.2f} | MaxDD {(f['MaxDD']-g['MaxDD'])*100:+6.2f}pp")
+              f"Sharpe {f['Sharpe']-g['Sharpe']:+5.2f} | MaxDD {(f['MaxDD']-g['MaxDD'])*100:+6.2f}pp")  # noqa: E501
 
 
 def main():
