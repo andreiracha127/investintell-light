@@ -97,7 +97,7 @@ async def test_list_funds_payload(monkeypatch: pytest.MonkeyPatch) -> None:
         "source_calc_date": "2026-06-09",
         "source_nav_max_date": "2026-06-05",
     }
-    assert "classificador" in body["classification_note"]
+    assert body["classification_note"] == ""
     item = body["items"][0]
     assert item["instrument_id"] == str(_FUND_ID)
     assert item["sharpe_1y"] == 1.1
@@ -391,7 +391,7 @@ async def test_fund_profile_payload(monkeypatch: pytest.MonkeyPatch) -> None:
             "expense_ratio": None,
         },
     ]
-    assert "classificador" in body["classification_note"]
+    assert body["classification_note"] == ""
 
 
 async def test_fund_profile_404(monkeypatch: pytest.MonkeyPatch) -> None:

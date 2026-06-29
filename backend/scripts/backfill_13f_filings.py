@@ -235,7 +235,8 @@ CREATE TABLE IF NOT EXISTS sec_13f_other_managers (
   sec_filenumber     text,
   name               text
 );
-CREATE INDEX IF NOT EXISTS sec_13f_other_managers_acc_idx ON sec_13f_other_managers (accession_number);
+CREATE INDEX IF NOT EXISTS sec_13f_other_managers_acc_idx
+  ON sec_13f_other_managers (accession_number);
 CREATE INDEX IF NOT EXISTS sec_13f_other_managers_cik_idx ON sec_13f_other_managers (cik);
 """
 
@@ -250,13 +251,11 @@ def load(dsn, out):
         cur.execute("TRUNCATE sec_13f_filings;")
         with open(os.path.join(out, "filings.csv"), encoding="utf-8") as f:
             cur.copy_expert(
-                "COPY sec_13f_filings (%s) FROM STDIN WITH (FORMAT csv, HEADER true, NULL '')"
-                % ",".join(FILINGS_COLS), f)
+                "COPY sec_13f_filings ({}) FROM STDIN WITH (FORMAT csv, HEADER true, NULL '')".format(",".join(FILINGS_COLS)), f)  # noqa: E501
         cur.execute("TRUNCATE sec_13f_other_managers;")
         with open(os.path.join(out, "other_managers.csv"), encoding="utf-8") as f:
             cur.copy_expert(
-                "COPY sec_13f_other_managers (%s) FROM STDIN WITH (FORMAT csv, HEADER true, NULL '')"
-                % ",".join(OM_COLS), f)
+                "COPY sec_13f_other_managers ({}) FROM STDIN WITH (FORMAT csv, HEADER true, NULL '')".format(",".join(OM_COLS)), f)  # noqa: E501
         conn.commit()
         cur.execute("SELECT count(*) FROM sec_13f_filings;")
         nf = cur.fetchone()[0]

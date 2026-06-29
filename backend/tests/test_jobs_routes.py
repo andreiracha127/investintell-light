@@ -93,7 +93,6 @@ async def test_walk_forward_enqueues_when_large(monkeypatch):
 @pytest.mark.asyncio
 async def test_walk_forward_runs_sync_when_small(monkeypatch):
     from app.api.routes import backtest as bt_route
-    from app.schemas.backtest import WalkForwardResponse
 
     monkeypatch.setattr(bt_route.jobs_service, "should_run_async", lambda **k: False)
 

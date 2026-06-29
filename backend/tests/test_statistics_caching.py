@@ -65,8 +65,8 @@ async def test_beta_service_is_cached(monkeypatch):
 async def test_scenario_version_changes_cache_key():
     # _VersionedScenario embeds the portfolio version, so two different versions
     # yield different cache keys (editing the portfolio invalidates the cache).
-    from app.services.statistics import _VersionedScenario
     from app.schemas.statistics import ScenarioRequest
+    from app.services.statistics import _VersionedScenario
 
     req = ScenarioRequest(
         start_date=dt.date(2026, 1, 1), end_date=dt.date(2026, 6, 1), portfolio_id=1

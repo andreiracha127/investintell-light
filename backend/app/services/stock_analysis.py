@@ -26,6 +26,7 @@ from collections.abc import Hashable, Iterable, Mapping
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.services.series_sql as series_sql
 from app.analytics import (
     MIN_IN_RANGE_RETURNS,
     align_returns,
@@ -68,8 +69,6 @@ from app.services._series import (
 from app.services._series import (
     series_points as _series_points,
 )
-
-import app.services.series_sql as series_sql
 
 _HISTOGRAM_BINS = 20
 

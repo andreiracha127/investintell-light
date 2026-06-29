@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import pytest
 
 from app.analytics.return_convention import GLITCH_LOG_THRESHOLD, to_simple_returns
 

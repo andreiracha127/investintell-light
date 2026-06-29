@@ -25,7 +25,8 @@ class _FakeFund:
 
 class _FakeSession:
     def __init__(self, *, row=None):
-        self._row = row; self.executed = []
+        self._row = row
+        self.executed = []
     async def execute(self, query, params=None):
         self.executed.append(str(query))
         return _Result([self._row] if self._row else [])
@@ -52,7 +53,7 @@ async def test_db_first_reads_payload_from_mv():
         "period": "2026-03-31",
     }
     row = {"series_id": "S000001", "as_of": _AS_OF, "schema_version": 1, "payload": payload}
-    out = await svc.fetch_fund_institutional_reveal(object(), _FakeSession(row=row), _IID, use_db_first=True)
+    out = await svc.fetch_fund_institutional_reveal(object(), _FakeSession(row=row), _IID, use_db_first=True)  # noqa: E501
     assert out.top_holders[0].manager_name == "Alpha"
     assert out.overlap[0].cusip == "AAA"
     assert out.holder_network.nodes[0].type == "fund"
@@ -60,6 +61,6 @@ async def test_db_first_reads_payload_from_mv():
 
 @pytest.mark.asyncio
 async def test_db_first_empty_yields_empty_payload():
-    out = await svc.fetch_fund_institutional_reveal(object(), _FakeSession(row=None), _IID, use_db_first=True)
+    out = await svc.fetch_fund_institutional_reveal(object(), _FakeSession(row=None), _IID, use_db_first=True)  # noqa: E501
     assert out.top_holders == []
     assert out.empty_state is not None

@@ -37,7 +37,7 @@ async def test_risk_timeseries_drawdown_x100_matches_legacy():
     )
     scaled = [(d, v * 100.0) for d, v in pts]
     assert len(scaled) == len(legacy)
-    for (d, v), (idx, lv) in zip(scaled, legacy.items()):
+    for (_d, v), (_idx, lv) in zip(scaled, legacy.items(), strict=False):
         assert abs(v - float(lv)) < 1e-10
 
 
