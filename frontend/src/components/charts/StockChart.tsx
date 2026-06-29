@@ -163,7 +163,7 @@ export function StockChart({
           type: INITIAL_TYPE,
           scale: { log: false, pct: false },
           showVolume: SHOW_VOLUME,
-          sma20: true,
+          sma20: false,
           compares: [],
           colors,
           selectedRangeIndex: rangeButtonIndexForPreset(initialRangeRef.current),

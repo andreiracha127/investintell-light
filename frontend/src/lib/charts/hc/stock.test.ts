@@ -55,7 +55,7 @@ function baseInput(over: Partial<Parameters<typeof buildStockOptions>[0]> = {}) 
     type: "candles" as const,
     scale: { log: false, pct: false },
     showVolume: true,
-    sma20: true,
+    sma20: false,
     compares: [],
     colors: COLORS,
     selectedRangeIndex: 2,
@@ -92,6 +92,12 @@ describe("buildStockOptions", () => {
     const sma = (opt.series ?? []).find((s) => (s as { type?: string }).type === "sma");
     expect((sma as { linkedTo?: string }).linkedTo).toBe("price-main");
     expect((sma as { params?: { period?: number } }).params?.period).toBe(20);
+  });
+
+  it("does not include SMA by default (stock-tools GUI provides it on demand)", () => {
+    const opt = buildStockOptions(baseInput());
+    const types = (opt.series ?? []).map((s) => (s as { type?: string }).type);
+    expect(types).not.toContain("sma");
   });
 
   it("omits SMA and volume when toggled off", () => {
