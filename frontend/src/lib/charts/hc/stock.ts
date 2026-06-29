@@ -45,6 +45,23 @@ function nativeSeriesType(type: StockChartType): "candlestick" | "ohlc" | "line"
   return type === "candles" ? "candlestick" : type;
 }
 
+// Native Highstock series types whose point shape is [t,o,h,l,c]. The rest
+// ([t,c]) are line-like. Used to keep surgical data/tick updates consistent
+// with the type the user picked via the stock-tools `typeChange` GUI button —
+// otherwise a candle-shaped point would corrupt a line/area series (and vice
+// versa) on the next bars refresh or live tick.
+const OHLC_SHAPED_SERIES = new Set([
+  "candlestick",
+  "ohlc",
+  "hlc",
+  "heikinashi",
+  "hollowcandlestick",
+]);
+
+export function stockTypeFromSeries(seriesType?: string): StockChartType {
+  return seriesType && OHLC_SHAPED_SERIES.has(seriesType) ? "candles" : "line";
+}
+
 export interface StockOptionsInput {
   symbol: string;
   bars: HistoryBar[];
@@ -96,6 +113,14 @@ export function buildStockOptions(input: StockOptionsInput): Options {
       lineColor: colors.accent,
       upColor: colors.gain,
       upLineColor: colors.gain,
+      // Always-on last-price tag (price-indicator module), matching the golden
+      // reference. The stock-tools `currentPriceIndicator` button is a separate,
+      // user-toggled marker and does not replace this.
+      lastPrice: {
+        enabled: true,
+        color: colors.accent,
+        label: { enabled: true, backgroundColor: colors.accent },
+      },
     } as SeriesOptionsType,
   ];
   if (showVolume) {

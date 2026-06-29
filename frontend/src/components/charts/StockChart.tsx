@@ -36,6 +36,7 @@ import {
   rangeButtonIndexForPreset,
   STOCK_PRICE_ID,
   STOCK_VOLUME_ID,
+  stockTypeFromSeries,
   toMainSeriesData,
   toVolumeSeriesData,
   type StockCompare,
@@ -80,6 +81,116 @@ const FEED_BADGE: Record<FeedStatus, { label: string; live: boolean }> = {
   off: { label: "EOD", live: false },
 };
 
+// Id of the always-on High/Low marker so we can replace it on refresh WITHOUT
+// touching user-drawn annotations (which carry their own ids).
+const AUTO_HL_ID = "auto-hl";
+
+type AnnotationChart = Chart & {
+  addAnnotation?: (options: unknown, redraw?: boolean) => unknown;
+  removeAnnotation?: (idOrAnnotation: string) => void;
+};
+
+/**
+ * Draws (or redraws) the decorative High/Low markers + connecting trendline
+ * over the CURRENTLY VISIBLE window — matching the golden reference, which
+ * recomputes High/Low for the range on view. Computed from `bars` so it stays
+ * decoupled from Highcharts point internals, and fully guarded: a decorative
+ * annotation must never throw and break the live chart.
+ */
+function refreshHighLowAnnotation(
+  chart: Chart | null,
+  bars: HistoryBar[],
+  colors: ReturnType<typeof chartColors> | null,
+): void {
+  const ac = chart as AnnotationChart | null;
+  if (!ac?.addAnnotation || !ac.removeAnnotation || !colors) return;
+  try {
+    ac.removeAnnotation(AUTO_HL_ID);
+  } catch {
+    /* not drawn yet — nothing to remove */
+  }
+  try {
+    const ext = chart?.xAxis?.[0]?.getExtremes?.();
+    const lo = typeof ext?.min === "number" ? ext.min : -Infinity;
+    const hi = typeof ext?.max === "number" ? ext.max : Infinity;
+    const view = bars.filter((b) => b.t >= lo && b.t <= hi);
+    const src = view.length >= 2 ? view : bars;
+    if (src.length < 2) return;
+    let hiI = 0;
+    let loI = 0;
+    for (let i = 1; i < src.length; i++) {
+      if (src[i].h > src[hiI].h) hiI = i;
+      if (src[i].l < src[loI].l) loI = i;
+    }
+    const H = src[hiI];
+    const L = src[loI];
+    const fmt = (n: number) => n.toFixed(2);
+    ac.addAnnotation(
+      {
+        id: AUTO_HL_ID,
+        draggable: "",
+        labelOptions: {
+          backgroundColor: colors.surface,
+          borderColor: colors.grid,
+          borderRadius: 6,
+          padding: 5,
+          style: { color: colors.text, fontSize: "10px" },
+        },
+        labels: [
+          { point: { x: H.t, y: H.h, xAxis: 0, yAxis: 0 }, text: `High ${fmt(H.h)}` },
+          { point: { x: L.t, y: L.l, xAxis: 0, yAxis: 0 }, text: `Low ${fmt(L.l)}` },
+        ],
+        shapes: [
+          {
+            type: "path",
+            stroke: colors.accent,
+            strokeWidth: 1.4,
+            dashStyle: "Dash",
+            points: [
+              { x: L.t, y: L.l, xAxis: 0, yAxis: 0 },
+              { x: H.t, y: H.h, xAxis: 0, yAxis: 0 },
+            ],
+          },
+        ],
+      },
+      true,
+    );
+  } catch {
+    /* never let a decorative annotation break the chart */
+  }
+}
+
+/**
+ * Make EVERY drawn annotation selectable (click → edit/delete toolbar).
+ *
+ * Highcharts wires the "select annotation" handler (which opens the stock-tools
+ * edit/delete toolbar and exposes the Remove button) onto the BASE Annotation
+ * class only. The advanced types registered by annotations-advanced — fibonacci,
+ * pitchfork, measure, crookedLine, elliottWave, tunnel, infinityLine,
+ * timeCycles, fibonacciTimeZones, verticalLine, basicAnnotation — are created
+ * after that wiring runs, and their own `defaultOptions.events` shadow the base,
+ * leaving them with NO click handler: a drawn Fibonacci can't be selected or
+ * deleted. Propagate the base class's events (click/touchstart/touchend) onto
+ * every registered type. Idempotent — safe to run on every chart mount.
+ */
+type AnnotationProto = {
+  prototype?: { defaultOptions?: { events?: Record<string, unknown> } };
+};
+function ensureAnnotationsSelectable(highcharts: unknown): void {
+  const Annotation = (highcharts as { Annotation?: AnnotationProto & {
+    types?: Record<string, AnnotationProto>;
+  } }).Annotation;
+  const baseEvents = Annotation?.prototype?.defaultOptions?.events;
+  const types = Annotation?.types;
+  if (!baseEvents || !baseEvents.click || !types) return;
+  for (const key of Object.keys(types)) {
+    const defaults = types[key]?.prototype?.defaultOptions;
+    if (defaults) {
+      defaults.events = { ...(defaults.events ?? {}), ...baseEvents };
+    }
+  }
+}
+
 export function StockChart({
   symbol,
   bars,
@@ -99,6 +210,10 @@ export function StockChart({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
+
+  // Resolved design tokens captured at create time, reused by the High/Low
+  // annotation refresh (which runs outside the create effect's closure).
+  const colorsRef = useRef<ReturnType<typeof chartColors> | null>(null);
 
   // Current bars for the live-tick callback; kept in a ref so ticks merge onto
   // the latest data without re-running the subscribe effect.
@@ -153,7 +268,11 @@ export function StockChart({
       await import("highcharts/esm/modules/stock-tools.js");
       if (disposed || !containerRef.current) return;
       const Highcharts = mod.default;
+      // Make advanced drawn annotations (Fibonacci, pitchfork, measure, …)
+      // selectable so their edit/delete toolbar opens on click. See the helper.
+      ensureAnnotationsSelectable(Highcharts);
       const colors = chartColors();
+      colorsRef.current = colors;
       Highcharts.setOptions(highchartsTheme(colors));
       const chart = Highcharts.stockChart(
         containerRef.current,
@@ -168,6 +287,10 @@ export function StockChart({
           colors,
           selectedRangeIndex: rangeButtonIndexForPreset(initialRangeRef.current),
           onRangeButtonClick: (preset) => {
+            // Recompute the High/Low markers for the newly selected window.
+            // afterSetExtremes fires AFTER the extremes are applied, so the
+            // visible range is already current here.
+            refreshHighLowAnnotation(chartRef.current, barsRef.current, colorsRef.current);
             // Ignore the first (on-mount) emission from applying the initial
             // rangeSelector selection; forward all later user clicks.
             if (!mountedRef.current) {
@@ -183,6 +306,9 @@ export function StockChart({
         return;
       }
       chartRef.current = chart;
+      // Initial High/Low marker (no-op until bars arrive; the bars effect below
+      // refreshes once data populates).
+      refreshHighLowAnnotation(chart, barsRef.current, colors);
     })();
     const observer = new ResizeObserver(() => chartRef.current?.reflow());
     observer.observe(el);
@@ -206,13 +332,18 @@ export function StockChart({
       // Partial update: only the display name. Cast because Highcharts types a
       // series update as the full discriminated SeriesOptionsType union.
       price.update({ name: symbol } as Parameters<Series["update"]>[0], false);
-      price.setData(toMainSeriesData(bars, INITIAL_TYPE), false);
+      // Shape the data for the series type the user may have switched to via the
+      // stock-tools `typeChange` GUI button — NOT the create-time constant.
+      // Feeding candle-shaped points into a line/area series (or vice versa)
+      // corrupts the points; derive the shape from the live series type.
+      price.setData(toMainSeriesData(bars, stockTypeFromSeries(price.type)), false);
     }
     const vol = chart.get(STOCK_VOLUME_ID) as Series | undefined;
     if (vol && "setData" in vol) {
       vol.setData(toVolumeSeriesData(bars), false);
     }
     chart.redraw(false);
+    refreshHighLowAnnotation(chart, bars, colorsRef.current);
   }, [symbol, bars]);
 
   // ── Live ticks (coalesced via rAF) ────────────────────────────────────────
@@ -224,11 +355,14 @@ export function StockChart({
       const pending = pendingTickRef.current;
       pendingTickRef.current = null;
       if (!pending || !chartRef.current) return;
+      // Match the point shape to the series type the user may have switched to
+      // via the stock-tools GUI, not the create-time constant.
+      const priceSeries = chartRef.current.get(STOCK_PRICE_ID) as Series | undefined;
       applyTickToStockChart({
         chart: chartRef.current,
         bar: pending.bar,
         appended: pending.appended,
-        type: INITIAL_TYPE,
+        type: stockTypeFromSeries(priceSeries?.type),
         showVolume: SHOW_VOLUME,
         redraw: true,
       });

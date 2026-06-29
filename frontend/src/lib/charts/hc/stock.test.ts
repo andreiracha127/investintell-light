@@ -5,6 +5,7 @@ import {
   rangeButtonIndexForPreset,
   STOCK_PRICE_ID,
   STOCK_VOLUME_ID,
+  stockTypeFromSeries,
   toMainSeriesData,
   toVolumeSeriesData,
 } from "./stock";
@@ -37,6 +38,17 @@ describe("stock series data", () => {
 
   it("volume maps to [t,v]", () => {
     expect(toVolumeSeriesData(BARS)).toEqual([[1, 100], [2, 200]]);
+  });
+
+  it("stockTypeFromSeries maps native OHLC-shaped series to 'candles' and the rest to 'line'", () => {
+    // OHLC-shaped: a live tick / data refresh must keep feeding [t,o,h,l,c].
+    for (const t of ["candlestick", "ohlc", "hlc", "heikinashi", "hollowcandlestick"]) {
+      expect(stockTypeFromSeries(t)).toBe("candles");
+    }
+    // Anything else ([t,c] shaped) — including after the GUI typeChange button.
+    for (const t of ["line", "area", "spline", "areaspline", undefined]) {
+      expect(stockTypeFromSeries(t)).toBe("line");
+    }
   });
 });
 
@@ -74,6 +86,14 @@ describe("buildStockOptions", () => {
     const opt = buildStockOptions(baseInput());
     const main = (opt.series ?? []).find((s) => (s as { id?: string }).id === "price-main");
     expect((main as { type?: string }).type).toBe("candlestick");
+  });
+
+  it("enables the always-on last-price indicator on the main series", () => {
+    const opt = buildStockOptions(baseInput());
+    const main = (opt.series ?? []).find((s) => (s as { id?: string }).id === "price-main");
+    const lastPrice = (main as { lastPrice?: { enabled?: boolean; label?: { enabled?: boolean } } }).lastPrice;
+    expect(lastPrice?.enabled).toBe(true);
+    expect(lastPrice?.label?.enabled).toBe(true);
   });
 
   it("maps the chart type to the native main-series type", () => {
