@@ -27,8 +27,11 @@ SCHEMA_SHA256: Final[dict[str, str]] = {
 }
 
 EXPECTED_SOURCE: Final[dict[str, object]] = {
+    "contract_name": "open_macro_v03_runtime_skeleton",
+    "contract_id": "open_macro_v03_runtime_skeleton_001",
     "source_repo": "andreiracha127/investintell-datalake-workers",
     "source_pr": 9,
+    "source_original_pr_head": "70ca3a7a3a995a20f09013a5f62a0d8acba6ec0a",
     "source_merged_pr_head": "70c8ce37cc59354c5cbdf6dfbcaa01190d443952",
     "source_merge_commit": "87e69a8cfb7aa646d1d0c7c9d7610ce914514cc7",
 }

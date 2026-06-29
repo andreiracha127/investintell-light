@@ -30,6 +30,10 @@ def _schema_for(fixture_name: str) -> str | None:
     return None
 
 
+def _fixtures(root: Path, kind: str) -> list[Path]:
+    return sorted((root / "fixtures" / kind).glob("*.json"))
+
+
 def main() -> int:
     ok = True
 
@@ -41,7 +45,16 @@ def main() -> int:
         ok = False
 
     root = runtime_skeleton.contract_dir()
-    for fx in sorted((root / "fixtures" / "valid").glob("*.json")):
+    valid_fixtures = _fixtures(root, "valid")
+    invalid_fixtures = _fixtures(root, "invalid")
+    if not valid_fixtures:
+        print("FAIL missing valid runtime skeleton fixtures")
+        ok = False
+    if not invalid_fixtures:
+        print("FAIL missing invalid runtime skeleton fixtures")
+        ok = False
+
+    for fx in valid_fixtures:
         payload = json.loads(fx.read_text(encoding="utf-8"))
         try:
             if fx.name.startswith("runtime-job-envelope"):
@@ -54,7 +67,7 @@ def main() -> int:
         else:
             print(f"OK   fixture valid/{fx.name}")
 
-    for fx in sorted((root / "fixtures" / "invalid").glob("*.json")):
+    for fx in invalid_fixtures:
         payload = json.loads(fx.read_text(encoding="utf-8"))
         try:
             if fx.name.startswith("runtime-job-envelope"):
@@ -72,8 +85,11 @@ def main() -> int:
     except ImportError:
         print("[warn] jsonschema not installed; skipped JSON Schema fixture validation")
     else:
-        for kind, expect_valid in (("valid", True), ("invalid", False)):
-            for fx in sorted((root / "fixtures" / kind).glob("*.json")):
+        for kind, expect_valid, fixtures in (
+            ("valid", True, valid_fixtures),
+            ("invalid", False, invalid_fixtures),
+        ):
+            for fx in fixtures:
                 schema_name = _schema_for(fx.name)
                 if schema_name is None:
                     print(f"FAIL no schema mapped for fixture {fx.name}")

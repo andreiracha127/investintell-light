@@ -11,6 +11,7 @@ import pytest
 
 from app.contracts import open_macro_v03_runtime_skeleton as runtime_skeleton
 from app.main import create_app
+from scripts import verify_open_macro_v03_runtime_skeleton as verifier_script
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_ROOT = runtime_skeleton.contract_dir()
@@ -89,6 +90,10 @@ def test_runtime_skeleton_source_metadata_preserves_inert_governance() -> None:
 @pytest.mark.parametrize(
     ("field", "bad"),
     [
+        ("contract_name", "different_contract"),
+        ("contract_id", "different_contract_001"),
+        ("source_original_pr_head", "0" * 40),
+        ("source_merged_pr_head", "1" * 40),
         ("A3", "different_strategy"),
         ("A4", "runtime_active"),
         ("feature_flag_name", "different_flag"),
@@ -99,11 +104,27 @@ def test_runtime_skeleton_source_metadata_pins_all_inert_governance(
     monkeypatch: pytest.MonkeyPatch, field: str, bad: object
 ) -> None:
     source = runtime_skeleton.load_source_metadata()
-    source["governance"][field] = bad
+    if field in source:
+        source[field] = bad
+    else:
+        source["governance"][field] = bad
     monkeypatch.setattr(runtime_skeleton, "load_source_metadata", lambda: source)
 
     with pytest.raises(runtime_skeleton.RuntimeSkeletonContractError):
         runtime_skeleton.verify_source_metadata()
+
+
+def test_runtime_skeleton_standalone_verifier_fails_when_fixtures_are_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(verifier_script.runtime_skeleton, "verify_schema_hashes", lambda: {})
+    monkeypatch.setattr(verifier_script.runtime_skeleton, "verify_source_metadata", lambda: {})
+    monkeypatch.setattr(verifier_script.runtime_skeleton, "contract_dir", lambda: tmp_path)
+
+    assert verifier_script.main() == 1
+    output = capsys.readouterr().out
+    assert "FAIL missing valid runtime skeleton fixtures" in output
+    assert "FAIL missing invalid runtime skeleton fixtures" in output
 
 
 def test_runtime_skeleton_valid_fixtures_pass_schema_and_offline_validator() -> None:
