@@ -33,6 +33,27 @@ def _valid_result() -> dict[str, Any]:
     return _fixture("valid", "runtime-result.not-executed.json")
 
 
+def _valid_contract_drift_result() -> dict[str, Any]:
+    result = _valid_result()
+    result.update(
+        {
+            "status": "rejected",
+            "failure_class": "contract_drift",
+            "contract_bundle_sha256": runtime_skeleton.PINNED_IDENTITY[
+                "contract_bundle_sha256"
+            ],
+            "contract_version": runtime_skeleton.PINNED_IDENTITY["contract_version"],
+            "engine_commit": runtime_skeleton.PINNED_IDENTITY["engine_commit"],
+            "engine_image_digest": runtime_skeleton.PINNED_IDENTITY["engine_image_digest"],
+            "observed_contract_bundle_sha256": "0" * 64,
+            "observed_contract_version": "2.0.0",
+            "observed_engine_commit": "1" * 40,
+            "observed_engine_image_digest": "sha256:" + "2" * 64,
+        }
+    )
+    return result
+
+
 def _schema_for(fixture: Path) -> dict[str, Any]:
     for prefix, schema_name in _SCHEMA_BY_PREFIX.items():
         if fixture.name.startswith(prefix):
@@ -153,6 +174,52 @@ def test_runtime_skeleton_result_rejects_side_effect_pins(field: str, bad: objec
         runtime_skeleton.validate_result_manifest(broken)
 
 
+@pytest.mark.parametrize(
+    ("field", "bad"),
+    [
+        ("input_pack_id", "open_macro_v03_certified_input_pack_drifted"),
+        ("input_pack_sha256", "0" * 64),
+        ("calibration_id", "open_macro_v03_calibration_drifted"),
+        ("calibration_config_sha256", "0" * 64),
+        ("contract_bundle_sha256", "0" * 64),
+        ("contract_version", "2.0.0"),
+        ("engine_commit", "0" * 40),
+        ("engine_image_digest", "sha256:" + "0" * 64),
+    ],
+)
+def test_runtime_skeleton_result_rejects_drifted_optional_identity_pins(
+    field: str, bad: object
+) -> None:
+    result = _valid_result()
+    result[field] = bad
+
+    with pytest.raises(runtime_skeleton.RuntimeSkeletonContractError):
+        runtime_skeleton.validate_result_manifest(result)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("observed_input_pack_id", "open_macro_v03_certified_input_pack_drifted"),
+        ("observed_input_pack_sha256", "0" * 64),
+        ("observed_calibration_id", "open_macro_v03_calibration_drifted"),
+        ("observed_calibration_config_sha256", "1" * 64),
+        ("observed_contract_bundle_sha256", "2" * 64),
+        ("observed_contract_version", "2.0.0"),
+        ("observed_engine_commit", "3" * 40),
+        ("observed_engine_image_digest", "sha256:" + "4" * 64),
+    ],
+)
+def test_runtime_skeleton_not_executed_result_rejects_observed_drift_evidence(
+    field: str, value: object
+) -> None:
+    result = _valid_result()
+    result[field] = value
+
+    with pytest.raises(runtime_skeleton.RuntimeSkeletonContractError):
+        runtime_skeleton.validate_result_manifest(result)
+
+
 def test_runtime_skeleton_result_rejects_side_effect_evidence_without_rejection() -> None:
     result = _valid_result()
     result["side_effect_attempt_count"] = 1
@@ -174,6 +241,22 @@ def test_runtime_skeleton_result_requires_side_effect_evidence_on_allocator_atte
     runtime_skeleton.validate_result_manifest(result)
 
 
+def test_runtime_skeleton_side_effect_rejection_rejects_observed_drift_evidence() -> None:
+    result = _valid_result()
+    result.update(
+        {
+            "status": "rejected",
+            "failure_class": "allocator_publish_attempt",
+            "side_effect_attempt_count": 1,
+            "side_effect_attempt_evidence_sha256": "a" * 64,
+            "observed_engine_commit": "1" * 40,
+        }
+    )
+
+    with pytest.raises(runtime_skeleton.RuntimeSkeletonContractError):
+        runtime_skeleton.validate_result_manifest(result)
+
+
 def test_runtime_skeleton_result_rejects_identity_drift_without_actual_drift() -> None:
     drift = _fixture("valid", "runtime-result.identity-drift.json")
     drift.update(
@@ -186,6 +269,55 @@ def test_runtime_skeleton_result_rejects_identity_drift_without_actual_drift() -
             "observed_engine_image_digest": drift["engine_image_digest"],
         }
     )
+
+    with pytest.raises(runtime_skeleton.RuntimeSkeletonContractError):
+        runtime_skeleton.validate_result_manifest(drift)
+
+
+@pytest.mark.parametrize(
+    ("field", "bad"),
+    [
+        ("observed_input_pack_sha256", "not-a-sha"),
+        ("observed_calibration_config_sha256", "A" * 64),
+        ("observed_engine_commit", 123),
+        ("observed_engine_commit", "0" * 39),
+        ("observed_engine_image_digest", "0" * 64),
+        ("observed_engine_image_digest", "sha256:" + "G" * 64),
+        ("observed_input_pack_id", ""),
+        ("observed_calibration_id", None),
+    ],
+)
+def test_runtime_skeleton_identity_drift_rejects_malformed_observed_evidence(
+    field: str, bad: object
+) -> None:
+    drift = _fixture("valid", "runtime-result.identity-drift.json")
+    drift[field] = bad
+
+    with pytest.raises(runtime_skeleton.RuntimeSkeletonContractError):
+        runtime_skeleton.validate_result_manifest(drift)
+
+
+def test_runtime_skeleton_contract_drift_result_passes_with_well_formed_evidence() -> None:
+    runtime_skeleton.validate_result_manifest(_valid_contract_drift_result())
+
+
+@pytest.mark.parametrize(
+    ("field", "bad"),
+    [
+        ("observed_contract_bundle_sha256", "not-a-sha"),
+        ("observed_contract_bundle_sha256", "A" * 64),
+        ("observed_contract_version", ""),
+        ("observed_engine_commit", 123),
+        ("observed_engine_commit", "0" * 39),
+        ("observed_engine_image_digest", "0" * 64),
+        ("observed_engine_image_digest", "sha256:" + "G" * 64),
+    ],
+)
+def test_runtime_skeleton_contract_drift_rejects_malformed_observed_evidence(
+    field: str, bad: object
+) -> None:
+    drift = _valid_contract_drift_result()
+    drift[field] = bad
 
     with pytest.raises(runtime_skeleton.RuntimeSkeletonContractError):
         runtime_skeleton.validate_result_manifest(drift)

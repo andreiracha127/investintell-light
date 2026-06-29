@@ -92,6 +92,27 @@ SIDE_EFFECT_FAILURE_CLASSES: Final[frozenset[str]] = frozenset(
 )
 DRIFT_FAILURE_CLASSES: Final[frozenset[str]] = frozenset({"identity_drift", "contract_drift"})
 FAILURE_CLASSES: Final[frozenset[str]] = SIDE_EFFECT_FAILURE_CLASSES | DRIFT_FAILURE_CLASSES
+OBSERVED_IDENTITY_DRIFT_FIELDS: Final[frozenset[str]] = frozenset(
+    {
+        "observed_input_pack_id",
+        "observed_input_pack_sha256",
+        "observed_calibration_id",
+        "observed_calibration_config_sha256",
+        "observed_engine_commit",
+        "observed_engine_image_digest",
+    }
+)
+OBSERVED_CONTRACT_DRIFT_FIELDS: Final[frozenset[str]] = frozenset(
+    {
+        "observed_contract_bundle_sha256",
+        "observed_contract_version",
+        "observed_engine_commit",
+        "observed_engine_image_digest",
+    }
+)
+OBSERVED_DRIFT_FIELDS: Final[frozenset[str]] = (
+    OBSERVED_IDENTITY_DRIFT_FIELDS | OBSERVED_CONTRACT_DRIFT_FIELDS
+)
 
 ENVELOPE_ALLOWED_KEYS: Final[frozenset[str]] = frozenset(
     set(ENVELOPE_PINS) | {"request_id", "correlation_id", "execution_id", "output_artifact_uri"}
@@ -203,6 +224,7 @@ def validate_job_envelope(payload: Mapping[str, Any]) -> None:
 def validate_result_manifest(payload: Mapping[str, Any]) -> None:
     _reject_unknown(payload, RESULT_ALLOWED_KEYS)
     _require_pins(payload, RESULT_PINS)
+    _require_optional_pins(payload, PINNED_IDENTITY)
     _require_string(payload, "request_id", min_length=12)
     _require_string(payload, "correlation_id", min_length=12)
     _require_string(payload, "execution_id", min_length=12)
@@ -223,12 +245,22 @@ def validate_result_manifest(payload: Mapping[str, Any]) -> None:
             raise RuntimeSkeletonContractError(
                 "not_executed result cannot carry side-effect evidence"
             )
+        _reject_present(
+            payload,
+            OBSERVED_DRIFT_FIELDS,
+            "not_executed result cannot carry drift evidence",
+        )
         return
 
     if failure_class not in FAILURE_CLASSES:
         raise RuntimeSkeletonContractError("rejected result requires a recognized failure_class")
 
     if failure_class in SIDE_EFFECT_FAILURE_CLASSES:
+        _reject_present(
+            payload,
+            OBSERVED_DRIFT_FIELDS,
+            "side-effect rejection cannot carry drift evidence",
+        )
         _require_positive_int(payload, "side_effect_attempt_count")
         _require_sha256_hex(payload, "side_effect_attempt_evidence_sha256")
     elif failure_class == "identity_drift":
@@ -238,6 +270,11 @@ def validate_result_manifest(payload: Mapping[str, Any]) -> None:
 
 
 def _validate_identity_drift(payload: Mapping[str, Any]) -> None:
+    _reject_present(
+        payload,
+        OBSERVED_CONTRACT_DRIFT_FIELDS - OBSERVED_IDENTITY_DRIFT_FIELDS,
+        "identity_drift result cannot carry contract drift evidence",
+    )
     expected = {
         key: PINNED_IDENTITY[key]
         for key in (
@@ -262,6 +299,11 @@ def _validate_identity_drift(payload: Mapping[str, Any]) -> None:
 
 
 def _validate_contract_drift(payload: Mapping[str, Any]) -> None:
+    _reject_present(
+        payload,
+        OBSERVED_IDENTITY_DRIFT_FIELDS - OBSERVED_CONTRACT_DRIFT_FIELDS,
+        "contract_drift result cannot carry identity drift evidence",
+    )
     expected = {
         key: PINNED_IDENTITY[key]
         for key in (
@@ -299,6 +341,12 @@ def _require_pins(payload: Mapping[str, Any], pins: Mapping[str, object]) -> Non
         _require_equal(payload, key, expected)
 
 
+def _require_optional_pins(payload: Mapping[str, Any], pins: Mapping[str, object]) -> None:
+    for key, expected in pins.items():
+        if key in payload:
+            _require_equal(payload, key, expected)
+
+
 def _require_equal(payload: Mapping[str, Any], key: str, expected: object) -> None:
     if key not in payload:
         raise RuntimeSkeletonContractError(f"missing required field: {key}")
@@ -313,6 +361,12 @@ def _require_string(payload: Mapping[str, Any], key: str, *, min_length: int) ->
     if not isinstance(value, str) or len(value) < min_length:
         raise RuntimeSkeletonContractError(f"{key} must be a string with length >= {min_length}")
     return value
+
+
+def _reject_present(payload: Mapping[str, Any], fields: frozenset[str], message: str) -> None:
+    present = sorted(set(payload) & fields)
+    if present:
+        raise RuntimeSkeletonContractError(f"{message}: {present}")
 
 
 def _require_artifact_uri(payload: Mapping[str, Any], key: str) -> str:
@@ -336,6 +390,39 @@ def _require_sha256_hex(payload: Mapping[str, Any], key: str) -> str:
     return value
 
 
+def _require_commit_sha(payload: Mapping[str, Any], key: str) -> str:
+    value = _require_string(payload, key, min_length=40)
+    if len(value) != 40 or any(ch not in "0123456789abcdef" for ch in value):
+        raise RuntimeSkeletonContractError(f"{key} must be a lowercase git commit SHA")
+    return value
+
+
+def _require_sha256_digest(payload: Mapping[str, Any], key: str) -> str:
+    value = _require_string(payload, key, min_length=len("sha256:") + 64)
+    prefix = "sha256:"
+    digest = value.removeprefix(prefix)
+    if not value.startswith(prefix) or len(digest) != 64:
+        raise RuntimeSkeletonContractError(f"{key} must be a sha256 digest")
+    if any(ch not in "0123456789abcdef" for ch in digest):
+        raise RuntimeSkeletonContractError(f"{key} must be a lowercase sha256 digest")
+    return value
+
+
+def _require_observed_format(payload: Mapping[str, Any], key: str) -> None:
+    if key in {
+        "observed_input_pack_sha256",
+        "observed_calibration_config_sha256",
+        "observed_contract_bundle_sha256",
+    }:
+        _require_sha256_hex(payload, key)
+    elif key == "observed_engine_commit":
+        _require_commit_sha(payload, key)
+    elif key == "observed_engine_image_digest":
+        _require_sha256_digest(payload, key)
+    else:
+        _require_string(payload, key, min_length=1)
+
+
 def _require_observed_drift(
     payload: Mapping[str, Any], observed_to_pinned: Mapping[str, object]
 ) -> None:
@@ -343,6 +430,7 @@ def _require_observed_drift(
     for key, pinned in observed_to_pinned.items():
         if key not in payload:
             raise RuntimeSkeletonContractError(f"missing observed drift field: {key}")
+        _require_observed_format(payload, key)
         if payload[key] != pinned:
             drifted = True
     if not drifted:
