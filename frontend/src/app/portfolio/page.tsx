@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { PortfolioOverviewView } from "@/components/portfolio/PortfolioOverviewView";
 
 export const metadata: Metadata = {
-  title: "Portfolio Overview — Investintell Light",
+  title: "Portfolio Overview · Investintell Cockpit",
 };
 
 export default function PortfolioOverviewPage() {

@@ -9,7 +9,7 @@ import { IndexStrip } from "@/components/stocks/IndexStrip";
 import { LeadersTable } from "@/components/stocks/LeadersTable";
 import { SectorPanel } from "@/components/stocks/SectorPanel";
 import { MarketBreadthPanel } from "@/components/stocks/MarketBreadthPanel";
-import { PageTitle } from "@/components/ui/panels";
+import { ErrorPanel, PageTitle } from "@/components/ui/panels";
 
 export function MarketOverview() {
   const { data, error, isPending, refetch } = useQuery({
@@ -21,18 +21,13 @@ export function MarketOverview() {
 
   if (error) {
     return (
-      <div className="flex min-h-full items-center justify-center px-6 py-10">
-        <div className="w-full max-w-[520px] border border-border border-l-[3px] border-l-[var(--color-loss)] bg-surface-2 px-8 py-6">
-          <h1 className="mb-3 text-lg font-bold text-text-primary">Failed to load market overview</h1>
-          <p className="text-sm text-loss break-words">{(error as Error).message}</p>
-          <button
-            type="button"
-            onClick={() => refetch()}
-            className="mt-4 px-4 py-1.5 bg-field border border-border-strong text-sm font-semibold text-text-primary hover:bg-layer-hover transition-colors"
-          >
-            Retry
-          </button>
-        </div>
+      <div className="mx-auto max-w-[1360px] px-[clamp(14px,3vw,28px)] pt-5">
+        <PageTitle title="Stocks" />
+        <ErrorPanel
+          title="Failed to load market overview"
+          message={(error as Error).message}
+          onRetry={() => refetch()}
+        />
       </div>
     );
   }
@@ -40,15 +35,18 @@ export function MarketOverview() {
   if (isPending || !data) {
     return (
       <div aria-busy="true" className="mx-auto flex max-w-[1360px] animate-pulse flex-col px-[clamp(14px,3vw,28px)] pb-10 pt-5">
+        {/* Index strip: 4 cards ~80px */}
         <div className="mb-3.5 grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
           {Array.from({ length: 4 }, (_, i) => (
             <div key={i} className="h-20 bg-surface-2" />
           ))}
         </div>
-        <div className="mb-3.5 h-[480px] border border-border bg-surface-2" />
+        {/* Leaders table ~420px */}
+        <div className="mb-3.5 h-[420px] border border-border bg-surface-2" />
+        {/* Sector + breadth panels */}
         <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]">
-          <div className="h-[320px] bg-surface-2" />
-          <div className="h-[320px] bg-surface-2" />
+          <div className="h-[300px] bg-surface-2" />
+          <div className="h-[300px] bg-surface-2" />
         </div>
       </div>
     );

@@ -3,15 +3,17 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-/** Header search: type a ticker + Enter to navigate to /stocks/{TICKER}. */
+/** Header search: type a ticker + Enter to navigate to /stocks/{TICKER}.
+ *  Acts as a "go to ticker" command — no autocomplete (a full symbol search
+ *  lives in SymbolSearchInput on detail pages). */
 export function TickerSearch() {
   const router = useRouter();
   const [value, setValue] = useState("");
 
   return (
     <form
+      role="search"
       className="relative min-w-0 flex-1"
-      style={{ maxWidth: 380 }}
       onSubmit={(event) => {
         event.preventDefault();
         const ticker = value.trim().toUpperCase();
@@ -35,11 +37,11 @@ export function TickerSearch() {
         type="text"
         value={value}
         onChange={(event) => setValue(event.target.value)}
-        placeholder="Search ticker…"
-        aria-label="Search ticker"
+        placeholder="Go to ticker…"
+        aria-label="Go to ticker"
         autoComplete="off"
         spellCheck={false}
-        className="h-9 w-full border-0 border-b border-border-strong bg-field pl-[34px] pr-3 text-[13px] uppercase text-text-primary outline-none placeholder:text-text-muted focus:border-b-2 focus:border-accent"
+        className="h-9 w-full max-w-[440px] border-0 border-b border-border-strong bg-field pl-[34px] pr-3 text-[13px] uppercase text-text-primary outline-none placeholder:text-text-muted placeholder:normal-case focus:border-b-2 focus:border-accent"
       />
     </form>
   );

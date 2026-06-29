@@ -151,11 +151,16 @@ export function buildStockOptions(input: StockOptionsInput): Options {
     stockTools: {
       gui: {
         enabled: true,
+        // Full default button set (matches Highcharts stock-tools documentation).
+        // Each name maps to a pre-built NavigationBindings handler; the modules
+        // loaded in StockChart.tsx (annotations-advanced, drag-panes,
+        // price-indicator, full-screen) provide the implementations.
         buttons: [
-          "typeChange", "separator",
+          "indicators", "separator",
           "simpleShapes", "lines", "crookedLines", "measure", "advanced",
           "toggleAnnotations", "separator", "verticalLabels", "flags",
-          "separator", "indicators", "currentPriceIndicator", "fullScreen",
+          "separator", "zoomChange", "fullScreen", "typeChange", "separator",
+          "currentPriceIndicator", "saveChart",
         ],
       },
     },

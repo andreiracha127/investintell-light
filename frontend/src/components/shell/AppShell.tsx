@@ -203,12 +203,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </a>
 
       {/* ── Top header ───────────────────────────────────────────────────── */}
-      <header className="flex h-[52px] flex-none items-center border-b border-border bg-surface-1">
+      <header
+        className="flex flex-none items-center border-b border-border bg-surface-1"
+        style={{ height: "var(--ix-header-h)" }}
+      >
         <div className="flex flex-none items-center gap-2 pl-2.5">
           <button
             type="button"
             aria-label="Toggle navigation menu"
             aria-expanded={navOpen}
+            aria-pressed={navOpen}
             onClick={() => {
               setNavOpen((v) => !v);
               setSettingsOpen(false);
@@ -311,7 +315,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {/* Click-away backdrop (covers the content area only, keeping the header
             and its menus interactive). */}
         {anyMenuOpen && (
-          <div onClick={closeAll} className="fixed inset-x-0 bottom-0 top-[52px] z-40" aria-hidden />
+          <div
+            onClick={closeAll}
+            className="fixed inset-x-0 bottom-0 z-40"
+            style={{ top: "var(--ix-header-h)" }}
+            aria-hidden
+          />
         )}
 
         {/* Sidebar as a floating drop menu — overlays the content, animated via

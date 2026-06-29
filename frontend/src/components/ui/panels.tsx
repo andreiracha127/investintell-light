@@ -146,3 +146,41 @@ export function valueTone(value: number): string {
   if (value < 0) return "text-loss";
   return "text-neutral-value";
 }
+
+/**
+ * Standard inline error panel — left accent rule in loss color, retry button.
+ * Used by data-loading views so every failure renders identically.
+ */
+export function ErrorPanel({
+  title,
+  message,
+  onRetry,
+  retryLabel = "Retry",
+}: {
+  title: string;
+  message: string;
+  onRetry?: () => void;
+  retryLabel?: string;
+}) {
+  return (
+    <div
+      role="alert"
+      className="ix-pad bg-surface-2 border border-border border-l-[3px]"
+      style={{ borderLeftColor: "var(--color-loss)" }}
+    >
+      <h2 className="mb-1 text-sm font-semibold text-loss">{title}</h2>
+      <p className="break-words whitespace-pre-wrap text-[13px] text-text-secondary">
+        {message}
+      </p>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-3 h-[28px] border border-accent bg-accent px-4 text-[12px] font-bold text-on-accent transition-colors hover:bg-accent-muted"
+        >
+          {retryLabel}
+        </button>
+      )}
+    </div>
+  );
+}

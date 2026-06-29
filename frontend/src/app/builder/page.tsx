@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { BuilderView } from "@/components/builder/BuilderView";
 
 export const metadata: Metadata = {
-  title: "Builder — Investintell Light",
+  title: "Builder · Investintell Cockpit",
 };
 
 export default function BuilderPage() {

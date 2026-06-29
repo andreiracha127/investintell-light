@@ -2,6 +2,7 @@
 
 /** Cards SPY/QQQ/DIA/IWM: último preço (live quando o feed está aberto),
  *  variação do dia e sparkline 30d em SVG puro. */
+import { useMemo } from "react";
 import type { IndexCard } from "@/lib/api/client";
 import { formatCurrency, formatPercent } from "@/lib/format";
 import { useLiveTicks } from "@/lib/livefeed/useLiveTicks";
@@ -9,8 +10,18 @@ import { useLiveTicks } from "@/lib/livefeed/useLiveTicks";
 function Spark({ points, color }: { points: number[]; color: string }) {
   const w = 96;
   const h = 30;
-  const min = Math.min(...points);
-  const max = Math.max(...points);
+  // reduce-based min/max avoids argument-spread limits on large arrays.
+  const { min, max } = useMemo(() => {
+    let lo = points[0] ?? 0;
+    let hi = lo;
+    for (let i = 1; i < points.length; i++) {
+      const p = points[i];
+      if (p === undefined) continue;
+      if (p < lo) lo = p;
+      if (p > hi) hi = p;
+    }
+    return { min: lo, max: hi };
+  }, [points]);
   const span = max - min || 1;
   const d = points
     .map((p, i) => `${((i / (points.length - 1)) * w).toFixed(1)},${(h - ((p - min) / span) * h).toFixed(1)}`)
@@ -23,7 +34,10 @@ function Spark({ points, color }: { points: number[]; color: string }) {
 }
 
 export function IndexStrip({ indices }: { indices: IndexCard[] }) {
-  const { ticks } = useLiveTicks(indices.map((i) => i.ticker));
+  // Stabilize the ticker list so useLiveTicks does not re-subscribe on every
+  // render when the parent re-renders with the same indices identity.
+  const tickers = useMemo(() => indices.map((i) => i.ticker), [indices]);
+  const { ticks } = useLiveTicks(tickers);
   if (!indices.length) return null;
   return (
     <div className="mb-3.5 grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">

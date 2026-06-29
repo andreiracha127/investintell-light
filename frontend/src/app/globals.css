@@ -8,11 +8,18 @@
   Source of truth: /design/investintell-cockpit/InvestintellCockpit.dc.html
   and /design/tokens/*.css (Investintell-Light Design System).
 
-  Rules: light ground, single deep accent (oxblood), flat square forms
-  (radius 0, no shadow), hairline borders, tabular numerals on all data.
-  Theme/accent/density switch via data attributes on <html>:
+  Rules: light ground, single deep accent (oxblood), hairline borders,
+  tabular numerals on all data. Theme/accent/density switch via data
+  attributes on <html>:
     data-theme="light|dark"  data-accent="oxblood|blue|teal"
     data-density="compact|comfortable"
+
+  Radius convention (deliberate, not uniform):
+    - Tiles / cards / table cells / inputs  → square (radius 0)
+    - Floating overlays (menus, dropdowns)   → 8px (rounded-lg)
+    - Avatars / swatches                     → full circle
+  The --radius-* tokens below are kept at 0 for content surfaces; overlay
+  components apply their own explicit corner radius as documented above.
 */
 
 /*
@@ -107,7 +114,7 @@
   --ix-border-strong: #c6c6c6;
   --ix-text: #161616;
   --ix-text-2: #525252;
-  --ix-text-3: #6f6f6f;
+  --ix-text-3: #5a5a5a;
   --ix-text-on-accent: #ffffff;
   --ix-graphite: #2b2f36;
   --ix-grey-bar: #c4c8cf;
@@ -137,6 +144,7 @@
   --ix-row-h: 34px;
   --ix-fs: 12.5px;
   --ix-fs-sm: 11px;
+  --ix-header-h: 52px;
 }
 
 html[data-accent="blue"] {
@@ -162,7 +170,7 @@ html[data-theme="dark"] {
   --ix-border-strong: #6f6f6f;
   --ix-text: #f4f4f4;
   --ix-text-2: #c6c6c6;
-  --ix-text-3: #8d8d8d;
+  --ix-text-3: #9a9a9a;
   --ix-text-on-accent: #ffffff;
   --ix-graphite: #c6c6c6;
   --ix-grey-bar: #6f6f6f;
@@ -183,10 +191,21 @@ html[data-theme="dark"] {
   --color-cat-6: #d4bbff;   /* lavender */
   --color-cat-7: #08bdba;   /* deep teal */
   --color-cat-8: #ff832b;   /* warm accent (orange) */
+  /* accent: oxblood default in dark (brighter for contrast on dark ground) */
+  --ix-accent: #e0828a;
+  --ix-accent-hover: #d76b73;
+  --ix-accent-wash: #3a2326;
 }
-html[data-theme="dark"] { --ix-accent: #e0828a; --ix-accent-hover: #d76b73; --ix-accent-wash: #3a2326; }
-html[data-theme="dark"][data-accent="blue"] { --ix-accent: #78a9ff; --ix-accent-hover: #a6c8ff; --ix-accent-wash: #1c2a45; }
-html[data-theme="dark"][data-accent="teal"] { --ix-accent: #3ddbd9; --ix-accent-hover: #08bdba; --ix-accent-wash: #10302f; }
+html[data-theme="dark"][data-accent="blue"] {
+  --ix-accent: #78a9ff;
+  --ix-accent-hover: #a6c8ff;
+  --ix-accent-wash: #1c2a45;
+}
+html[data-theme="dark"][data-accent="teal"] {
+  --ix-accent: #3ddbd9;
+  --ix-accent-hover: #08bdba;
+  --ix-accent-wash: #10302f;
+}
 
 html[data-density="comfortable"] {
   --ix-pad: 18px;

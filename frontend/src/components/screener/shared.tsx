@@ -8,6 +8,10 @@
 import type { QueryClient } from "@tanstack/react-query";
 
 import { ApiError, type FilterUpdateResponse } from "@/lib/api/client";
+import { ErrorPanel } from "@/components/ui/panels";
+
+// Re-export the canonical ErrorPanel so existing screener imports keep working.
+export { ErrorPanel };
 
 /** Carbon field: square, bottom-border only, accent focus rule. */
 export const INPUT_CLASS =
@@ -59,30 +63,4 @@ export function applyFilterResponse(
   queryClient.invalidateQueries({ queryKey: ["screens"] });
   queryClient.invalidateQueries({ queryKey: ["screen-results", screenId] });
   queryClient.invalidateQueries({ queryKey: ["screen-build", screenId] }); // batch build (sparklines + panel)
-}
-
-export function ErrorPanel({
-  title,
-  message,
-  onRetry,
-}: {
-  title: string;
-  message: string;
-  onRetry: () => void;
-}) {
-  return (
-    <div
-      role="alert"
-      className="bg-surface-2 border border-border border-l-[3px] px-5 py-4"
-      style={{ borderLeftColor: "var(--color-loss)" }}
-    >
-      <h2 className="text-sm font-semibold text-loss mb-1">{title}</h2>
-      <p className="text-[13px] text-text-secondary break-words whitespace-pre-wrap">
-        {message}
-      </p>
-      <button type="button" onClick={onRetry} className={`mt-3 ${BUTTON_CLASS}`}>
-        Retry
-      </button>
-    </div>
-  );
 }

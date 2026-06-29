@@ -13,6 +13,7 @@
   fill: var(--color-accent) !important;
 }
 
+/* ── Stock Tools GUI toolbar ───────────────────────────────────────────── */
 .highcharts-stocktools-toolbar {
   background: var(--color-surface-1);
   border-color: var(--color-border);
@@ -20,17 +21,84 @@
 .highcharts-stocktools-toolbar li > .highcharts-menu-item-btn {
   background-color: var(--color-surface-1);
 }
+.highcharts-stocktools-toolbar li > .highcharts-menu-item-btn:hover {
+  background-color: var(--color-layer-hover);
+}
+/* Active tool highlight */
+.highcharts-stocktools-toolbar li.highcharts-active > .highcharts-menu-item-btn {
+  background-color: var(--color-accent-wash);
+}
 
+/* ── Annotations / indicator popups ────────────────────────────────────── */
 .highcharts-popup {
   background: var(--color-surface-1);
   color: var(--color-text-primary);
   border: 1px solid var(--color-border);
 }
+.highcharts-popup .highcharts-popup-header {
+  background: var(--color-surface-2);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+}
+.highcharts-popup .highcharts-popup-close {
+  color: var(--color-text-muted);
+}
+.highcharts-popup .highcharts-popup-close:hover {
+  color: var(--color-text-primary);
+}
 .highcharts-popup button.highcharts-popup-button {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  border: 1px solid var(--color-accent);
+}
+.highcharts-popup button.highcharts-popup-button:hover {
+  background: var(--color-accent-muted);
+  border-color: var(--color-accent-muted);
+}
+/* Annotation tab switcher in popup */
+.highcharts-popup .highcharts-annotation-edit-group label,
+.highcharts-popup .highcharts-indicator-edit-group label {
+  color: var(--color-text-secondary);
+}
+.highcharts-popup input[type="text"],
+.highcharts-popup select {
+  background: var(--color-field);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-strong);
+}
+.highcharts-popup hr {
+  border-color: var(--color-border);
+}
+
+/* ── Binding ripples (visual feedback when drawing annotations) ─────────── */
+.highcharts-bindings-wrapper .highcharts-binding-ripple {
+  fill: var(--color-accent);
+  opacity: 0.3;
+}
+
+/* ── Navigator mask ─────────────────────────────────────────────────────── */
+.highcharts-navigator-mask-inside {
+  fill: var(--color-accent-wash);
+}
+
+/* ── Drag-panes handle (resize between price/volume panes) ──────────────── */
+.highcharts-axis-resizer {
+  fill: var(--color-border-strong);
+}
+.highcharts-axis-resizer:hover {
+  fill: var(--color-accent);
+}
+
+/* ── Current price indicator (dashed line + label) ──────────────────────── */
+.highcharts-series.highcharts-current-price-indicator-line {
+  stroke: var(--color-accent);
+}
+.highcharts-current-price-indicator-label {
   background: var(--color-accent);
   color: var(--color-on-accent);
 }
 
-.highcharts-navigator-mask-inside {
-  fill: var(--color-accent-wash);
+/* ── Full-screen mode background ────────────────────────────────────────── */
+.highcharts-bound {
+  background: var(--color-surface-0);
 }

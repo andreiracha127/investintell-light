@@ -12,6 +12,11 @@
  * Creating once is the bug fix: a full `chart.update(buildStockOptions(...))`
  * tears down user drawings/annotations. Series type and indicators are driven
  * by the native stock-tools GUI; only compare/scale/live need custom chrome.
+ *
+ * Module dependencies (import order matters — stock-tools.js depends on all
+ * modules below it):
+ *   highstock → highcharts-more → indicators-all → annotations-advanced →
+ *   drag-panes → price-indicator → full-screen → stock-tools
  */
 import { useEffect, useRef, useState } from "react";
 import type { Chart, Series, YAxisOptions } from "highcharts";
@@ -129,11 +134,22 @@ export function StockChart({
     if (!el) return;
     void (async () => {
       // ESM build so Stock modules register on the same Highcharts singleton.
+      // Import order matters: stock-tools.js depends on all modules below it.
       const mod = await import("highcharts/esm/highstock.js");
       await import("highcharts/esm/highcharts-more.js");
       // Native indicators (RSI/MACD/Bollinger/…) the user adds via the GUI.
       await import("highcharts/esm/indicators/indicators-all.js");
-      await import("highcharts/esm/modules/annotations.js");
+      // Advanced annotations (Fibonacci, pitchfork, parallel channel, Elliott
+      // waves, etc.). NOT annotations.js — that only provides basic shapes.
+      await import("highcharts/esm/modules/annotations-advanced.js");
+      // Drag-panes: lets the user resize the volume/RSI sub-panes by dragging.
+      await import("highcharts/esm/modules/drag-panes.js");
+      // Price indicator: the "current price" dashed line + label button in the
+      // stock-tools GUI ("currentPriceIndicator").
+      await import("highcharts/esm/modules/price-indicator.js");
+      // Full-screen: the "fullScreen" button in the stock-tools GUI.
+      await import("highcharts/esm/modules/full-screen.js");
+      // Stock-tools GUI itself — must be last, depends on all modules above.
       await import("highcharts/esm/modules/stock-tools.js");
       if (disposed || !containerRef.current) return;
       const Highcharts = mod.default;

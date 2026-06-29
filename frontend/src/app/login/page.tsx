@@ -3,6 +3,7 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, View, ViewOff } from "@carbon/icons-react";
 import { useAuth } from "@/lib/auth/context";
+import { TextInput } from "@/components/ui/TextInput";
 
 function LoginForm() {
   const router = useRouter();
@@ -26,9 +27,6 @@ function LoginForm() {
     if (error) { setError(error); return; }
     router.replace(next);
   }
-
-  const fieldClass =
-    "h-11 w-full border-0 border-b border-field-underline bg-surface-0 text-[13.5px] text-text-primary outline-none transition-[background,box-shadow,border-color] placeholder:text-placeholder focus:border-accent focus:bg-field focus:shadow-[inset_0_-1px_0_0_var(--color-accent)]";
 
   return (
     <div
@@ -61,7 +59,7 @@ function LoginForm() {
           <label htmlFor="email" className="mb-1.5 block text-[11px] font-semibold tracking-[0.02em] text-text-secondary">
             Email
           </label>
-          <input
+          <TextInput
             id="email"
             type="email"
             required
@@ -69,14 +67,14 @@ function LoginForm() {
             placeholder="you@firm.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className={`${fieldClass} mb-[22px] px-3.5`}
+            className="h-11 w-full mb-[22px] px-3.5 text-[13.5px] placeholder:text-placeholder focus:bg-field focus:shadow-[inset_0_-1px_0_0_var(--color-accent)]"
           />
 
           <label htmlFor="password" className="mb-1.5 block text-[11px] font-semibold tracking-[0.02em] text-text-secondary">
             Password
           </label>
           <div className="relative mb-2.5">
-            <input
+            <TextInput
               id="password"
               type={showPassword ? "text" : "password"}
               required
@@ -84,7 +82,7 @@ function LoginForm() {
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className={`${fieldClass} pl-3.5 pr-11`}
+              className="h-11 w-full pl-3.5 pr-11 text-[13.5px] placeholder:text-placeholder focus:bg-field focus:shadow-[inset_0_-1px_0_0_var(--color-accent)]"
             />
             <button
               type="button"
@@ -97,15 +95,10 @@ function LoginForm() {
             </button>
           </div>
 
-          <div className="mb-[26px] flex justify-end">
-            <a
-              href="#"
-              onClick={(e) => e.preventDefault()}
-              className="text-[12px] text-text-secondary no-underline transition-colors hover:text-accent"
-            >
-              Forgot password?
-            </a>
-          </div>
+          {/* Spacing reserved for a future "Forgot password?" flow.
+              The dead placeholder link was removed to avoid promising a
+              feature that does not exist yet. */}
+          <div className="mb-[26px]" aria-hidden />
 
           <button
             type="submit"

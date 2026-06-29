@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { ScreenerView } from "@/components/screener/ScreenerView";
 
 export const metadata: Metadata = {
-  title: "Screener — Investintell Light",
+  title: "Screener · Investintell Cockpit",
 };
 
 export default function ScreenerPage() {

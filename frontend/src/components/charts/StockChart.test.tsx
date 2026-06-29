@@ -25,7 +25,10 @@ vi.mock("highcharts/esm/highstock.js", () => ({
 }));
 vi.mock("highcharts/esm/highcharts-more.js", () => ({}));
 vi.mock("highcharts/esm/indicators/indicators-all.js", () => ({}));
-vi.mock("highcharts/esm/modules/annotations.js", () => ({}));
+vi.mock("highcharts/esm/modules/annotations-advanced.js", () => ({}));
+vi.mock("highcharts/esm/modules/drag-panes.js", () => ({}));
+vi.mock("highcharts/esm/modules/price-indicator.js", () => ({}));
+vi.mock("highcharts/esm/modules/full-screen.js", () => ({}));
 vi.mock("highcharts/esm/modules/stock-tools.js", () => ({}));
 vi.mock("highcharts/css/stocktools/gui.css", () => ({}));
 vi.mock("highcharts/css/annotations/popup.css", () => ({}));

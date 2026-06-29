@@ -21,6 +21,7 @@ import { ResultsTab } from "@/components/screener/ResultsTab";
 import { ScreenerHeader } from "@/components/screener/ScreenerHeader";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
 import { PageTitle } from "@/components/ui/panels";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const TABS = [
   { id: "build", label: "Build" },
@@ -41,6 +42,7 @@ export function ScreenerView() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
 
   const screensQuery = useQuery({ queryKey: ["screens"], queryFn: ({ signal }) => fetchScreens(signal), staleTime: 60_000, retry: retryPolicy });
   const screens = screensQuery.data;
@@ -57,9 +59,9 @@ export function ScreenerView() {
   });
   const catalogQuery = useQuery({ queryKey: ["screener-metrics"], queryFn: ({ signal }) => fetchMetricCatalog(signal), staleTime: Infinity, retry: retryPolicy });
 
-  const onReset = async () => {
+  const doReset = async () => {
     const screen = screenQuery.data;
-    if (!screen || screen.filters.length === 0 || !window.confirm("Clear all filters from this screen?")) return;
+    if (!screen || screen.filters.length === 0) return;
     setSaveStatus("saving");
     try {
       await Promise.all(screen.filters.map((f) => deleteScreenFilter(screen.id, f.metric_code)));
@@ -67,6 +69,12 @@ export function ScreenerView() {
         queryClient.invalidateQueries({ queryKey: key });
       setSaveStatus("idle");
     } catch { setSaveStatus("error"); }
+  };
+
+  const onReset = () => {
+    const screen = screenQuery.data;
+    if (!screen || screen.filters.length === 0) return;
+    setConfirmReset(true);
   };
 
   const onExport = async () => {
@@ -144,6 +152,21 @@ export function ScreenerView() {
           </div>
         )}
       </div>
+
+      {confirmReset && (
+        <ConfirmDialog
+          title="Clear all filters"
+          message="Remove every filter from this screen? The screen itself is kept."
+          confirmLabel="Clear filters"
+          cancelLabel="Cancel"
+          destructive={false}
+          onConfirm={() => {
+            setConfirmReset(false);
+            void doReset();
+          }}
+          onCancel={() => setConfirmReset(false)}
+        />
+      )}
     </div>
   );
 }

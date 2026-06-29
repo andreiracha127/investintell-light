@@ -51,6 +51,7 @@ import {
   liveEligibleTickers,
 } from "@/lib/portfolio/liveOverview";
 import { Card, InfoDot, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { retryPolicy } from "@/components/screener/shared";
 import { PortfolioNewsPanel } from "@/components/portfolio/PortfolioNewsPanel";
 import { PortfolioLookthroughSection } from "@/components/portfolio/PortfolioLookthroughSection";
@@ -515,6 +516,7 @@ function PortfolioManageBar({
 }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const showAsOf = activeSection === "overview";
 
   // Shares the overview cache with the section views — only for the EOD as-of.
@@ -611,12 +613,23 @@ function PortfolioManageBar({
             setEditing(false);
           }}
           onSubmit={(payload) => editPortfolioMutation.mutate(payload)}
-          onDelete={() => {
-            // Native confirm: deletion is destructive and cascades positions.
-            if (window.confirm(`Delete portfolio "${selected.name}"?`)) {
-              deleteMutation.mutate(selected.id);
-            }
+          onDelete={() => setConfirmingDelete(true)}
+        />
+      )}
+
+      {confirmingDelete && (
+        <ConfirmDialog
+          title="Delete portfolio"
+          message={`Delete portfolio “${selected.name}”? This also removes all of its positions. This cannot be undone.`}
+          confirmLabel="Delete"
+          cancelLabel="Cancel"
+          destructive
+          pending={deleteMutation.isPending}
+          onConfirm={() => {
+            deleteMutation.mutate(selected.id);
+            setConfirmingDelete(false);
           }}
+          onCancel={() => setConfirmingDelete(false)}
         />
       )}
     </div>
@@ -651,10 +664,29 @@ function PortfolioEditDialog({
   );
   const [cashText, setCashText] = useState(String(portfolio.cash));
   const [cashInvalid, setCashInvalid] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      // Focus trap: keep Tab cycling inside the dialog.
+      if (e.key !== "Tab" || !dialogRef.current) return;
+      const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -682,7 +714,9 @@ function PortfolioEditDialog({
       className="fixed inset-0 z-[90] flex items-center justify-center bg-[rgba(0,0,0,0.32)] p-4"
     >
       <div
+        ref={dialogRef}
         role="dialog"
+        aria-modal="true"
         aria-label={`Edit portfolio ${portfolio.name}`}
         onClick={(e) => e.stopPropagation()}
         className="w-[420px] max-w-[96vw] border border-border-strong bg-surface-2 shadow-[0_12px_36px_rgba(0,0,0,0.22)]"
