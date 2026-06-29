@@ -1,0 +1,44 @@
+{
+  "contract_name": "open_macro_v03_runtime_skeleton",
+  "contract_id": "open_macro_v03_runtime_skeleton_001",
+  "source_repo": "andreiracha127/investintell-datalake-workers",
+  "source_pr": 9,
+  "source_original_pr_head": "70ca3a7a3a995a20f09013a5f62a0d8acba6ec0a",
+  "source_merged_pr_head": "70c8ce37cc59354c5cbdf6dfbcaa01190d443952",
+  "source_merge_commit": "87e69a8cfb7aa646d1d0c7c9d7610ce914514cc7",
+  "synced_at": "2026-06-29",
+  "schema_sha256": {
+    "runtime_job_envelope.schema.json": "1bb904ff44f8afaf08f51bcf15195547054dba9c1a9ceaf343d8ff902d96d110",
+    "runtime_result_manifest.schema.json": "51eeabfdece3936f12826f7dc3feae14aa585149954a71e4f6b6d598bafe9cfa"
+  },
+  "workers_validation": {
+    "runtime_skeleton_pytest": "56 passed",
+    "railway_equivalent_pytest": "314 passed",
+    "contract_bundle_verify": "ok",
+    "verify_input_pack": "ok",
+    "verify_calibration_artifacts": "ok",
+    "compileall": "pass",
+    "git_diff_check": "pass",
+    "remote_runner": "PASS"
+  },
+  "governance": {
+    "A3": "open_macro_v03",
+    "A4": "runtime_skeleton_prepared",
+    "A5": "blocked",
+    "runtime_activation": false,
+    "freeze_ready": false,
+    "official_result": false,
+    "feature_flag_name": "open_macro_v03_runtime_activation",
+    "feature_flag_default": false,
+    "backend_runtime_wiring": "none",
+    "backend_runtime_execution": "none",
+    "db_writes": "none",
+    "allocator_publish": "none",
+    "production_endpoint_activation": "none",
+    "formula_changes": "none",
+    "input_pack_changes": "none",
+    "calibration_pack_changes": "none",
+    "contract_v1_changes": "none"
+  },
+  "note": "Inert backend mirror only. This SOURCE metadata authorizes offline schema/fixture validation by the control plane. It does not authorize backend engine execution, Docker/subprocess invocation, DB writes, allocator publish, production endpoint activation, runtime activation, freeze readiness, or A5 advancement."
+}
