@@ -549,7 +549,10 @@ class FundRiskTimeseriesResponse(BaseModel):
     )
     benchmark_drawdown: list[SeriesPoint] = Field(
         default_factory=list,
-        description="Benchmark drawdown in percent points, aligned to the requested risk window when available.",
+        description=(
+            "Benchmark drawdown in percent points, aligned to the requested risk "
+            "window when available."
+        ),
     )
     benchmark_label: str | None = None
     benchmark_empty_state: EmptyState | None = None

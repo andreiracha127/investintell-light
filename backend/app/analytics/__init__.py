@@ -23,6 +23,17 @@ from app.analytics.portfolio import (
     weight_series,
     weights_to_quantities,
 )
+from app.analytics.return_statistics import (
+    ReturnStatistics,
+    down_proficiency_ratio,
+    geometric_mean_monthly,
+    jensen_alpha,
+    omega_ratio,
+    r_squared,
+    sterling_ratio,
+    treynor_ratio,
+    up_proficiency_ratio,
+)
 from app.analytics.returns import (
     align_returns,
     cumulative_return_series,
@@ -69,17 +80,6 @@ from app.analytics.risk_budgeting import (
 from app.analytics.robust_sharpe import (
     RobustSharpeResult,
     robust_sharpe,
-)
-from app.analytics.return_statistics import (
-    ReturnStatistics,
-    down_proficiency_ratio,
-    geometric_mean_monthly,
-    jensen_alpha,
-    omega_ratio,
-    r_squared,
-    sterling_ratio,
-    treynor_ratio,
-    up_proficiency_ratio,
 )
 from app.analytics.rolling import (
     rolling_annualized_return,

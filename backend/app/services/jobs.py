@@ -49,7 +49,7 @@ def params_hash(kind: str, payload: BaseModel) -> str:
     canonical = json.dumps(
         json.loads(payload.model_dump_json()), sort_keys=True, separators=(",", ":")
     )
-    return hashlib.sha256(f"{kind}:{canonical}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{kind}:{canonical}".encode()).hexdigest()
 
 
 async def get_job(session: Any, job_id: uuid.UUID) -> OptimizeJob | None:

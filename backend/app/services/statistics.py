@@ -29,6 +29,7 @@ from collections.abc import Callable, Mapping
 
 import pandas as pd
 from fastapi import HTTPException
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analytics import (
@@ -51,6 +52,7 @@ from app.analytics import (
     weight_series,
 )
 from app.analytics._validation import to_date as _to_date
+from app.core.result_cache import cached_result
 from app.models.portfolio import Portfolio
 from app.schemas.analysis import DatedValue, HistogramOut
 from app.schemas.statistics import (
@@ -93,14 +95,12 @@ from app.services._series import (
 from app.services._series import (
     shortest_history_ticker as _shortest_history_ticker,
 )
-from app.core.result_cache import cached_result, portfolio_version_hash
 from app.services.stock_analysis import (
     InsufficientDataError,
     PayloadTooLargeError,
     build_adj_close_series,
     lookback_pad_days,
 )
-from pydantic import BaseModel
 
 _HISTOGRAM_BINS = 20
 
