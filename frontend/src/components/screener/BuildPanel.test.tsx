@@ -166,7 +166,7 @@ function renderBuildPanel(props: {
       />
     </QueryClientProvider>,
   );
-  return { ...utils, onScreenCreated, onHeadline, onSaveStatus };
+  return { ...utils, queryClient, onScreenCreated, onHeadline, onSaveStatus };
 }
 
 beforeEach(() => {
@@ -310,6 +310,29 @@ describe("BuildPanel", () => {
     expect(dom.getByText(/No metrics yet/)).toBeInTheDocument();
     expect(dom.queryByTestId("filters-grid")).not.toBeInTheDocument();
     expect(mocked.fetchScreenBuildAll).not.toHaveBeenCalled();
+  });
+
+  it("7c. clears stale headline when moving from a populated screen to an empty one", async () => {
+    const onHeadline = vi.fn();
+    const utils = renderBuildPanel({ screen: makeScreen(), onHeadline });
+
+    await waitFor(() => expect(onHeadline).toHaveBeenCalledWith(42));
+    onHeadline.mockClear();
+
+    utils.rerender(
+      <QueryClientProvider client={utils.queryClient}>
+        <BuildPanel
+          screen={makeScreen({ id: 2, filters: [] })}
+          catalog={CATALOG}
+          onScreenCreated={utils.onScreenCreated}
+          onHeadline={onHeadline}
+          onSaveStatus={utils.onSaveStatus}
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(onHeadline).toHaveBeenCalledWith(null));
+    expect(dom.getByText(/No metrics yet/)).toBeInTheDocument();
   });
 
   it("8. headline + saveStatus: onHeadline(42) after build; saving→idle around a PUT", async () => {

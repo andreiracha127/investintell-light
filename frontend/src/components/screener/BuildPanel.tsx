@@ -55,23 +55,25 @@ export function BuildPanel({
     () => (screen ? [...screen.filters].sort((a, b) => a.position - b.position) : []),
     [screen],
   );
+  const hasFilters = filters.length > 0;
   const filterCodes = useMemo(() => new Set(filters.map((f) => f.metric_code)), [filters]);
 
   const buildQuery = useQuery({
     queryKey: ["screen-build", screenId],
     queryFn: ({ signal }) => fetchScreenBuildAll(screenId as number, signal),
-    enabled: screenId !== null && filters.length > 0,
+    enabled: screenId !== null && hasFilters,
     placeholderData: keepPreviousData,
     staleTime: 60_000,
     retry: retryPolicy,
   });
+  const buildData = hasFilters ? buildQuery.data : undefined;
   const builds = useMemo(
-    () => new Map((buildQuery.data?.metrics ?? []).map((m) => [m.metric_code, m])),
-    [buildQuery.data],
+    () => new Map((buildData?.metrics ?? []).map((m) => [m.metric_code, m])),
+    [buildData],
   );
 
   // Live headline: batch-build first, overwritten by each mutation response.
-  const headline = buildQuery.data?.headline_count ?? null;
+  const headline = buildData?.headline_count ?? null;
   useEffect(() => onHeadline(headline), [headline, onHeadline]);
 
   const [activeCode, setActiveCode] = useState<string | null>(null);
