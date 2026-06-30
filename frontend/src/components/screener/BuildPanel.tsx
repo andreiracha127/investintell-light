@@ -66,7 +66,7 @@ export function BuildPanel({
     staleTime: 60_000,
     retry: retryPolicy,
   });
-  const buildData = hasFilters ? buildQuery.data : undefined;
+  const buildData = hasFilters && !buildQuery.isPlaceholderData ? buildQuery.data : undefined;
   const builds = useMemo(
     () => new Map((buildData?.metrics ?? []).map((m) => [m.metric_code, m])),
     [buildData],

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen as dom, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen as dom, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -127,6 +127,14 @@ function makeScreen(overrides: Partial<Screen> = {}): Screen {
 
 const BUILD_ALL: BuildAll = {
   headline_count: 42,
+  metrics: [
+    { metric_code: "pe_ratio", available_count: 100, distribution: null },
+    { metric_code: "market_cap", available_count: 100, distribution: null },
+  ],
+};
+
+const BUILD_OTHER: BuildAll = {
+  headline_count: 11,
   metrics: [
     { metric_code: "pe_ratio", available_count: 100, distribution: null },
     { metric_code: "market_cap", available_count: 100, distribution: null },
@@ -333,6 +341,43 @@ describe("BuildPanel", () => {
 
     await waitFor(() => expect(onHeadline).toHaveBeenCalledWith(null));
     expect(dom.getByText(/No metrics yet/)).toBeInTheDocument();
+  });
+
+  it("7d. clears stale headline while moving between populated screens", async () => {
+    let resolveSecond: ((value: BuildAll) => void) | undefined;
+    mocked.fetchScreenBuildAll
+      .mockResolvedValueOnce(BUILD_ALL)
+      .mockImplementationOnce(
+        () =>
+          new Promise<BuildAll>((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+    const onHeadline = vi.fn();
+    const utils = renderBuildPanel({ screen: makeScreen(), onHeadline });
+
+    await waitFor(() => expect(onHeadline).toHaveBeenCalledWith(42));
+    onHeadline.mockClear();
+
+    utils.rerender(
+      <QueryClientProvider client={utils.queryClient}>
+        <BuildPanel
+          screen={makeScreen({ id: 2 })}
+          catalog={CATALOG}
+          onScreenCreated={utils.onScreenCreated}
+          onHeadline={onHeadline}
+          onSaveStatus={utils.onSaveStatus}
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(onHeadline).toHaveBeenCalledWith(null));
+    expect(onHeadline).not.toHaveBeenCalledWith(42);
+
+    await act(async () => {
+      resolveSecond?.(BUILD_OTHER);
+    });
+    await waitFor(() => expect(onHeadline).toHaveBeenCalledWith(11));
   });
 
   it("8. headline + saveStatus: onHeadline(42) after build; saving→idle around a PUT", async () => {
