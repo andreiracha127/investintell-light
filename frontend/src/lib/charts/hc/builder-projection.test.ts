@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { ConfidenceBar } from "@/lib/api/client";
 import { TEST_COLORS } from "@/lib/charts/hc/__fixtures__/colors";
-import { buildHcBuilderProjectionOption } from "@/lib/charts/hc/builder-projection";
+import {
+  buildHcBuilderProjectionLinesOption,
+  buildHcBuilderProjectionOption,
+} from "@/lib/charts/hc/builder-projection";
 import { formatNumber, formatPercent } from "@/lib/format";
 
 const BARS: ConfidenceBar[] = [
@@ -128,5 +131,59 @@ describe("buildHcBuilderProjectionOption", () => {
     ).labels;
 
     expect(labels?.formatter?.call({ value: 1.25 })).toBe(formatNumber(1.25, 1));
+  });
+});
+
+describe("buildHcBuilderProjectionLinesOption", () => {
+  it("renders one line per percentile window plus the median, no shaded area", () => {
+    const option = buildHcBuilderProjectionLinesOption(BARS, "fraction", TEST_COLORS);
+
+    expect(option.chart?.type).toBe("line");
+    const series = (option.series ?? []) as Array<{ name?: string; type?: string }>;
+    expect(series.map((s) => s.name)).toEqual([
+      "95th",
+      "75th",
+      "Median",
+      "25th",
+      "5th",
+    ]);
+    expect(series.every((s) => s.type === "line")).toBe(true);
+  });
+
+  it("maps each line series to the matching percentile across horizons", () => {
+    const option = buildHcBuilderProjectionLinesOption(BARS, "fraction", TEST_COLORS);
+    const p95 = option.series?.[0] as { data?: number[] };
+    const median = option.series?.[2] as { data?: number[] };
+    const p5 = option.series?.[4] as { data?: number[] };
+
+    expect(p95.data).toEqual([0.3, 1.6]);
+    expect(median.data).toEqual([0.08, 0.5]);
+    expect(p5.data).toEqual([-0.1, -0.2]);
+  });
+
+  it("draws the median in the distinct blue token, solid and thicker than the percentile lines", () => {
+    const option = buildHcBuilderProjectionLinesOption(BARS, "fraction", TEST_COLORS);
+    const median = option.series?.[2] as {
+      color?: string;
+      dashStyle?: string;
+      lineWidth?: number;
+    };
+    const p75 = option.series?.[1] as { lineWidth?: number };
+
+    expect(median.color).toBe(TEST_COLORS.blue);
+    expect(median.dashStyle).toBe("Solid");
+    expect(median.lineWidth ?? 0).toBeGreaterThan(p75.lineWidth ?? 0);
+  });
+
+  it("uses the supplied axis title", () => {
+    const option = buildHcBuilderProjectionLinesOption(
+      BARS,
+      "unitless",
+      TEST_COLORS,
+      "Projected Sharpe",
+    );
+    expect((option.yAxis as { title?: { text?: string } }).title?.text).toBe(
+      "Projected Sharpe",
+    );
   });
 });

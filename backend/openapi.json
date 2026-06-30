@@ -5240,7 +5240,7 @@
           "mean"
         ],
         "title": "ConfidenceBar",
-        "description": "One horizon's percentile fan of the projected statistic.\n\nFor max_drawdown/return the percentile fields are decimal fractions\n(0.05 = 5%); for sharpe they are unitless."
+        "description": "One horizon's percentile fan of the projected statistic.\n\nFor max_drawdown/return the percentile fields are decimal fractions\n(0.05 = 5%); for sharpe they are unitless. For ``return`` specifically,\nthese percentiles are the *cumulative* total return over the horizon\n(not the annualized CAGR reported at the top level of the response) so\nthe fan widens with the horizon."
       },
       "ConstraintsIn": {
         "properties": {
