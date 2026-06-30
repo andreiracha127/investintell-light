@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { authReducer, gateDecision, isPublicPath, authGate, safeNextPath, type AuthState } from "@/lib/auth/authState";
+import { authReducer, isPublicPath, authGate, safeNextPath, type AuthState } from "@/lib/auth/authState";
 
 const loading: AuthState = { status: "loading", user: null };
 
@@ -17,31 +17,13 @@ describe("authReducer", () => {
   });
 });
 
-describe("gateDecision", () => {
-  it("never redirects while loading", () => {
-    expect(gateDecision("loading", "/portfolio")).toBeNull();
-  });
-  it("never redirects on /login", () => {
+describe("isPublicPath", () => {
+  it("is true only for the login route", () => {
     expect(isPublicPath("/login")).toBe(true);
-    expect(gateDecision("anon", "/login")).toBeNull();
-  });
-  it("redirects anon users to /login with next", () => {
-    expect(gateDecision("anon", "/portfolio")).toBe("/login?next=%2Fportfolio");
-  });
-  it("does not redirect anon users away from public funds routes", () => {
-    expect(isPublicPath("/funds")).toBe(true);
-    expect(isPublicPath("/funds/fund-1")).toBe(true);
-    expect(gateDecision("anon", "/funds")).toBeNull();
-    expect(gateDecision("anon", "/funds/fund-1")).toBeNull();
-  });
-  it("does not redirect anon users away from public stock routes", () => {
-    expect(isPublicPath("/stocks")).toBe(true);
-    expect(isPublicPath("/stocks/AMD")).toBe(true);
-    expect(gateDecision("anon", "/stocks")).toBeNull();
-    expect(gateDecision("anon", "/stocks/AMD")).toBeNull();
-  });
-  it("does not redirect authed users", () => {
-    expect(gateDecision("authed", "/portfolio")).toBeNull();
+    expect(isPublicPath("/stocks")).toBe(false);
+    expect(isPublicPath("/stocks/AMD")).toBe(false);
+    expect(isPublicPath("/funds")).toBe(false);
+    expect(isPublicPath("/portfolio")).toBe(false);
   });
 });
 

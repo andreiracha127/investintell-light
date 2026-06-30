@@ -10,7 +10,7 @@
  */
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import {
   ChartColumn,
@@ -29,7 +29,6 @@ import {
 } from "@carbon/icons-react";
 import { TickerSearch } from "@/components/TickerSearch";
 import { useAuth } from "@/lib/auth/context";
-import { gateDecision, isPublicPath } from "@/lib/auth/authState";
 
 type Theme = "light" | "dark";
 type Accent = "oxblood" | "blue" | "teal";
@@ -126,9 +125,7 @@ const NAV_ITEMS: { href: string; match: (p: string) => boolean; label: string; i
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const router = useRouter();
   const { status, user, signOut } = useAuth();
-  const isPublicRoute = isPublicPath(pathname);
 
   const [settings, setSettings] = useState<Settings>(DEFAULTS);
   const [navOpen, setNavOpen] = useState(false);
@@ -177,16 +174,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  useEffect(() => {
-    const target = gateDecision(status, pathname);
-    if (target) router.replace(target);
-  }, [status, pathname, router]);
-
   // The login route renders bare (no shell chrome).
   if (pathname === "/login") return <>{children}</>;
 
-  // Don't flash the app or bounce a valid user while the session resolves.
-  if (status === "loading" && !isPublicRoute) {
+  // Don't flash the app while the session resolves (the /login route already
+  // returned bare above).
+  if (status === "loading") {
     return <div className="flex h-screen items-center justify-center text-text-muted">Loading…</div>;
   }
 

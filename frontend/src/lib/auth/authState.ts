@@ -14,20 +14,10 @@ export function authReducer(_state: AuthState, action: AuthAction): AuthState {
   }
 }
 
-const PUBLIC_PATH_PREFIXES = ["/funds", "/login", "/stocks"];
+const PUBLIC_PATH_PREFIXES = ["/login"];
 
 export function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATH_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
-}
-
-/** Returns the path to redirect to, or null to stay. Never redirects while
- *  loading or already on /login. */
-export function gateDecision(status: AuthStatus, pathname: string): string | null {
-  if (status === "loading") return null;
-  if (pathname === "/login") return null;
-  if (isPublicPath(pathname)) return null;
-  if (status === "anon") return `/login?next=${encodeURIComponent(pathname)}`;
-  return null;
 }
 
 /** Same-origin relative path, or "/" for anything else (open-redirect guard). */
