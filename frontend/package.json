@@ -7,6 +7,7 @@
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint",
+    "perf:lighthouse": "node scripts/perf-auth-lighthouse.mjs",
     "typecheck": "tsc --noEmit",
     "types": "openapi-typescript ../backend/openapi.json -o src/lib/api/api.d.ts",
     "test": "vitest run"

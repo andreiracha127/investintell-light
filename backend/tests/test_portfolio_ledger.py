@@ -433,6 +433,96 @@ async def test_nav_route_empty_ledger_returns_empty_series(
     assert ensure_calls == []
 
 
+async def test_nav_route_uses_private_cache_and_invalidates_after_transaction(
+    monkeypatch: pytest.MonkeyPatch, ensure_calls: list[list[str]]
+) -> None:
+    calls: list[dt.date | None] = []
+    materialized: list[int] = []
+
+    async def fake_get_portfolio(
+        session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> SimpleNamespace:
+        return SimpleNamespace(id=portfolio_id, inception_date=dt.date(2025, 12, 31))
+
+    async def fake_nav(
+        session: Any, portfolio_id: int, *, end_date: dt.date | None = None
+    ) -> list[SimpleNamespace]:
+        calls.append(end_date)
+        point_date = end_date or dt.date(2026, 1, 2)
+        return [
+            SimpleNamespace(
+                nav_date=point_date,
+                nav=100.0 + len(calls),
+                market_value=1000.0,
+                cash=0.0,
+                total_value=1000.0,
+            )
+        ]
+
+    async def fake_exists(
+        session: Any, portfolio_id: int, owner_sub: str | None = None
+    ) -> bool:
+        return True
+
+    async def fake_fund_tickers(session: Any, tickers: Any) -> set[str]:
+        return set()
+
+    async def fake_create(session: Any, portfolio_id: int, payload: Any) -> SimpleNamespace:
+        return _tx(
+            payload.ticker,
+            payload.side,
+            payload.quantity,
+            payload.price,
+            payload.trade_date,
+            payload.commission,
+        )
+
+    async def fake_materialize(session: Any, portfolio_id: int) -> SimpleNamespace:
+        materialized.append(portfolio_id)
+        return SimpleNamespace(portfolio_id=portfolio_id)
+
+    monkeypatch.setattr(portfolio_crud, "get_portfolio", fake_get_portfolio)
+    monkeypatch.setattr(portfolio_ledger, "list_materialized_nav", fake_nav)
+    monkeypatch.setattr(portfolio_crud, "portfolio_exists", fake_exists)
+    monkeypatch.setattr(portfolio_crud, "select_fund_tickers", fake_fund_tickers)
+    monkeypatch.setattr(portfolio_ledger, "create_transaction", fake_create)
+    monkeypatch.setattr(portfolio_ledger, "materialize_portfolio_nav", fake_materialize)
+
+    async with _client() as ac:
+        first = await ac.get("/portfolios/7/nav?end_date=2026-01-03")
+        second = await ac.get("/portfolios/7/nav?end_date=2026-01-03")
+        distinct_query = await ac.get("/portfolios/7/nav?end_date=2026-01-04")
+        mutation = await ac.post(
+            "/portfolios/7/transactions",
+            json={
+                "ticker": "AAPL",
+                "side": "buy",
+                "quantity": 1,
+                "price": 100,
+                "trade_date": "2026-01-01",
+            },
+        )
+        after_mutation = await ac.get("/portfolios/7/nav?end_date=2026-01-03")
+
+    assert first.status_code == 200, first.text
+    assert first.headers["x-cache-private"] == "miss"
+    assert second.status_code == 200, second.text
+    assert second.headers["x-cache-private"] == "hit"
+    assert second.json() == first.json()
+    assert distinct_query.status_code == 200, distinct_query.text
+    assert distinct_query.headers["x-cache-private"] == "miss"
+    assert mutation.status_code == 201, mutation.text
+    assert after_mutation.status_code == 200, after_mutation.text
+    assert after_mutation.headers["x-cache-private"] == "miss"
+    assert calls == [
+        dt.date(2026, 1, 3),
+        dt.date(2026, 1, 4),
+        dt.date(2026, 1, 3),
+    ]
+    assert materialized == [7]
+    assert ensure_calls == [["AAPL"]]
+
+
 async def test_materialize_portfolio_nav_rebuilds_daily_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

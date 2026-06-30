@@ -1,6 +1,7 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -14,12 +15,24 @@ import {
   type Screen,
 } from "@/lib/api/client";
 import { AddMetricBar } from "@/components/screener/AddMetricBar";
-import { DistributionPanel } from "@/components/screener/DistributionPanel";
 import { FiltersGrid } from "@/components/screener/FiltersGrid";
 import { applyFilterResponse, ErrorPanel, retryPolicy } from "@/components/screener/shared";
 import type { FiltersGridCallbacks } from "@/lib/grid/filtersGridOptions";
 
 type SaveStatus = "idle" | "saving" | "error";
+
+const DistributionPanel = dynamic(
+  () =>
+    import("@/components/screener/DistributionPanel").then(
+      (mod) => mod.DistributionPanel,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[240px] animate-pulse border-x border-b border-border bg-surface-2" />
+    ),
+  },
+);
 
 export function BuildPanel({
   screen,
@@ -47,7 +60,8 @@ export function BuildPanel({
   const buildQuery = useQuery({
     queryKey: ["screen-build", screenId],
     queryFn: ({ signal }) => fetchScreenBuildAll(screenId as number, signal),
-    enabled: screenId !== null,
+    enabled: screenId !== null && filters.length > 0,
+    placeholderData: keepPreviousData,
     staleTime: 60_000,
     retry: retryPolicy,
   });

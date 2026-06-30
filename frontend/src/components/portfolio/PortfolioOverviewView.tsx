@@ -12,6 +12,7 @@
  * panels stacked with 1px separation, hairline borders, tabular numerals.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -53,12 +54,6 @@ import {
 import { Card, InfoDot, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { retryPolicy } from "@/components/screener/shared";
-import { PortfolioNewsPanel } from "@/components/portfolio/PortfolioNewsPanel";
-import { PortfolioLookthroughSection } from "@/components/portfolio/PortfolioLookthroughSection";
-import { PortfolioRebalanceSection } from "@/components/portfolio/PortfolioRebalanceSection";
-import { PortfolioConstraintsSection } from "@/components/portfolio/PortfolioConstraintsSection";
-import { PortfolioDriftSection } from "@/components/portfolio/PortfolioDriftSection";
-import { PortfolioPerformanceView } from "@/components/portfolio/PortfolioPerformanceView";
 import { usePortfolioNav } from "@/components/portfolio/usePortfolioNav";
 import { compactDatetimeXAxis, formatTimestampDate } from "@/lib/charts/hc/dateAxis";
 import {
@@ -100,6 +95,64 @@ const PORTFOLIO_SECTIONS = [
 ] as const;
 
 type PortfolioSectionId = (typeof PORTFOLIO_SECTIONS)[number]["id"];
+
+const PortfolioPerformanceView = dynamic(
+  () =>
+    import("@/components/portfolio/PortfolioPerformanceView").then(
+      (mod) => mod.PortfolioPerformanceView,
+    ),
+  { ssr: false, loading: () => <SectionFallback className="h-[560px]" /> },
+);
+
+const PortfolioLookthroughSection = dynamic(
+  () =>
+    import("@/components/portfolio/PortfolioLookthroughSection").then(
+      (mod) => mod.PortfolioLookthroughSection,
+    ),
+  { ssr: false, loading: () => <SectionFallback className="h-[640px]" /> },
+);
+
+const PortfolioDriftSection = dynamic(
+  () =>
+    import("@/components/portfolio/PortfolioDriftSection").then(
+      (mod) => mod.PortfolioDriftSection,
+    ),
+  { ssr: false, loading: () => <SectionFallback className="h-[300px]" /> },
+);
+
+const PortfolioRebalanceSection = dynamic(
+  () =>
+    import("@/components/portfolio/PortfolioRebalanceSection").then(
+      (mod) => mod.PortfolioRebalanceSection,
+    ),
+  { ssr: false, loading: () => <SectionFallback className="h-[520px]" /> },
+);
+
+const PortfolioConstraintsSection = dynamic(
+  () =>
+    import("@/components/portfolio/PortfolioConstraintsSection").then(
+      (mod) => mod.PortfolioConstraintsSection,
+    ),
+  { ssr: false, loading: () => <SectionFallback className="h-[360px]" /> },
+);
+
+const PortfolioNewsPanel = dynamic(
+  () =>
+    import("@/components/portfolio/PortfolioNewsPanel").then(
+      (mod) => mod.PortfolioNewsPanel,
+    ),
+  { ssr: false, loading: () => <SectionFallback className="h-[360px]" /> },
+);
+
+function SectionFallback({ className }: { className: string }) {
+  return (
+    <div
+      aria-busy="true"
+      aria-label="Loading section"
+      className={`${className} animate-pulse bg-surface-2`}
+    />
+  );
+}
 
 function portfolioSectionFromParam(value: string | null): PortfolioSectionId {
   return PORTFOLIO_SECTIONS.some((section) => section.id === value)
@@ -1041,7 +1094,7 @@ function NavPanel({
       {isLoading && slice.length === 0 ? (
         <div className="h-[340px] flex-1 animate-pulse bg-layer-active" />
       ) : option ? (
-        <HighchartsChart options={option} className="h-[340px] w-full flex-1" />
+        <HighchartsChart options={option} modules={[]} className="h-[340px] w-full flex-1" />
       ) : (
         <div className="flex h-[340px] flex-1 items-center justify-center px-4 text-center text-[12px] text-text-muted">
           {isError
@@ -1199,7 +1252,7 @@ function AllocationPanel({
         ) : null
       }
     >
-      <HighchartsChart options={options} className="h-[340px] w-full" />
+      <HighchartsChart options={options} modules={[]} className="h-[340px] w-full" />
     </Card>
   );
 }

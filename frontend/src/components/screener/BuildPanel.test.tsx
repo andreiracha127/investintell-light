@@ -309,6 +309,7 @@ describe("BuildPanel", () => {
     renderBuildPanel({ screen: makeScreen({ filters: [] }) });
     expect(dom.getByText(/No metrics yet/)).toBeInTheDocument();
     expect(dom.queryByTestId("filters-grid")).not.toBeInTheDocument();
+    expect(mocked.fetchScreenBuildAll).not.toHaveBeenCalled();
   });
 
   it("8. headline + saveStatus: onHeadline(42) after build; saving→idle around a PUT", async () => {

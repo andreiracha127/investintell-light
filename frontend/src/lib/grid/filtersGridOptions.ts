@@ -65,6 +65,7 @@ export function filtersGridColumns(callbacks: FiltersGridCallbacks): GridColumns
       id: "__select",
       header: { format: "" },
       className: "ix-grid-cell-check",
+      dataType: "boolean",
       cells: {
         renderer: { type: "checkbox" },
         events: {
@@ -79,6 +80,7 @@ export function filtersGridColumns(callbacks: FiltersGridCallbacks): GridColumns
       id: "__up",
       header: { format: "" },
       className: "ix-grid-cell-mv",
+      dataType: "string",
       cells: {
         formatter: upFormatter,
         events: {
@@ -93,6 +95,7 @@ export function filtersGridColumns(callbacks: FiltersGridCallbacks): GridColumns
       id: "__down",
       header: { format: "" },
       className: "ix-grid-cell-mv",
+      dataType: "string",
       cells: {
         formatter: downFormatter,
         events: {
@@ -107,6 +110,7 @@ export function filtersGridColumns(callbacks: FiltersGridCallbacks): GridColumns
       id: "metric",
       header: { format: "Metric" },
       className: "ix-grid-cell-text",
+      dataType: "string",
       cells: {
         formatter: metricFormatter,
         events: {
@@ -119,11 +123,12 @@ export function filtersGridColumns(callbacks: FiltersGridCallbacks): GridColumns
     },
     { id: "min", header: { format: "Min" }, className: "ix-grid-cell-num", dataType: "number", cells: { formatter: boundFormatter, editMode: { enabled: true } } },
     { id: "max", header: { format: "Max" }, className: "ix-grid-cell-num", dataType: "number", cells: { formatter: boundFormatter, editMode: { enabled: true } } },
-    { id: "dist", header: { format: "Distribution" }, className: "ix-grid-cell-num", cells: { formatter: distFormatter } },
+    { id: "dist", header: { format: "Distribution" }, className: "ix-grid-cell-num", dataType: "string", cells: { formatter: distFormatter } },
     {
       id: "__remove",
       header: { format: "" },
       className: "ix-grid-cell-num",
+      dataType: "string",
       cells: {
         formatter: removeFormatter,
         events: {
@@ -135,10 +140,10 @@ export function filtersGridColumns(callbacks: FiltersGridCallbacks): GridColumns
       },
     },
     // hidden data-only columns used by formatters / handlers via row.getCell
-    { id: "metric_code", enabled: false },
-    { id: "abbr", enabled: false },
-    { id: "unit", enabled: false },
-    { id: "is_percent", enabled: false },
+    { id: "metric_code", enabled: false, dataType: "string" },
+    { id: "abbr", enabled: false, dataType: "string" },
+    { id: "unit", enabled: false, dataType: "string" },
+    { id: "is_percent", enabled: false, dataType: "boolean" },
   ];
 }
 

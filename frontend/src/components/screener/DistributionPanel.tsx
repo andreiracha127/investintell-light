@@ -118,7 +118,7 @@ export function DistributionPanel({
         {/* Histogram + read-out + quick ranges */}
         <div className="min-w-[300px] flex-1 max-w-[600px]">
           {option ? (
-            <HighchartsChart options={option} className="h-[170px]" />
+            <HighchartsChart options={option} modules={[]} className="h-[170px]" />
           ) : (
             <p className="h-[170px] flex items-center justify-center bg-field text-[13px] text-text-muted">
               No metric data yet — run the metrics job.

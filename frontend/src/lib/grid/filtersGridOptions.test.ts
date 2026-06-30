@@ -80,4 +80,17 @@ describe("screenFiltersToGridOptions", () => {
       ]),
     );
   });
+
+  it("declares data types for control and rendered columns", () => {
+    const opts = screenFiltersToGridOptions(filters, catalog, builds, new Set(), noop);
+    const columns = new Map((opts.columns ?? []).map((column) => [column.id, column]));
+
+    expect(columns.get("__select")?.dataType).toBe("boolean");
+    expect(columns.get("__up")?.dataType).toBe("string");
+    expect(columns.get("__down")?.dataType).toBe("string");
+    expect(columns.get("dist")?.dataType).toBe("string");
+    expect(columns.get("__remove")?.dataType).toBe("string");
+    expect(columns.get("metric_code")?.dataType).toBe("string");
+    expect(columns.get("is_percent")?.dataType).toBe("boolean");
+  });
 });

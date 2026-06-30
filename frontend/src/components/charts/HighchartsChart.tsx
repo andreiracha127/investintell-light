@@ -7,7 +7,7 @@
  * Mirrors DataGrid.tsx. Chart content comes from pure builders in
  * `src/lib/charts/hc/*`.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Chart, Options } from "highcharts";
 
 import { chartColors } from "@/lib/charts/chartColors";
@@ -21,6 +21,48 @@ type StockUiOptions = Options & {
   stockTools?: { gui?: { enabled?: boolean } };
   navigation?: { bindingsClassName?: string };
 };
+
+export type HighchartsModuleKey =
+  | "heatmap"
+  | "xrange"
+  | "more"
+  | "annotations"
+  | "treemap"
+  | "sunburst";
+
+const DEFAULT_MODULES: readonly HighchartsModuleKey[] = [
+  "heatmap",
+  "xrange",
+  "more",
+  "annotations",
+  "treemap",
+  "sunburst",
+];
+
+const moduleLoaders: Record<HighchartsModuleKey, () => Promise<unknown>> = {
+  heatmap: () => import("highcharts/esm/modules/heatmap.js"),
+  xrange: () => import("highcharts/esm/modules/xrange.js"),
+  more: () => import("highcharts/esm/highcharts-more.js"),
+  annotations: () => import("highcharts/esm/modules/annotations.js"),
+  treemap: () => import("highcharts/esm/modules/treemap.js"),
+  sunburst: () => import("highcharts/esm/modules/sunburst.js"),
+};
+
+function moduleKeyFor(modules: readonly HighchartsModuleKey[] | undefined): string {
+  return (modules ?? DEFAULT_MODULES).join("|");
+}
+
+function modulesFromKey(moduleKey: string): HighchartsModuleKey[] {
+  if (!moduleKey) return [];
+  return moduleKey.split("|") as HighchartsModuleKey[];
+}
+
+async function loadHighchartsModules(modules: readonly HighchartsModuleKey[]) {
+  const requested = new Set(modules);
+  for (const key of DEFAULT_MODULES) {
+    if (requested.has(key)) await moduleLoaders[key]();
+  }
+}
 
 function coreOnlyOptions(options: Options): Options {
   return {
@@ -44,6 +86,7 @@ export function HighchartsChart({
   className,
   emptyMessage,
   isEmpty,
+  modules,
   onReady,
 }: {
   options: Options;
@@ -51,10 +94,13 @@ export function HighchartsChart({
   emptyMessage?: string;
   /** Consumer-decided empty state (Highcharts has no generic row count). */
   isEmpty?: boolean;
+  modules?: readonly HighchartsModuleKey[];
   onReady?: (chart: Chart) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<Chart | null>(null);
+  const [isReady, setIsReady] = useState(false);
+  const moduleKey = moduleKeyFor(modules);
   // Freshest options/callback for the async create, without re-running it.
   const latestOptions = useRef(options);
   latestOptions.current = options;
@@ -65,23 +111,13 @@ export function HighchartsChart({
     let disposed = false;
     const el = containerRef.current;
     if (!el) return;
+    setIsReady(false);
     void (async () => {
       // Use the ESM build so the Core modules below register on the SAME
       // Highcharts instance (the UMD `highcharts/modules/*` bundles expect a
       // global and do not self-register under ESM).
       const mod = await import("highcharts/esm/highcharts.js");
-      // Register Core modules consumed by hc/* builders before any chart is
-      // created: heatmap (also provides colorAxis, used by correlation +
-      // monthly-returns), xrange (regime strip), highcharts-more (arearange
-      // confidence cones), and annotations (macro RRG).
-      await import("highcharts/esm/modules/heatmap.js");
-      await import("highcharts/esm/modules/xrange.js");
-      await import("highcharts/esm/highcharts-more.js");
-      await import("highcharts/esm/modules/annotations.js");
-      // treemap: portfolio look-through exposure tiles. highcharts-more (above)
-      // provides the `packedbubble` series used by the Performance contributors.
-      await import("highcharts/esm/modules/treemap.js");
-      await import("highcharts/esm/modules/sunburst.js");
+      await loadHighchartsModules(modulesFromKey(moduleKey));
       if (disposed || !containerRef.current) return;
       const Highcharts = mod.default;
       // Custom pie fan-in entrance (idempotent; mutates the pie prototype once).
@@ -94,6 +130,7 @@ export function HighchartsChart({
         return;
       }
       chartRef.current = chart;
+      setIsReady(true);
       onReadyRef.current?.(chart);
     })();
     const observer = new ResizeObserver(() => chartRef.current?.reflow());
@@ -104,7 +141,7 @@ export function HighchartsChart({
       chartRef.current?.destroy();
       chartRef.current = null;
     };
-  }, []);
+  }, [moduleKey]);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -122,6 +159,12 @@ export function HighchartsChart({
   return (
     <div className={`relative ${className ?? ""}`}>
       <div ref={containerRef} className="h-full w-full" />
+      {!isReady && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 animate-pulse bg-layer-active"
+        />
+      )}
       {showEmpty && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4 text-center text-[13px] text-text-muted">
           {emptyMessage}

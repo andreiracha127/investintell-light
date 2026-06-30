@@ -6,12 +6,14 @@
  * runs during SSR. All grid content comes from the pure adapter in
  * `src/lib/grid/gridOptions.ts`. Mirrors the Highcharts wrapper pattern.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Grid, Options } from "@highcharts/grid-pro";
 
 import { gridRowCount } from "@/lib/grid/gridEmpty";
 import "@highcharts/grid-pro/css/grid-pro.css";
 import "@/lib/grid/grid-theme.css";
+
+type GridKeyOptions = Options & { gridKey?: string };
 
 /**
  * Force-disable the Highcharts Grid credits badge on every grid, mirroring the
@@ -19,7 +21,13 @@ import "@/lib/grid/grid-theme.css";
  * the single wrapper so individual grid adapters don't each repeat it.
  */
 function withGridChrome(options: Options): Options {
-  return { ...options, credits: { enabled: false } };
+  const gridKey = process.env.NEXT_PUBLIC_HIGHCHARTS_GRID_LICENSE_KEY?.trim();
+  const current = options as GridKeyOptions;
+  return {
+    ...options,
+    gridKey: current.gridKey ?? (gridKey || undefined),
+    credits: { enabled: false },
+  } as GridKeyOptions;
 }
 
 export function DataGrid({
@@ -43,6 +51,7 @@ export function DataGrid({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<Grid | null>(null);
+  const [isReady, setIsReady] = useState(false);
   // Keep the freshest options for the async create callback without re-running it.
   const latestOptions = useRef(options);
   latestOptions.current = options;
@@ -60,6 +69,7 @@ export function DataGrid({
     let disposed = false;
     const el = containerRef.current;
     if (!el) return;
+    setIsReady(false);
     // Async factory overload: resolves AFTER load, so viewport is ready.
     void import("@highcharts/grid-pro").then(({ grid }) => {
       if (disposed || !containerRef.current) return;
@@ -69,6 +79,7 @@ export function DataGrid({
           return;
         }
         gridRef.current = g;
+        setIsReady(true);
         notifyReady(g);
       });
     });
@@ -92,6 +103,12 @@ export function DataGrid({
   return (
     <div className={`relative ${className ?? ""}`}>
       <div ref={containerRef} className="h-full w-full" />
+      {!isReady && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 animate-pulse bg-layer-active"
+        />
+      )}
       {showEmpty && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4 text-center text-[13px] text-text-muted">
           {emptyMessage}
