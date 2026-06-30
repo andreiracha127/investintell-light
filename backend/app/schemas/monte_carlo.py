@@ -1,9 +1,12 @@
 """Request/response schemas for POST /monte-carlo/projection.
 
-Scale contract (project-wide): drawdown and annualized-return percentiles are
-decimal fractions (0.05 = 5%), never 0-100; Sharpe is unitless. Request
-validation is fail-loud (422 via Pydantic); the service maps analytics
-ValueErrors to 422 as well.
+Scale contract (project-wide): drawdown and return percentiles are decimal
+fractions (0.05 = 5%), never 0-100; Sharpe is unitless. The headline
+return distribution (``percentiles``/``mean``/``median``/``historical_value``)
+annualizes to a CAGR; ``confidence_bars`` reports cumulative total return per
+horizon instead — see ``ConfidenceBar`` and ``app.analytics.monte_carlo`` for
+why. Request validation is fail-loud (422 via Pydantic); the service maps
+analytics ValueErrors to 422 as well.
 """
 
 from typing import Annotated, Literal, cast
@@ -83,7 +86,10 @@ class ConfidenceBar(BaseModel):
     """One horizon's percentile fan of the projected statistic.
 
     For max_drawdown/return the percentile fields are decimal fractions
-    (0.05 = 5%); for sharpe they are unitless.
+    (0.05 = 5%); for sharpe they are unitless. For ``return`` specifically,
+    these percentiles are the *cumulative* total return over the horizon
+    (not the annualized CAGR reported at the top level of the response) so
+    the fan widens with the horizon.
     """
 
     horizon: str = Field(description="Human label, e.g. '1Y', '10Y' (or 'ND' for sub-year).")

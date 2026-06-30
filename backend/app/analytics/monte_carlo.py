@@ -4,9 +4,21 @@ Pure numpy — no I/O, no DB, no FastAPI. Uses block bootstrap (21 trading-day
 blocks) to preserve autocorrelation; does NOT assume a normal distribution.
 Ported from the legacy quant_engine.monte_carlo_service.
 
-Scale contract (project-wide): drawdown and annualized-return statistics are
-decimal fractions (0.05 = 5%), never 0-100; Sharpe is unitless. The only RNG is
+Scale contract (project-wide): drawdown and return statistics are decimal
+fractions (0.05 = 5%), never 0-100; Sharpe is unitless. The only RNG is
 ``numpy.random.default_rng``.
+
+Return scaling differs between the headline distribution and the per-horizon
+fan: ``percentiles``/``mean``/``median``/``historical_value`` annualize to a
+CAGR (horizons are comparable on a like-for-like rate basis), while
+``confidence_bars`` reports the *cumulative* total return per horizon so the
+projection fan widens with time the way a "range of outcomes" chart should —
+annualized-rate estimates get *less* noisy over a longer horizon, which reads
+as a misleadingly narrowing band. max_drawdown and sharpe are unaffected by
+this distinction (drawdown is already a path extremum that widens with
+horizon; Sharpe has no cumulative analogue, so it stays annualized everywhere
+and its per-horizon band narrows by design — a longer track record makes the
+risk-adjusted-return estimate more reliable, not less).
 
 Fail-loud (LIGHT contract): the two hard input guards (too little history,
 history too short for the requested horizon) raise ``ValueError`` — the route
@@ -70,8 +82,19 @@ def _compute_statistic(
     simulated_returns: np.ndarray[Any, Any],
     statistic: str,
     risk_free_rate: float,
+    *,
+    annualize_return: bool = True,
 ) -> tuple[np.ndarray[Any, Any], int]:
-    """Per-path statistic + zero-variance count (only meaningful for sharpe)."""
+    """Per-path statistic + zero-variance count (only meaningful for sharpe).
+
+    ``annualize_return`` only affects ``statistic == "return"``: the headline
+    distribution (mean/median/percentiles/historical rank) annualizes to a
+    CAGR so horizons are comparable on a like-for-like basis. The per-horizon
+    confidence fan instead wants the *cumulative* total return so the band
+    widens with the horizon (compounding uncertainty grows with time, even
+    though the annualized-rate estimate gets less noisy) — callers building
+    that fan pass ``annualize_return=False``.
+    """
     n_sims = simulated_returns.shape[0]
     zero_var_count = 0
 
@@ -86,7 +109,7 @@ def _compute_statistic(
     elif statistic == "return":
         h = simulated_returns.shape[1]
         total = np.prod(1 + simulated_returns, axis=1) - 1.0
-        results = (1.0 + total) ** (252.0 / h) - 1.0
+        results = (1.0 + total) ** (252.0 / h) - 1.0 if annualize_return else total
 
     elif statistic == "sharpe":
         rf_daily = risk_free_rate / 252
@@ -216,7 +239,9 @@ def block_bootstrap_monte_carlo(
 
     confidence_bars: list[dict[str, object]] = []
     for h in horizons:
-        h_stats, _ = _compute_statistic(paths[:, :h], statistic, risk_free_rate)
+        h_stats, _ = _compute_statistic(
+            paths[:, :h], statistic, risk_free_rate, annualize_return=False
+        )
         label = f"{h // 252}Y" if h >= 252 else f"{h}D"
         confidence_bars.append(
             {

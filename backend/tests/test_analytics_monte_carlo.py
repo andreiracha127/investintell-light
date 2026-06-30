@@ -59,6 +59,38 @@ def test_return_statistic_annualizes() -> None:
     assert res.historical_percentile_rank is not None
 
 
+def test_return_confidence_bars_are_cumulative_and_widen_with_horizon() -> None:
+    """The per-horizon fan must widen over time (a "range of outcomes" cone),
+
+    unlike the headline ``median``/``percentiles`` above, which stay annualized
+    (CAGR) and therefore narrow with horizon — that's a different, correct
+    statistic used for cross-horizon rate comparisons, not for the chart.
+    """
+    r = _returns(n=1500, seed=11)
+    res = block_bootstrap_monte_carlo(r, n_simulations=1500, statistic="return", seed=5)
+    widths = [b["pct_95"] - b["pct_5"] for b in res.confidence_bars]
+    assert widths == sorted(widths)  # strictly non-decreasing as horizon grows
+    assert widths[-1] > widths[0]
+    # 1Y cumulative return roughly matches the annualized rate (h ≈ 252 days);
+    # by 10Y the two diverge sharply because cumulative compounds the rate.
+    one_year, ten_year = res.confidence_bars[0], res.confidence_bars[-1]
+    assert one_year["horizon"] == "1Y"
+    assert ten_year["horizon"] == "10Y"
+
+
+def test_sharpe_confidence_bars_still_narrow_with_horizon() -> None:
+    """Unlike return, Sharpe has no cumulative analogue and stays annualized
+
+    everywhere — its per-horizon band narrowing is the statistically correct
+    behavior (a longer simulated track record makes the risk-adjusted-return
+    estimate more reliable), not a bug to "fix".
+    """
+    r = _returns(n=1500, seed=11)
+    res = block_bootstrap_monte_carlo(r, n_simulations=1500, statistic="sharpe", seed=5)
+    widths = [b["pct_95"] - b["pct_5"] for b in res.confidence_bars]
+    assert widths[-1] < widths[0]
+
+
 def test_sharpe_statistic_no_rank() -> None:
     r = _returns()
     res = block_bootstrap_monte_carlo(r, n_simulations=1500, statistic="sharpe", seed=7)

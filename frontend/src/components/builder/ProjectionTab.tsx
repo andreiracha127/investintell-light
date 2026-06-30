@@ -15,6 +15,7 @@ import {
 } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
 import {
+  buildHcBuilderProjectionLinesOption,
   buildHcBuilderProjectionOption,
   type ProjectionUnit,
 } from "@/lib/charts/hc/builder-projection";
@@ -161,13 +162,17 @@ function ProjectionBody({
 }) {
   const unit = unitFor(statistic);
   const meta = statMeta(statistic);
+  // Sharpe's per-horizon band narrows by design (a longer simulated track
+  // record makes the risk-adjusted-return estimate more reliable, not less),
+  // so a widening shaded cone would misrepresent it — use classic
+  // one-line-per-percentile instead. Return / Worst drop keep the shaded cone,
+  // which does widen with the horizon.
+  const buildOption =
+    statistic === "sharpe"
+      ? buildHcBuilderProjectionLinesOption
+      : buildHcBuilderProjectionOption;
   const coneOption = colors
-    ? buildHcBuilderProjectionOption(
-        data.confidence_bars,
-        unit,
-        colors,
-        meta.axisTitle,
-      )
+    ? buildOption(data.confidence_bars, unit, colors, meta.axisTitle)
     : null;
   const last = data.confidence_bars[data.confidence_bars.length - 1] ?? null;
   const formatValue = (value: number) =>
