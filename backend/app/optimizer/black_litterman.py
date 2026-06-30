@@ -514,8 +514,8 @@ def solve_bl_vol_target(
         )
         try:
             floor_prob.solve()
-        except cp.error.SolverError:  # pragma: no cover - solver-dependent
-            raise exc
+        except cp.error.SolverError as err:  # pragma: no cover - solver-dependent
+            raise exc from err
         if floor_w.value is not None and str(floor_prob.status) == cp.OPTIMAL:
             floor_vol = float(np.sqrt(floor_w.value @ sigma_ann @ floor_w.value))
             if floor_vol > vol_target + 1e-6:
@@ -524,4 +524,4 @@ def solve_bl_vol_target(
                     f"achievable floor {floor_vol:.6f} under these constraints — "
                     "raise the target or relax the cap"
                 ) from exc
-        raise exc
+        raise
