@@ -65,8 +65,8 @@ export function MarketBreadthPanel({ breadth }: { breadth: MarketBreadth | null 
       </div>
 
       <div className="mb-2 flex items-baseline justify-between text-[12px] tabular-nums">
-        <span className="font-bold text-gain">{formatNumber(breadth.advancing, 0)} advancing</span>
         <span className="font-bold text-loss">{formatNumber(breadth.declining, 0)} declining</span>
+        <span className="font-bold text-gain">{formatNumber(breadth.advancing, 0)} advancing</span>
       </div>
       <div className="space-y-2">
         <div>
