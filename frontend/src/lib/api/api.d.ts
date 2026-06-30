@@ -1957,7 +1957,10 @@ export interface components {
          * @description One horizon's percentile fan of the projected statistic.
          *
          *     For max_drawdown/return the percentile fields are decimal fractions
-         *     (0.05 = 5%); for sharpe they are unitless.
+         *     (0.05 = 5%); for sharpe they are unitless. For ``return`` specifically,
+         *     these percentiles are the *cumulative* total return over the horizon
+         *     (not the annualized CAGR reported at the top level of the response) so
+         *     the fan widens with the horizon.
          */
         ConfidenceBar: {
             /**
