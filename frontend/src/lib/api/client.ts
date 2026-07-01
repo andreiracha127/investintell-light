@@ -73,6 +73,10 @@ type FundLookthroughOperation =
 type PortfolioLookthroughOperation =
   paths["/portfolios/{portfolio_id}/lookthrough"]["get"];
 type MacroRegimeOperation = paths["/macro/regime"]["get"];
+type MacroRegionalOperation = paths["/macro/regional"]["get"];
+type MacroGlobalIndicatorsOperation = paths["/macro/global-indicators"]["get"];
+type MacroFiscalOperation = paths["/macro/fiscal"]["get"];
+type CorrelationRegimeOperation = paths["/correlation-regime"]["post"];
 type RebalancePolicyOperation =
   paths["/portfolios/{portfolio_id}/rebalance/policy"]["get"];
 type RebalancePreviewOperation =
@@ -293,6 +297,24 @@ export type MacroRegime =
   MacroRegimeOperation["responses"]["200"]["content"]["application/json"];
 export type RegimeSignal = components["schemas"]["RegimeSignalOut"];
 export type RegimeFlip = components["schemas"]["RegimeFlipOut"];
+export type MacroRegional =
+  MacroRegionalOperation["responses"]["200"]["content"]["application/json"];
+export type RegionScorecard = components["schemas"]["RegionScorecardOut"];
+export type RegionDimension = components["schemas"]["DimensionOut"];
+export type RegionDataFreshness = components["schemas"]["DataFreshnessOut"];
+export type GlobalIndicators =
+  MacroGlobalIndicatorsOperation["responses"]["200"]["content"]["application/json"];
+export type MacroFiscal =
+  MacroFiscalOperation["responses"]["200"]["content"]["application/json"];
+export type FiscalSeries = MacroFiscal["series"][number];
+export type FiscalCategory = NonNullable<
+  NonNullable<MacroFiscalOperation["parameters"]["query"]>["category"]
+>;
+export type CorrelationRegimeRequest =
+  CorrelationRegimeOperation["requestBody"]["content"]["application/json"];
+export type CorrelationRegimeResponse =
+  CorrelationRegimeOperation["responses"]["200"]["content"]["application/json"];
+export type PairCorrelation = CorrelationRegimeResponse["pair_correlations"][number];
 export type RebalancePolicy =
   RebalancePolicyOperation["responses"]["200"]["content"]["application/json"];
 export type RebalancePreview =
@@ -1389,6 +1411,43 @@ export function fetchPortfolioLookthroughTree(
 /** Fetch the current macro regime signals and recent regime flips. */
 export function fetchMacroRegime(signal?: AbortSignal): Promise<MacroRegime> {
   return requestPublic<MacroRegime>("/macro/regime", signal);
+}
+
+/** Latest regional macro scorecards (composite + dimensions + freshness). */
+export function fetchMacroRegional(signal?: AbortSignal): Promise<MacroRegional> {
+  return requestPublic<MacroRegional>("/macro/regional", signal);
+}
+
+/** Global macro risk indicators (0-100 scores, mixed polarity by field). */
+export function fetchMacroGlobalIndicators(
+  signal?: AbortSignal,
+): Promise<GlobalIndicators> {
+  return requestPublic<GlobalIndicators>("/macro/global-indicators", signal);
+}
+
+/** Treasury fiscal series for one category over the lookback window (≤3650d). */
+export function fetchMacroFiscal(
+  query: { category?: FiscalCategory; lookback_days?: number } = {},
+  signal?: AbortSignal,
+): Promise<MacroFiscal> {
+  const params = new URLSearchParams();
+  if (query.category !== undefined) params.set("category", query.category);
+  if (query.lookback_days !== undefined) {
+    params.set("lookback_days", String(query.lookback_days));
+  }
+  const qs = params.toString();
+  return requestPublic<MacroFiscal>(`/macro/fiscal${qs ? `?${qs}` : ""}`, signal);
+}
+
+/** Correlation-regime read (matrix, concentration, diversification, shift flag). */
+export function postCorrelationRegime(
+  body: CorrelationRegimeRequest,
+  signal?: AbortSignal,
+): Promise<CorrelationRegimeResponse> {
+  return request<CorrelationRegimeResponse>("/correlation-regime", signal, {
+    method: "POST",
+    json: body,
+  });
 }
 
 /** Fetch the rebalance policy (bands and frequency) for a portfolio. */

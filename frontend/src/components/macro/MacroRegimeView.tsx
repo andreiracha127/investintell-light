@@ -19,6 +19,9 @@ import {
 } from "@/lib/api/client";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { SymbolSearchInput } from "@/components/charts/SymbolSearchInput";
+import { FiscalExplorerPanel } from "@/components/macro/FiscalExplorerPanel";
+import { GlobalIndicatorsPanel } from "@/components/macro/GlobalIndicatorsPanel";
+import { RegionalScorecardsPanel } from "@/components/macro/RegionalScorecardsPanel";
 import { usePortfolioNav } from "@/components/portfolio/usePortfolioNav";
 import { PortfolioSelect } from "@/components/statistics/PortfolioSelect";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
@@ -554,6 +557,15 @@ export function MacroRegimeView() {
           )
         }
       />
+
+      {/* ── Global conditions ── */}
+      <GlobalIndicatorsPanel />
+
+      {/* ── Regional scorecards ── */}
+      <RegionalScorecardsPanel />
+
+      {/* ── US fiscal data explorer ── */}
+      <FiscalExplorerPanel />
     </MacroShell>
   );
 }
