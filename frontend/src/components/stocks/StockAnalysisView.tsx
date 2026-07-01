@@ -21,8 +21,11 @@ import {
   type StockQuote,
 } from "@/lib/api/client";
 import { buildHcBellCurveOption } from "@/lib/charts/hc/stats-bellcurve";
+import { buildHcCumulativeOption } from "@/lib/charts/hc/cumulative";
 import { buildHcRollingOption } from "@/lib/charts/hc/rolling";
+import { buildHcUnderwaterOption } from "@/lib/charts/hc/underwater";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
+import { drawdownFromCumulative } from "@/lib/stocks/derived";
 import {
   formatCurrency,
   formatDate,
@@ -38,8 +41,11 @@ import { useLiveTicks } from "@/lib/livefeed/useLiveTicks";
 import { Card, KpiTile, StatRow, valueTone } from "@/components/ui/panels";
 import {
   STOCK_DATA_STALE_TIME_MS,
+  STOCK_HISTORY_BARS_MAX,
   STOCK_ROLLING_WINDOW,
+  STOCK_ROLLING_WINDOWS,
   stockQueryKeys,
+  type StockRollingWindow,
 } from "@/lib/stocks/queries";
 
 export function StockAnalysisView({
@@ -53,6 +59,8 @@ export function StockAnalysisView({
   const [range, setRange] = useState<RangePreset>(
     isRangePreset(initialRange) ? initialRange : "1Y",
   );
+  const [rollingWindow, setRollingWindow] =
+    useState<StockRollingWindow>(STOCK_ROLLING_WINDOW);
 
   // Design tokens are only readable from the DOM — resolve after mount.
   const [colors, setColors] = useState<ChartColors | null>(null);
@@ -71,13 +79,9 @@ export function StockAnalysisView({
 
   const { data, error, isPending, isFetching, isPlaceholderData, refetch } =
     useQuery({
-    queryKey: stockQueryKeys.analysis(ticker, range, STOCK_ROLLING_WINDOW),
+    queryKey: stockQueryKeys.analysis(ticker, range, rollingWindow),
     queryFn: ({ signal }) =>
-      fetchStockAnalysis(
-        ticker,
-        { range, window: STOCK_ROLLING_WINDOW },
-        signal,
-      ),
+      fetchStockAnalysis(ticker, { range, window: rollingWindow }, signal),
     staleTime: STOCK_DATA_STALE_TIME_MS,
     retry: (failureCount, err) =>
       !(err instanceof ApiError && err.status >= 400 && err.status < 500) &&
@@ -89,7 +93,8 @@ export function StockAnalysisView({
   // refetch bars (only the `analysis` KPIs above are range-scoped).
   const history = useQuery({
     queryKey: stockQueryKeys.historyFull(ticker),
-    queryFn: ({ signal }) => fetchStockHistory(ticker, 2520, signal),
+    queryFn: ({ signal }) =>
+      fetchStockHistory(ticker, STOCK_HISTORY_BARS_MAX, signal),
     staleTime: STOCK_DATA_STALE_TIME_MS,
     retry: (failureCount, err) =>
       !(err instanceof ApiError && err.status >= 400 && err.status < 500) &&
@@ -162,6 +167,8 @@ export function StockAnalysisView({
         colors={colors}
         range={range}
         onRangeChange={selectRange}
+        rollingWindow={rollingWindow}
+        onRollingWindowChange={setRollingWindow}
         historyBars={history.data?.bars ?? []}
       />
     </div>
@@ -175,12 +182,16 @@ function AnalysisContent({
   colors,
   range,
   onRangeChange,
+  rollingWindow,
+  onRollingWindowChange,
   historyBars,
 }: {
   data: StockAnalysis;
   colors: ChartColors;
   range: RangePreset;
   onRangeChange: (range: RangePreset) => void;
+  rollingWindow: StockRollingWindow;
+  onRollingWindowChange: (window: StockRollingWindow) => void;
   historyBars: HistoryBar[];
 }) {
   const { header, params, stats } = data;
@@ -215,6 +226,27 @@ function AnalysisContent({
   const distributionOption = useMemo(
     () => buildHcBellCurveOption(data.histogram, stats.var_95, colors),
     [data.histogram, stats.var_95, colors],
+  );
+  // Backend cumulative-return pair (asset vs benchmark) over the range.
+  const cumulativeOption = useMemo(
+    () =>
+      buildHcCumulativeOption(
+        data.cumulative_returns,
+        header.ticker,
+        params.benchmark,
+        colors,
+      ),
+    [data.cumulative_returns, header.ticker, params.benchmark, colors],
+  );
+  // Underwater plot — running-peak decline of the backend cumulative series.
+  const underwaterOption = useMemo(
+    () =>
+      buildHcUnderwaterOption(
+        drawdownFromCumulative(data.cumulative_returns.asset),
+        `${header.ticker} drawdown`,
+        colors,
+      ),
+    [data.cumulative_returns.asset, header.ticker, colors],
   );
 
   return (
@@ -296,7 +328,57 @@ function AnalysisContent({
         />
       </div>
 
-      {/* ── Rolling row ── */}
+      {/* ── Cumulative return + drawdown (backend series over the range) ── */}
+      <div className="mb-px grid grid-cols-1 gap-px bg-border lg:grid-cols-2">
+        <Card
+          title={`Cumulative Return vs ${params.benchmark} · ${range}`}
+          subtitle="both series rebased at the range start"
+        >
+          <HighchartsChart options={cumulativeOption} className="h-[240px] w-full" />
+        </Card>
+        <Card
+          title={`Drawdown · ${range}`}
+          subtitle="decline from the running peak"
+        >
+          <HighchartsChart options={underwaterOption} className="h-[240px] w-full" />
+        </Card>
+      </div>
+
+      {/* ── Rolling row (user-selectable window) ── */}
+      <div className="mb-px flex flex-wrap items-center justify-between gap-3 border border-b-0 border-border bg-surface-2 px-[var(--ix-pad)] py-2.5">
+        <h2 className="ix-label m-0">Rolling risk metrics</h2>
+        <div className="flex items-center gap-2.5">
+          <span className="text-[10px] font-bold uppercase tracking-[0.07em] text-text-muted">
+            Window
+          </span>
+          <div
+            role="group"
+            aria-label="Rolling window"
+            className="flex h-[28px] border border-border-strong"
+          >
+            {STOCK_ROLLING_WINDOWS.map((w, i) => {
+              const active = rollingWindow === w;
+              return (
+                <button
+                  key={w}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => onRollingWindowChange(w)}
+                  className={`px-[11px] text-[11.5px] font-bold tabular-nums transition-colors ${
+                    i === 0 ? "" : "border-l border-border-strong"
+                  } ${
+                    active
+                      ? "bg-accent text-on-accent"
+                      : "bg-transparent text-text-secondary hover:text-text-primary"
+                  }`}
+                >
+                  {w}d
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
       <div className="mb-px grid grid-cols-1 gap-px bg-border lg:grid-cols-3">
         <Card title={`Rolling Volatility · ${params.window}d`}>
           <HighchartsChart options={volatilityOption} className="h-[200px] w-full" />
