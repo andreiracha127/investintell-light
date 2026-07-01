@@ -519,12 +519,17 @@ async def create_portfolio_transaction(
 
 @router.get("/{portfolio_id}/nav", response_model=PortfolioNavResponse)
 async def get_portfolio_nav(
+    request: Request,
     portfolio_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
     user: Annotated[CurrentUser, Depends(get_current_user)],
     end_date: Annotated[dt.date | None, Query(description="Last NAV date.")] = None,
-) -> PortfolioNavResponse:
+) -> Response:
     """Persisted transaction-aware NAV index, rebased to 100 at inception."""
+    cache_key = _portfolio_cache_key(request, user.sub, portfolio_id, "nav")
+    cached = await _cached_private_response(cache_key)
+    if cached is not None:
+        return cached
     portfolio = await portfolio_crud.get_portfolio(session, portfolio_id, user.sub)
     if portfolio is None:
         raise HTTPException(status_code=404, detail=f"Portfolio {portfolio_id} not found.")
@@ -533,7 +538,7 @@ async def get_portfolio_nav(
         portfolio_id,
         end_date=end_date,
     )
-    return PortfolioNavResponse(
+    payload = PortfolioNavResponse(
         portfolio_id=portfolio_id,
         inception_date=rows[0].nav_date if rows else portfolio.inception_date,
         points=[
@@ -547,6 +552,7 @@ async def get_portfolio_nav(
             for row in rows
         ],
     )
+    return await _store_private_response(cache_key, payload.model_dump_json().encode())
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -14,12 +15,24 @@ import {
   type Screen,
 } from "@/lib/api/client";
 import { AddMetricBar } from "@/components/screener/AddMetricBar";
-import { DistributionPanel } from "@/components/screener/DistributionPanel";
 import { FiltersGrid } from "@/components/screener/FiltersGrid";
 import { applyFilterResponse, ErrorPanel, retryPolicy } from "@/components/screener/shared";
 import type { FiltersGridCallbacks } from "@/lib/grid/filtersGridOptions";
 
 type SaveStatus = "idle" | "saving" | "error";
+
+const DistributionPanel = dynamic(
+  () =>
+    import("@/components/screener/DistributionPanel").then(
+      (mod) => mod.DistributionPanel,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[240px] animate-pulse border-x border-b border-border bg-surface-2" />
+    ),
+  },
+);
 
 export function BuildPanel({
   screen,
@@ -42,22 +55,25 @@ export function BuildPanel({
     () => (screen ? [...screen.filters].sort((a, b) => a.position - b.position) : []),
     [screen],
   );
+  const hasFilters = filters.length > 0;
   const filterCodes = useMemo(() => new Set(filters.map((f) => f.metric_code)), [filters]);
 
   const buildQuery = useQuery({
     queryKey: ["screen-build", screenId],
     queryFn: ({ signal }) => fetchScreenBuildAll(screenId as number, signal),
-    enabled: screenId !== null,
+    enabled: screenId !== null && hasFilters,
+    placeholderData: keepPreviousData,
     staleTime: 60_000,
     retry: retryPolicy,
   });
+  const buildData = hasFilters && !buildQuery.isPlaceholderData ? buildQuery.data : undefined;
   const builds = useMemo(
-    () => new Map((buildQuery.data?.metrics ?? []).map((m) => [m.metric_code, m])),
-    [buildQuery.data],
+    () => new Map((buildData?.metrics ?? []).map((m) => [m.metric_code, m])),
+    [buildData],
   );
 
   // Live headline: batch-build first, overwritten by each mutation response.
-  const headline = buildQuery.data?.headline_count ?? null;
+  const headline = buildData?.headline_count ?? null;
   useEffect(() => onHeadline(headline), [headline, onHeadline]);
 
   const [activeCode, setActiveCode] = useState<string | null>(null);

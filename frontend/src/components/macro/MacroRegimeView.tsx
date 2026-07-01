@@ -468,7 +468,7 @@ export function MacroRegimeView() {
               ))}
           </div>
           {rotationOption ? (
-            <HighchartsChart options={rotationOption} className="h-[440px] w-full" />
+            <HighchartsChart options={rotationOption} modules={[]} className="h-[440px] w-full" />
           ) : (
             <div className="flex h-[440px] items-center justify-center px-4 text-center text-[13px] text-text-muted">
               No regime history for the selected period.
@@ -672,7 +672,7 @@ function PerformancePanel({
     return <div className="h-[440px] animate-pulse bg-surface-3" />;
   }
   if (option) {
-    return <HighchartsChart options={option} className="h-[440px] w-full" />;
+    return <HighchartsChart options={option} modules={[]} className="h-[440px] w-full" />;
   }
   return (
     <div className="flex h-[440px] items-center justify-center px-4 text-center text-[13px] text-text-muted">

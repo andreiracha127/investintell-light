@@ -6,6 +6,7 @@
  * filters grid + distribution panel) and Results (server-driven Grid Pro).
  */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -17,7 +18,6 @@ import {
   fetchScreens,
 } from "@/lib/api/client";
 import { BuildPanel } from "@/components/screener/BuildPanel";
-import { ResultsTab } from "@/components/screener/ResultsTab";
 import { ScreenerHeader } from "@/components/screener/ScreenerHeader";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
 import { PageTitle } from "@/components/ui/panels";
@@ -29,6 +29,16 @@ const TABS = [
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 type SaveStatus = "idle" | "saving" | "error";
+
+const ResultsTab = dynamic(
+  () => import("@/components/screener/ResultsTab").then((mod) => mod.ResultsTab),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="mx-auto h-[560px] max-w-[1360px] animate-pulse bg-surface-2" />
+    ),
+  },
+);
 
 export function ScreenerView() {
   const router = useRouter();
