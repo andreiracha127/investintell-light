@@ -23,10 +23,21 @@ import { formatDate, formatNumber } from "@/lib/format";
 const LOOKTHROUGH_TIP =
   "Final holdings aggregated across funds and ETFs.";
 
+const LOOKTHROUGH_UNAVAILABLE_MESSAGE =
+  "Look-through data not available for this portfolio.";
+
 export function PortfolioLookthroughSection({
   portfolioId,
+  standalone = false,
 }: {
   portfolioId: number;
+  /**
+   * When true, this section is the ONLY content on the page (e.g. the
+   * "Exposure" tab) — it must never render blank, so the 404/empty cases get
+   * an explicit empty-state instead of the embedded default of silently
+   * disappearing.
+   */
+  standalone?: boolean;
 }) {
   // Design tokens are only readable from the DOM — resolve after mount.
   const [colors, setColors] = useState<ChartColors | null>(null);
@@ -51,7 +62,12 @@ export function PortfolioLookthroughSection({
     query.error instanceof ApiError &&
     query.error.status === 404
   ) {
-    return null;
+    if (!standalone) return null;
+    return (
+      <div className="ix-pad border border-border bg-surface-2 text-center text-[13px] text-text-muted">
+        {LOOKTHROUGH_UNAVAILABLE_MESSAGE}
+      </div>
+    );
   }
   if (query.isPending) {
     return (
@@ -75,7 +91,14 @@ export function PortfolioLookthroughSection({
   if (!data) return null;
   const assetItems = data.dimensions.asset_class ?? [];
   const tree = data.tree;
-  if (tree.length === 0 && assetItems.length === 0) return null;
+  if (tree.length === 0 && assetItems.length === 0) {
+    if (!standalone) return null;
+    return (
+      <div className="ix-pad border border-border bg-surface-2 text-center text-[13px] text-text-muted">
+        {LOOKTHROUGH_UNAVAILABLE_MESSAGE}
+      </div>
+    );
+  }
 
   // ── KPIs (computed defensively from the dimensions that exist) ──────────
   const parentIds = new Set(

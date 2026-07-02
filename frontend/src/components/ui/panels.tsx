@@ -6,6 +6,14 @@
  */
 
 /**
+ * Canonical page container — every routed view wraps its content in this exact
+ * frame so width, gutters and vertical rhythm are identical across pages.
+ * Append layout extras (`flex flex-col`, `animate-pulse`) as needed.
+ */
+export const PAGE_CONTAINER_CLASS =
+  "mx-auto w-full max-w-[1360px] px-[clamp(14px,3vw,28px)] pb-10 pt-5";
+
+/**
  * Inline "i" help dot with a styled hover/focus popover. Square-system circle,
  * hairline border, muted glyph; hover or keyboard focus reveals `tip` in a
  * token-styled popover above the dot (matching the .dc.html `.ix-pop`).

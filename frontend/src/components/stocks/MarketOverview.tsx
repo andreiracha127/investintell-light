@@ -9,7 +9,11 @@ import { IndexStrip } from "@/components/stocks/IndexStrip";
 import { LeadersTable } from "@/components/stocks/LeadersTable";
 import { SectorPanel } from "@/components/stocks/SectorPanel";
 import { MarketBreadthPanel } from "@/components/stocks/MarketBreadthPanel";
-import { ErrorPanel, PageTitle } from "@/components/ui/panels";
+import {
+  ErrorPanel,
+  PAGE_CONTAINER_CLASS,
+  PageTitle,
+} from "@/components/ui/panels";
 
 export function MarketOverview() {
   const { data, error, isPending, refetch } = useQuery({
@@ -21,7 +25,7 @@ export function MarketOverview() {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-[1360px] px-[clamp(14px,3vw,28px)] pt-5">
+      <div className={PAGE_CONTAINER_CLASS}>
         <PageTitle title="Stocks" />
         <ErrorPanel
           title="Failed to load market overview"
@@ -34,7 +38,7 @@ export function MarketOverview() {
 
   if (isPending || !data) {
     return (
-      <div aria-busy="true" className="mx-auto flex max-w-[1360px] animate-pulse flex-col px-[clamp(14px,3vw,28px)] pb-10 pt-5">
+      <div aria-busy="true" className={`${PAGE_CONTAINER_CLASS} flex animate-pulse flex-col`}>
         {/* Index strip: 4 cards ~80px */}
         <div className="mb-3.5 grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
           {Array.from({ length: 4 }, (_, i) => (
@@ -53,7 +57,7 @@ export function MarketOverview() {
   }
 
   return (
-    <div className="mx-auto flex max-w-[1360px] flex-col px-[clamp(14px,3vw,28px)] pb-10 pt-5">
+    <div className={`${PAGE_CONTAINER_CLASS} flex flex-col`}>
       <PageTitle title="Stocks">
         {data.as_of && (
           <span className="inline-flex items-center gap-1.5 border border-border bg-field px-[9px] py-1 text-[11px] text-text-muted">

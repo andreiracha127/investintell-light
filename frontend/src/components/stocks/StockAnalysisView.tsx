@@ -21,8 +21,11 @@ import {
   type StockQuote,
 } from "@/lib/api/client";
 import { buildHcBellCurveOption } from "@/lib/charts/hc/stats-bellcurve";
+import { buildHcCumulativeOption } from "@/lib/charts/hc/cumulative";
 import { buildHcRollingOption } from "@/lib/charts/hc/rolling";
+import { buildHcUnderwaterOption } from "@/lib/charts/hc/underwater";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
+import { drawdownFromCumulative } from "@/lib/stocks/derived";
 import {
   formatCurrency,
   formatDate,
@@ -35,11 +38,20 @@ import { AddToPortfolio } from "@/components/stocks/AddToPortfolio";
 import { HoldersTab } from "@/components/stocks/HoldersTab";
 import { NewsPanel } from "@/components/stocks/NewsPanel";
 import { useLiveTicks } from "@/lib/livefeed/useLiveTicks";
-import { Card, KpiTile, StatRow, valueTone } from "@/components/ui/panels";
+import {
+  Card,
+  KpiTile,
+  PAGE_CONTAINER_CLASS,
+  StatRow,
+  valueTone,
+} from "@/components/ui/panels";
 import {
   STOCK_DATA_STALE_TIME_MS,
+  STOCK_HISTORY_BARS_MAX,
   STOCK_ROLLING_WINDOW,
+  STOCK_ROLLING_WINDOWS,
   stockQueryKeys,
+  type StockRollingWindow,
 } from "@/lib/stocks/queries";
 
 export function StockAnalysisView({
@@ -53,6 +65,8 @@ export function StockAnalysisView({
   const [range, setRange] = useState<RangePreset>(
     isRangePreset(initialRange) ? initialRange : "1Y",
   );
+  const [rollingWindow, setRollingWindow] =
+    useState<StockRollingWindow>(STOCK_ROLLING_WINDOW);
 
   // Design tokens are only readable from the DOM — resolve after mount.
   const [colors, setColors] = useState<ChartColors | null>(null);
@@ -71,13 +85,9 @@ export function StockAnalysisView({
 
   const { data, error, isPending, isFetching, isPlaceholderData, refetch } =
     useQuery({
-    queryKey: stockQueryKeys.analysis(ticker, range, STOCK_ROLLING_WINDOW),
+    queryKey: stockQueryKeys.analysis(ticker, range, rollingWindow),
     queryFn: ({ signal }) =>
-      fetchStockAnalysis(
-        ticker,
-        { range, window: STOCK_ROLLING_WINDOW },
-        signal,
-      ),
+      fetchStockAnalysis(ticker, { range, window: rollingWindow }, signal),
     staleTime: STOCK_DATA_STALE_TIME_MS,
     retry: (failureCount, err) =>
       !(err instanceof ApiError && err.status >= 400 && err.status < 500) &&
@@ -89,7 +99,8 @@ export function StockAnalysisView({
   // refetch bars (only the `analysis` KPIs above are range-scoped).
   const history = useQuery({
     queryKey: stockQueryKeys.historyFull(ticker),
-    queryFn: ({ signal }) => fetchStockHistory(ticker, 2520, signal),
+    queryFn: ({ signal }) =>
+      fetchStockHistory(ticker, STOCK_HISTORY_BARS_MAX, signal),
     staleTime: STOCK_DATA_STALE_TIME_MS,
     retry: (failureCount, err) =>
       !(err instanceof ApiError && err.status >= 400 && err.status < 500) &&
@@ -136,7 +147,7 @@ export function StockAnalysisView({
     const fastHeader = data?.header ?? quote.data;
     if (fastHeader) {
       return (
-        <div className="mx-auto flex max-w-[1360px] flex-col px-[clamp(14px,3vw,28px)] pb-10 pt-5">
+        <div className={`${PAGE_CONTAINER_CLASS} flex flex-col`}>
           <StockHeaderBar header={fastHeader} />
           <AnalysisBodySkeleton />
         </div>
@@ -162,6 +173,8 @@ export function StockAnalysisView({
         colors={colors}
         range={range}
         onRangeChange={selectRange}
+        rollingWindow={rollingWindow}
+        onRollingWindowChange={setRollingWindow}
         historyBars={history.data?.bars ?? []}
       />
     </div>
@@ -175,16 +188,30 @@ function AnalysisContent({
   colors,
   range,
   onRangeChange,
+  rollingWindow,
+  onRollingWindowChange,
   historyBars,
 }: {
   data: StockAnalysis;
   colors: ChartColors;
   range: RangePreset;
   onRangeChange: (range: RangePreset) => void;
+  rollingWindow: StockRollingWindow;
+  onRollingWindowChange: (window: StockRollingWindow) => void;
   historyBars: HistoryBar[];
 }) {
   const { header, params, stats } = data;
   const [tab, setTab] = useState<"analysis" | "holders">("analysis");
+  // Holders mounts lazily on first activation (13F/N-PORT grids are heavy),
+  // but once mounted it stays mounted — switching back to Analysis just hides
+  // it via CSS. Same for Analysis: it starts mounted and is never unmounted,
+  // so the native StockChart never loses its annotations/comparisons/scale
+  // when the user hops to Holders and back.
+  const [holdersMounted, setHoldersMounted] = useState(false);
+  const selectTab = useCallback((id: "analysis" | "holders") => {
+    setTab(id);
+    if (id === "holders") setHoldersMounted(true);
+  }, []);
 
   const volatilityOption = useMemo(
     () =>
@@ -216,9 +243,30 @@ function AnalysisContent({
     () => buildHcBellCurveOption(data.histogram, stats.var_95, colors),
     [data.histogram, stats.var_95, colors],
   );
+  // Backend cumulative-return pair (asset vs benchmark) over the range.
+  const cumulativeOption = useMemo(
+    () =>
+      buildHcCumulativeOption(
+        data.cumulative_returns,
+        header.ticker,
+        params.benchmark,
+        colors,
+      ),
+    [data.cumulative_returns, header.ticker, params.benchmark, colors],
+  );
+  // Underwater plot — running-peak decline of the backend cumulative series.
+  const underwaterOption = useMemo(
+    () =>
+      buildHcUnderwaterOption(
+        drawdownFromCumulative(data.cumulative_returns.asset),
+        `${header.ticker} drawdown`,
+        colors,
+      ),
+    [data.cumulative_returns.asset, header.ticker, colors],
+  );
 
   return (
-    <div className="mx-auto flex max-w-[1360px] flex-col px-[clamp(14px,3vw,28px)] pb-10 pt-5">
+    <div className={`${PAGE_CONTAINER_CLASS} flex flex-col`}>
       <StockHeaderBar header={header} />
 
       {/* ── Tab bar (Analysis | Holders) ── */}
@@ -229,7 +277,7 @@ function AnalysisContent({
             type="button"
             role="tab"
             aria-selected={tab === id}
-            onClick={() => setTab(id)}
+            onClick={() => selectTab(id)}
             className={`px-4 py-2 text-[13px] font-semibold capitalize transition-colors ${
               tab === id
                 ? "border-b-2 border-b-accent text-text-primary"
@@ -241,12 +289,16 @@ function AnalysisContent({
         ))}
       </div>
 
-      {tab === "holders" ? (
-        <div className="mt-px">
+      {holdersMounted && (
+        <div className="mt-px" hidden={tab !== "holders"} aria-hidden={tab !== "holders"}>
           <HoldersTab ticker={header.ticker} />
         </div>
-      ) : (
-      <>
+      )}
+
+      {/* Analysis stays mounted (never unmounted) so the native StockChart
+          keeps its annotations/comparisons/user zoom when Holders is active —
+          only visibility toggles via the `hidden` attribute. */}
+      <div hidden={tab !== "analysis"} aria-hidden={tab !== "analysis"}>
       {/* ── Interactive chart (native Highstock + livefeed) ── */}
       <div className="mb-px">
         <StockChart
@@ -287,6 +339,7 @@ function AnalysisContent({
           label="Max Drawdown"
           value={formatPercent(stats.max_drawdown.depth)}
           tone="text-loss"
+          detail={`${formatDate(stats.max_drawdown.peak_date)} → ${formatDate(stats.max_drawdown.trough_date)}`}
           tip="Largest peak-to-trough decline over the range."
         />
         <KpiTile
@@ -296,7 +349,57 @@ function AnalysisContent({
         />
       </div>
 
-      {/* ── Rolling row ── */}
+      {/* ── Cumulative return + drawdown (backend series over the range) ── */}
+      <div className="mb-px grid grid-cols-1 gap-px bg-border lg:grid-cols-2">
+        <Card
+          title={`Cumulative Return vs ${params.benchmark} · ${range}`}
+          subtitle="both series rebased at the range start"
+        >
+          <HighchartsChart options={cumulativeOption} className="h-[240px] w-full" />
+        </Card>
+        <Card
+          title={`Drawdown · ${range}`}
+          subtitle="decline from the running peak"
+        >
+          <HighchartsChart options={underwaterOption} className="h-[240px] w-full" />
+        </Card>
+      </div>
+
+      {/* ── Rolling row (user-selectable window) ── */}
+      <div className="mb-px flex flex-wrap items-center justify-between gap-3 border border-b-0 border-border bg-surface-2 px-[var(--ix-pad)] py-2.5">
+        <h2 className="ix-label m-0">Rolling risk metrics</h2>
+        <div className="flex items-center gap-2.5">
+          <span className="text-[10px] font-bold uppercase tracking-[0.07em] text-text-muted">
+            Window
+          </span>
+          <div
+            role="group"
+            aria-label="Rolling window"
+            className="flex h-[28px] border border-border-strong"
+          >
+            {STOCK_ROLLING_WINDOWS.map((w, i) => {
+              const active = rollingWindow === w;
+              return (
+                <button
+                  key={w}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => onRollingWindowChange(w)}
+                  className={`px-[11px] text-[11.5px] font-bold tabular-nums transition-colors ${
+                    i === 0 ? "" : "border-l border-border-strong"
+                  } ${
+                    active
+                      ? "bg-accent text-on-accent"
+                      : "bg-transparent text-text-secondary hover:text-text-primary"
+                  }`}
+                >
+                  {w}d
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
       <div className="mb-px grid grid-cols-1 gap-px bg-border lg:grid-cols-3">
         <Card title={`Rolling Volatility · ${params.window}d`}>
           <HighchartsChart options={volatilityOption} className="h-[200px] w-full" />
@@ -315,18 +418,9 @@ function AnalysisContent({
           <HighchartsChart options={distributionOption} className="h-[280px] w-full" />
         </Card>
 
-        <Card title="Statistics">
+        {/* Only metrics NOT already in the KPI tiles above — no duplication. */}
+        <Card title="Tail Risk & Extremes" subtitle={`over ${range}`}>
           <dl>
-            <StatRow
-              label="Annualized Volatility"
-              value={formatPercent(stats.annualized_volatility)}
-              tip="Annualized standard deviation of daily returns — higher means larger price swings."
-            />
-            <StatRow
-              label="VaR 95 (1d)"
-              value={formatPercent(stats.var_95)}
-              tip="The daily loss not expected to be exceeded 95% of the time."
-            />
             <StatRow
               label="VaR 99 (1d)"
               value={formatPercent(stats.var_99)}
@@ -336,28 +430,6 @@ function AnalysisContent({
               label="CVaR 95 (1d)"
               value={formatPercent(stats.cvar_95)}
               tip="Expected loss on the worst 5% of days (the average tail beyond VaR 95)."
-            />
-            <StatRow
-              label="Total Return"
-              value={formatPercent(stats.total_return, 2, { signed: true })}
-              tone={valueTone(stats.total_return)}
-            />
-            <StatRow
-              label={`Beta vs ${params.benchmark}`}
-              value={formatNumber(stats.beta)}
-              tip={`Sensitivity to ${params.benchmark}: 1.0 moves in line, >1 amplifies, <1 dampens.`}
-            />
-            <StatRow
-              label={`Correlation vs ${params.benchmark}`}
-              value={formatNumber(stats.correlation)}
-              tip={`Correlation of daily returns with ${params.benchmark} (−1 to +1).`}
-            />
-            <StatRow
-              label="Max Drawdown"
-              value={formatPercent(stats.max_drawdown.depth)}
-              tone="text-loss"
-              detail={`${formatDate(stats.max_drawdown.peak_date)} → ${formatDate(stats.max_drawdown.trough_date)}`}
-              tip="Largest peak-to-trough decline over the range."
             />
             <StatRow
               label="Best Day"
@@ -379,8 +451,7 @@ function AnalysisContent({
       <div className="mt-px">
         <NewsPanel ticker={header.ticker} />
       </div>
-      </>
-      )}
+      </div>
     </div>
   );
 }
@@ -403,6 +474,10 @@ function StockHeaderBar({ header }: { header: StockQuote }) {
       : shownChange < 0
         ? "text-loss"
         : "text-neutral-value";
+  // One-shot flash on each live tick (keyed remount re-triggers the
+  // animation); resolves to the static tone — same pattern as LeadersTable.
+  const priceFlash =
+    live?.dir === 1 ? "ix-flash text-gain" : live?.dir === -1 ? "ix-flash text-loss" : "text-text-primary";
 
   return (
     <div className="mb-[18px] flex flex-wrap items-start justify-between gap-4">
@@ -416,7 +491,7 @@ function StockHeaderBar({ header }: { header: StockQuote }) {
           )}
         </div>
         <div className="mt-2 flex flex-wrap items-baseline gap-3 tabular-nums">
-          <span className="text-[30px] font-bold text-text-primary">
+          <span key={shownLast} className={`inline-block px-0.5 text-[30px] font-bold ${priceFlash}`}>
             {formatCurrency(shownLast)}
           </span>
           <span className={`text-[15px] font-bold ${changeTone}`}>
@@ -491,7 +566,7 @@ function LoadingSkeleton() {
     <div
       aria-busy="true"
       aria-label="Loading analysis"
-      className="mx-auto flex max-w-[1360px] animate-pulse flex-col px-[clamp(14px,3vw,28px)] pb-10 pt-5"
+      className={`${PAGE_CONTAINER_CLASS} flex animate-pulse flex-col`}
     >
       <div className="mb-[18px] h-16 w-[320px] border border-border bg-surface-2" />
       <div className="mb-px grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">

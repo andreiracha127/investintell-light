@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Carbon-style content switcher shared by the four Statistics tools.
+ * Carbon-style content switcher shared by the five Statistics tools.
  * Items are plain links; the active one derives from the pathname.
  * Design source: /design/investintell-cockpit/InvestintellCockpit.dc.html
  */
@@ -13,6 +13,7 @@ const TOOLS = [
   { href: "/statistics/beta", label: "Beta" },
   { href: "/statistics/correlation", label: "Correlation" },
   { href: "/statistics/stock-correlation", label: "Stock Correlation" },
+  { href: "/statistics/correlation-regime", label: "Correlation Regime" },
 ] as const;
 
 export function StatisticsTabs() {

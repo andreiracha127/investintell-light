@@ -37,15 +37,6 @@ export interface NavReconstruction {
   endTs: number;
 }
 
-export interface PeriodContribution {
-  ticker: string;
-  name: string;
-  /** Contribution to the period P&L in account currency (signed). */
-  value: number;
-  /** Holding price return over the period, decimal fraction. */
-  ret: number;
-}
-
 /** Normalize a numeric date/epoch variant to milliseconds. */
 export function toMs(t: number): number {
   // Some backend/DB adapters expose dates as Unix day ordinals. Treat small
@@ -76,16 +67,6 @@ export function pricePointsFromLine(series: number[][]): Array<[number, number]>
   return series
     .filter((row) => row.length >= 2 && Number.isFinite(row[1]))
     .map((row) => [toMs(row[0]!), row[1]!] as [number, number]);
-}
-
-/** Last price at-or-before `ts`; the first price when `ts` precedes the series. */
-function priceAt(points: Array<[number, number]>, ts: number): number {
-  let price = points[0]![1];
-  for (const [t, v] of points) {
-    if (t <= ts) price = v;
-    else break;
-  }
-  return price;
 }
 
 const usableHoldings = (holdings: HoldingSeries[]): HoldingSeries[] =>
@@ -145,27 +126,4 @@ export function reconstructNav(
       : [];
 
   return { nav, navIndex, startTs, endTs: allTs[allTs.length - 1]! };
-}
-
-/**
- * Per-holding contribution to the period P&L over [minTs, maxTs]:
- * valueᵢ = qtyᵢ·(priceᵢ(max) − priceᵢ(min)); retᵢ = priceᵢ(max)/priceᵢ(min) − 1.
- */
-export function periodContributions(
-  holdings: HoldingSeries[],
-  minTs: number,
-  maxTs: number,
-): PeriodContribution[] {
-  return usableHoldings(holdings).map((h) => {
-    const start = priceAt(h.points, minTs);
-    const end = priceAt(h.points, maxTs);
-    const value = parseFloat((h.quantity * (end - start)).toFixed(2));
-    const ret = start > 0 ? end / start - 1 : 0;
-    return { ticker: h.ticker, name: h.name, value, ret };
-  });
-}
-
-/** Net period result = Σ contributions = NAV(max) − NAV(min). */
-export function periodTotal(contribs: PeriodContribution[]): number {
-  return parseFloat(contribs.reduce((sum, c) => sum + c.value, 0).toFixed(2));
 }

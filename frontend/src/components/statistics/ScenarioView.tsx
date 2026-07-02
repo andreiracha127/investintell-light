@@ -31,8 +31,12 @@ import { buildHcBellCurveOption } from "@/lib/charts/hc/stats-bellcurve";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { formatCurrency, formatDate, formatNumber, formatPercent } from "@/lib/format";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
-import { Card, StatRow } from "@/components/ui/panels";
-import { DateRangeInputs, defaultDateRange } from "@/components/statistics/DateRangeInputs";
+import { Card, StatRow, valueTone } from "@/components/ui/panels";
+import {
+  DateRangeInputs,
+  defaultDateRange,
+  isDateRangeValid,
+} from "@/components/statistics/DateRangeInputs";
 import { PortfolioSelect } from "@/components/statistics/PortfolioSelect";
 import { StatisticsShell } from "@/components/statistics/StatisticsShell";
 import { ErrorPanel, LABEL_CLASS, ParamsPanel, RunButton } from "@/components/statistics/ui";
@@ -111,7 +115,11 @@ export function ScenarioView() {
     mutationFn: (body: ScenarioRequest) => postScenario(body),
   });
 
-  const canRun = portfolioId !== null && startDate !== "" && endDate !== "";
+  const canRun =
+    portfolioId !== null &&
+    startDate !== "" &&
+    endDate !== "" &&
+    isDateRangeValid(startDate, endDate);
   const onRun = () => {
     if (!canRun || mutation.isPending) return;
     mutation.mutate({
@@ -258,13 +266,13 @@ function Results({
             <StatRow
               label="Best 1D Return"
               value={formatPercent(stats.max_return.value, 2, { signed: true })}
-              tone="text-gain"
+              tone={valueTone(stats.max_return.value)}
               detail={formatDate(stats.max_return.date)}
             />
             <StatRow
               label="Worst 1D Return"
               value={formatPercent(stats.min_return.value, 2, { signed: true })}
-              tone="text-loss"
+              tone={valueTone(stats.min_return.value)}
               detail={formatDate(stats.min_return.date)}
             />
             <StatRow

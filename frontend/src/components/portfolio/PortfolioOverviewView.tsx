@@ -15,7 +15,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { Grid } from "@highcharts/grid-pro";
 
 import {
@@ -51,10 +51,22 @@ import {
   applyLiveTicksToOverview,
   liveEligibleTickers,
 } from "@/lib/portfolio/liveOverview";
-import { Card, InfoDot, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
+import {
+  Card,
+  InfoDot,
+  KpiTile,
+  PAGE_CONTAINER_CLASS,
+  PageTitle,
+  valueTone,
+} from "@/components/ui/panels";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { retryPolicy } from "@/components/screener/shared";
 import { usePortfolioNav } from "@/components/portfolio/usePortfolioNav";
+import {
+  OVERVIEW_NAV_RANGES,
+  sliceNavWindow,
+  type NavRangeKey,
+} from "@/lib/portfolio/navRanges";
 import { compactDatetimeXAxis, formatTimestampDate } from "@/lib/charts/hc/dateAxis";
 import {
   buildAmountAdd,
@@ -190,15 +202,23 @@ export function PortfolioOverviewView() {
   const selected = portfolios?.find((p) => p.id === selectedId) ?? null;
 
   return (
-    <div className="mx-auto max-w-[1360px] px-[clamp(14px,3vw,28px)] pb-10 pt-5">
+    <div className={PAGE_CONTAINER_CLASS}>
       <PageTitle title="Portfolio Overview">
-        {portfolios && portfolios.length > 0 && (
-          <PortfolioSwitcher
-            portfolios={portfolios}
-            selected={selected}
-            onSelect={setSelectedId}
-          />
-        )}
+        <div className="flex items-center gap-2.5">
+          <Link
+            href="/portfolio/static"
+            className="flex h-[30px] items-center border border-border-strong bg-field px-3 text-[12px] text-text-secondary transition-colors hover:bg-layer-hover hover:text-text-primary"
+          >
+            Static analysis
+          </Link>
+          {portfolios && portfolios.length > 0 && (
+            <PortfolioSwitcher
+              portfolios={portfolios}
+              selected={selected}
+              onSelect={setSelectedId}
+            />
+          )}
+        </div>
       </PageTitle>
 
       {portfoliosQuery.isPending ? (
@@ -242,7 +262,7 @@ export function PortfolioOverviewView() {
                 />
               )}
               {activeSection === "exposure" && (
-                <PortfolioLookthroughSection portfolioId={selected.id} />
+                <PortfolioLookthroughSection portfolioId={selected.id} standalone />
               )}
               {activeSection === "rebalance" && (
                 <div className="flex flex-col gap-px">
@@ -252,7 +272,7 @@ export function PortfolioOverviewView() {
                 </div>
               )}
               {activeSection === "news" && (
-                <PortfolioNewsPanel portfolioId={selected.id} />
+                <PortfolioNewsPanel portfolioId={selected.id} standalone />
               )}
             </>
           )}
@@ -448,6 +468,27 @@ function PortfolioSwitcher({
 }) {
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [hi, setHi] = useState(-1);
+  const listId = useId();
+
+  const selectedIndex = portfolios.findIndex((p) => p.id === selected?.id);
+
+  const closeMenu = () => {
+    setOpen(false);
+    setHi(-1);
+  };
+
+  const openMenu = (index: number) => {
+    setOpen(true);
+    setHi(index);
+  };
+
+  const selectIndex = (index: number) => {
+    const p = portfolios[index];
+    if (!p) return;
+    onSelect(p.id);
+    closeMenu();
+  };
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -456,8 +497,31 @@ function PortfolioSwitcher({
           type="button"
           aria-haspopup="listbox"
           aria-expanded={open}
+          aria-controls={listId}
           aria-label="Select portfolio"
-          onClick={() => setOpen((o) => !o)}
+          aria-activedescendant={
+            open && hi >= 0 && portfolios[hi] ? `${listId}-opt-${hi}` : undefined
+          }
+          onClick={() => (open ? closeMenu() : openMenu(Math.max(0, selectedIndex)))}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              if (!open) openMenu(Math.max(0, selectedIndex));
+              else setHi((i) => Math.min(i + 1, portfolios.length - 1));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              if (!open) openMenu(portfolios.length - 1);
+              else setHi((i) => Math.max(i - 1, 0));
+            } else if (e.key === "Enter") {
+              if (!open) return;
+              e.preventDefault();
+              if (hi >= 0) selectIndex(hi);
+            } else if (e.key === "Escape") {
+              if (!open) return;
+              e.preventDefault();
+              closeMenu();
+            }
+          }}
           className="flex h-[34px] min-w-[210px] items-center gap-2.5 border border-border-strong bg-field px-3 text-left text-[12.5px] text-text-primary"
         >
           <span className="flex min-w-0 flex-1 items-center gap-[7px]">
@@ -478,57 +542,59 @@ function PortfolioSwitcher({
         </button>
         {open && (
           <>
-            <div className="fixed inset-0 z-[55]" onClick={() => setOpen(false)} />
-            <ul
-              role="listbox"
-              aria-label="Portfolios"
-              className="absolute left-0 top-[38px] z-[56] max-h-[300px] min-w-[240px] max-w-[320px] overflow-y-auto border border-border-strong bg-surface-2 py-1 shadow-[0_6px_20px_rgba(0,0,0,0.16)]"
-            >
-              {portfolios.map((p) => {
-                const active = p.id === selected?.id;
-                return (
-                  <li key={p.id} role="option" aria-selected={active}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onSelect(p.id);
-                        setOpen(false);
-                      }}
-                      className={`flex w-full items-center gap-[9px] px-3 py-2 text-left text-[12.5px] ${
-                        active
-                          ? "bg-[var(--color-accent-wash)] font-bold text-accent"
-                          : "text-text-primary hover:bg-layer-hover"
-                      }`}
-                    >
-                      <span
-                        aria-hidden
-                        className="h-2 w-2 flex-none"
-                        style={{
-                          background: active
-                            ? "var(--color-accent)"
-                            : "var(--color-border-strong)",
-                        }}
-                      />
-                      <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                      <span className="flex-none tabular-nums text-text-muted">
-                        {p.position_count}
-                      </span>
-                      <span className="w-3 flex-none font-bold text-accent">
-                        {active ? "✓" : ""}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-              <li
-                role="option"
-                aria-selected={false}
-                className="mt-1 border-t border-border pt-0.5"
+            <div className="fixed inset-0 z-[55]" onClick={closeMenu} />
+            <div className="absolute left-0 top-[38px] z-[56] min-w-[240px] max-w-[320px] border border-border-strong bg-surface-2 py-1 shadow-[0_6px_20px_rgba(0,0,0,0.16)]">
+              <ul
+                id={listId}
+                role="listbox"
+                aria-label="Portfolios"
+                className="max-h-[260px] overflow-y-auto"
               >
+                {portfolios.map((p, i) => {
+                  const active = p.id === selected?.id;
+                  return (
+                    <li
+                      key={p.id}
+                      id={`${listId}-opt-${i}`}
+                      role="option"
+                      aria-selected={active}
+                    >
+                      <button
+                        type="button"
+                        onMouseEnter={() => setHi(i)}
+                        onClick={() => selectIndex(i)}
+                        className={`flex w-full items-center gap-[9px] px-3 py-2 text-left text-[12.5px] ${
+                          active
+                            ? "bg-[var(--color-accent-wash)] font-bold text-accent"
+                            : "text-text-primary hover:bg-layer-hover"
+                        } ${i === hi ? "bg-layer-hover" : ""}`}
+                      >
+                        <span
+                          aria-hidden
+                          className="h-2 w-2 flex-none"
+                          style={{
+                            background: active
+                              ? "var(--color-accent)"
+                              : "var(--color-border-strong)",
+                          }}
+                        />
+                        <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                        <span className="flex-none tabular-nums text-text-muted">
+                          {p.position_count}
+                        </span>
+                        <span className="w-3 flex-none font-bold text-accent">
+                          {active ? "✓" : ""}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="mt-1 border-t border-border pt-0.5">
                 <button
                   type="button"
                   onClick={() => {
-                    setOpen(false);
+                    closeMenu();
                     setCreating(true);
                   }}
                   className="flex w-full items-center gap-[9px] px-3 py-2 text-left text-[12.5px] text-text-secondary hover:bg-layer-hover"
@@ -538,8 +604,8 @@ function PortfolioSwitcher({
                   </span>
                   <span>New portfolio…</span>
                 </button>
-              </li>
-            </ul>
+              </div>
+            </div>
           </>
         )}
       </div>
@@ -689,6 +755,44 @@ function PortfolioManageBar({
   );
 }
 
+/**
+ * Modal focus trap + Escape-to-close, shared by every dialog on this page.
+ * Attach the returned ref to the dialog's outermost focusable container
+ * (the element carrying `role="dialog"`): Tab/Shift+Tab then cycle only
+ * among that subtree's focusable elements, and Escape calls `onClose`.
+ */
+function useModalFocusTrap<T extends HTMLElement>(onClose: () => void) {
+  const dialogRef = useRef<T>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      // Focus trap: keep Tab cycling inside the dialog.
+      if (e.key !== "Tab" || !dialogRef.current) return;
+      const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return dialogRef;
+}
+
 function PortfolioEditDialog({
   portfolio,
   pending,
@@ -717,33 +821,7 @@ function PortfolioEditDialog({
   );
   const [cashText, setCashText] = useState(String(portfolio.cash));
   const [cashInvalid, setCashInvalid] = useState(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose();
-        return;
-      }
-      // Focus trap: keep Tab cycling inside the dialog.
-      if (e.key !== "Tab" || !dialogRef.current) return;
-      const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-      );
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const dialogRef = useModalFocusTrap<HTMLDivElement>(onClose);
 
   const canSave = name.trim().length > 0 && !pending && !deletePending;
   const save = () => {
@@ -963,14 +1041,6 @@ function PerformanceSection({
 
 /* ── Portfolio NAV mini-panel (Overview, beside the allocation donut) ─────── */
 
-const NAV_RANGES = [
-  { key: "1M", label: "1M", bars: 21 },
-  { key: "6M", label: "6M", bars: 126 },
-  { key: "1Y", label: "1Y", bars: 252 },
-  { key: "MAX", label: "Max", bars: Infinity },
-] as const;
-type NavRangeKey = (typeof NAV_RANGES)[number]["key"];
-
 const SYNTH_NAV_TIP =
   "Persisted daily portfolio NAV index from the real transaction ledger and portfolio inception date.";
 
@@ -984,10 +1054,9 @@ function NavPanel({
   const { recon, isLoading, isError } = usePortfolioNav(portfolioId);
   const [range, setRange] = useState<NavRangeKey>("1Y");
 
-  const bars = NAV_RANGES.find((r) => r.key === range)!.bars;
   const slice = useMemo(
-    () => (bars === Infinity ? recon.navIndex : recon.navIndex.slice(-bars)),
-    [recon.navIndex, bars],
+    () => sliceNavWindow(recon.navIndex, range),
+    [recon.navIndex, range],
   );
   const change =
     slice.length > 1 ? slice[slice.length - 1]![1] / slice[0]![1] - 1 : 0;
@@ -1070,7 +1139,7 @@ function NavPanel({
             aria-label="NAV range"
             className="flex border border-border-strong"
           >
-            {NAV_RANGES.map((r) => {
+            {OVERVIEW_NAV_RANGES.map((r) => {
               const active = r.key === range;
               return (
                 <button
@@ -1688,14 +1757,7 @@ function PositionNumberDialog({
 }) {
   const [text, setText] = useState(initialText);
   const [invalid, setInvalid] = useState(false);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const dialogRef = useModalFocusTrap<HTMLDivElement>(onClose);
 
   const submit = () => {
     const parsed = parse(text);
@@ -1712,7 +1774,9 @@ function PositionNumberDialog({
       className="fixed inset-0 z-[90] flex items-center justify-center bg-[rgba(0,0,0,0.28)] p-4"
     >
       <div
+        ref={dialogRef}
         role="dialog"
+        aria-modal="true"
         aria-label={`Set ${fieldLabel.toLowerCase()} for ${position.ticker}`}
         onClick={(e) => e.stopPropagation()}
         className="w-[360px] max-w-[96vw] border border-border-strong bg-surface-2 shadow-[0_12px_36px_rgba(0,0,0,0.22)]"
@@ -1798,14 +1862,7 @@ function TradeDateDialog({
   onSubmit: (tradeDate: string | null) => Promise<void>;
 }) {
   const [date, setDate] = useState(position.trade_date ?? "");
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const dialogRef = useModalFocusTrap<HTMLDivElement>(onClose);
 
   return (
     <div
@@ -1813,7 +1870,9 @@ function TradeDateDialog({
       className="fixed inset-0 z-[90] flex items-center justify-center bg-[rgba(0,0,0,0.28)] p-4"
     >
       <div
+        ref={dialogRef}
         role="dialog"
+        aria-modal="true"
         aria-label={`Set buy date for ${position.ticker}`}
         onClick={(e) => e.stopPropagation()}
         className="w-[360px] max-w-[96vw] border border-border-strong bg-surface-2 shadow-[0_12px_36px_rgba(0,0,0,0.22)]"
@@ -1893,14 +1952,7 @@ function TradeTicketDialog({
   const [price, setPrice] = useState(String(position.last_close || ""));
   const [tradeDate, setTradeDate] = useState(isoDateOnly(defaultDate) || todayIsoDate());
   const [commission, setCommission] = useState("");
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const dialogRef = useModalFocusTrap<HTMLDivElement>(onClose);
 
   const q = parseShares(quantity);
   const px = parseShares(price);
@@ -1932,7 +1984,9 @@ function TradeTicketDialog({
       className="fixed inset-0 z-[90] flex items-center justify-center bg-[rgba(0,0,0,0.32)] p-4"
     >
       <div
+        ref={dialogRef}
         role="dialog"
+        aria-modal="true"
         aria-label={`Trade ${position.ticker}`}
         onClick={(e) => e.stopPropagation()}
         className="w-[420px] max-w-[96vw] border border-border-strong bg-surface-2 shadow-[0_12px_36px_rgba(0,0,0,0.22)]"
@@ -2061,13 +2115,7 @@ function PositionDetailPanel({
   onClose: () => void;
   onRemove: (ticker: string) => void;
 }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const dialogRef = useModalFocusTrap<HTMLElement>(onClose);
 
   const weight =
     aggregates.total_value > 0 ? position.market_value / aggregates.total_value : 0;
@@ -2106,7 +2154,9 @@ function PositionDetailPanel({
       className="fixed inset-0 z-[80] flex justify-end bg-[rgba(0,0,0,0.28)]"
     >
       <aside
+        ref={dialogRef}
         role="dialog"
+        aria-modal="true"
         aria-label={`Position detail ${position.ticker}`}
         onClick={(e) => e.stopPropagation()}
         className="flex h-full w-[340px] max-w-[90vw] flex-col overflow-auto border-l border-border-strong bg-surface-2 shadow-[-8px_0_30px_rgba(0,0,0,0.18)]"

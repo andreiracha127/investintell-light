@@ -41,7 +41,13 @@ import {
   formatPercent,
 } from "@/lib/format";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
-import { Card, PageTitle, StatRow, valueTone } from "@/components/ui/panels";
+import {
+  Card,
+  PAGE_CONTAINER_CLASS,
+  PageTitle,
+  StatRow,
+  valueTone,
+} from "@/components/ui/panels";
 
 interface PositionRow {
   id: number;
@@ -160,7 +166,7 @@ export function StaticPortfolioView() {
   };
 
   return (
-    <div className="mx-auto max-w-[1360px] px-[clamp(14px,3vw,28px)] pb-10 pt-5">
+    <div className={PAGE_CONTAINER_CLASS}>
       <PageTitle title="Static Portfolio Analysis" />
 
       <div className="flex flex-col gap-px">

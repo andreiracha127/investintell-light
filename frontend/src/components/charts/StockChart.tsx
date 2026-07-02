@@ -240,6 +240,15 @@ export function StockChart({
   const comparesRef = useRef<CompareEntry[]>(compares);
   comparesRef.current = compares;
 
+  // Compare-mode x-axis floor bookkeeping: the floor we imposed (if any), the
+  // view we saw before imposing it, and the user's live selected min (tracked
+  // via afterSetExtremes). Together these let compare add/remove restore the
+  // user's CURRENT range instead of a stale one, even if they changed range or
+  // zoomed while a compare floor was active.
+  const imposedFloorRef = useRef<number | null>(null);
+  const preFloorMinRef = useRef<number | null>(null);
+  const userMinRef = useRef<number | null>(null);
+
   const [feed, setFeed] = useState<FeedStatus>("off");
 
   // ── Create the chart ONCE ────────────────────────────────────────────────
@@ -306,6 +315,32 @@ export function StockChart({
         return;
       }
       chartRef.current = chart;
+      // Track the user's own range changes (range buttons, navigator, zoom,
+      // scrollbar, pan). When the user re-ranges while a compare floor is
+      // active, the native rangeSelector overrides our imposed min — so we
+      // forget the imposed-floor bookkeeping, record the fresh view, and
+      // re-impose an appropriate floor for the new range if compares remain.
+      // Our own programmatic min (chart.update) fires with no user trigger and
+      // is ignored here, so this never recurses.
+      const USER_EXTREME_TRIGGERS = new Set([
+        "rangeSelectorButton",
+        "navigator",
+        "zoom",
+        "pan",
+        "scrollbar",
+        "rangeSelectorInput",
+      ]);
+      const primaryAxis = chart.xAxis?.[0];
+      if (primaryAxis && typeof Highcharts.addEvent === "function") {
+        Highcharts.addEvent(primaryAxis, "afterSetExtremes", (e: unknown) => {
+          const event = e as { trigger?: string; min?: number };
+          if (!event.trigger || !USER_EXTREME_TRIGGERS.has(event.trigger)) return;
+          userMinRef.current = typeof event.min === "number" ? event.min : null;
+          imposedFloorRef.current = null;
+          preFloorMinRef.current = null;
+          if (comparesRef.current.length > 0) applyCompareMode(comparesRef.current);
+        });
+      }
       // Initial High/Low marker (no-op until bars arrive; the bars effect below
       // refreshes once data populates).
       refreshHighLowAnnotation(chart, barsRef.current, colors);
@@ -400,13 +435,67 @@ export function StockChart({
   useEffect(() => onFeedStatus(setFeed), []);
 
   // ── Compare: auto-percent so series align; revert when last is removed ─────
-  function applyCompareMode(count: number): void {
+  function applyCompareMode(entries: CompareEntry[]): void {
     const chart = chartRef.current;
     if (!chart) return;
-    chart.update(
-      { plotOptions: { series: { compare: count > 0 ? "percent" : undefined } } },
-      true,
-    );
+    const count = entries.length;
+    // Percent-rebased curves must share a baseline. Highstock rebases each
+    // series at the first point IN THE VISIBLE RANGE, so a compare whose
+    // history starts after that first point would rebase on a different day.
+    // We only move the left edge FORWARD when a series actually starts inside
+    // the user's selected window — never backward to an absolute inception,
+    // which would zoom the user out just for adding a compare.
+    const update: Parameters<Chart["update"]>[0] = {
+      plotOptions: { series: { compare: count > 0 ? "percent" : undefined } },
+    };
+
+    const extremes = chart.xAxis[0]?.getExtremes();
+    const currentVisibleMin =
+      extremes && typeof extremes.min === "number" ? extremes.min : null;
+    // Decisions are made against the USER's selected view, not the current
+    // visible min — while a floor is imposed the visible min IS that floor, so
+    // using it would keep clearing/lowering incorrectly when compares change.
+    // When no floor is active, prefer the tracked user min (kept fresh on
+    // every user range change) and fall back to the current visible min.
+    const referenceMin =
+      imposedFloorRef.current !== null
+        ? preFloorMinRef.current
+        : userMinRef.current ?? currentVisibleMin;
+
+    let floor: number | null = null;
+    if (count > 0) {
+      const inceptions = [
+        barsRef.current[0]?.t,
+        ...entries.map((entry) => entry.bars[0]?.t),
+      ].filter((t): t is number => typeof t === "number");
+      const latestInception = inceptions.length > 0 ? Math.max(...inceptions) : null;
+      // Floor forward only when the latest-starting series begins after the
+      // user's view. This also correctly LOWERS the floor (rather than clearing
+      // it) when the newest of several short-history compares is removed and an
+      // earlier-but-still-late compare remains.
+      if (
+        latestInception !== null &&
+        referenceMin !== null &&
+        latestInception > referenceMin
+      ) {
+        floor = latestInception;
+      }
+    }
+
+    if (floor !== null) {
+      // Capture the pre-floor view once, so removal can restore it.
+      if (imposedFloorRef.current === null) preFloorMinRef.current = referenceMin;
+      update.xAxis = { min: floor };
+      imposedFloorRef.current = floor;
+    } else if (imposedFloorRef.current !== null) {
+      // No series starts inside the user's view anymore — restore that view
+      // instead of leaving the chart clipped to a removed compare's inception.
+      update.xAxis = { min: referenceMin };
+      imposedFloorRef.current = null;
+      preFloorMinRef.current = null;
+    }
+
+    chart.update(update, true);
   }
 
   async function addCompare(item: SymbolSearchResult): Promise<void> {
@@ -446,10 +535,11 @@ export function StockChart({
       },
       false,
     );
-    setCompares((current) =>
-      current.map((c) => (c.key === key ? { ...c, bars: loaded } : c)),
+    const nextEntries = comparesRef.current.map((c) =>
+      c.key === key ? { ...c, bars: loaded } : c,
     );
-    applyCompareMode(comparesRef.current.length);
+    setCompares(nextEntries);
+    applyCompareMode(nextEntries);
   }
 
   function removeCompare(key: string): void {
@@ -457,7 +547,7 @@ export function StockChart({
     chart?.get(`compare-${key}`)?.remove(false);
     const remaining = comparesRef.current.filter((c) => c.key !== key);
     setCompares(remaining);
-    applyCompareMode(remaining.length);
+    applyCompareMode(remaining);
   }
 
   // ── Log/Linear toggle (native GUI has none) ───────────────────────────────

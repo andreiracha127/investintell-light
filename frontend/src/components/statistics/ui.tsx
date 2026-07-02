@@ -49,21 +49,34 @@ export function RunButton({
 
 /**
  * Diverging heatmap gradient legend (−1.0 → 0 → +1.0) for a Card's `actions`
- * slot. Mirrors the diverging colorAxis the Statistics correlation matrix
- * draws: loss at −1, the chart surface at 0, accent at +1.
+ * slot. Mirrors the diverging colorAxis every correlation matrix in the app
+ * draws: blue at −1 (correlation is a neutral math signal, not a risk
+ * judgment — loss/red is reserved for actual risk calls), the chart surface
+ * at 0, accent at +1.
  */
 export function HeatmapLegend() {
   return (
     <span className="flex items-center gap-2 text-[10.5px] tabular-nums text-text-muted">
       −1.0
-      <span className="h-[9px] w-[120px] bg-[linear-gradient(90deg,var(--color-loss),var(--color-surface-3),var(--color-accent))]" />
+      <span className="h-[9px] w-[120px] bg-[linear-gradient(90deg,var(--color-chart-blue),var(--color-surface-3),var(--color-accent))]" />
       +1.0
     </span>
   );
 }
 
-/** Fail-loud error panel: renders the backend `detail` verbatim. */
-export function ErrorPanel({ title, message }: { title: string; message: string }) {
+/** Fail-loud error panel: renders the backend `detail` verbatim. An optional
+ * `onRetry` renders a Retry button so a failed query/mutation isn't a dead
+ * end (e.g. a portfolio-overview fetch that leaves Run permanently disabled
+ * with no way to recover). */
+export function ErrorPanel({
+  title,
+  message,
+  onRetry,
+}: {
+  title: string;
+  message: string;
+  onRetry?: () => void;
+}) {
   return (
     <div
       role="alert"
@@ -73,6 +86,15 @@ export function ErrorPanel({ title, message }: { title: string; message: string 
       <p className="ix-fs whitespace-pre-wrap break-words text-text-secondary">
         {message}
       </p>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-3 h-[28px] border border-accent bg-accent px-4 text-[12px] font-bold text-on-accent transition-colors hover:bg-accent-muted"
+        >
+          Retry
+        </button>
+      )}
     </div>
   );
 }

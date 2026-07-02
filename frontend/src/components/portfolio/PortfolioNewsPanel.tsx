@@ -13,22 +13,63 @@ import { useQuery } from "@tanstack/react-query";
 
 import { fetchPortfolioNews } from "@/lib/api/client";
 import { formatDate } from "@/lib/format";
+import { ErrorPanel } from "@/components/ui/panels";
 
-export function PortfolioNewsPanel({ portfolioId }: { portfolioId: number }) {
-  const { data, error } = useQuery({
+export function PortfolioNewsPanel({
+  portfolioId,
+  standalone = false,
+}: {
+  portfolioId: number;
+  /**
+   * When true, this panel is the ONLY content on the page (e.g. the "News"
+   * tab) — it must never render blank, so pending/error/empty states get
+   * explicit UI instead of the embedded default of silently disappearing.
+   */
+  standalone?: boolean;
+}) {
+  const { data, error, isPending, refetch } = useQuery({
     queryKey: ["portfolio-news", portfolioId],
     queryFn: ({ signal }) => fetchPortfolioNews(portfolioId, {}, signal),
     staleTime: 5 * 60 * 1000, // matches the backend's per-ticker staleness order of magnitude
     // Decorative panel: a failure just hides it, so retries only add latency/noise.
+    // Standalone (the News tab) still allows a manual retry via ErrorPanel.
     retry: false,
   });
 
-  // INTENTIONAL swallow — allowed ONLY here because this panel is decorative:
-  // news must never break the page (the current Tiingo plan even 403s the news
-  // endpoint). On error or zero articles the whole section is hidden (the
-  // backend already logged the failure loudly).
-  if (error || !data || data.count === 0) {
-    return null;
+  if (standalone) {
+    if (isPending) {
+      return (
+        <div
+          aria-busy="true"
+          aria-label="Loading news"
+          className="h-[240px] animate-pulse bg-surface-2"
+        />
+      );
+    }
+    if (error) {
+      return (
+        <ErrorPanel
+          title="Failed to load news"
+          message={error.message}
+          onRetry={() => refetch()}
+        />
+      );
+    }
+    if (!data || data.count === 0) {
+      return (
+        <div className="ix-pad border border-border bg-surface-2 text-center text-[13px] text-text-muted">
+          No news for these holdings.
+        </div>
+      );
+    }
+  } else {
+    // INTENTIONAL swallow — allowed ONLY here because this embedded panel is
+    // decorative: news must never break the page (the current Tiingo plan
+    // even 403s the news endpoint). On error or zero articles the whole
+    // section is hidden (the backend already logged the failure loudly).
+    if (error || !data || data.count === 0) {
+      return null;
+    }
   }
 
   return (

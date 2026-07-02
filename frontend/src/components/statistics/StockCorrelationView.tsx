@@ -101,7 +101,10 @@ function Results({
     () =>
       buildHcHeatmapOption(data, colors, {
         diverging: true,
-        negativeColor: colors.loss,
+        // Blue = negative correlation is the neutral math convention (not a
+        // risk judgment — loss/red is reserved for actual risk calls).
+        // Matches RiskTab and CorrelationRegimeView.
+        negativeColor: colors.blue,
         zeroColor: colors.surface,
       }),
     [data, colors],
@@ -254,8 +257,17 @@ function PairsTable({
           <tbody>
             {pairs.map((p, i) => {
               const positive = p.corr >= 0;
-              const barTone = positive ? "bg-accent" : "bg-loss";
-              const textTone = positive ? "text-accent" : "text-loss";
+              // Negative correlation reads as blue, not loss/red — a negative
+              // sign here is a neutral math signal (diversification), not a
+              // risk judgment. Matches the heatmap's diverging scale above.
+              const barStyle = positive
+                ? undefined
+                : { backgroundColor: "var(--color-chart-blue)" };
+              const barTone = positive ? "bg-accent" : "";
+              const textStyle = positive
+                ? undefined
+                : { color: "var(--color-chart-blue)" };
+              const textTone = positive ? "text-accent" : "";
               return (
                 <tr
                   key={`${p.a}-${p.b}`}
@@ -267,7 +279,10 @@ function PairsTable({
                   <td className="px-3 py-2 text-[12.5px] font-bold text-text-secondary">
                     {p.b}
                   </td>
-                  <td className={`px-3 py-2 text-right text-[12.5px] font-bold tabular-nums ${textTone}`}>
+                  <td
+                    className={`px-3 py-2 text-right text-[12.5px] font-bold tabular-nums ${textTone}`}
+                    style={textStyle}
+                  >
                     {formatNumber(p.corr, 3)}
                   </td>
                   <td className="px-3 py-2">
@@ -275,7 +290,10 @@ function PairsTable({
                       <span className="relative h-[6px] w-[90px] bg-layer-active">
                         <span
                           className={`absolute left-0 top-0 h-[6px] ${barTone}`}
-                          style={{ width: `${(Math.abs(p.corr) * 100).toFixed(0)}%` }}
+                          style={{
+                            width: `${(Math.abs(p.corr) * 100).toFixed(0)}%`,
+                            ...barStyle,
+                          }}
                         />
                       </span>
                       <span className="w-[64px] text-[10.5px] text-text-muted">

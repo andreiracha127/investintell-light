@@ -16,13 +16,20 @@ import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { InteractiveChart } from "@/components/charts/InteractiveChart";
 import { FundLookthroughSection } from "@/components/funds/FundLookthroughSection";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
-import { Card, InfoDot, KpiTile, StatRow } from "@/components/ui/panels";
+import {
+  Card,
+  InfoDot,
+  KpiTile,
+  PAGE_CONTAINER_CLASS,
+  StatRow,
+} from "@/components/ui/panels";
 import {
   fetchFundActiveShare,
   fetchFundAnalysis,
   fetchFundEntityAnalytics,
   fetchFundFactors,
   fetchFundHoldingsTop,
+  fetchFundInstitutionalReveal,
   fetchFundPeers,
   fetchFundProfile,
   fetchFundRiskTimeseries,
@@ -34,6 +41,7 @@ import {
   type FundEntityAnalytics,
   type FundFactors,
   type FundHoldingsTop,
+  type FundInstitutionalReveal,
   type FundPeers,
   type FundRisk,
   type FundRiskTimeseries,
@@ -44,6 +52,8 @@ import {
 import {
   buildHcFactorSensitivityOption,
   buildHcInsiderSentimentOption,
+  buildHcInstitutionalHolderOption,
+  buildHcInstitutionalOverlapOption,
   buildHcPeerBubbleOption,
   buildHcRiskSynchronizedOptions,
   buildHcStyleBiasOption,
@@ -75,7 +85,13 @@ const TYPE_TAG: Record<string, string> = {
   mmf: "Money market",
 };
 
-type TabId = "performance" | "holdings" | "style" | "factors" | "peers";
+type TabId =
+  | "performance"
+  | "holdings"
+  | "style"
+  | "factors"
+  | "peers"
+  | "institutional";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "performance", label: "Performance" },
@@ -83,6 +99,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "style", label: "Style" },
   { id: "factors", label: "Factors" },
   { id: "peers", label: "Peers" },
+  { id: "institutional", label: "Institutional" },
 ];
 
 function pct(value: number | null | undefined, dp = 2): string {
@@ -225,6 +242,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
   const isStyleTab = activeTab === "style";
   const isFactorsTab = activeTab === "factors";
   const isPeersTab = activeTab === "peers";
+  const isInstitutionalTab = activeTab === "institutional";
 
   const profileQuery = useQuery({
     queryKey: dossierQueryKeys.profile(instrumentId),
@@ -355,6 +373,14 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     retry: retryPolicy,
   });
 
+  const institutionalRevealQuery = useQuery({
+    queryKey: dossierQueryKeys.institutionalReveal(instrumentId),
+    queryFn: ({ signal }) => fetchFundInstitutionalReveal(instrumentId, signal),
+    staleTime: FUND_DOSSIER_STALE_TIME_MS["institutional-reveal"],
+    enabled: isInstitutionalTab,
+    retry: retryPolicy,
+  });
+
   const chartBars = useMemo(
     () =>
       timeseriesQuery.data
@@ -375,6 +401,25 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
   const histogramOption = useMemo(() => {
     if (!colors || !analysisQuery.data) return null;
     return buildHcHistogramOption(analysisQuery.data.histogram, colors);
+  }, [analysisQuery.data, colors]);
+
+  const rollingVolatilityOption = useMemo(() => {
+    if (!colors || !analysisQuery.data?.rolling_volatility.length) return null;
+    return buildHcRollingOption(
+      analysisQuery.data.rolling_volatility,
+      "Rolling volatility",
+      colors,
+      { yPercent: true },
+    );
+  }, [analysisQuery.data, colors]);
+
+  const rollingSharpeOption = useMemo(() => {
+    if (!colors || !analysisQuery.data?.rolling_sharpe.length) return null;
+    return buildHcRollingOption(
+      analysisQuery.data.rolling_sharpe,
+      "Rolling Sharpe",
+      colors,
+    );
   }, [analysisQuery.data, colors]);
 
   // Return distribution: fitted-normal bell with ±1σ shading and Mean / VaR-95
@@ -412,6 +457,22 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     if (!colors || !factorsQuery.data?.market_sensitivities.length) return null;
     return buildHcFactorSensitivityOption(factorsQuery.data, colors);
   }, [factorsQuery.data, colors]);
+
+  const institutionalHolderOption = useMemo(() => {
+    const reveal = institutionalRevealQuery.data;
+    if (!colors || !reveal || reveal.empty_state || reveal.top_holders.length === 0) {
+      return null;
+    }
+    return buildHcInstitutionalHolderOption(reveal, colors);
+  }, [institutionalRevealQuery.data, colors]);
+
+  const institutionalOverlapOption = useMemo(() => {
+    const reveal = institutionalRevealQuery.data;
+    if (!colors || !reveal || reveal.empty_state || reveal.overlap.length === 0) {
+      return null;
+    }
+    return buildHcInstitutionalOverlapOption(reveal, colors);
+  }, [institutionalRevealQuery.data, colors]);
 
   const styleBiasOption = useMemo(() => {
     if (!colors || !factorsQuery.data?.style_bias.length) return null;
@@ -466,7 +527,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
 
   if (profileQuery.isPending) {
     return (
-      <div className="mx-auto max-w-[1400px] px-5 py-5">
+      <div className={PAGE_CONTAINER_CLASS}>
         <div
           aria-busy="true"
           aria-label="Loading fund profile"
@@ -478,7 +539,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
 
   if (profileQuery.isError) {
     return (
-      <div className="mx-auto max-w-[1400px] px-5 py-5">
+      <div className={PAGE_CONTAINER_CLASS}>
         <ErrorPanel
           title="Failed to load fund"
           message={profileQuery.error.message}
@@ -507,7 +568,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
   );
 
   return (
-    <div className="mx-auto max-w-[1400px] px-5 py-5">
+    <div className={PAGE_CONTAINER_CLASS}>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <Link
@@ -613,6 +674,9 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
           risk={risk}
           fundType={fund.fund_type}
           assetClass={fund.asset_class}
+          rollingVolatilityOption={rollingVolatilityOption}
+          rollingSharpeOption={rollingSharpeOption}
+          monthlyReturns={analysisQuery.data?.monthly_returns ?? []}
         />
       )}
 
@@ -644,6 +708,14 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
         <PeersTab
           peersQuery={peersQuery}
           bubbleOption={peerBubbleOption}
+        />
+      )}
+
+      {activeTab === "institutional" && (
+        <InstitutionalTab
+          revealQuery={institutionalRevealQuery}
+          holderOption={institutionalHolderOption}
+          overlapOption={institutionalOverlapOption}
         />
       )}
 
@@ -685,6 +757,9 @@ function PerformanceTab({
   risk,
   fundType,
   assetClass,
+  rollingVolatilityOption,
+  rollingSharpeOption,
+  monthlyReturns,
 }: {
   chartBars: ReturnType<typeof fundTimeseriesToHistoryBars>;
   fundLabel: string;
@@ -700,6 +775,9 @@ function PerformanceTab({
   risk: FundRisk | null;
   fundType: string;
   assetClass: string | null;
+  rollingVolatilityOption: Highcharts.Options | null;
+  rollingSharpeOption: Highcharts.Options | null;
+  monthlyReturns: [string, number][];
 }) {
   const isRefreshing =
     (timeseriesQuery.isFetching && !timeseriesQuery.isPending) ||
@@ -711,7 +789,7 @@ function PerformanceTab({
         {chartBars.length > 0 ? (
           <div className="relative">
             {isRefreshing ? (
-              <span className="absolute right-2 top-2 z-10 rounded bg-surface px-2 py-0.5 text-[11px] text-text-muted">
+              <span className="absolute right-2 top-2 z-10 bg-surface px-2 py-0.5 text-[11px] text-text-muted">
                 Updating…
               </span>
             ) : null}
@@ -763,6 +841,35 @@ function PerformanceTab({
             "No risk timeseries available for this fund."
           }
         />
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          <ChartCard
+            title="Rolling volatility"
+            subtitle="annualized"
+            option={rollingVolatilityOption}
+            query={analysisQuery}
+            emptyMessage="No rolling volatility series for this window."
+          />
+          <ChartCard
+            title="Rolling Sharpe"
+            subtitle="zero risk-free rate"
+            option={rollingSharpeOption}
+            query={analysisQuery}
+            emptyMessage="No rolling Sharpe series for this window."
+          />
+        </div>
+
+        <Card title="Monthly returns">
+          {monthlyReturns.length > 0 ? (
+            <MonthlyReturnsTable data={monthlyReturns} />
+          ) : (
+            <QueryMessage
+              query={analysisQuery}
+              emptyMessage="No monthly returns for this window."
+              loadingMessage="Loading monthly returns..."
+            />
+          )}
+        </Card>
       </div>
 
       <div className="flex flex-col gap-4">
@@ -828,11 +935,152 @@ function HoldingsTab({
 }) {
   return (
     <div className="flex flex-col gap-4">
+      <Card
+        title="Top holdings"
+        subtitle={holdingsTopQuery.data?.report_date ? formatDate(holdingsTopQuery.data.report_date) : undefined}
+      >
+        {holdingsTopQuery.data ? (
+          <TopHoldingsTable data={holdingsTopQuery.data} />
+        ) : (
+          <QueryMessage
+            query={holdingsTopQuery}
+            emptyMessage="No top holdings returned for this fund."
+            loadingMessage="Loading top holdings..."
+          />
+        )}
+      </Card>
       <FundLookthroughSection
         instrumentId={instrumentId}
         holdingsTop={holdingsTopQuery.data}
       />
       <ActiveSharePanel query={activeShareQuery} />
+    </div>
+  );
+}
+
+function TopHoldingsTable({ data }: { data: FundHoldingsTop }) {
+  const holdings = data.top_holdings;
+  if (holdings.length === 0) {
+    return <EmptyMessage message="No top holdings returned." />;
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-[640px] w-full border-collapse ix-fs tabular-nums lining-nums">
+        <thead>
+          <tr className="bg-field">
+            <Th align="right">#</Th>
+            <Th>Issuer</Th>
+            <Th>Sector</Th>
+            <Th align="right">% of NAV</Th>
+            <Th align="right">Market value</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {holdings.map((holding, index) => (
+            <tr
+              key={holding.cusip ?? holding.isin ?? `${holding.rank}`}
+              className={`border-b border-border transition-colors hover:bg-accent-wash ${
+                index % 2 === 1 ? "bg-zebra" : ""
+              }`}
+            >
+              <Td align="right" className="text-text-muted">{holding.rank}</Td>
+              <Td>
+                <span className="block max-w-[280px] truncate font-bold">
+                  {holding.issuer_name ?? holding.cusip ?? holding.isin ?? "—"}
+                </span>
+                {(holding.cusip ?? holding.isin) && (
+                  <span className="block text-[10px] text-text-muted">
+                    {holding.cusip ?? holding.isin}
+                  </span>
+                )}
+              </Td>
+              <Td>{holding.sector_label ?? holding.gics_sector ?? holding.sector ?? "—"}</Td>
+              <Td align="right">
+                {holding.pct_of_nav !== null
+                  ? `${formatNumber(holding.pct_of_nav, 2)}%`
+                  : "—"}
+              </Td>
+              <Td align="right">
+                {holding.market_value !== null
+                  ? `$${formatCompact(holding.market_value)}`
+                  : "—"}
+              </Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const MONTH_LABELS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/**
+ * `monthly_returns` arrives as a flat [month_end_date, fraction] series
+ * (see FundAnalysisResponse). Reshape it into a year x month grid so it
+ * reads like a standard monthly-returns table; months without a data point
+ * (partial years) render as a dash rather than a fabricated zero.
+ */
+function MonthlyReturnsTable({ data }: { data: [string, number][] }) {
+  const byYear = new Map<number, (number | null)[]>();
+  for (const [date, value] of data) {
+    const parsed = new Date(`${date.slice(0, 10)}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime())) continue;
+    const year = parsed.getUTCFullYear();
+    const month = parsed.getUTCMonth();
+    const row = byYear.get(year) ?? new Array<number | null>(12).fill(null);
+    row[month] = value;
+    byYear.set(year, row);
+  }
+  const years = Array.from(byYear.keys()).sort((a, b) => b - a);
+
+  if (years.length === 0) {
+    return <EmptyMessage message="No monthly returns returned." />;
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-[760px] w-full border-collapse ix-fs tabular-nums lining-nums">
+        <thead>
+          <tr className="bg-field">
+            <Th align="right">Year</Th>
+            {MONTH_LABELS.map((label) => (
+              <Th key={label} align="right">{label}</Th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {years.map((year, index) => (
+            <tr
+              key={year}
+              className={`border-b border-border ${index % 2 === 1 ? "bg-zebra" : ""}`}
+            >
+              <Td align="right" className="font-bold">{year}</Td>
+              {(byYear.get(year) ?? []).map((value, month) => (
+                <Td
+                  key={month}
+                  align="right"
+                  className={
+                    value === null
+                      ? "text-text-muted"
+                      : value > 0
+                        ? "text-gain"
+                        : value < 0
+                          ? "text-loss"
+                          : ""
+                  }
+                >
+                  {value !== null ? formatPercent(value, 1, { signed: true }) : "—"}
+                </Td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -1247,6 +1495,107 @@ function SynchronizedRiskCharts({
         <QueryMessage query={query} emptyMessage={emptyMessage} />
       )}
     </Card>
+  );
+}
+
+/**
+ * Institutional tab — 13F reveal for the fund's holdings: which institutions
+ * hold the same securities (`top_holders`), and where the fund's book overlaps
+ * the most institutional money (`overlap`). Data comes straight from
+ * GET /funds/{id}/institutional-reveal; `empty_state.reason` explains gaps.
+ */
+function InstitutionalTab({
+  revealQuery,
+  holderOption,
+  overlapOption,
+}: {
+  revealQuery: UseQueryResult<FundInstitutionalReveal, Error>;
+  holderOption: Highcharts.Options | null;
+  overlapOption: Highcharts.Options | null;
+}) {
+  const reveal = revealQuery.data ?? null;
+  const emptyReason =
+    reveal?.empty_state?.reason ??
+    "No 13F institutional data matched to this fund's holdings.";
+  const asOf = reveal
+    ? [
+        reveal.period ? `13F period ${formatDate(reveal.period)}` : null,
+        reveal.holdings_report_date
+          ? `holdings ${formatDate(reveal.holdings_report_date)}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" · ") || undefined
+    : undefined;
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid items-stretch gap-px bg-border xl:grid-cols-2">
+        <ChartCard
+          title="Top institutional holders"
+          subtitle={asOf}
+          option={holderOption}
+          query={revealQuery}
+          emptyMessage={emptyReason}
+          tip="Largest 13F managers holding the securities in this fund's portfolio, ranked by reported value across matched holdings."
+          className="h-[420px]"
+        />
+        <ChartCard
+          title="Institutional overlap"
+          subtitle="by security"
+          option={overlapOption}
+          query={revealQuery}
+          emptyMessage={emptyReason}
+          tip="The fund's holdings ranked by how much 13F institutional money sits in the same securities — where the fund crowds with institutions."
+          className="h-[420px]"
+        />
+      </div>
+
+      {reveal && !reveal.empty_state && reveal.top_holders.length > 0 && (
+        <Card
+          title="Holder detail"
+          subtitle={`${reveal.top_holders.length} managers`}
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[560px] border-collapse text-[length:var(--ix-fs)] tabular-nums">
+              <thead>
+                <tr>
+                  <Th>Manager</Th>
+                  <Th align="right">Reported value</Th>
+                  <Th align="right">Shares</Th>
+                  <Th align="right">Matched holdings</Th>
+                  <Th align="right">Report date</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {reveal.top_holders.map((holder, i) => (
+                  <tr
+                    key={holder.cik}
+                    className={`border-b border-border last:border-b-0 ${
+                      i % 2 === 1 ? "bg-zebra" : ""
+                    }`}
+                  >
+                    <Td className="font-bold text-text-primary">
+                      {holder.manager_name}
+                    </Td>
+                    <Td align="right">{money(holder.value_usd)}</Td>
+                    <Td align="right">
+                      {holder.shares !== null && holder.shares !== undefined
+                        ? formatCompact(holder.shares)
+                        : "--"}
+                    </Td>
+                    <Td align="right">{String(holder.holding_count)}</Td>
+                    <Td align="right" className="text-text-secondary">
+                      {holder.report_date ? formatDate(holder.report_date) : "--"}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+    </div>
   );
 }
 

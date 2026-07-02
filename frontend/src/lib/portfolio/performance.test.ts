@@ -3,8 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   pricePointsFromLine,
   pricePointsFromOhlc,
-  periodContributions,
-  periodTotal,
   reconstructNav,
   toMs,
   type HoldingSeries,
@@ -143,24 +141,5 @@ describe("reconstructNav", () => {
       [D2, 110],
       [D3, 150],
     ]);
-  });
-});
-
-describe("periodContributions / periodTotal", () => {
-  it("computes qty·(end−start) per holding and a matching total", () => {
-    const contribs = periodContributions(HOLDINGS, D2, D3);
-    expect(contribs).toEqual([
-      { ticker: "AAA", name: "Alpha", value: 100, ret: 120 / 110 - 1 },
-      { ticker: "BBB", name: "Beta", value: 50, ret: 60 / 50 - 1 },
-    ]);
-    // Σ contributions == NAV(D3) − NAV(D2) == 2500 − 2350.
-    expect(periodTotal(contribs)).toBe(150);
-  });
-
-  it("uses the first price when the period start precedes a holding's history", () => {
-    const contribs = periodContributions(HOLDINGS, D1, D3);
-    // BBB has no point at D1 → start price falls back to its first (50).
-    const bbb = contribs.find((c) => c.ticker === "BBB");
-    expect(bbb?.value).toBe(50); // 5·(60−50)
   });
 });

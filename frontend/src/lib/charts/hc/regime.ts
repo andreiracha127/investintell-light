@@ -48,6 +48,48 @@ function normalizeSeries(points: DatePoint[]): Array<[number, number]> {
 }
 
 /**
+ * Clip both series to their first SHARED observation so "Indexed to 100"
+ * curves rebase (and drawdowns peak-track) from the same day. Clipping to the
+ * later inception alone is not enough: `normalizeSeries`/`drawdownSeries`
+ * rebase at each series' own first remaining point, so when calendars differ
+ * (a fund missing a holiday the portfolio NAV has) the two could still start
+ * on different dates. We instead find the first date present in BOTH series
+ * and start both there. No-op when either series is empty; falls back to the
+ * later inception when the two never share a date.
+ */
+function clipToCommonStart(
+  a: DatePoint[],
+  b: DatePoint[],
+): [DatePoint[], DatePoint[]] {
+  const firstValid = (points: DatePoint[]): number | null => {
+    const hit = points.find(([, value]) => Number.isFinite(value) && value > 0);
+    return hit ? dateToUtcMs(hit[0]) : null;
+  };
+  const firstA = firstValid(a);
+  const firstB = firstValid(b);
+  if (firstA === null || firstB === null) return [a, b];
+  const start = Math.max(firstA, firstB);
+
+  const bDates = new Set(
+    b.filter(([, value]) => Number.isFinite(value)).map(([date]) => dateToUtcMs(date)),
+  );
+  let shared: number | null = null;
+  for (const [date, value] of a) {
+    if (!Number.isFinite(value)) continue;
+    const ms = dateToUtcMs(date);
+    if (ms >= start && bDates.has(ms)) {
+      shared = ms;
+      break;
+    }
+  }
+  const from = shared ?? start;
+  return [
+    a.filter(([date]) => dateToUtcMs(date) >= from),
+    b.filter(([date]) => dateToUtcMs(date) >= from),
+  ];
+}
+
+/**
  * Running drawdown from each prior peak, expressed as a non-positive percent
  * (0% at every new high). Mirrors the prototype's `drawdown` helper.
  */
@@ -128,8 +170,11 @@ export function buildHcMacroPerformanceOption({
 }): Options | null {
   const isDrawdown = view === "drawdown";
   const project = isDrawdown ? drawdownSeries : normalizeSeries;
-  const portfolioData = project(portfolio);
-  const assetData = project(asset);
+  // Same start date for both curves — rebasing (and peak-tracking) must begin
+  // on the same day for the two series to be comparable.
+  const [portfolioAligned, assetAligned] = clipToCommonStart(portfolio, asset);
+  const portfolioData = project(portfolioAligned);
+  const assetData = project(assetAligned);
   const allTimes = [...portfolioData, ...assetData].map(([time]) => time);
   if (allTimes.length === 0) return null;
   const minX = Math.min(...allTimes);

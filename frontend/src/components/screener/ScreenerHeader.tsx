@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { createScreen, deleteScreen, patchScreen, type ScreenListItem } from "@/lib/api/client";
 import { BUTTON_CLASS, BUTTON_PRIMARY_CLASS, INPUT_CLASS } from "@/components/screener/shared";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { formatCompact } from "@/lib/format";
 
 type SaveStatus = "idle" | "saving" | "error";
@@ -32,6 +33,9 @@ export function ScreenerHeader({
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [draftCreateName, setDraftCreateName] = useState("");
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -51,13 +55,14 @@ export function ScreenerHeader({
   });
   const createMutation = useMutation({
     mutationFn: (name: string) => createScreen({ name }),
-    onSuccess: (screen) => { invalidateList(); queryClient.setQueryData(["screen", screen.id], screen); setMenuOpen(false); onSelect(screen.id); },
+    onSuccess: (screen) => { invalidateList(); queryClient.setQueryData(["screen", screen.id], screen); setCreating(false); setMenuOpen(false); onSelect(screen.id); },
   });
   const deleteMutation = useMutation({
     mutationFn: (id: number) => deleteScreen(id),
     onSuccess: (_r, id) => {
       invalidateList();
       for (const key of [["screen", id], ["screen-build", id], ["screen-results", id]]) queryClient.removeQueries({ queryKey: key });
+      setConfirmDeleteOpen(false);
       setMenuOpen(false);
       onSelect(null);
     },
@@ -103,13 +108,22 @@ export function ScreenerHeader({
                 ))}
               </ul>
               <div className="flex flex-col border-t border-border p-1 text-[12px]">
-                <button type="button" onClick={() => { const name = window.prompt("New screen name"); if (name?.trim()) createMutation.mutate(name.trim()); }}
-                  className="px-2 py-1 text-left text-text-secondary hover:bg-layer-hover">+ New screen</button>
+                {creating ? (
+                  <input autoFocus value={draftCreateName} onChange={(e) => setDraftCreateName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && draftCreateName.trim()) createMutation.mutate(draftCreateName.trim());
+                      else if (e.key === "Escape") setCreating(false);
+                    }} onBlur={() => setCreating(false)} placeholder="Screen name"
+                    aria-label="New screen name" className={`m-0.5 ${INPUT_CLASS}`} />
+                ) : (
+                  <button type="button" onClick={() => { setDraftCreateName(""); setCreating(true); }}
+                    className="px-2 py-1 text-left text-text-secondary hover:bg-layer-hover">+ New screen</button>
+                )}
                 {selected && (
                   <>
                     <button type="button" onClick={() => { setDraftName(selected.name); setRenaming(true); setMenuOpen(false); }}
                       className="px-2 py-1 text-left text-text-secondary hover:bg-layer-hover">Rename</button>
-                    <button type="button" onClick={() => { if (window.confirm(`Delete screen "${selected.name}"?`)) deleteMutation.mutate(selected.id); }}
+                    <button type="button" onClick={() => { setConfirmDeleteOpen(true); setMenuOpen(false); }}
                       className="px-2 py-1 text-left text-loss hover:bg-layer-hover">Delete</button>
                   </>
                 )}
@@ -142,6 +156,18 @@ export function ScreenerHeader({
       </div>
       {mutationError && (
         <p role="alert" className="mx-auto max-w-[1360px] px-[var(--ix-pad)] pb-2 text-[12px] text-loss">{mutationError.message}</p>
+      )}
+      {confirmDeleteOpen && selected && (
+        <ConfirmDialog
+          title="Delete screen"
+          message={`Delete screen "${selected.name}"? This can't be undone.`}
+          confirmLabel="Delete screen"
+          cancelLabel="Cancel"
+          destructive
+          pending={deleteMutation.isPending}
+          onConfirm={() => deleteMutation.mutate(selected.id)}
+          onCancel={() => setConfirmDeleteOpen(false)}
+        />
       )}
     </header>
   );

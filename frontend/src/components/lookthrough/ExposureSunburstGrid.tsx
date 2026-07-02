@@ -6,7 +6,12 @@ import type { Grid } from "@highcharts/grid-pro";
 
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { DataGrid } from "@/components/ui/DataGrid";
-import { buildHcExposureSunburstOption, assetClassLabel } from "@/lib/charts/hc/sunburst";
+import {
+  buildHcExposureSunburstOption,
+  assetClassLabel,
+  computeAssetResiduals,
+  type AssetResidual,
+} from "@/lib/charts/hc/sunburst";
 import type { ChartColors } from "@/lib/charts/chartColors";
 import type { ExposureItem, PortfolioLookthrough } from "@/lib/api/client";
 import {
@@ -55,7 +60,43 @@ function rowFromNode(node: ExposureNode, assetItems: ExposureItem[]): ExposureGr
   };
 }
 
-function tableParentId(tree: ExposureNode[], activeId: string): string {
+function residualRow(residual: AssetResidual): ExposureGridRow {
+  return {
+    id: residual.id,
+    label: "Other holdings",
+    kind: "Beyond top-25 sample",
+    pct: residual.valuePct,
+  };
+}
+
+/**
+ * Table rows for the children of `parentId`: the real tree children plus any
+ * synthetic "Other holdings" residual hanging under it, sorted by weight so the
+ * table matches the sunburst and the header total equals the asset's true NAV
+ * share.
+ */
+function tableRowsFor(
+  tree: ExposureNode[],
+  residuals: AssetResidual[],
+  assetItems: ExposureItem[],
+  parentId: string,
+): ExposureGridRow[] {
+  const rows = childrenOf(tree, parentId).map((node) => rowFromNode(node, assetItems));
+  for (const residual of residuals) {
+    if (residual.parentId === parentId) rows.push(residualRow(residual));
+  }
+  return rows.sort((a, b) => b.pct - a.pct);
+}
+
+function tableParentId(
+  tree: ExposureNode[],
+  residuals: AssetResidual[],
+  activeId: string,
+): string {
+  // A focused residual leaf has no children of its own — show its siblings by
+  // treating its parent asset class as the active level.
+  const residual = residuals.find((item) => item.id === activeId);
+  if (residual) return residual.parentId;
   const activeChildren = childrenOf(tree, activeId);
   if (activeChildren.length > 0) return activeId;
   const activeNode = tree.find((node) => node.id === activeId);
@@ -84,10 +125,18 @@ export function ExposureSunburstGrid({
   const detachGridHoverRef = useRef<(() => void) | null>(null);
   const [activeId, setActiveId] = useState<string>(ROOT_ID);
 
+  const residuals = useMemo(
+    () => computeAssetResiduals(tree, assetItems),
+    [tree, assetItems],
+  );
+
   useEffect(() => {
     if (activeId === ROOT_ID) return;
-    if (!tree.some((node) => node.id === activeId)) setActiveId(ROOT_ID);
-  }, [activeId, tree]);
+    const known =
+      tree.some((node) => node.id === activeId) ||
+      residuals.some((residual) => residual.id === activeId);
+    if (!known) setActiveId(ROOT_ID);
+  }, [activeId, tree, residuals]);
 
   const onPointFocus = useCallback((id: string) => {
     setActiveId(id);
@@ -104,10 +153,10 @@ export function ExposureSunburstGrid({
     [activeId, assetItems, colors, onPointFocus, rootName, tree],
   );
 
-  const activeParentId = tableParentId(tree, activeId);
+  const activeParentId = tableParentId(tree, residuals, activeId);
   const tableRows = useMemo(
-    () => childrenOf(tree, activeParentId).map((node) => rowFromNode(node, assetItems)),
-    [activeParentId, assetItems, tree],
+    () => tableRowsFor(tree, residuals, assetItems, activeParentId),
+    [activeParentId, assetItems, residuals, tree],
   );
   const gridOptions = useMemo(
     () => exposureGridOptions(tableRows, activeId),

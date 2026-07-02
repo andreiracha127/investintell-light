@@ -258,20 +258,35 @@ const BROAD_OBJECTIVES: readonly BuilderObjective[] = [
 ];
 
 /** Objectives selectable in the current mode. Broad-universe mode keeps only the
- * covariance-based objectives (see BROAD_OBJECTIVES); ranked mode keeps all. */
-export function objectivesForBroad(broad: boolean): typeof OBJECTIVES {
-  return broad
-    ? OBJECTIVES.filter((o) => BROAD_OBJECTIVES.includes(o.value))
-    : OBJECTIVES;
+ * covariance-based objectives (see BROAD_OBJECTIVES); ranked mode keeps all
+ * EXCEPT bl_utility when views are unavailable (`viewsAvailable = false`) —
+ * "Follow my views" needs an explicit asset list to attach views to, which the
+ * fund-universe path (ranked or broad) never has, so selecting it there would
+ * silently fall back to the market-weight baseline. Defaults to `true` so
+ * existing simulate-mode (basket) callers are unaffected. */
+export function objectivesForBroad(
+  broad: boolean,
+  viewsAvailable = true,
+): typeof OBJECTIVES {
+  return OBJECTIVES.filter(
+    (o) =>
+      (!broad || BROAD_OBJECTIVES.includes(o.value)) &&
+      (viewsAvailable || o.value !== "bl_utility"),
+  );
 }
 
-/** Steer a now-unavailable objective to the covariance default (min_vol). In
- * broad mode any non-covariance objective (min_cvar / max_return_cvar /
- * bl_utility) becomes min_vol; covariance objectives and all of ranked mode are
- * left untouched. */
+/** Steer a now-unavailable objective to a valid default. In broad mode any
+ * non-covariance objective (min_cvar / max_return_cvar / bl_utility) becomes
+ * min_vol. In any mode without views available, bl_utility (which needs views
+ * to do anything but return the baseline) falls back to the builder's overall
+ * default, max_return_cvar. Covariance objectives and simulate-mode bl_utility
+ * are left untouched. */
 export function resolveObjectiveForBroad(
   objective: BuilderObjective,
   broad: boolean,
+  viewsAvailable = true,
 ): BuilderObjective {
-  return broad && !BROAD_OBJECTIVES.includes(objective) ? "min_vol" : objective;
+  if (broad && !BROAD_OBJECTIVES.includes(objective)) return "min_vol";
+  if (!viewsAvailable && objective === "bl_utility") return "max_return_cvar";
+  return objective;
 }

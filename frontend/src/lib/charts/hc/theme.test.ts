@@ -14,8 +14,8 @@ describe("highchartsTheme", () => {
     expect(t.chart?.borderRadius).toBe(0);
     expect(t.tooltip?.shadow).toBe(false);
     expect(t.tooltip?.backgroundColor).toBe(TEST_COLORS.surface);
-    // Flat Carbon language: 2px tooltip, square bars/columns/series.
-    expect(t.tooltip?.borderRadius).toBe(2);
+    // Flat Carbon language: square tooltip, bars/columns/series.
+    expect(t.tooltip?.borderRadius).toBe(0);
     expect(t.plotOptions?.column?.borderRadius).toBe(0);
     expect(t.plotOptions?.bar?.borderRadius).toBe(0);
     expect(

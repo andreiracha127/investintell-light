@@ -14,14 +14,10 @@ import {
   type PortfolioNav as PortfolioNavResponse,
 } from "@/lib/api/client";
 import { dateToUtcMs } from "@/lib/charts/hc/dateAxis";
-import type {
-  HoldingSeries,
-  NavReconstruction,
-} from "@/lib/portfolio/performance";
+import type { NavReconstruction } from "@/lib/portfolio/performance";
 import { retryPolicy } from "@/components/screener/shared";
 
 export interface PortfolioNav {
-  holdings: HoldingSeries[];
   recon: NavReconstruction;
   response: PortfolioNavResponse | null;
   isLoading: boolean;
@@ -73,7 +69,6 @@ export function usePortfolioNav(portfolioId: number | null | undefined): Portfol
   );
 
   return {
-    holdings: [],
     recon,
     response: query.data ?? null,
     isLoading: query.isPending,

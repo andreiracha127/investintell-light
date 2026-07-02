@@ -6,7 +6,7 @@ import type { XAxisOptions } from "highcharts";
 
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { ErrorPanel } from "@/components/screener/shared";
-import { KpiTile } from "@/components/ui/panels";
+import { InfoDot, KpiTile } from "@/components/ui/panels";
 import {
   postBacktestWalkForward,
   type BuilderObjective,
@@ -18,11 +18,13 @@ import type { ChartColors } from "@/lib/charts/chartColors";
 import { dateToUtcMs } from "@/lib/charts/hc/dateAxis";
 import {
   buildHcFoldMetricsOption,
+  foldPeriods,
   type FoldMetricKey,
 } from "@/lib/charts/hc/foldMetrics";
 import { buildHcNavOption } from "@/lib/charts/hc/nav";
-import { formatNumber, formatPercent } from "@/lib/format";
+import { formatDate, formatNumber, formatPercent } from "@/lib/format";
 
+import { OBJECTIVE_COPY } from "./BuilderCopy";
 import { ChartCard, TabSkeleton, type UsedConstraints } from "./tabShared";
 
 const BACKTESTABLE: ReadonlySet<BuilderObjective> = new Set<BuilderObjective>([
@@ -92,9 +94,13 @@ export function BacktestTab({
   return (
     <div className="flex flex-col gap-px">
       {downgraded && (
-        <p className="ix-fs m-0 border-l-[3px] border-border-strong bg-surface-2 px-3 py-2 text-text-secondary">
+        <p className="ix-fs m-0 flex items-center gap-1.5 border-l-[3px] border-border-strong bg-surface-2 px-3 py-2 text-text-secondary">
           Backtest objective adjusted to{" "}
-          <span className="font-bold text-text-primary">min_cvar</span>.
+          <span className="font-bold text-text-primary">
+            {OBJECTIVE_COPY[backtestObjective].label}
+          </span>
+          .
+          <InfoDot tip={`"${OBJECTIVE_COPY[objective].label}" needs your market views, but a walk-forward backtest re-optimizes on each fold's own training window — views entered once aren't reproducible fold by fold, so this objective can't be backtested as-is.`} />
         </p>
       )}
 
@@ -126,9 +132,19 @@ function BacktestBody({
     () => data.fold_boundaries ?? [],
     [data.fold_boundaries],
   );
+  // Real test windows per fold (fold_boundaries + last OOS date).
+  const periods = useMemo(() => foldPeriods(data), [data]);
+  const periodByFold = useMemo(
+    () => new Map(periods.map((period) => [period.fold, period])),
+    [periods],
+  );
+  const oosSpan =
+    periods.length > 0
+      ? `${periods.length} test periods · ${formatDate(periods[0].start)} → ${formatDate(periods[periods.length - 1].end)}`
+      : "test periods";
 
   const foldOption = colors
-    ? buildHcFoldMetricsOption(data.folds, metric, colors)
+    ? buildHcFoldMetricsOption(data.folds, periods, metric, colors)
     : null;
 
   const oosOption = useMemo(() => {
@@ -179,7 +195,7 @@ function BacktestBody({
 
       <ChartCard
         title="Return path by test period"
-        subtitle="periods"
+        subtitle={oosSpan}
         actions={
           <div className="flex items-stretch border border-border-strong">
             {(
@@ -209,8 +225,8 @@ function BacktestBody({
           <HighchartsChart
             options={foldOption}
             className="h-[300px] w-full"
-            isEmpty={data.folds.length === 0}
-            emptyMessage="No folds computed - not enough history for the splits."
+            isEmpty={data.folds.length === 0 || periods.length === 0}
+            emptyMessage="No test periods computed - not enough history for the splits."
           />
         ) : (
           <p className="py-8 text-center text-[13px] text-text-muted">
@@ -222,7 +238,7 @@ function BacktestBody({
           <table className="w-full min-w-[640px] border-collapse ix-fs tabular-nums lining-nums">
             <thead>
               <tr className="bg-zebra">
-                <Th align="left">Period</Th>
+                <Th align="left">Test period</Th>
                 <Th align="right">Sharpe</Th>
                 <Th align="right">Worst-case loss</Th>
                 <Th align="right">Max drawdown</Th>
@@ -238,8 +254,15 @@ function BacktestBody({
                     index % 2 === 1 ? "bg-zebra" : ""
                   }`}
                 >
-                  <td className="ix-cell px-2.5 first:pl-[var(--ix-pad)] font-bold text-accent">
-                    Period {fold.fold}
+                  <td className="ix-cell whitespace-nowrap px-2.5 first:pl-[var(--ix-pad)]">
+                    <span className="font-bold text-accent">
+                      {periodByFold.has(fold.fold)
+                        ? `${formatDate(periodByFold.get(fold.fold)!.start)} → ${formatDate(periodByFold.get(fold.fold)!.end)}`
+                        : `Period ${fold.fold}`}
+                    </span>
+                    <span className="block text-[10.5px] text-text-muted">
+                      #{fold.fold} · trained on {fold.train_size}d
+                    </span>
                   </td>
                   <td className="ix-cell px-2.5 text-right">
                     {formatNumber(fold.sharpe)}

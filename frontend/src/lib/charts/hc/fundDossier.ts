@@ -13,7 +13,6 @@ import type {
   FundPeers,
   FundRiskTimeseries,
   FundStyleDrift,
-  FundsScatter,
 } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
 import {
@@ -634,9 +633,9 @@ export function buildHcInstitutionalHolderOption(
       {
         type: "bar",
         name: "13F value",
-        data: holders.map((holder, index) => ({
+        data: holders.map((holder) => ({
           y: holder.value_usd ?? 0,
-          color: categoryColor(colors, index),
+          color: colors.bar,
         })),
         borderWidth: 0,
       },
@@ -680,62 +679,11 @@ export function buildHcInstitutionalOverlapOption(
       {
         type: "column",
         name: "Institutional value",
-        data: rows.map((row, index) => ({
+        data: rows.map((row) => ({
           y: row.institutional_value_usd ?? 0,
-          color: categoryColor(colors, index),
+          color: colors.bar,
         })),
         borderWidth: 0,
-      },
-    ],
-  };
-}
-
-export function buildHcFundsScatterOption(
-  scatter: FundsScatter,
-  colors: ChartColors,
-): Options {
-  return {
-    chart: { type: "scatter" },
-    xAxis: {
-      title: { text: "Volatility 1Y" },
-      labels: {
-        formatter() {
-          return formatPercent(this.value as number, 1);
-        },
-      },
-    },
-    yAxis: {
-      title: { text: "Return 1Y" },
-      labels: {
-        formatter() {
-          return formatPercent(this.value as number, 1);
-        },
-      },
-    },
-    tooltip: {
-      formatter(this: Point) {
-        const index = this.index;
-        const name = scatter.names[index] ?? "Fund";
-        const tail = scatter.tail_risks[index];
-        return (
-          `${name}<br/>` +
-          `Return: <b>${formatPercent(this.y as number, 2, { signed: true })}</b><br/>` +
-          `Vol: <b>${formatPercent(this.x as number, 2)}</b><br/>` +
-          `CVaR: <b>${tail != null ? formatPercent(tail, 2) : "—"}</b>`
-        );
-      },
-    },
-    series: [
-      {
-        type: "scatter",
-        name: "Funds",
-        data: scatter.instrument_ids.map((id, index) => ({
-          id,
-          x: scatter.volatilities[index],
-          y: scatter.expected_returns[index],
-          color: categoryColor(colors, index),
-        })),
-        marker: { radius: 4 },
       },
     ],
   };
@@ -816,7 +764,7 @@ export function buildHcPeerBubbleOption(
       {
         type: "bubble",
         name: "Peers",
-        data: rows.map((peer, index) => ({
+        data: rows.map((peer) => ({
           id: peer.instrument_id,
           name: peer.ticker ?? peer.name,
           x: peer.volatility_1y ?? 0,
@@ -824,9 +772,9 @@ export function buildHcPeerBubbleOption(
           z: Math.max(Math.abs(peer.return_1y ?? 0), 0.002) * 100,
           color: peer.is_target
             ? colors.accent
-            : peer.return_1y != null && peer.return_1y < 0
+            : (peer.return_1y ?? 0) < 0
               ? colors.loss
-              : categoryColor(colors, index),
+              : colors.gain,
         })),
       },
     ],

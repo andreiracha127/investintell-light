@@ -49,6 +49,10 @@ export function IndexStrip({ indices }: { indices: IndexCard[] }) {
         const tone = chg > 0 ? "text-gain" : chg < 0 ? "text-loss" : "text-neutral-value";
         const sparkColor =
           chg > 0 ? "var(--color-gain)" : chg < 0 ? "var(--color-loss)" : "var(--color-neutral-value)";
+        // One-shot flash on each tick (keyed remount re-triggers the
+        // animation); resolves to the static tone — same pattern as LeadersTable.
+        const flash =
+          live?.dir === 1 ? "ix-flash text-gain" : live?.dir === -1 ? "ix-flash text-loss" : "text-text-primary";
         return (
           <div key={ix.ticker} className="ix-pad flex items-center justify-between gap-3 bg-surface-2">
             <div>
@@ -57,7 +61,7 @@ export function IndexStrip({ indices }: { indices: IndexCard[] }) {
               </div>
               <div className="mt-px text-[10px] text-text-muted">Day change</div>
               <div className="mt-1 flex items-baseline gap-2 tabular-nums">
-                <span className="text-[18px] font-bold text-text-primary">
+                <span key={last} className={`inline-block px-0.5 text-[18px] font-bold ${flash}`}>
                   {formatCurrency(last)}
                 </span>
                 <span className={`text-[12px] font-bold ${tone}`}>

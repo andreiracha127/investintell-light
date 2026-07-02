@@ -19,10 +19,19 @@ import {
 } from "@/lib/api/client";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { SymbolSearchInput } from "@/components/charts/SymbolSearchInput";
+import { FiscalExplorerPanel } from "@/components/macro/FiscalExplorerPanel";
+import { GlobalIndicatorsPanel } from "@/components/macro/GlobalIndicatorsPanel";
+import { RegionalScorecardsPanel } from "@/components/macro/RegionalScorecardsPanel";
 import { usePortfolioNav } from "@/components/portfolio/usePortfolioNav";
 import { PortfolioSelect } from "@/components/statistics/PortfolioSelect";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
-import { InfoDot, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
+import {
+  InfoDot,
+  KpiTile,
+  PAGE_CONTAINER_CLASS,
+  PageTitle,
+  valueTone,
+} from "@/components/ui/panels";
 import {
   buildHcMacroPerformanceOption,
   type MacroPerformanceView,
@@ -554,6 +563,15 @@ export function MacroRegimeView() {
           )
         }
       />
+
+      {/* ── Global conditions ── */}
+      <GlobalIndicatorsPanel />
+
+      {/* ── Regional scorecards ── */}
+      <RegionalScorecardsPanel />
+
+      {/* ── US fiscal data explorer ── */}
+      <FiscalExplorerPanel />
     </MacroShell>
   );
 }
@@ -702,7 +720,7 @@ function RegimeTimeline({ data, range }: { data: MacroRegime; range: RangePreset
             Risk-on
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <span className="h-[11px] w-[13px] bg-loss" />
+            <span className="h-[11px] w-[13px] border border-loss bg-loss-muted" />
             Risk-off
           </span>
         </div>
@@ -715,7 +733,7 @@ function RegimeTimeline({ data, range }: { data: MacroRegime; range: RangePreset
             <div
               key={`${seg.start}-${i}`}
               title={`${on ? "Risk-on" : "Risk-off"} · ${formatDate(seg.start)} → ${formatDate(seg.end)} · ${daysBetween(seg.start, seg.end)} days`}
-              className={`h-full transition-[filter] hover:brightness-95 ${on ? "bg-gain-muted" : "bg-loss"}`}
+              className={`h-full transition-[filter] hover:brightness-95 ${on ? "bg-gain-muted" : "bg-loss-muted"}`}
               style={{ flex: `0 0 ${width}%` }}
             />
           );
@@ -963,6 +981,6 @@ function EmptyState({ onRetry }: { onRetry: () => void }) {
 
 function MacroShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mx-auto max-w-[1360px] px-[clamp(14px,3vw,28px)] pb-10 pt-5">{children}</div>
+    <div className={PAGE_CONTAINER_CLASS}>{children}</div>
   );
 }

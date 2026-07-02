@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import type { FoldMetrics } from "@/lib/api/client";
+import type { FoldMetrics, WalkForwardResponse } from "@/lib/api/client";
 import { TEST_COLORS } from "@/lib/charts/hc/__fixtures__/colors";
-import { buildHcFoldMetricsOption } from "@/lib/charts/hc/foldMetrics";
-import { formatNumber, formatPercent } from "@/lib/format";
+import { dateToUtcMs } from "@/lib/charts/hc/dateAxis";
+import {
+  buildHcFoldMetricsOption,
+  foldPeriods,
+  type FoldPeriod,
+} from "@/lib/charts/hc/foldMetrics";
+import { formatDate, formatNumber, formatPercent } from "@/lib/format";
 
 const FOLDS: FoldMetrics[] = [
   {
@@ -30,43 +35,132 @@ const FOLDS: FoldMetrics[] = [
   },
 ];
 
-function seriesData(metric: "net_return" | "sharpe") {
-  const option = buildHcFoldMetricsOption(FOLDS, metric, TEST_COLORS);
-  const series = option.series?.[0] as {
-    data?: Array<{ y: number; color: string }>;
+const PERIODS: FoldPeriod[] = [
+  { fold: 1, start: "2024-01-02", end: "2024-04-01" },
+  { fold: 2, start: "2024-04-01", end: "2024-07-15" },
+];
+
+function response(overrides: Partial<WalkForwardResponse> = {}): WalkForwardResponse {
+  return {
+    folds: FOLDS,
+    params: {
+      objective: "min_cvar",
+      n_obs: 500,
+      n_splits_computed: 2,
+      gap: 2,
+      test_size: 63,
+      min_train_size: 252,
+      cost_bps: 10,
+    },
+    mean_sharpe: 0.45,
+    std_sharpe: 0.75,
+    positive_folds: 1,
+    mean_turnover: 0.15,
+    // Chronological OOS curve with an intermediate date inside fold 1's window
+    // (before the fold-2 boundary 2024-04-01) so the fold-1 end is derived, not
+    // borrowed from the next boundary.
+    oos_curve: [
+      ["2024-01-02", 1],
+      ["2024-03-28", 1.02],
+      ["2024-04-01", 1.03],
+      ["2024-07-15", 1.05],
+    ],
+    fold_boundaries: ["2024-01-02", "2024-04-01"],
+    ...overrides,
   };
-  return series.data ?? [];
 }
 
-describe("buildHcFoldMetricsOption", () => {
-  it("labels categories F1..Fn and maps one value per fold", () => {
-    const option = buildHcFoldMetricsOption(FOLDS, "net_return", TEST_COLORS);
-
-    expect((option.xAxis as { categories?: string[] }).categories).toEqual([
-      "F1",
-      "F2",
-    ]);
-    expect(seriesData("net_return").map((point) => point.y)).toEqual([
-      0.04,
-      -0.03,
+describe("foldPeriods", () => {
+  it("ends each fold before the next boundary, not on it", () => {
+    // Fold 1 ends on the last OOS date < 2024-04-01 (the fold-2 boundary),
+    // i.e. 2024-03-28 — NOT 2024-04-01, which is fold 2's first OOS day.
+    // Fold 2 (final) ends on the last OOS date.
+    expect(foldPeriods(response())).toEqual([
+      { fold: 1, start: "2024-01-02", end: "2024-03-28" },
+      { fold: 2, start: "2024-04-01", end: "2024-07-15" },
     ]);
   });
 
-  it("tints negative columns with the loss token", () => {
-    const data = seriesData("net_return");
+  it("falls back to the fold start when no OOS date precedes the next boundary", () => {
+    const periods = foldPeriods(
+      response({
+        oos_curve: [
+          ["2024-01-02", 1],
+          ["2024-04-01", 1.03],
+        ],
+      }),
+    );
+    // No curve date strictly before 2024-04-01 except the start itself.
+    expect(periods[0]).toEqual({ fold: 1, start: "2024-01-02", end: "2024-01-02" });
+  });
 
-    expect(data[0]?.color).toBe(TEST_COLORS.bar);
-    expect(data[1]?.color).toBe(TEST_COLORS.loss);
+  it("returns empty when boundaries are missing or disagree with the fold count", () => {
+    expect(foldPeriods(response({ fold_boundaries: [] }))).toEqual([]);
+    expect(foldPeriods(response({ fold_boundaries: ["2024-01-02"] }))).toEqual([]);
+  });
+});
+
+describe("buildHcFoldMetricsOption", () => {
+  function option(metric: "net_return" | "sharpe" = "net_return") {
+    return buildHcFoldMetricsOption(FOLDS, PERIODS, metric, TEST_COLORS);
+  }
+
+  function points(metric: "net_return" | "sharpe" = "net_return") {
+    const series = option(metric).series?.[0] as {
+      data?: Array<{ x: number; y: number; custom: { fold: number } }>;
+    };
+    return series.data ?? [];
+  }
+
+  it("uses a datetime axis with a step segment per fold (start + end points)", () => {
+    expect((option().xAxis as { type?: string }).type).toBe("datetime");
+    const data = points();
+    expect(data).toHaveLength(4);
+    expect(data[0]).toMatchObject({ x: dateToUtcMs("2024-01-02"), y: 0.04 });
+    expect(data[1]).toMatchObject({ x: dateToUtcMs("2024-04-01"), y: 0.04 });
+    expect(data[2]).toMatchObject({ x: dateToUtcMs("2024-04-01"), y: -0.03 });
+    expect(data[3]).toMatchObject({ x: dateToUtcMs("2024-07-15"), y: -0.03 });
+  });
+
+  it("renders a left-step line with loss-toned zone below zero", () => {
+    const series = option().series?.[0] as {
+      type?: string;
+      step?: string;
+      zones?: Array<{ value?: number; color?: string }>;
+    };
+    expect(series.type).toBe("line");
+    expect(series.step).toBe("left");
+    expect(series.zones?.[0]).toMatchObject({ value: 0, color: TEST_COLORS.loss });
+  });
+
+  it("marks each fold start with an x-axis plot line", () => {
+    const xAxis = option().xAxis as { plotLines?: Array<{ value?: number }> };
+    expect(xAxis.plotLines?.map((line) => line.value)).toEqual([
+      dateToUtcMs("2024-01-02"),
+      dateToUtcMs("2024-04-01"),
+    ]);
+  });
+
+  it("tooltip names the test period and shows its real date window", () => {
+    const tooltip = option().tooltip as {
+      formatter?: (this: {
+        y: number;
+        point: { custom?: { fold: number; start: string; end: string } };
+      }) => string;
+    };
+    const out = tooltip.formatter!.call({
+      y: 0.04,
+      point: { custom: { fold: 1, start: "2024-01-02", end: "2024-04-01" } },
+    });
+    expect(out).toContain("Test period 1");
+    expect(out).toContain(formatDate("2024-01-02"));
+    expect(out).toContain(formatDate("2024-04-01"));
+    expect(out).toContain(formatPercent(0.04, 1, { signed: true }));
   });
 
   it("formats net_return y-axis labels as percent and sharpe as numbers", () => {
-    const percentOption = buildHcFoldMetricsOption(
-      FOLDS,
-      "net_return",
-      TEST_COLORS,
-    );
     const percentLabels = (
-      percentOption.yAxis as {
+      option("net_return").yAxis as {
         labels?: { formatter?: (this: { value: number }) => string };
       }
     ).labels;
@@ -74,14 +168,21 @@ describe("buildHcFoldMetricsOption", () => {
       formatPercent(0.05, 0),
     );
 
-    const sharpeOption = buildHcFoldMetricsOption(FOLDS, "sharpe", TEST_COLORS);
     const sharpeLabels = (
-      sharpeOption.yAxis as {
+      option("sharpe").yAxis as {
         labels?: { formatter?: (this: { value: number }) => string };
       }
     ).labels;
-    expect(sharpeLabels?.formatter?.call({ value: 1.5 })).toBe(
-      formatNumber(1.5, 1),
-    );
+    expect(sharpeLabels?.formatter?.call({ value: 1.5 })).toBe(formatNumber(1.5, 1));
+  });
+
+  it("skips folds without a derived period instead of inventing dates", () => {
+    const series = buildHcFoldMetricsOption(
+      FOLDS,
+      [PERIODS[0]],
+      "net_return",
+      TEST_COLORS,
+    ).series?.[0] as { data?: unknown[] };
+    expect(series.data).toHaveLength(2);
   });
 });

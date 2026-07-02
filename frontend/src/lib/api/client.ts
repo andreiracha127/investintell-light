@@ -73,6 +73,10 @@ type FundLookthroughOperation =
 type PortfolioLookthroughOperation =
   paths["/portfolios/{portfolio_id}/lookthrough"]["get"];
 type MacroRegimeOperation = paths["/macro/regime"]["get"];
+type MacroRegionalOperation = paths["/macro/regional"]["get"];
+type MacroGlobalIndicatorsOperation = paths["/macro/global-indicators"]["get"];
+type MacroFiscalOperation = paths["/macro/fiscal"]["get"];
+type CorrelationRegimeOperation = paths["/correlation-regime"]["post"];
 type RebalancePolicyOperation =
   paths["/portfolios/{portfolio_id}/rebalance/policy"]["get"];
 type RebalancePreviewOperation =
@@ -293,8 +297,30 @@ export type MacroRegime =
   MacroRegimeOperation["responses"]["200"]["content"]["application/json"];
 export type RegimeSignal = components["schemas"]["RegimeSignalOut"];
 export type RegimeFlip = components["schemas"]["RegimeFlipOut"];
+export type MacroRegional =
+  MacroRegionalOperation["responses"]["200"]["content"]["application/json"];
+export type RegionScorecard = components["schemas"]["RegionScorecardOut"];
+export type RegionDimension = components["schemas"]["DimensionOut"];
+export type RegionDataFreshness = components["schemas"]["DataFreshnessOut"];
+export type GlobalIndicators =
+  MacroGlobalIndicatorsOperation["responses"]["200"]["content"]["application/json"];
+export type MacroFiscal =
+  MacroFiscalOperation["responses"]["200"]["content"]["application/json"];
+export type FiscalSeries = MacroFiscal["series"][number];
+export type FiscalCategory = NonNullable<
+  NonNullable<MacroFiscalOperation["parameters"]["query"]>["category"]
+>;
+export type CorrelationRegimeRequest =
+  CorrelationRegimeOperation["requestBody"]["content"]["application/json"];
+export type CorrelationRegimeResponse =
+  CorrelationRegimeOperation["responses"]["200"]["content"]["application/json"];
+export type PairCorrelation = CorrelationRegimeResponse["pair_correlations"][number];
 export type RebalancePolicy =
   RebalancePolicyOperation["responses"]["200"]["content"]["application/json"];
+export type RebalancePolicyPut = NonNullable<
+  paths["/portfolios/{portfolio_id}/rebalance/policy"]["put"]["requestBody"]
+>["content"]["application/json"];
+export type RebalanceFrequency = RebalancePolicy["frequency"];
 export type RebalancePreview =
   RebalancePreviewOperation["responses"]["200"]["content"]["application/json"];
 export type PositionDrift = components["schemas"]["PositionDriftOut"];
@@ -494,7 +520,7 @@ async function request<T>(
     if (err instanceof DOMException && err.name === "AbortError") {
       // Distinguish a timeout from a caller-triggered abort (e.g. unmount).
       if (timeoutSignal.aborted) {
-        throw new Error("Request timed out — is the backend running?");
+        throw new Error("The data service took too long to respond. Check your connection and retry.");
       }
       throw new Error("Request cancelled");
     }
@@ -540,7 +566,7 @@ async function requestSameOrigin<T>(
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       if (timeoutSignal.aborted) {
-        throw new Error("Request timed out — is the backend running?");
+        throw new Error("The data service took too long to respond. Check your connection and retry.");
       }
       throw new Error("Request cancelled");
     }
@@ -1391,6 +1417,43 @@ export function fetchMacroRegime(signal?: AbortSignal): Promise<MacroRegime> {
   return requestPublic<MacroRegime>("/macro/regime", signal);
 }
 
+/** Latest regional macro scorecards (composite + dimensions + freshness). */
+export function fetchMacroRegional(signal?: AbortSignal): Promise<MacroRegional> {
+  return requestPublic<MacroRegional>("/macro/regional", signal);
+}
+
+/** Global macro risk indicators (0-100 scores, mixed polarity by field). */
+export function fetchMacroGlobalIndicators(
+  signal?: AbortSignal,
+): Promise<GlobalIndicators> {
+  return requestPublic<GlobalIndicators>("/macro/global-indicators", signal);
+}
+
+/** Treasury fiscal series for one category over the lookback window (≤3650d). */
+export function fetchMacroFiscal(
+  query: { category?: FiscalCategory; lookback_days?: number } = {},
+  signal?: AbortSignal,
+): Promise<MacroFiscal> {
+  const params = new URLSearchParams();
+  if (query.category !== undefined) params.set("category", query.category);
+  if (query.lookback_days !== undefined) {
+    params.set("lookback_days", String(query.lookback_days));
+  }
+  const qs = params.toString();
+  return requestPublic<MacroFiscal>(`/macro/fiscal${qs ? `?${qs}` : ""}`, signal);
+}
+
+/** Correlation-regime read (matrix, concentration, diversification, shift flag). */
+export function postCorrelationRegime(
+  body: CorrelationRegimeRequest,
+  signal?: AbortSignal,
+): Promise<CorrelationRegimeResponse> {
+  return request<CorrelationRegimeResponse>("/correlation-regime", signal, {
+    method: "POST",
+    json: body,
+  });
+}
+
 /** Fetch the rebalance policy (bands and frequency) for a portfolio. */
 export function fetchRebalancePolicy(
   portfolioId: number,
@@ -1399,6 +1462,19 @@ export function fetchRebalancePolicy(
   return request<RebalancePolicy>(
     `/portfolios/${portfolioId}/rebalance/policy`,
     signal,
+  );
+}
+
+/** Save the rebalance policy (bands, frequency, macro trigger). */
+export function putRebalancePolicy(
+  portfolioId: number,
+  body: RebalancePolicyPut,
+  signal?: AbortSignal,
+): Promise<RebalancePolicy> {
+  return request<RebalancePolicy>(
+    `/portfolios/${portfolioId}/rebalance/policy`,
+    signal,
+    { method: "PUT", json: body },
   );
 }
 

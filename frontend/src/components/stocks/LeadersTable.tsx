@@ -48,8 +48,24 @@ const COLUMNS: {
 const NUMERIC_KEYS = new Set<SortKey>(["last", "change", "change_pct", "volume"]);
 const PAGE = 20;
 
+/**
+ * Company display name. Names already delivered in mixed case ("JPMorgan
+ * Chase & Co") pass through untouched — naive title-casing corrupts embedded
+ * capitals and acronyms. Only ALL-CAPS feeds are softened to title case, and
+ * short tokens (likely acronyms: "AT&T", "IBM", "ETF") keep their capitals.
+ */
 function formatCompanyName(name: string | null | undefined): string {
-  return (name ?? "").toLowerCase().replace(/\b([\p{L}\p{N}])/gu, (char) => char.toUpperCase());
+  const raw = (name ?? "").trim();
+  if (!raw || raw !== raw.toUpperCase()) return raw;
+  return raw
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) =>
+      word.replace(/[^\p{L}\p{N}]/gu, "").length <= 3
+        ? word.toUpperCase()
+        : word.charAt(0).toUpperCase() + word.slice(1),
+    )
+    .join(" ");
 }
 
 function compareRows(a: LeaderRow, b: LeaderRow, key: SortKey, dir: "asc" | "desc"): number {
@@ -224,8 +240,10 @@ export function LeadersTable({ overview }: { overview: MarketOverview }) {
                   const change = live ? last - r.last : r.change;
                   const changePct = live && r.last > 0 ? last / r.last - 1 : r.change_pct;
                   const tone = change > 0 ? "text-gain" : change < 0 ? "text-loss" : "text-neutral-value";
+                  // One-shot flash on each tick (keyed remount re-triggers the
+                  // animation); resolves to the static tone — never a pulse.
                   const flash =
-                    live?.dir === 1 ? "animate-pulse text-gain" : live?.dir === -1 ? "animate-pulse text-loss" : "";
+                    live?.dir === 1 ? "ix-flash text-gain" : live?.dir === -1 ? "ix-flash text-loss" : "";
                   return (
                     <tr
                       key={r.ticker}
@@ -238,8 +256,10 @@ export function LeadersTable({ overview }: { overview: MarketOverview }) {
                       <td className="max-w-[240px] truncate px-3 py-1.5 text-text-secondary">
                         {formatCompanyName(r.name)}
                       </td>
-                      <td className={`px-3 py-1.5 text-right font-bold text-text-primary ${flash}`}>
-                        {formatCurrency(last)}
+                      <td className="px-3 py-1.5 text-right font-bold text-text-primary">
+                        <span key={last} className={`inline-block px-0.5 ${flash}`}>
+                          {formatCurrency(last)}
+                        </span>
                       </td>
                       <td className={`px-3 py-1.5 text-right ${tone}`}>
                         {formatCurrency(change, { signed: true })}

@@ -79,6 +79,62 @@ function topAssetId(
   return current.id;
 }
 
+/** Suffix marking the synthetic residual leaf id under an asset-class node. */
+export const OTHER_HOLDINGS_SUFFIX = "|__other__";
+
+/** A residual leaf is at/below this % of NAV — too small to bother drawing. */
+const OTHER_HOLDINGS_EPSILON = 0.005;
+
+/** One synthetic "Other holdings" residual per asset class. */
+export interface AssetResidual {
+  /** Point id, `${assetNodeId}|__other__`. */
+  id: string;
+  /** The asset-class node this residual hangs under. */
+  parentId: string;
+  /** Residual % of NAV = true asset total − sampled top-N leaves. */
+  valuePct: number;
+}
+
+/**
+ * The tree carries only a sampled subset of holdings per asset class (e.g. the
+ * top-25 largest positions), while `assetItems` holds the TRUE dimension
+ * totals. This computes the per-asset-class residual (`total − Σ sampled
+ * leaves`) so both the sunburst arc AND the drill table can render an identical
+ * "Other holdings" node — keeping the chart, the table rows and the header
+ * total in agreement. Residuals at/below the epsilon are omitted.
+ */
+export function computeAssetResiduals(
+  tree: PortfolioLookthrough["tree"],
+  assetItems: ExposureItem[],
+): AssetResidual[] {
+  const byId = new Map(tree.map((node) => [node.id, node]));
+  const leaves = leafIds(tree);
+  const assetNodes = tree.filter((node) => !node.parent_id);
+  const assetTotals = new Map(
+    assetItems.map((item) => [item.key.trim().toUpperCase(), item.total_pct]),
+  );
+  const leafSumByAsset = new Map<string, number>();
+  for (const node of tree) {
+    if (!leaves.has(node.id)) continue;
+    const topId = topAssetId(node, byId);
+    leafSumByAsset.set(topId, (leafSumByAsset.get(topId) ?? 0) + node.value_pct);
+  }
+  const residuals: AssetResidual[] = [];
+  for (const node of assetNodes) {
+    const total = assetTotals.get(node.key.trim().toUpperCase());
+    if (total === undefined) continue;
+    const sampled = leafSumByAsset.get(node.id) ?? 0;
+    const residual = round4(Math.max(0, total - sampled));
+    if (residual <= OTHER_HOLDINGS_EPSILON) continue;
+    residuals.push({
+      id: `${node.id}${OTHER_HOLDINGS_SUFFIX}`,
+      parentId: node.id,
+      valuePct: residual,
+    });
+  }
+  return residuals;
+}
+
 export function buildHcExposureSunburstOption(
   tree: PortfolioLookthrough["tree"],
   assetItems: ExposureItem[],
@@ -100,6 +156,30 @@ export function buildHcExposureSunburstOption(
       { total: item.total_pct, label: assetClassLabel(item.key, item.label) },
     ]),
   );
+
+  // The tree only carries a sampled subset of holdings per asset class (e.g.
+  // the top-25 largest positions), but `assetTotals` above holds the true
+  // dimension totals. Left alone, each asset-class arc would only be sized by
+  // the sampled leaves it contains, disagreeing with the true total shown in
+  // its own tooltip and in the exposure table. A synthetic "Other holdings"
+  // residual leaf per asset class closes the gap so the arc sums to the true
+  // total — computed by the shared helper so the drill table renders the
+  // identical node (see ExposureSunburstGrid).
+  const residualData: PointOptionsObject[] = computeAssetResiduals(
+    tree,
+    assetItems,
+  ).map((residual) => ({
+    id: residual.id,
+    parent: residual.parentId,
+    name: "Other holdings",
+    value: residual.valuePct,
+    color: colors.barMute,
+    custom: {
+      rawKey: byId.get(residual.parentId)?.key ?? "",
+      kind: "other_holdings",
+      valuePct: residual.valuePct,
+    },
+  }));
 
   const data: PointOptionsObject[] = [
     {
@@ -132,6 +212,7 @@ export function buildHcExposureSunburstOption(
         },
       };
     }),
+    ...residualData,
   ];
 
   return {
@@ -155,10 +236,13 @@ export function buildHcExposureSunburstOption(
           }
         ).point;
         const value = point.options.custom?.valuePct ?? 0;
+        const note = point.options.custom?.kind === "other_holdings"
+          ? `<br/><span style="color:${colors.textMuted}">Holdings beyond the top-25 sample</span>`
+          : "";
         return `<div style="font-size:12px"><b>${point.name}</b><br/>${formatNumber(
           value,
           2,
-        )}${opts.valueLabel ?? "% of NAV"}</div>`;
+        )}${opts.valueLabel ?? "% of NAV"}${note}</div>`;
       },
     },
     plotOptions: {

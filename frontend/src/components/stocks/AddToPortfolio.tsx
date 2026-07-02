@@ -64,6 +64,11 @@ export function AddToPortfolio({
       : null;
   const canAddAmount = amountOk && previewSpot != null && !priceBad;
 
+  const qtyVal = Number(qty);
+  const qtyOk = Number.isFinite(qtyVal) && qtyVal > 0;
+  const qtyBad = qty.trim() !== "" && !qtyOk;
+  const canAddShares = qtyOk;
+
   const add = useMutation({
     mutationFn: async ({ portfolioId }: { portfolioId: number }) => {
       // Read the target portfolio's current holding, then accumulate onto it.
@@ -78,8 +83,10 @@ export function AddToPortfolio({
         : null;
 
       if (mode === "shares") {
-        const q = Number(qty);
-        const addedQty = Number.isFinite(q) && q > 0 ? q : 1;
+        // Portfolio buttons are disabled while the field is invalid (see
+        // `canAddShares`), so a valid quantity is guaranteed here — no silent
+        // fallback to a default lot size.
+        const addedQty = qtyVal;
         // The new lot is bought at the current price (when known); empty → the
         // prior average cost is kept.
         const lotPrice = price != null && price > 0 ? price : null;
@@ -124,7 +131,8 @@ export function AddToPortfolio({
         ? "Enter a price"
         : `≈ ${formatNumber(amountVal / previewSpot, 4)} sh at ${formatCurrency(previewSpot)}`
     : "";
-  const portfolioDisabled = add.isPending || (isAmount && !canAddAmount);
+  const portfolioDisabled =
+    add.isPending || (isAmount ? !canAddAmount : !canAddShares);
 
   return (
     <div ref={rootRef} className="relative inline-block">
@@ -219,7 +227,10 @@ export function AddToPortfolio({
                 value={qty}
                 onChange={(e) => setQty(e.target.value)}
                 inputMode="decimal"
-                className="h-6 w-20 border border-border-strong bg-field px-1.5 tabular-nums text-text-primary"
+                aria-invalid={qtyBad}
+                className={`h-6 w-20 border bg-field px-1.5 tabular-nums text-text-primary ${
+                  qtyBad ? "border-loss" : "border-border-strong"
+                }`}
               />
             </label>
           )}

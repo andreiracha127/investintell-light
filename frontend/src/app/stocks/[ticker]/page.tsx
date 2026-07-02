@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import {
   dehydrate,
   HydrationBoundary,
@@ -12,6 +13,16 @@ import {
   STOCK_DATA_STALE_TIME_MS,
   stockQueryKeys,
 } from "@/lib/stocks/queries";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ ticker: string }>;
+}): Promise<Metadata> {
+  const { ticker } = await params;
+  const symbol = decodeURIComponent(ticker).toUpperCase();
+  return { title: `${symbol} · Investintell Cockpit` };
+}
 
 export default async function StockAnalysisPage({
   params,

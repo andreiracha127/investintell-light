@@ -4,8 +4,8 @@
  * Stocks → Holders tab. Two complementary views, toggled:
  *  - "By manager" (13F): every institutional holder with ownership %.
  *  - "By fund" (N-PORT): registered funds grouped Family → Fund (tree).
- * Below, a network graph (added next). The frontend computes no finance — every
- * number comes from the backend payloads.
+ * The frontend computes no finance — every number comes from the backend
+ * payloads.
  */
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
@@ -64,13 +64,6 @@ export function HoldersTab({ ticker }: { ticker: string }) {
       ) : (
         <FundView ticker={ticker} />
       )}
-
-      {/* ── Holder network graph (added in the next step) ── */}
-      <Card title="Holder Network">
-        <div className="flex h-[440px] items-center justify-center text-sm text-text-muted">
-          Network graph — coming in the next step.
-        </div>
-      </Card>
     </div>
   );
 }

@@ -26,7 +26,7 @@ import {
   type PortfolioOverview,
 } from "@/lib/api/client";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
-import { InfoDot } from "@/components/ui/panels";
+import { InfoDot, PAGE_CONTAINER_CLASS } from "@/components/ui/panels";
 import { ErrorPanel } from "@/components/screener/shared";
 
 import {
@@ -75,8 +75,6 @@ const MANDATES: { value: Mandate; label: string }[] = [
 ];
 
 const DEFAULT_MANDATE: Mandate = "moderate";
-
-const AS_OF = "Jun 18, 2026";
 
 /** Parse a non-empty numeric input; invalid/blank -> null. */
 function parseNum(text: string): number | null {
@@ -278,13 +276,17 @@ export function BuilderView() {
 
   const objectiveCopy = OBJECTIVE_COPY[objective];
   const broadUniverse = mode === "universe" && universeDraft.broadUniverse;
-  const visibleObjectives = objectivesForBroad(broadUniverse);
-  // Entering broad mode while a mu-based objective is selected silently resets
-  // it to the mu-free default (the dropdown also hides it). Functional update
-  // keeps `objective` out of the dependency list.
+  // Market views only exist in Simulate (basket) mode — the fund-universe path
+  // (ranked or broad) has no explicit asset list to attach a view to, so
+  // "Follow my views" (bl_utility) must not be selectable there either.
+  const viewsAvailable = mode === "simulate";
+  const visibleObjectives = objectivesForBroad(broadUniverse, viewsAvailable);
+  // Entering broad mode (or leaving Simulate) while a now-unavailable objective
+  // is selected silently resets it (the dropdown also hides it). Functional
+  // update keeps `objective` out of the dependency list.
   useEffect(() => {
-    setObjective((o) => resolveObjectiveForBroad(o, broadUniverse));
-  }, [broadUniverse]);
+    setObjective((o) => resolveObjectiveForBroad(o, broadUniverse, viewsAvailable));
+  }, [broadUniverse, viewsAvailable]);
 
   const submittedRequest = mutation.variables;
   const resultObjective = submittedRequest?.objective ?? objective;
@@ -329,7 +331,7 @@ export function BuilderView() {
       : null;
 
   return (
-    <div className="mx-auto max-w-[1400px] px-5 py-5">
+    <div className={PAGE_CONTAINER_CLASS}>
       {/* ── Workspace header ──────────────────────────────────────────── */}
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3.5">
         <div>
@@ -340,7 +342,7 @@ export function BuilderView() {
         </div>
       </div>
 
-      {/* ── Mode toggle + estimation chip ─────────────────────────────── */}
+      {/* ── Mode toggle ──────────────────────────────────────────────── */}
       <div className="mb-3.5 flex flex-wrap items-center gap-3.5">
         <div
           role="tablist"
@@ -364,10 +366,6 @@ export function BuilderView() {
             </button>
           ))}
         </div>
-        <span className="inline-flex items-center gap-1.5 border border-border bg-field px-2.5 py-1 text-[11px] text-text-muted">
-          <span>Data</span>{" "}
-          · {AS_OF}
-        </span>
       </div>
 
       <div className="flex flex-col gap-3.5">

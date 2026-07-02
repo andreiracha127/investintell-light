@@ -72,9 +72,52 @@ describe("objective gating for broad mode", () => {
     // Covariance objectives are left untouched in broad mode.
     expect(resolveObjectiveForBroad("erc", true)).toBe("erc");
     expect(resolveObjectiveForBroad("equal_weight", true)).toBe("equal_weight");
-    // Ranked mode never rewrites the objective.
+    // Ranked mode never rewrites the objective (viewsAvailable defaults true).
     expect(resolveObjectiveForBroad("min_cvar", false)).toBe("min_cvar");
     expect(resolveObjectiveForBroad("bl_utility", false)).toBe("bl_utility");
+  });
+});
+
+describe("objective gating for views availability (fund-universe modes)", () => {
+  it("ranked mode without views drops ONLY bl_utility — every other objective stays, including scenario ones", () => {
+    const values = objectivesForBroad(false, false).map((o) => o.value);
+    expect(values).not.toContain("bl_utility");
+    expect(values).toContain("min_cvar");
+    expect(values).toContain("max_return_cvar");
+    expect(values).toContain("min_vol");
+    expect(values).toContain("erc");
+    expect(values).toContain("max_diversification");
+    expect(values).toContain("equal_weight");
+  });
+
+  it("ranked mode with views available (simulate/basket) keeps bl_utility", () => {
+    const values = objectivesForBroad(false, true).map((o) => o.value);
+    expect(values).toContain("bl_utility");
+  });
+
+  it("broad mode drops bl_utility regardless of viewsAvailable (already covariance-gated)", () => {
+    expect(objectivesForBroad(true, true).map((o) => o.value)).not.toContain(
+      "bl_utility",
+    );
+    expect(objectivesForBroad(true, false).map((o) => o.value)).not.toContain(
+      "bl_utility",
+    );
+  });
+
+  it("resolveObjectiveForBroad steers bl_utility to max_return_cvar when views are unavailable", () => {
+    expect(resolveObjectiveForBroad("bl_utility", false, false)).toBe(
+      "max_return_cvar",
+    );
+    // Broad mode's min_vol steer takes precedence (still not selectable).
+    expect(resolveObjectiveForBroad("bl_utility", true, false)).toBe("min_vol");
+    // Views available (simulate/basket): bl_utility is left untouched.
+    expect(resolveObjectiveForBroad("bl_utility", false, true)).toBe(
+      "bl_utility",
+    );
+    // Non-bl_utility objectives are untouched by the views gate.
+    expect(resolveObjectiveForBroad("min_cvar", false, false)).toBe(
+      "min_cvar",
+    );
   });
 });
 

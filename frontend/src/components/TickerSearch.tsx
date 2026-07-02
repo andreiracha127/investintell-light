@@ -1,27 +1,81 @@
 "use client";
 
+/**
+ * Global header search — typeahead over GET /search/symbols (debounce 250ms,
+ * ↑/↓/Enter/Esc keyboard navigation, click-outside closes). Routes by kind:
+ * stocks → /stocks/{ticker}; catalogued funds (ETF / mutual fund / MMF) →
+ * /funds/{instrument_id}. Enter with no highlighted suggestion falls back to
+ * treating the raw text as a stock ticker.
+ */
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
-/** Header search: type a ticker + Enter to navigate to /stocks/{TICKER}.
- *  Acts as a "go to ticker" command — no autocomplete (a full symbol search
- *  lives in SymbolSearchInput on detail pages). */
+import { fetchSymbolSearch, type SymbolSearchResult } from "@/lib/api/client";
+
+const KIND_LABEL: Record<string, string> = {
+  stock: "Stock",
+  etf: "ETF",
+  mutual_fund: "Mutual fund",
+  mmf: "MMF",
+};
+
+function targetHref(item: SymbolSearchResult): string {
+  if (item.instrument_id) {
+    return `/funds/${encodeURIComponent(item.instrument_id)}`;
+  }
+  return `/stocks/${encodeURIComponent(item.symbol.toUpperCase())}`;
+}
+
 export function TickerSearch() {
   const router = useRouter();
-  const [value, setValue] = useState("");
+  const [text, setText] = useState("");
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(-1);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
+
+  // Debounce keystrokes into the query the API sees.
+  useEffect(() => {
+    const t = setTimeout(() => setQ(text.trim()), 250);
+    return () => clearTimeout(t);
+  }, [text]);
+
+  const { data: results = [] } = useQuery({
+    queryKey: ["symbol-search", q],
+    queryFn: ({ signal }) => fetchSymbolSearch(q, signal),
+    enabled: q.length >= 1,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // `results` belong to the debounced query `q`, which lags `text` by 250ms.
+  // Only treat them as valid for navigation/display when they match exactly
+  // what's typed — this hides stale suggestions during the debounce window so
+  // neither a click nor an Enter can route to the previous query's hit.
+  const trimmedText = text.trim();
+  const resultsCurrent = q === trimmedText;
+  const showResults = open && results.length > 0 && resultsCurrent;
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const go = (item: SymbolSearchResult) => {
+    router.push(targetHref(item));
+    setText("");
+    setQ("");
+    setOpen(false);
+    setHi(-1);
+  };
 
   return (
-    <form
-      role="search"
-      className="relative min-w-0 flex-1"
-      onSubmit={(event) => {
-        event.preventDefault();
-        const ticker = value.trim().toUpperCase();
-        if (!ticker) return;
-        router.push(`/stocks/${encodeURIComponent(ticker)}`);
-        setValue("");
-      }}
-    >
+    <div ref={rootRef} role="search" className="relative min-w-0 flex-1">
       <svg
         width="14"
         height="14"
@@ -35,14 +89,83 @@ export function TickerSearch() {
       </svg>
       <input
         type="text"
-        value={value}
-        onChange={(event) => setValue(event.target.value)}
-        placeholder="Go to ticker…"
-        aria-label="Go to ticker"
+        value={text}
+        onChange={(event) => {
+          setText(event.target.value);
+          setOpen(true);
+          setHi(-1);
+        }}
+        onFocus={() => text && setOpen(true)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setHi((i) => Math.min(i + 1, results.length - 1));
+          } else if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setHi((i) => Math.max(i - 1, -1));
+          } else if (event.key === "Enter") {
+            event.preventDefault();
+            // Only act on suggestions when they belong to the current input
+            // (see `resultsCurrent`); otherwise treat the raw text as a ticker
+            // so a fast Enter never routes to a stale suggestion.
+            if (hi >= 0 && results[hi] && resultsCurrent) {
+              go(results[hi]);
+            } else if (results.length > 0 && open && resultsCurrent) {
+              go(results[0]);
+            } else if (trimmedText) {
+              go({
+                symbol: trimmedText.toUpperCase(),
+                name: null,
+                kind: "stock",
+                instrument_id: null,
+              });
+            }
+          } else if (event.key === "Escape") {
+            setOpen(false);
+            setHi(-1);
+          }
+        }}
+        placeholder="Search stocks & funds…"
+        aria-label="Search stocks and funds"
+        aria-expanded={showResults}
+        aria-autocomplete="list"
+        aria-controls={listId}
+        role="combobox"
         autoComplete="off"
         spellCheck={false}
-        className="h-9 w-full max-w-[440px] border-0 border-b border-border-strong bg-field pl-[34px] pr-3 text-[13px] uppercase text-text-primary outline-none placeholder:text-text-muted placeholder:normal-case focus:border-b-2 focus:border-accent"
+        className="h-9 w-full max-w-[440px] border-0 border-b border-border-strong bg-field pl-[34px] pr-3 text-[13px] text-text-primary outline-none placeholder:text-text-muted focus:border-b-2 focus:border-accent"
       />
-    </form>
+      {showResults && (
+        <ul
+          id={listId}
+          role="listbox"
+          aria-label="Symbol suggestions"
+          className="absolute left-0 top-full z-[70] mt-1 max-h-[320px] w-full max-w-[440px] overflow-auto border border-border-strong bg-surface-1 shadow-lg"
+        >
+          {results.map((r, i) => (
+            <li key={`${r.kind}:${r.symbol}:${r.instrument_id ?? ""}`} role="option" aria-selected={i === hi}>
+              <button
+                type="button"
+                onMouseEnter={() => setHi(i)}
+                onClick={() => go(r)}
+                className={`flex w-full items-baseline gap-2.5 px-3 py-2 text-left text-[12.5px] ${
+                  i === hi ? "bg-layer-hover" : ""
+                }`}
+              >
+                <span className="w-[52px] shrink-0 font-bold tabular-nums text-accent">
+                  {r.symbol}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-text-secondary">
+                  {r.name}
+                </span>
+                <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.06em] text-text-muted">
+                  {KIND_LABEL[r.kind] ?? r.kind}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

@@ -5,6 +5,7 @@ import {
   render,
   screen as dom,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -152,14 +153,16 @@ describe("ScreenerHeader", () => {
     expect(onSelect).toHaveBeenCalledWith(2);
   });
 
-  it("4. new: prompt → createScreen(name); on resolve onSelect(created id)", async () => {
+  it("4. new: inline name input → createScreen(name); on resolve onSelect(created id)", async () => {
     const user = userEvent.setup();
-    vi.spyOn(window, "prompt").mockReturnValue("New X");
     mocked.createScreen.mockResolvedValue(makeScreen(7, "New X"));
     const { onSelect } = renderHeader();
 
     await user.click(dom.getByRole("button", { name: /Tech growth/ }));
     await user.click(dom.getByRole("button", { name: "+ New screen" }));
+
+    const input = dom.getByRole("textbox", { name: "New screen name" });
+    await user.type(input, "New X{Enter}");
 
     expect(mocked.createScreen).toHaveBeenCalledWith({ name: "New X" });
     await waitFor(() => expect(onSelect).toHaveBeenCalledWith(7));
@@ -182,17 +185,33 @@ describe("ScreenerHeader", () => {
     );
   });
 
-  it("6. delete: confirm → deleteScreen(id); on resolve onSelect(null)", async () => {
+  it("6. delete: styled confirm dialog → deleteScreen(id); on resolve onSelect(null)", async () => {
     const user = userEvent.setup();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     mocked.deleteScreen.mockResolvedValue(undefined);
     const { onSelect } = renderHeader();
 
     await user.click(dom.getByRole("button", { name: /Tech growth/ }));
     await user.click(dom.getByRole("button", { name: "Delete" }));
 
+    const dialog = dom.getByRole("alertdialog", { name: "Delete screen" });
+    await user.click(within(dialog).getByRole("button", { name: "Delete screen" }));
+
     expect(mocked.deleteScreen).toHaveBeenCalledWith(1);
     await waitFor(() => expect(onSelect).toHaveBeenCalledWith(null));
+  });
+
+  it("6b. delete: Cancel in the confirm dialog leaves the screen intact", async () => {
+    const user = userEvent.setup();
+    renderHeader();
+
+    await user.click(dom.getByRole("button", { name: /Tech growth/ }));
+    await user.click(dom.getByRole("button", { name: "Delete" }));
+
+    const dialog = dom.getByRole("alertdialog", { name: "Delete screen" });
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect(dom.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(mocked.deleteScreen).not.toHaveBeenCalled();
   });
 
   it("7a. reset: calls onReset; disabled when nothing selected", async () => {

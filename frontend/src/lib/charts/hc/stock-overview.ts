@@ -68,7 +68,12 @@ export function buildHcSectorPerformanceOption(
       ],
       plotLines: [{ value: 0, color: colors.textMuted, width: 1, zIndex: 4 }],
       labels: {
-        enabled: false,
+        enabled: true,
+        formatter() {
+          const value = this.value as number;
+          return signedPercentLabel(value, 0);
+        },
+        style: { color: colors.textMuted, fontSize: "10px" },
       },
     },
     tooltip: {
@@ -245,7 +250,10 @@ function buildHcTwoSidedForceOption({
       ],
       plotLines: [{ value: 0, color: colors.textMuted, width: 1, zIndex: 4 }],
       labels: {
-        enabled: false,
+        enabled: true,
+        formatter() {
+          return formatPercent(Math.abs(this.value as number), 0);
+        },
         style: { color: colors.textMuted, fontSize: "10px" },
       },
     },
@@ -267,9 +275,14 @@ function buildHcTwoSidedForceOption({
         dataLabels: {
           enabled: true,
           inside: true,
+          // Always render the value — small segments used to return "" below
+          // an 8% threshold, silently dropping the label. `overflow`/`crop`
+          // let Highcharts draw a label wider than its (possibly tiny) bar
+          // instead of clipping it.
+          overflow: "allow",
+          crop: false,
           formatter() {
-            const y = this.y as number | null;
-            return y && Math.abs(y) >= 0.08 ? formatPercent(Math.abs(y), 0) : "";
+            return formatPercent(Math.abs(this.y as number), 0);
           },
           style: {
             color: colors.textOnAccent,
