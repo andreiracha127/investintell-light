@@ -103,7 +103,7 @@ export function TickerSearch() {
             // are for exactly what's typed — otherwise treat the raw text as a
             // ticker so a fast Enter never routes to a stale suggestion.
             const resultsCurrent = q === trimmed;
-            if (hi >= 0 && results[hi]) {
+            if (hi >= 0 && results[hi] && resultsCurrent) {
               go(results[hi]);
             } else if (results.length > 0 && open && resultsCurrent) {
               go(results[0]);

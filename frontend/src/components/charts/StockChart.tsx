@@ -240,6 +240,13 @@ export function StockChart({
   const comparesRef = useRef<CompareEntry[]>(compares);
   comparesRef.current = compares;
 
+  // Compare-mode x-axis floor bookkeeping: the floor we imposed (if any) and
+  // the visible min we saw before imposing it, so removal can restore the
+  // user's prior view instead of leaving the chart clipped to a removed
+  // compare's inception.
+  const imposedFloorRef = useRef<number | null>(null);
+  const preFloorMinRef = useRef<number | null>(null);
+
   const [feed, setFeed] = useState<FeedStatus>("off");
 
   // ── Create the chart ONCE ────────────────────────────────────────────────
@@ -415,23 +422,41 @@ export function StockChart({
     const update: Parameters<Chart["update"]>[0] = {
       plotOptions: { series: { compare: count > 0 ? "percent" : undefined } },
     };
+
+    const extremes = chart.xAxis[0]?.getExtremes();
+    const visibleMin =
+      extremes && typeof extremes.min === "number" ? extremes.min : null;
+
+    let floor: number | null = null;
     if (count > 0) {
       const inceptions = [
         barsRef.current[0]?.t,
         ...entries.map((entry) => entry.bars[0]?.t),
       ].filter((t): t is number => typeof t === "number");
       const latestInception = inceptions.length > 0 ? Math.max(...inceptions) : null;
-      const extremes = chart.xAxis[0]?.getExtremes();
-      const visibleMin =
-        extremes && typeof extremes.min === "number" ? extremes.min : null;
       if (
         latestInception !== null &&
         visibleMin !== null &&
         latestInception > visibleMin
       ) {
-        update.xAxis = { min: latestInception };
+        floor = latestInception;
       }
     }
+
+    if (floor !== null) {
+      // Capture the pre-floor view once, so removal can restore it.
+      if (imposedFloorRef.current === null) preFloorMinRef.current = visibleMin;
+      update.xAxis = { min: floor };
+      imposedFloorRef.current = floor;
+    } else if (imposedFloorRef.current !== null) {
+      // A floor we previously imposed is no longer needed (compare removed or
+      // no series starts inside the window) — restore the pre-floor min so the
+      // chart isn't left clipped to a removed compare's inception.
+      update.xAxis = { min: preFloorMinRef.current };
+      imposedFloorRef.current = null;
+      preFloorMinRef.current = null;
+    }
+
     chart.update(update, true);
   }
 
