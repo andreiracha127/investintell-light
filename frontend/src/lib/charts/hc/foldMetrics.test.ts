@@ -56,8 +56,13 @@ function response(overrides: Partial<WalkForwardResponse> = {}): WalkForwardResp
     std_sharpe: 0.75,
     positive_folds: 1,
     mean_turnover: 0.15,
+    // Chronological OOS curve with an intermediate date inside fold 1's window
+    // (before the fold-2 boundary 2024-04-01) so the fold-1 end is derived, not
+    // borrowed from the next boundary.
     oos_curve: [
       ["2024-01-02", 1],
+      ["2024-03-28", 1.02],
+      ["2024-04-01", 1.03],
       ["2024-07-15", 1.05],
     ],
     fold_boundaries: ["2024-01-02", "2024-04-01"],
@@ -66,11 +71,27 @@ function response(overrides: Partial<WalkForwardResponse> = {}): WalkForwardResp
 }
 
 describe("foldPeriods", () => {
-  it("derives each fold's window from boundaries; last fold closes at the curve end", () => {
+  it("ends each fold before the next boundary, not on it", () => {
+    // Fold 1 ends on the last OOS date < 2024-04-01 (the fold-2 boundary),
+    // i.e. 2024-03-28 — NOT 2024-04-01, which is fold 2's first OOS day.
+    // Fold 2 (final) ends on the last OOS date.
     expect(foldPeriods(response())).toEqual([
-      { fold: 1, start: "2024-01-02", end: "2024-04-01" },
+      { fold: 1, start: "2024-01-02", end: "2024-03-28" },
       { fold: 2, start: "2024-04-01", end: "2024-07-15" },
     ]);
+  });
+
+  it("falls back to the fold start when no OOS date precedes the next boundary", () => {
+    const periods = foldPeriods(
+      response({
+        oos_curve: [
+          ["2024-01-02", 1],
+          ["2024-04-01", 1.03],
+        ],
+      }),
+    );
+    // No curve date strictly before 2024-04-01 except the start itself.
+    expect(periods[0]).toEqual({ fold: 1, start: "2024-01-02", end: "2024-01-02" });
   });
 
   it("returns empty when boundaries are missing or disagree with the fold count", () => {

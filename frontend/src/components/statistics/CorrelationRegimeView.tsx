@@ -38,6 +38,9 @@ import { retryPolicy } from "@/components/screener/shared";
 const WINDOW_DAYS_MIN = 30;
 const WINDOW_DAYS_MAX = 3650;
 
+/** Backend `/correlation-regime` caps the explicit assets list at 50. */
+const MAX_ASSETS = 50;
+
 function parseWindowDays(text: string): number | null {
   const value = Number(text.trim());
   return Number.isInteger(value) &&
@@ -47,15 +50,27 @@ function parseWindowDays(text: string): number | null {
     : null;
 }
 
-/** Positions → discriminated asset refs (fund when catalogued, else equity). */
-function positionsToAssets(
-  overview: PortfolioOverview,
-): NonNullable<CorrelationRegimeRequest["assets"]> {
-  return overview.positions.map((position) =>
-    position.instrument_id
-      ? { kind: "fund" as const, id: position.instrument_id }
-      : { kind: "equity" as const, ticker: position.ticker.toUpperCase() },
-  );
+type RegimeAssets = NonNullable<CorrelationRegimeRequest["assets"]>;
+
+/**
+ * Positions → discriminated asset refs (fund when catalogued, else equity),
+ * de-duplicated. Multiple share-class tickers of the same fund carry the same
+ * `instrument_id`, and duplicate equity tickers can also appear; the optimizer
+ * loader rejects duplicate asset labels with a 422, so we collapse them here.
+ */
+function positionsToAssets(overview: PortfolioOverview): RegimeAssets {
+  const seen = new Set<string>();
+  const assets: RegimeAssets = [];
+  for (const position of overview.positions) {
+    const ref = position.instrument_id
+      ? ({ kind: "fund" as const, id: position.instrument_id })
+      : ({ kind: "equity" as const, ticker: position.ticker.toUpperCase() });
+    const key = ref.kind === "fund" ? `fund:${ref.id}` : `equity:${ref.ticker}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    assets.push(ref);
+  }
+  return assets;
 }
 
 export function CorrelationRegimeView() {
@@ -80,15 +95,23 @@ export function CorrelationRegimeView() {
   });
 
   const windowDays = parseWindowDays(windowText);
-  const positionCount = overviewQuery.data?.positions.length ?? 0;
-  const canRun = overviewQuery.data !== undefined && positionCount >= 2 && windowDays !== null;
+  // De-duplicated asset set the request will actually send — gating counts
+  // must reflect this, not the raw position count.
+  const assets = useMemo(
+    () => (overviewQuery.data ? positionsToAssets(overviewQuery.data) : []),
+    [overviewQuery.data],
+  );
+  const assetCount = assets.length;
+  const tooManyAssets = assetCount > MAX_ASSETS;
+  const canRun =
+    overviewQuery.data !== undefined &&
+    assetCount >= 2 &&
+    !tooManyAssets &&
+    windowDays !== null;
 
   const onRun = () => {
-    if (!canRun || mutation.isPending || !overviewQuery.data) return;
-    mutation.mutate({
-      assets: positionsToAssets(overviewQuery.data),
-      window_days: windowDays,
-    });
+    if (!canRun || mutation.isPending || windowDays === null) return;
+    mutation.mutate({ assets, window_days: windowDays });
   };
 
   const windowInvalid = windowDays === null;
@@ -119,9 +142,15 @@ export function CorrelationRegimeView() {
         {portfolioId !== null && overviewQuery.isPending && (
           <span className="text-[12px] text-text-muted">Loading positions…</span>
         )}
-        {portfolioId !== null && positionCount < 2 && overviewQuery.data && (
+        {portfolioId !== null && assetCount < 2 && overviewQuery.data && (
           <span className="text-[12px] text-text-muted">
-            Needs at least two positions.
+            Needs at least two distinct assets.
+          </span>
+        )}
+        {tooManyAssets && (
+          <span className="text-[12px] text-loss">
+            {assetCount} distinct assets exceed the {MAX_ASSETS}-asset limit for
+            this analysis — reduce the portfolio to run it.
           </span>
         )}
       </ParamsPanel>

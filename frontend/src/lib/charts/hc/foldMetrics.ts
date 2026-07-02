@@ -29,6 +29,12 @@ export interface FoldPeriod {
  * Derive each fold's test window from the backend's dated series.
  * Returns one period per fold, in fold order; empty when the response has no
  * boundaries (not enough history) or the shapes disagree.
+ *
+ * A fold's window ends on the last OOS observation that belongs to it — i.e.
+ * the last `oos_curve` date STRICTLY BEFORE the next fold's boundary (which is
+ * the next fold's first OOS date, not part of this one). The final fold ends on
+ * the last OOS date. ISO `YYYY-MM-DD` strings compare lexicographically, and
+ * `oos_curve` is chronological, so a linear scan suffices.
  */
 export function foldPeriods(data: WalkForwardResponse): FoldPeriod[] {
   const boundaries = data.fold_boundaries ?? [];
@@ -36,12 +42,27 @@ export function foldPeriods(data: WalkForwardResponse): FoldPeriod[] {
   if (boundaries.length === 0 || boundaries.length !== data.folds.length) {
     return [];
   }
-  const lastDate = curve.length > 0 ? curve[curve.length - 1][0] : null;
-  return data.folds.map((fold, i) => ({
-    fold: fold.fold,
-    start: boundaries[i],
-    end: boundaries[i + 1] ?? lastDate ?? boundaries[i],
-  }));
+  const curveDates = curve.map((point) => point[0]);
+  const lastCurveDate =
+    curveDates.length > 0 ? curveDates[curveDates.length - 1] : null;
+
+  /** Last OOS date strictly before `boundary` (null if none precede it). */
+  const lastBefore = (boundary: string): string | null => {
+    let found: string | null = null;
+    for (const date of curveDates) {
+      if (date < boundary) found = date;
+      else break;
+    }
+    return found;
+  };
+
+  return data.folds.map((fold, i) => {
+    const nextBoundary = boundaries[i + 1];
+    const end = nextBoundary
+      ? lastBefore(nextBoundary) ?? boundaries[i]
+      : lastCurveDate ?? boundaries[i];
+    return { fold: fold.fold, start: boundaries[i], end };
+  });
 }
 
 export function buildHcFoldMetricsOption(

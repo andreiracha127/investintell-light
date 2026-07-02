@@ -97,13 +97,19 @@ export function TickerSearch() {
             setHi((i) => Math.max(i - 1, -1));
           } else if (event.key === "Enter") {
             event.preventDefault();
+            const trimmed = text.trim();
+            // `results` belong to the debounced query `q`; they may still lag
+            // the current input. Only auto-pick the top hit when the results
+            // are for exactly what's typed — otherwise treat the raw text as a
+            // ticker so a fast Enter never routes to a stale suggestion.
+            const resultsCurrent = q === trimmed;
             if (hi >= 0 && results[hi]) {
               go(results[hi]);
-            } else if (results.length > 0 && open) {
+            } else if (results.length > 0 && open && resultsCurrent) {
               go(results[0]);
-            } else if (text.trim()) {
+            } else if (trimmed) {
               go({
-                symbol: text.trim().toUpperCase(),
+                symbol: trimmed.toUpperCase(),
                 name: null,
                 kind: "stock",
                 instrument_id: null,

@@ -106,6 +106,8 @@ function makeWalkForward(): WalkForwardResponse {
     mean_turnover: 0.12,
     oos_curve: [
       ["2025-06-12", 1],
+      ["2025-12-11", 1.03],
+      ["2025-12-12", 1.035],
       ["2026-06-12", 1.06],
     ],
     fold_boundaries: ["2025-06-12", "2025-12-12"],
@@ -180,8 +182,10 @@ describe("BacktestTab", () => {
     expect(screen.getByText("Average turnover")).toBeInTheDocument();
     // Each fold row names its REAL test window (fold_boundaries → oos end),
     // not an anonymous "Period N".
+    // Fold 1 ends on the last OOS date before the fold-2 boundary
+    // (Dec 11), not on the boundary itself (Dec 12, fold 2's first day).
     expect(
-      screen.getAllByText("Jun 12, 2025 → Dec 12, 2025").length,
+      screen.getAllByText("Jun 12, 2025 → Dec 11, 2025").length,
     ).toBeGreaterThan(0);
     expect(
       screen.getAllByText("Dec 12, 2025 → Jun 12, 2026").length,

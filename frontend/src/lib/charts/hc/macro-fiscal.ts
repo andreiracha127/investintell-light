@@ -13,11 +13,13 @@ import type { ChartColors } from "@/lib/charts/chartColors";
 import { dateToUtcMs, formatTimestampDate } from "@/lib/charts/hc/dateAxis";
 import { formatCompact, formatNumber } from "@/lib/format";
 
-/** Categories whose values read as percent rates (vs dollar/level series). */
-const PERCENT_CATEGORIES: ReadonlySet<FiscalCategory> = new Set([
-  "rates",
-  "interest",
-]);
+/**
+ * Categories whose values read as percent rates. Only `rates` (average
+ * interest rates on outstanding securities) is a percentage; `interest` is
+ * federal interest EXPENSE in raw dollars, so it must format as a level, not
+ * a percent — otherwise the y-axis/tooltip show values like "123,456,789.00%".
+ */
+const PERCENT_CATEGORIES: ReadonlySet<FiscalCategory> = new Set(["rates"]);
 
 /** "RATE_10Y_TREASURY" → "10Y Treasury" (strip worker prefix, title-case). */
 export function fiscalSeriesLabel(seriesId: string, prefix: string): string {

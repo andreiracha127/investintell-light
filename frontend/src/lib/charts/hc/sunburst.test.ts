@@ -4,6 +4,7 @@ import type { SeriesSunburstOptions } from "highcharts";
 import {
   assetClassLabel,
   buildHcExposureSunburstOption,
+  computeAssetResiduals,
 } from "@/lib/charts/hc/sunburst";
 import type { ExposureItem, PortfolioLookthrough } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
@@ -120,6 +121,25 @@ describe("buildHcExposureSunburstOption", () => {
     const series = opt.series?.[0] as SeriesSunburstOptions;
     const data = series.data as Array<{ id?: string }>;
     expect(data.find((point) => point.id === "asset|equity|__other__")).toBeUndefined();
+  });
+
+  // The chart and the drill table share this residual computation so their
+  // rows and totals cannot drift apart (PR review r3510027269).
+  it("computeAssetResiduals derives the residual the table also renders", () => {
+    const assetsWithResidual: ExposureItem[] = [
+      { key: "equity", label: null, direct_pct: 75, indirect_pct: 0, total_pct: 75 },
+    ];
+    const residuals = computeAssetResiduals(TREE, assetsWithResidual);
+    expect(residuals).toHaveLength(1);
+    expect(residuals[0]).toMatchObject({
+      id: "asset|equity|__other__",
+      parentId: "asset|equity",
+    });
+    expect(residuals[0].valuePct).toBeCloseTo(15, 4);
+  });
+
+  it("computeAssetResiduals returns nothing when the sample covers the total", () => {
+    expect(computeAssetResiduals(TREE, ASSETS)).toEqual([]);
   });
 
   it("sanitizes N-PORT asset class codes", () => {
