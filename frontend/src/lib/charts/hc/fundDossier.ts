@@ -23,6 +23,7 @@ import {
   toDatetimeData,
 } from "@/lib/charts/hc/dateAxis";
 import { formatNumber, formatPercent } from "@/lib/format";
+import { compactUsd, titleCase } from "@/lib/grid/holdersGridOptions";
 
 function categoryColor(colors: ChartColors, index: number): string {
   return colors.categories[index % colors.categories.length];
@@ -607,15 +608,18 @@ export function buildHcInstitutionalHolderOption(
   const holders = reveal.top_holders.slice(0, 12);
   return {
     chart: { type: "bar" },
+    legend: { enabled: false },
     xAxis: {
-      categories: holders.map((holder) => holder.manager_name),
+      categories: holders.map((holder) => titleCase(holder.manager_name)),
       tickWidth: 0,
     },
     yAxis: {
       title: { text: "Reported value" },
+      // Leave room at the bar tips so end-of-bar value labels don't clip.
+      maxPadding: 0.14,
       labels: {
         formatter() {
-          return `$${formatNumber(this.value as number, 0)}`;
+          return compactUsd(this.value as number);
         },
       },
     },
@@ -623,8 +627,8 @@ export function buildHcInstitutionalHolderOption(
       formatter(this: Point) {
         const holder = holders[this.index];
         return (
-          `${holder?.manager_name ?? "Institution"}<br/>` +
-          `<b>$${formatNumber(this.y as number, 0)}</b><br/>` +
+          `${titleCase(holder?.manager_name ?? "Institution")}<br/>` +
+          `<b>${compactUsd(this.y as number)}</b><br/>` +
           `${holder?.holding_count ?? 0} matched holdings`
         );
       },
@@ -632,12 +636,21 @@ export function buildHcInstitutionalHolderOption(
     series: [
       {
         type: "bar",
-        name: "13F value",
-        data: holders.map((holder) => ({
-          y: holder.value_usd ?? 0,
-          color: colors.bar,
-        })),
+        name: "Reported value",
+        color: colors.accent,
+        data: holders.map((holder) => holder.value_usd ?? 0),
         borderWidth: 0,
+        dataLabels: {
+          enabled: true,
+          align: "left",
+          inside: false,
+          crop: false,
+          overflow: "allow",
+          style: { color: colors.textSecondary, fontWeight: "400", textOutline: "none" },
+          formatter(this: Point) {
+            return compactUsd(this.y as number);
+          },
+        },
       },
     ],
   };
@@ -649,18 +662,21 @@ export function buildHcInstitutionalOverlapOption(
 ): Options {
   const rows = reveal.overlap.slice(0, 12);
   return {
-    chart: { type: "column" },
+    chart: { type: "bar" },
+    legend: { enabled: false },
     xAxis: {
-      categories: rows.map((row) => row.name ?? row.cusip),
+      categories: rows.map((row) => titleCase(row.name ?? row.cusip)),
       tickWidth: 0,
       crosshair: true,
     },
     yAxis: [
       {
-        title: { text: "Institutional value" },
+        title: { text: "Reported value" },
+        // Leave room at the bar tips so end-of-bar value labels don't clip.
+        maxPadding: 0.14,
         labels: {
           formatter() {
-            return `$${formatNumber(this.value as number, 0)}`;
+            return compactUsd(this.value as number);
           },
         },
       },
@@ -669,21 +685,30 @@ export function buildHcInstitutionalOverlapOption(
       formatter(this: Point) {
         const row = rows[this.index];
         return (
-          `${row?.name ?? row?.cusip ?? "Holding"}<br/>` +
-          `<b>$${formatNumber(this.y as number, 0)}</b><br/>` +
+          `${titleCase(row?.name ?? row?.cusip ?? "Holding")}<br/>` +
+          `<b>${compactUsd(this.y as number)}</b><br/>` +
           `${row?.institution_count ?? 0} institutions`
         );
       },
     },
     series: [
       {
-        type: "column",
-        name: "Institutional value",
-        data: rows.map((row) => ({
-          y: row.institutional_value_usd ?? 0,
-          color: colors.bar,
-        })),
+        type: "bar",
+        name: "Reported value",
+        color: colors.accent,
+        data: rows.map((row) => row.institutional_value_usd ?? 0),
         borderWidth: 0,
+        dataLabels: {
+          enabled: true,
+          align: "left",
+          inside: false,
+          crop: false,
+          overflow: "allow",
+          style: { color: colors.textSecondary, fontWeight: "400", textOutline: "none" },
+          formatter(this: Point) {
+            return compactUsd(this.y as number);
+          },
+        },
       },
     ],
   };

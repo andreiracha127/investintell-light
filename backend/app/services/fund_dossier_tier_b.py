@@ -1612,14 +1612,26 @@ def _institutional_payload(
 # --- SEC 13F Tier C queries -------------------------------------------------
 # The deployed `sec_13f_holdings` (replicated from the monolith) stores
 # cik / report_date / cusip / issuer_name / market_value / shares — it has NO
-# manager_name / period / name / value_usd columns. Manager identity comes from
-# `sec_managers.firm_name` (cik is not unique there, so pick the highest-AUM row
-# via LATERAL). Output aliases keep the payload-builder row keys stable.
+# manager_name / period / name / value_usd columns.
+#
+# Manager identity resolves in two steps, both normalizing the CIK to the
+# 10-digit zero-padded form (`sec_13f_holdings.cik` is stored inconsistently —
+# some rows padded, some not — while `sec_managers`/`sec_13f_filings` are
+# uniformly padded, so a raw `=` silently misses padded/unpadded pairs):
+#   1. `sec_managers.firm_name` (cik is not unique there → highest-AUM row).
+#   2. Fallback to `sec_13f_filings.filing_manager_name` for recent filers that
+#      are not yet in the `sec_managers` snapshot (e.g. Vanguard Capital Mgmt).
+# Only when both miss do we surface the raw `CIK <padded>` placeholder.
+# Output aliases keep the payload-builder row keys stable.
 _INSTITUTIONAL_REVEAL_SQL = """
                     WITH matched AS (
                         SELECT
                             h.cik,
-                            COALESCE(mgr.firm_name, 'CIK ' || h.cik) AS manager_name,
+                            COALESCE(
+                                mgr.firm_name,
+                                flr.filing_manager_name,
+                                'CIK ' || lpad(h.cik, 10, '0')
+                            ) AS manager_name,
                             h.report_date AS period,
                             h.report_date,
                             upper(h.cusip) AS cusip,
@@ -1630,10 +1642,18 @@ _INSTITUTIONAL_REVEAL_SQL = """
                         LEFT JOIN LATERAL (
                             SELECT m.firm_name
                             FROM sec_managers m
-                            WHERE m.cik = h.cik AND m.firm_name IS NOT NULL
+                            WHERE m.cik = lpad(h.cik, 10, '0') AND m.firm_name IS NOT NULL
                             ORDER BY m.aum_total DESC NULLS LAST
                             LIMIT 1
                         ) mgr ON true
+                        LEFT JOIN LATERAL (
+                            SELECT f.filing_manager_name
+                            FROM sec_13f_filings f
+                            WHERE f.cik = lpad(h.cik, 10, '0')
+                              AND f.filing_manager_name IS NOT NULL
+                            ORDER BY f.report_date DESC
+                            LIMIT 1
+                        ) flr ON true
                         WHERE upper(h.cusip) = ANY(:cusips)
                     ),
                     latest AS (
@@ -1654,7 +1674,11 @@ _REVERSE_LOOKUP_SQL = """
                     )
                     SELECT
                         h.cik,
-                        COALESCE(mgr.firm_name, 'CIK ' || h.cik) AS manager_name,
+                        COALESCE(
+                            mgr.firm_name,
+                            flr.filing_manager_name,
+                            'CIK ' || lpad(h.cik, 10, '0')
+                        ) AS manager_name,
                         h.report_date AS period,
                         h.report_date,
                         upper(h.cusip) AS cusip,
@@ -1665,10 +1689,18 @@ _REVERSE_LOOKUP_SQL = """
                     LEFT JOIN LATERAL (
                         SELECT m.firm_name
                         FROM sec_managers m
-                        WHERE m.cik = h.cik AND m.firm_name IS NOT NULL
+                        WHERE m.cik = lpad(h.cik, 10, '0') AND m.firm_name IS NOT NULL
                         ORDER BY m.aum_total DESC NULLS LAST
                         LIMIT 1
                     ) mgr ON true
+                    LEFT JOIN LATERAL (
+                        SELECT f.filing_manager_name
+                        FROM sec_13f_filings f
+                        WHERE f.cik = lpad(h.cik, 10, '0')
+                          AND f.filing_manager_name IS NOT NULL
+                        ORDER BY f.report_date DESC
+                        LIMIT 1
+                    ) flr ON true
                     WHERE upper(h.cusip) = :cusip
                       AND h.report_date = (SELECT period FROM latest)
                     ORDER BY value_usd DESC NULLS LAST

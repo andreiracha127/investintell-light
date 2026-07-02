@@ -349,28 +349,51 @@ describe("fund dossier Highcharts builders", () => {
     expect(option.series?.[2]).toMatchObject({ type: "line", name: "Net", data: [45] });
   });
 
-  it("builds institutional holder and overlap charts with a uniform bar color", () => {
+  it("builds institutional holder and overlap charts as sanitized horizontal bars", () => {
     const reveal = institutionalReveal();
     const holders = buildHcInstitutionalHolderOption(reveal, colors);
     const overlap = buildHcInstitutionalOverlapOption(reveal, colors);
 
+    // Both charts read as horizontal bars ranked by reported value, filled with
+    // the brand accent; no SEC form nomenclature ("13F") leaks into the name.
     expect(holders.series?.[0]).toMatchObject({
       type: "bar",
-      name: "13F value",
+      name: "Reported value",
+      color: colors.accent,
     });
-    const holderData = holders.series?.[0] && "data" in holders.series[0]
-      ? (holders.series[0].data as Array<{ color?: string }>)
-      : [];
-    expect(holderData.every((point) => point.color === colors.bar)).toBe(true);
-
     expect(overlap.series?.[0]).toMatchObject({
-      type: "column",
-      name: "Institutional value",
+      type: "bar",
+      name: "Reported value",
+      color: colors.accent,
     });
-    const overlapData = overlap.series?.[0] && "data" in overlap.series[0]
-      ? (overlap.series[0].data as Array<{ color?: string }>)
-      : [];
-    expect(overlapData.every((point) => point.color === colors.bar)).toBe(true);
+
+    // End-of-bar value labels, formatted as compact adaptive USD.
+    const holderLabels = (holders.series?.[0] as { dataLabels?: {
+      enabled?: boolean;
+      formatter?: () => string;
+    } }).dataLabels;
+    expect(holderLabels?.enabled).toBe(true);
+    expect(holderLabels?.formatter?.call({ y: 1_500_000_000 })).toBe("$1.5B");
+    const overlapLabels = (overlap.series?.[0] as { dataLabels?: {
+      enabled?: boolean;
+    } }).dataLabels;
+    expect(overlapLabels?.enabled).toBe(true);
+
+    // Names are Title-Cased: SHOUTY source names normalize, already-mixed
+    // names are left untouched.
+    const holderCats = (holders.xAxis as { categories?: string[] }).categories;
+    const overlapCats = (overlap.xAxis as { categories?: string[] }).categories;
+    expect(holderCats).toEqual(["Berkshire Hathaway"]);
+    expect(overlapCats).toEqual(["Apple Inc"]);
+
+    // Value axis is compact adaptive USD ($M/$B/$T), not raw dollars.
+    const holderFmt = (holders.yAxis as { labels?: { formatter?: () => string } })
+      .labels?.formatter;
+    expect(holderFmt?.call({ value: 1_500_000_000 })).toBe("$1.5B");
+    const overlapAxis = Array.isArray(overlap.yAxis) ? overlap.yAxis[0] : overlap.yAxis;
+    const overlapFmt = (overlapAxis as { labels?: { formatter?: () => string } })
+      .labels?.formatter;
+    expect(overlapFmt?.call({ value: 336_000_000 })).toBe("$336.0M");
   });
 
   it("builds peer bubbles from the same twenty-row peer cohort payload", () => {

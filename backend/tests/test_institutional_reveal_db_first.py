@@ -63,3 +63,24 @@ async def test_db_first_empty_yields_empty_payload():
     out = await svc.fetch_fund_institutional_reveal(object(), _FakeSession(row=None), _IID, use_db_first=True)
     assert out.top_holders == []
     assert out.empty_state is not None
+
+
+def test_reveal_sql_normalizes_cik_and_falls_back_to_filings():
+    """Manager names resolve robustly: pad the CIK to 10 digits on every join
+    side (holdings stores it inconsistently) and fall back to the 13F filing's
+    manager name before surfacing a raw CIK placeholder."""
+    for q in (svc._INSTITUTIONAL_REVEAL_SQL, svc._REVERSE_LOOKUP_SQL):
+        # CIK normalized to the 10-digit zero-padded form used by the name tables.
+        assert q.count("lpad(h.cik, 10, '0')") >= 3
+        # Resolution order: sec_managers → sec_13f_filings → raw placeholder.
+        assert "FROM sec_managers m" in q
+        assert "FROM sec_13f_filings f" in q
+        assert "filing_manager_name" in q
+        mgr_pos = q.index("sec_managers m")
+        flr_pos = q.index("sec_13f_filings f")
+        placeholder_pos = q.index("'CIK ' || lpad(h.cik, 10, '0')")
+        # COALESCE lists the placeholder first (in the SELECT), then the two
+        # LATERAL sources below it — assert both sources precede neither other's
+        # role by checking the managers LATERAL comes before the filings LATERAL.
+        assert mgr_pos < flr_pos
+        assert placeholder_pos < mgr_pos

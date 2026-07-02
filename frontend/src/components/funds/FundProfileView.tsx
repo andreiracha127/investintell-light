@@ -78,6 +78,7 @@ import {
   formatNumber,
   formatPercent,
 } from "@/lib/format";
+import { compactUsd, titleCase } from "@/lib/grid/holdersGridOptions";
 
 const TYPE_TAG: Record<string, string> = {
   etf: "ETF",
@@ -389,15 +390,6 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     [timeseriesQuery.data],
   );
 
-  const growthOption = useMemo(() => {
-    if (!colors || !analysisQuery.data?.growth_of_100.length) return null;
-    return buildHcRollingOption(
-      analysisQuery.data.growth_of_100,
-      "Growth of 100",
-      colors,
-    );
-  }, [analysisQuery.data, colors]);
-
   const histogramOption = useMemo(() => {
     if (!colors || !analysisQuery.data) return null;
     return buildHcHistogramOption(analysisQuery.data.histogram, colors);
@@ -667,7 +659,6 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
           timeseriesQuery={timeseriesQuery}
           analysisQuery={analysisQuery}
           riskTimeseriesQuery={riskTimeseriesQuery}
-          growthOption={growthOption}
           histogramOption={histogramOption}
           distributionBellOption={distributionBellOption}
           riskSyncPanes={riskSyncPanes}
@@ -750,7 +741,6 @@ function PerformanceTab({
   timeseriesQuery,
   analysisQuery,
   riskTimeseriesQuery,
-  growthOption,
   histogramOption,
   distributionBellOption,
   riskSyncPanes,
@@ -768,7 +758,6 @@ function PerformanceTab({
   timeseriesQuery: UseQueryResult<unknown, Error>;
   analysisQuery: UseQueryResult<FundAnalysis, Error>;
   riskTimeseriesQuery: UseQueryResult<FundRiskTimeseries, Error>;
-  growthOption: Highcharts.Options | null;
   histogramOption: Highcharts.Options | null;
   distributionBellOption: Highcharts.Options | null;
   riskSyncPanes: HcRiskSynchronizedPane[] | null;
@@ -817,21 +806,13 @@ function PerformanceTab({
           </Card>
         )}
 
-        <div className="grid gap-4 xl:grid-cols-2">
-          <ChartCard
-            title="Growth of $100"
-            option={growthOption}
-            query={analysisQuery}
-            emptyMessage="No rebased performance series for this window."
-          />
-          <ChartCard
-            title="Return distribution"
-            subtitle="daily"
-            option={distributionBellOption ?? histogramOption}
-            query={analysisQuery}
-            emptyMessage="No return distribution for this window."
-          />
-        </div>
+        <ChartCard
+          title="Return distribution"
+          subtitle="daily"
+          option={distributionBellOption ?? histogramOption}
+          query={analysisQuery}
+          emptyMessage="No return distribution for this window."
+        />
 
         <SynchronizedRiskCharts
           panes={riskSyncPanes}
@@ -1516,16 +1497,19 @@ function InstitutionalTab({
   const reveal = revealQuery.data ?? null;
   const emptyReason =
     reveal?.empty_state?.reason ??
-    "No 13F institutional data matched to this fund's holdings.";
+    "No institutional positions matched to this fund's holdings.";
   const asOf = reveal
-    ? [
-        reveal.period ? `13F period ${formatDate(reveal.period)}` : null,
-        reveal.holdings_report_date
-          ? `holdings ${formatDate(reveal.holdings_report_date)}`
-          : null,
-      ]
-        .filter(Boolean)
-        .join(" · ") || undefined
+    ? (() => {
+        const reported = reveal.period ? formatDate(reveal.period) : null;
+        const holdings = reveal.holdings_report_date
+          ? formatDate(reveal.holdings_report_date)
+          : null;
+        if (reported && holdings && reported !== holdings) {
+          return `Reported as of ${reported} · holdings ${holdings}`;
+        }
+        const anchor = reported ?? holdings;
+        return anchor ? `Reported as of ${anchor}` : undefined;
+      })()
     : undefined;
 
   return (
@@ -1537,7 +1521,7 @@ function InstitutionalTab({
           option={holderOption}
           query={revealQuery}
           emptyMessage={emptyReason}
-          tip="Largest 13F managers holding the securities in this fund's portfolio, ranked by reported value across matched holdings."
+          tip="Largest institutional managers holding the securities in this fund's portfolio, ranked by reported value across matched holdings."
           className="h-[420px]"
         />
         <ChartCard
@@ -1546,7 +1530,7 @@ function InstitutionalTab({
           option={overlapOption}
           query={revealQuery}
           emptyMessage={emptyReason}
-          tip="The fund's holdings ranked by how much 13F institutional money sits in the same securities — where the fund crowds with institutions."
+          tip="The fund's holdings ranked by how much institutional money sits in the same securities — where the fund crowds with institutions."
           className="h-[420px]"
         />
       </div>
@@ -1576,9 +1560,9 @@ function InstitutionalTab({
                     }`}
                   >
                     <Td className="font-bold text-text-primary">
-                      {holder.manager_name}
+                      {titleCase(holder.manager_name)}
                     </Td>
-                    <Td align="right">{money(holder.value_usd)}</Td>
+                    <Td align="right">{compactUsd(holder.value_usd ?? null)}</Td>
                     <Td align="right">
                       {holder.shares !== null && holder.shares !== undefined
                         ? formatCompact(holder.shares)
