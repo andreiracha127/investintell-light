@@ -13,6 +13,7 @@ const TOOLS = [
   { href: "/statistics/beta", label: "Beta" },
   { href: "/statistics/correlation", label: "Correlation" },
   { href: "/statistics/stock-correlation", label: "Stock Correlation" },
+  { href: "/statistics/correlation-regime", label: "Correlation Regime" },
 ] as const;
 
 export function StatisticsTabs() {

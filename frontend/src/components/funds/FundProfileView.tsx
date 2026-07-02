@@ -23,6 +23,7 @@ import {
   fetchFundEntityAnalytics,
   fetchFundFactors,
   fetchFundHoldingsTop,
+  fetchFundInstitutionalReveal,
   fetchFundPeers,
   fetchFundProfile,
   fetchFundRiskTimeseries,
@@ -34,6 +35,7 @@ import {
   type FundEntityAnalytics,
   type FundFactors,
   type FundHoldingsTop,
+  type FundInstitutionalReveal,
   type FundPeers,
   type FundRisk,
   type FundRiskTimeseries,
@@ -44,6 +46,8 @@ import {
 import {
   buildHcFactorSensitivityOption,
   buildHcInsiderSentimentOption,
+  buildHcInstitutionalHolderOption,
+  buildHcInstitutionalOverlapOption,
   buildHcPeerBubbleOption,
   buildHcRiskSynchronizedOptions,
   buildHcStyleBiasOption,
@@ -75,7 +79,13 @@ const TYPE_TAG: Record<string, string> = {
   mmf: "Money market",
 };
 
-type TabId = "performance" | "holdings" | "style" | "factors" | "peers";
+type TabId =
+  | "performance"
+  | "holdings"
+  | "style"
+  | "factors"
+  | "peers"
+  | "institutional";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "performance", label: "Performance" },
@@ -83,6 +93,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "style", label: "Style" },
   { id: "factors", label: "Factors" },
   { id: "peers", label: "Peers" },
+  { id: "institutional", label: "Institutional" },
 ];
 
 function pct(value: number | null | undefined, dp = 2): string {
@@ -225,6 +236,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
   const isStyleTab = activeTab === "style";
   const isFactorsTab = activeTab === "factors";
   const isPeersTab = activeTab === "peers";
+  const isInstitutionalTab = activeTab === "institutional";
 
   const profileQuery = useQuery({
     queryKey: dossierQueryKeys.profile(instrumentId),
@@ -355,6 +367,14 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     retry: retryPolicy,
   });
 
+  const institutionalRevealQuery = useQuery({
+    queryKey: dossierQueryKeys.institutionalReveal(instrumentId),
+    queryFn: ({ signal }) => fetchFundInstitutionalReveal(instrumentId, signal),
+    staleTime: FUND_DOSSIER_STALE_TIME_MS["institutional-reveal"],
+    enabled: isInstitutionalTab,
+    retry: retryPolicy,
+  });
+
   const chartBars = useMemo(
     () =>
       timeseriesQuery.data
@@ -412,6 +432,22 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     if (!colors || !factorsQuery.data?.market_sensitivities.length) return null;
     return buildHcFactorSensitivityOption(factorsQuery.data, colors);
   }, [factorsQuery.data, colors]);
+
+  const institutionalHolderOption = useMemo(() => {
+    const reveal = institutionalRevealQuery.data;
+    if (!colors || !reveal || reveal.empty_state || reveal.top_holders.length === 0) {
+      return null;
+    }
+    return buildHcInstitutionalHolderOption(reveal, colors);
+  }, [institutionalRevealQuery.data, colors]);
+
+  const institutionalOverlapOption = useMemo(() => {
+    const reveal = institutionalRevealQuery.data;
+    if (!colors || !reveal || reveal.empty_state || reveal.overlap.length === 0) {
+      return null;
+    }
+    return buildHcInstitutionalOverlapOption(reveal, colors);
+  }, [institutionalRevealQuery.data, colors]);
 
   const styleBiasOption = useMemo(() => {
     if (!colors || !factorsQuery.data?.style_bias.length) return null;
@@ -644,6 +680,14 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
         <PeersTab
           peersQuery={peersQuery}
           bubbleOption={peerBubbleOption}
+        />
+      )}
+
+      {activeTab === "institutional" && (
+        <InstitutionalTab
+          revealQuery={institutionalRevealQuery}
+          holderOption={institutionalHolderOption}
+          overlapOption={institutionalOverlapOption}
         />
       )}
 
@@ -1247,6 +1291,107 @@ function SynchronizedRiskCharts({
         <QueryMessage query={query} emptyMessage={emptyMessage} />
       )}
     </Card>
+  );
+}
+
+/**
+ * Institutional tab — 13F reveal for the fund's holdings: which institutions
+ * hold the same securities (`top_holders`), and where the fund's book overlaps
+ * the most institutional money (`overlap`). Data comes straight from
+ * GET /funds/{id}/institutional-reveal; `empty_state.reason` explains gaps.
+ */
+function InstitutionalTab({
+  revealQuery,
+  holderOption,
+  overlapOption,
+}: {
+  revealQuery: UseQueryResult<FundInstitutionalReveal, Error>;
+  holderOption: Highcharts.Options | null;
+  overlapOption: Highcharts.Options | null;
+}) {
+  const reveal = revealQuery.data ?? null;
+  const emptyReason =
+    reveal?.empty_state?.reason ??
+    "No 13F institutional data matched to this fund's holdings.";
+  const asOf = reveal
+    ? [
+        reveal.period ? `13F period ${formatDate(reveal.period)}` : null,
+        reveal.holdings_report_date
+          ? `holdings ${formatDate(reveal.holdings_report_date)}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" · ") || undefined
+    : undefined;
+
+  return (
+    <div className="grid gap-4">
+      <div className="grid items-stretch gap-px bg-border xl:grid-cols-2">
+        <ChartCard
+          title="Top institutional holders"
+          subtitle={asOf}
+          option={holderOption}
+          query={revealQuery}
+          emptyMessage={emptyReason}
+          tip="Largest 13F managers holding the securities in this fund's portfolio, ranked by reported value across matched holdings."
+          className="h-[420px]"
+        />
+        <ChartCard
+          title="Institutional overlap"
+          subtitle="by security"
+          option={overlapOption}
+          query={revealQuery}
+          emptyMessage={emptyReason}
+          tip="The fund's holdings ranked by how much 13F institutional money sits in the same securities — where the fund crowds with institutions."
+          className="h-[420px]"
+        />
+      </div>
+
+      {reveal && !reveal.empty_state && reveal.top_holders.length > 0 && (
+        <Card
+          title="Holder detail"
+          subtitle={`${reveal.top_holders.length} managers`}
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[560px] border-collapse text-[length:var(--ix-fs)] tabular-nums">
+              <thead>
+                <tr>
+                  <Th>Manager</Th>
+                  <Th align="right">Reported value</Th>
+                  <Th align="right">Shares</Th>
+                  <Th align="right">Matched holdings</Th>
+                  <Th align="right">Report date</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {reveal.top_holders.map((holder, i) => (
+                  <tr
+                    key={holder.cik}
+                    className={`border-b border-border last:border-b-0 ${
+                      i % 2 === 1 ? "bg-zebra" : ""
+                    }`}
+                  >
+                    <Td className="font-bold text-text-primary">
+                      {holder.manager_name}
+                    </Td>
+                    <Td align="right">{money(holder.value_usd)}</Td>
+                    <Td align="right">
+                      {holder.shares !== null && holder.shares !== undefined
+                        ? formatCompact(holder.shares)
+                        : "--"}
+                    </Td>
+                    <Td align="right">{String(holder.holding_count)}</Td>
+                    <Td align="right" className="text-text-secondary">
+                      {holder.report_date ? formatDate(holder.report_date) : "--"}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+    </div>
   );
 }
 
