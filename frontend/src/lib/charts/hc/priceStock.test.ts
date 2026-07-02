@@ -7,6 +7,8 @@ import {
   addCompareSelection,
   buildHcPriceCoreOption,
   buildHcPriceStockOption,
+  clipBarsFrom,
+  commonCompareStart,
   compareSelectionKey,
   dataGroupingForPeriod,
   indicatorSeriesData,
@@ -306,6 +308,93 @@ describe("priceStock option builder", () => {
       forced: true,
       units: [["month", [1]]],
     });
+  });
+});
+
+describe("compare start alignment", () => {
+  const LATER_BARS: PriceBar[] = BARS.slice(1); // compare history starts one bar later
+
+  it("commonCompareStart returns the latest inception across all series", () => {
+    expect(
+      commonCompareStart(BARS, [COMPARE], { [COMPARE.key]: LATER_BARS }),
+    ).toBe(LATER_BARS[0].t);
+    expect(commonCompareStart(BARS, [], {})).toBe(BARS[0].t);
+    expect(commonCompareStart([], [], {})).toBeNull();
+  });
+
+  it("clipBarsFrom drops bars before the alignment start and is a no-op on null", () => {
+    expect(clipBarsFrom(BARS, LATER_BARS[0].t)).toEqual(LATER_BARS);
+    expect(clipBarsFrom(BARS, null)).toEqual(BARS);
+  });
+
+  it("Core percent mode rebases main and compare at the same (later) date", () => {
+    const opt = buildHcPriceCoreOption({
+      symbol: "FUNDX",
+      bars: BARS,
+      mode: "nav",
+      type: "line",
+      period: "D",
+      range: "1Y",
+      overlays: { sma20: false, sma50: false },
+      panes: { volume: false, rsi: false },
+      scale: { log: false, pct: true },
+      compares: [COMPARE],
+      compareData: { [COMPARE.key]: LATER_BARS },
+      colors: TEST_COLORS,
+      onVisibleRangeChange: vi.fn(),
+    });
+    const series = opt.series as Array<{ data?: Array<[number, number]> }>;
+    // Main series is clipped to the compare's inception: both start at 0% on
+    // the SAME date instead of each on its own first bar.
+    expect(series[0]?.data?.[0]).toEqual([LATER_BARS[0].t, 0]);
+    expect(series[1]?.data?.[0]).toEqual([LATER_BARS[0].t, 0]);
+  });
+
+  it("Stock percent mode clips every series to the common inception", () => {
+    const opt = buildHcPriceStockOption({
+      symbol: "AAPL",
+      bars: BARS,
+      mode: "ohlcv",
+      type: "line",
+      period: "D",
+      range: "1Y",
+      overlays: { sma20: false, sma50: false },
+      panes: { volume: false, rsi: false },
+      scale: { log: false, pct: true },
+      compares: [COMPARE],
+      compareData: { [COMPARE.key]: LATER_BARS },
+      colors: TEST_COLORS,
+      onVisibleRangeChange: vi.fn(),
+    });
+    const series = opt.series as Array<{
+      id?: string;
+      data?: Array<[number, number]>;
+    }>;
+    const main = series.find((s) => s.id === PRICE_SERIES_ID);
+    const compare = series.find((s) => s.id === `compare-${COMPARE.key}`);
+    expect(main?.data?.[0]?.[0]).toBe(LATER_BARS[0].t);
+    expect(compare?.data?.[0]?.[0]).toBe(LATER_BARS[0].t);
+  });
+
+  it("price mode (non-percent) keeps full histories untouched", () => {
+    const opt = buildHcPriceStockOption({
+      symbol: "AAPL",
+      bars: BARS,
+      mode: "ohlcv",
+      type: "line",
+      period: "D",
+      range: "1Y",
+      overlays: { sma20: false, sma50: false },
+      panes: { volume: false, rsi: false },
+      scale: { log: false, pct: false },
+      compares: [COMPARE],
+      compareData: { [COMPARE.key]: LATER_BARS },
+      colors: TEST_COLORS,
+      onVisibleRangeChange: vi.fn(),
+    });
+    const series = opt.series as Array<{ id?: string; data?: Array<[number, number]> }>;
+    const main = series.find((s) => s.id === PRICE_SERIES_ID);
+    expect(main?.data?.[0]?.[0]).toBe(BARS[0].t);
   });
 });
 

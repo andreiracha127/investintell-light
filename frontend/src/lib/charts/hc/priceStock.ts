@@ -264,6 +264,32 @@ function periodBucketStart(timeMs: number, period: PricePeriod): number {
   );
 }
 
+/**
+ * Latest first-timestamp across the main series and every compare series —
+ * the only start date at which ALL rebased curves can begin together. Series
+ * with different inceptions rebased at their own first point would start at
+ * 0% on different dates and stop being comparable.
+ */
+export function commonCompareStart(
+  bars: PriceBar[],
+  compares: PriceCompareSelection[],
+  compareData: Record<string, PriceBar[]>,
+): number | null {
+  const firsts: number[] = [];
+  if (bars.length > 0) firsts.push(bars[0].t);
+  for (const compare of compares) {
+    const compareBars = compareData[compare.key] ?? [];
+    if (compareBars.length > 0) firsts.push(compareBars[0].t);
+  }
+  return firsts.length > 0 ? Math.max(...firsts) : null;
+}
+
+/** Bars on/after the alignment start (no-op when alignment is off). */
+export function clipBarsFrom(bars: PriceBar[], startTs: number | null): PriceBar[] {
+  if (startTs === null) return bars;
+  return bars.filter((bar) => bar.t >= startTs);
+}
+
 function closeDataForCore(
   bars: PriceBar[],
   period: PricePeriod,
@@ -294,16 +320,23 @@ export function buildHcPriceCoreOption(input: PriceStockOptionsInput): Options {
     onVisibleRangeChange,
   } = input;
   const safeType: "line" | "area" = type === "area" ? "area" : "line";
-  const dataMin = bars[0]?.t ?? 0;
-  const dataMax = bars[bars.length - 1]?.t ?? 0;
   const percent = scale.pct;
+  // In percent mode every curve must be rebased at the SAME date: clip all
+  // series to the latest common inception so 0% means the same day for all.
+  const alignStart =
+    percent && compares.length > 0
+      ? commonCompareStart(bars, compares, compareData)
+      : null;
+  const mainBars = clipBarsFrom(bars, alignStart);
+  const dataMin = mainBars[0]?.t ?? 0;
+  const dataMax = mainBars[mainBars.length - 1]?.t ?? 0;
 
   const series: SeriesOptionsType[] = [
     {
       id: PRICE_SERIES_ID,
       type: safeType,
       name: symbol,
-      data: closeDataForCore(bars, period, percent),
+      data: closeDataForCore(mainBars, period, percent),
       color: colors.accent,
       lineWidth: 2,
       marker: { enabled: false },
@@ -316,7 +349,11 @@ export function buildHcPriceCoreOption(input: PriceStockOptionsInput): Options {
       id: `compare-${compare.key}`,
       type: "line",
       name: compare.label,
-      data: closeDataForCore(compareData[compare.key] ?? [], period, percent),
+      data: closeDataForCore(
+        clipBarsFrom(compareData[compare.key] ?? [], alignStart),
+        period,
+        percent,
+      ),
       color: colors.categories[(index + 4) % colors.categories.length],
       lineWidth: 1.4,
       marker: { enabled: false },
@@ -457,12 +494,21 @@ export function buildHcPriceStockOption(input: PriceStockOptionsInput): Options 
     mode === "nav" && (type === "candles" || type === "ohlc") ? "line" : type;
   const dataGrouping = dataGroupingForPeriod(period);
   const showVolume = mode === "ohlcv" && panes.volume;
+  // In percent-compare mode all curves must be rebased at the SAME date:
+  // Highstock's native `compare` rebases each series at its own first visible
+  // point, so series with later inceptions would start at 0% on a different
+  // day. Clipping every series to the latest common inception aligns them.
+  const alignStart =
+    scale.pct && compares.length > 0
+      ? commonCompareStart(bars, compares, compareData)
+      : null;
+  const mainBars = clipBarsFrom(bars, alignStart);
   // Studies (SMA/RSI) are computed on bars resampled to the selected period so
   // W/M show 20-week / 20-month averages, not 20-day averages grouped visually.
-  const studyBars = resampleBars(bars, period);
+  const studyBars = resampleBars(mainBars, period);
   const layout = paneLayout({ volume: showVolume, rsi: panes.rsi });
-  const dataMin = bars[0]?.t ?? 0;
-  const dataMax = bars[bars.length - 1]?.t ?? 0;
+  const dataMin = mainBars[0]?.t ?? 0;
+  const dataMax = mainBars[mainBars.length - 1]?.t ?? 0;
 
   const yAxis: NonNullable<Options["yAxis"]> = [
     {
@@ -515,7 +561,7 @@ export function buildHcPriceStockOption(input: PriceStockOptionsInput): Options 
       id: PRICE_SERIES_ID,
       type: stockSeriesType(safeType),
       name: symbol,
-      data: toMainSeriesData(bars, safeType),
+      data: toMainSeriesData(mainBars, safeType),
       yAxis: "price-axis",
       color: colors.accent,
       lineColor: colors.accent,
@@ -531,7 +577,7 @@ export function buildHcPriceStockOption(input: PriceStockOptionsInput): Options 
       id: VOLUME_SERIES_ID,
       type: "column",
       name: "Volume",
-      data: toVolumeSeriesData(bars),
+      data: toVolumeSeriesData(mainBars),
       yAxis: "volume-axis",
       color: colors.barMute,
       dataGrouping,
@@ -582,7 +628,7 @@ export function buildHcPriceStockOption(input: PriceStockOptionsInput): Options 
   }
 
   compares.forEach((compare, index) => {
-    const compareBars = compareData[compare.key] ?? [];
+    const compareBars = clipBarsFrom(compareData[compare.key] ?? [], alignStart);
     series.push({
       id: `compare-${compare.key}`,
       type: "line",
@@ -605,7 +651,7 @@ export function buildHcPriceStockOption(input: PriceStockOptionsInput): Options 
     rangeSelector: { enabled: false },
     navigator: {
       enabled: true,
-      series: { data: emptyNavigatorData(bars), color: colors.barMute },
+      series: { data: emptyNavigatorData(mainBars), color: colors.barMute },
     },
     scrollbar: { enabled: true },
     // Barchart-style drawing/annotation toolbar. Drop the native `indicators`

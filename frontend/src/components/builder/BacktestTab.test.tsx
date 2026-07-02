@@ -178,8 +178,18 @@ describe("BacktestTab", () => {
     expect(screen.getByText("Consistency")).toBeInTheDocument();
     expect(screen.getByText("2 / 2")).toBeInTheDocument();
     expect(screen.getByText("Average turnover")).toBeInTheDocument();
-    expect(screen.getAllByText("Period 1").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Period 2").length).toBeGreaterThan(0);
+    // Each fold row names its REAL test window (fold_boundaries → oos end),
+    // not an anonymous "Period N".
+    expect(
+      screen.getAllByText("Jun 12, 2025 → Dec 12, 2025").length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("Dec 12, 2025 → Jun 12, 2026").length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText(/#1 · trained on 252d/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/2 test periods · Jun 12, 2025 → Jun 12, 2026/),
+    ).toBeInTheDocument();
     expect(screen.getAllByTestId("highcharts-chart")).toHaveLength(2);
   });
 

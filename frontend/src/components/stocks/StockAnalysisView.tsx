@@ -38,7 +38,13 @@ import { AddToPortfolio } from "@/components/stocks/AddToPortfolio";
 import { HoldersTab } from "@/components/stocks/HoldersTab";
 import { NewsPanel } from "@/components/stocks/NewsPanel";
 import { useLiveTicks } from "@/lib/livefeed/useLiveTicks";
-import { Card, KpiTile, StatRow, valueTone } from "@/components/ui/panels";
+import {
+  Card,
+  KpiTile,
+  PAGE_CONTAINER_CLASS,
+  StatRow,
+  valueTone,
+} from "@/components/ui/panels";
 import {
   STOCK_DATA_STALE_TIME_MS,
   STOCK_HISTORY_BARS_MAX,
@@ -141,7 +147,7 @@ export function StockAnalysisView({
     const fastHeader = data?.header ?? quote.data;
     if (fastHeader) {
       return (
-        <div className="mx-auto flex max-w-[1360px] flex-col px-[clamp(14px,3vw,28px)] pb-10 pt-5">
+        <div className={`${PAGE_CONTAINER_CLASS} flex flex-col`}>
           <StockHeaderBar header={fastHeader} />
           <AnalysisBodySkeleton />
         </div>
@@ -250,7 +256,7 @@ function AnalysisContent({
   );
 
   return (
-    <div className="mx-auto flex max-w-[1360px] flex-col px-[clamp(14px,3vw,28px)] pb-10 pt-5">
+    <div className={`${PAGE_CONTAINER_CLASS} flex flex-col`}>
       <StockHeaderBar header={header} />
 
       {/* ── Tab bar (Analysis | Holders) ── */}
@@ -319,6 +325,7 @@ function AnalysisContent({
           label="Max Drawdown"
           value={formatPercent(stats.max_drawdown.depth)}
           tone="text-loss"
+          detail={`${formatDate(stats.max_drawdown.peak_date)} → ${formatDate(stats.max_drawdown.trough_date)}`}
           tip="Largest peak-to-trough decline over the range."
         />
         <KpiTile
@@ -397,18 +404,9 @@ function AnalysisContent({
           <HighchartsChart options={distributionOption} className="h-[280px] w-full" />
         </Card>
 
-        <Card title="Statistics">
+        {/* Only metrics NOT already in the KPI tiles above — no duplication. */}
+        <Card title="Tail Risk & Extremes" subtitle={`over ${range}`}>
           <dl>
-            <StatRow
-              label="Annualized Volatility"
-              value={formatPercent(stats.annualized_volatility)}
-              tip="Annualized standard deviation of daily returns — higher means larger price swings."
-            />
-            <StatRow
-              label="VaR 95 (1d)"
-              value={formatPercent(stats.var_95)}
-              tip="The daily loss not expected to be exceeded 95% of the time."
-            />
             <StatRow
               label="VaR 99 (1d)"
               value={formatPercent(stats.var_99)}
@@ -418,28 +416,6 @@ function AnalysisContent({
               label="CVaR 95 (1d)"
               value={formatPercent(stats.cvar_95)}
               tip="Expected loss on the worst 5% of days (the average tail beyond VaR 95)."
-            />
-            <StatRow
-              label="Total Return"
-              value={formatPercent(stats.total_return, 2, { signed: true })}
-              tone={valueTone(stats.total_return)}
-            />
-            <StatRow
-              label={`Beta vs ${params.benchmark}`}
-              value={formatNumber(stats.beta)}
-              tip={`Sensitivity to ${params.benchmark}: 1.0 moves in line, >1 amplifies, <1 dampens.`}
-            />
-            <StatRow
-              label={`Correlation vs ${params.benchmark}`}
-              value={formatNumber(stats.correlation)}
-              tip={`Correlation of daily returns with ${params.benchmark} (−1 to +1).`}
-            />
-            <StatRow
-              label="Max Drawdown"
-              value={formatPercent(stats.max_drawdown.depth)}
-              tone="text-loss"
-              detail={`${formatDate(stats.max_drawdown.peak_date)} → ${formatDate(stats.max_drawdown.trough_date)}`}
-              tip="Largest peak-to-trough decline over the range."
             />
             <StatRow
               label="Best Day"
@@ -573,7 +549,7 @@ function LoadingSkeleton() {
     <div
       aria-busy="true"
       aria-label="Loading analysis"
-      className="mx-auto flex max-w-[1360px] animate-pulse flex-col px-[clamp(14px,3vw,28px)] pb-10 pt-5"
+      className={`${PAGE_CONTAINER_CLASS} flex animate-pulse flex-col`}
     >
       <div className="mb-[18px] h-16 w-[320px] border border-border bg-surface-2" />
       <div className="mb-px grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">

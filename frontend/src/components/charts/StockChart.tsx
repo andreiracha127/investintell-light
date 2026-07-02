@@ -400,11 +400,25 @@ export function StockChart({
   useEffect(() => onFeedStatus(setFeed), []);
 
   // ── Compare: auto-percent so series align; revert when last is removed ─────
-  function applyCompareMode(count: number): void {
+  function applyCompareMode(entries: CompareEntry[]): void {
     const chart = chartRef.current;
     if (!chart) return;
+    const count = entries.length;
+    // Percent-rebased curves must all start on the same date. Highstock
+    // rebases each series at its own first point in range, so a compare whose
+    // history begins later would start at 0% on a different day. Floor the
+    // axis at the latest inception across the main series and every loaded
+    // compare; lift the floor when the last compare is removed.
+    const firsts = [
+      barsRef.current[0]?.t,
+      ...entries.map((entry) => entry.bars[0]?.t),
+    ].filter((t): t is number => typeof t === "number");
+    const commonStart = count > 0 && firsts.length > 0 ? Math.max(...firsts) : null;
     chart.update(
-      { plotOptions: { series: { compare: count > 0 ? "percent" : undefined } } },
+      {
+        plotOptions: { series: { compare: count > 0 ? "percent" : undefined } },
+        xAxis: { min: commonStart },
+      },
       true,
     );
   }
@@ -446,10 +460,11 @@ export function StockChart({
       },
       false,
     );
-    setCompares((current) =>
-      current.map((c) => (c.key === key ? { ...c, bars: loaded } : c)),
+    const nextEntries = comparesRef.current.map((c) =>
+      c.key === key ? { ...c, bars: loaded } : c,
     );
-    applyCompareMode(comparesRef.current.length);
+    setCompares(nextEntries);
+    applyCompareMode(nextEntries);
   }
 
   function removeCompare(key: string): void {
@@ -457,7 +472,7 @@ export function StockChart({
     chart?.get(`compare-${key}`)?.remove(false);
     const remaining = comparesRef.current.filter((c) => c.key !== key);
     setCompares(remaining);
-    applyCompareMode(remaining.length);
+    applyCompareMode(remaining);
   }
 
   // ── Log/Linear toggle (native GUI has none) ───────────────────────────────

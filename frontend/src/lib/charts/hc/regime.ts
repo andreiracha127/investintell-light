@@ -48,6 +48,30 @@ function normalizeSeries(points: DatePoint[]): Array<[number, number]> {
 }
 
 /**
+ * Clip both series to their first COMMON date so "Indexed to 100" curves are
+ * rebased on the same day. Two series rebased at different inceptions both
+ * start at 100 on different dates and stop being comparable. No-op when either
+ * series is empty (the panel gates rendering on both being present anyway).
+ */
+function clipToCommonStart(
+  a: DatePoint[],
+  b: DatePoint[],
+): [DatePoint[], DatePoint[]] {
+  const firstValid = (points: DatePoint[]): number | null => {
+    const hit = points.find(([, value]) => Number.isFinite(value) && value > 0);
+    return hit ? dateToUtcMs(hit[0]) : null;
+  };
+  const firstA = firstValid(a);
+  const firstB = firstValid(b);
+  if (firstA === null || firstB === null) return [a, b];
+  const start = Math.max(firstA, firstB);
+  return [
+    a.filter(([date]) => dateToUtcMs(date) >= start),
+    b.filter(([date]) => dateToUtcMs(date) >= start),
+  ];
+}
+
+/**
  * Running drawdown from each prior peak, expressed as a non-positive percent
  * (0% at every new high). Mirrors the prototype's `drawdown` helper.
  */
@@ -128,8 +152,11 @@ export function buildHcMacroPerformanceOption({
 }): Options | null {
   const isDrawdown = view === "drawdown";
   const project = isDrawdown ? drawdownSeries : normalizeSeries;
-  const portfolioData = project(portfolio);
-  const assetData = project(asset);
+  // Same start date for both curves — rebasing (and peak-tracking) must begin
+  // on the same day for the two series to be comparable.
+  const [portfolioAligned, assetAligned] = clipToCommonStart(portfolio, asset);
+  const portfolioData = project(portfolioAligned);
+  const assetData = project(assetAligned);
   const allTimes = [...portfolioData, ...assetData].map(([time]) => time);
   if (allTimes.length === 0) return null;
   const minX = Math.min(...allTimes);

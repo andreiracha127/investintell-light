@@ -16,7 +16,13 @@ import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { InteractiveChart } from "@/components/charts/InteractiveChart";
 import { FundLookthroughSection } from "@/components/funds/FundLookthroughSection";
 import { ErrorPanel, retryPolicy } from "@/components/screener/shared";
-import { Card, InfoDot, KpiTile, StatRow } from "@/components/ui/panels";
+import {
+  Card,
+  InfoDot,
+  KpiTile,
+  PAGE_CONTAINER_CLASS,
+  StatRow,
+} from "@/components/ui/panels";
 import {
   fetchFundActiveShare,
   fetchFundAnalysis,
@@ -502,7 +508,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
 
   if (profileQuery.isPending) {
     return (
-      <div className="mx-auto max-w-[1400px] px-5 py-5">
+      <div className={PAGE_CONTAINER_CLASS}>
         <div
           aria-busy="true"
           aria-label="Loading fund profile"
@@ -514,7 +520,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
 
   if (profileQuery.isError) {
     return (
-      <div className="mx-auto max-w-[1400px] px-5 py-5">
+      <div className={PAGE_CONTAINER_CLASS}>
         <ErrorPanel
           title="Failed to load fund"
           message={profileQuery.error.message}
@@ -543,7 +549,7 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
   );
 
   return (
-    <div className="mx-auto max-w-[1400px] px-5 py-5">
+    <div className={PAGE_CONTAINER_CLASS}>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <Link

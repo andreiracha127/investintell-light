@@ -26,7 +26,7 @@ import {
   type PortfolioOverview,
 } from "@/lib/api/client";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
-import { InfoDot } from "@/components/ui/panels";
+import { InfoDot, PAGE_CONTAINER_CLASS } from "@/components/ui/panels";
 import { ErrorPanel } from "@/components/screener/shared";
 
 import {
@@ -329,7 +329,7 @@ export function BuilderView() {
       : null;
 
   return (
-    <div className="mx-auto max-w-[1400px] px-5 py-5">
+    <div className={PAGE_CONTAINER_CLASS}>
       {/* ── Workspace header ──────────────────────────────────────────── */}
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3.5">
         <div>

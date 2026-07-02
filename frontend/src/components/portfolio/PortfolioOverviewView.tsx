@@ -51,7 +51,14 @@ import {
   applyLiveTicksToOverview,
   liveEligibleTickers,
 } from "@/lib/portfolio/liveOverview";
-import { Card, InfoDot, KpiTile, PageTitle, valueTone } from "@/components/ui/panels";
+import {
+  Card,
+  InfoDot,
+  KpiTile,
+  PAGE_CONTAINER_CLASS,
+  PageTitle,
+  valueTone,
+} from "@/components/ui/panels";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { retryPolicy } from "@/components/screener/shared";
 import { usePortfolioNav } from "@/components/portfolio/usePortfolioNav";
@@ -190,7 +197,7 @@ export function PortfolioOverviewView() {
   const selected = portfolios?.find((p) => p.id === selectedId) ?? null;
 
   return (
-    <div className="mx-auto max-w-[1360px] px-[clamp(14px,3vw,28px)] pb-10 pt-5">
+    <div className={PAGE_CONTAINER_CLASS}>
       <PageTitle title="Portfolio Overview">
         {portfolios && portfolios.length > 0 && (
           <PortfolioSwitcher
