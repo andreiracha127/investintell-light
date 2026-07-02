@@ -7,13 +7,11 @@ import type {
   FundPeers,
   FundRiskTimeseries,
   FundStyleDrift,
-  FundsScatter,
 } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
 import { dateToUtcMs } from "@/lib/charts/hc/dateAxis";
 import {
   buildHcFactorSensitivityOption,
-  buildHcFundsScatterOption,
   buildHcInsiderSentimentOption,
   buildHcInstitutionalHolderOption,
   buildHcInstitutionalOverlapOption,
@@ -211,25 +209,11 @@ function institutionalReveal(): FundInstitutionalReveal {
   };
 }
 
-function scatter(): FundsScatter {
-  return {
-    count: 2,
-    instrument_ids: ["fund-id", "peer-id"],
-    names: ["Fund", "Peer"],
-    tickers: ["FND", null],
-    expected_returns: [0.12, 0.08],
-    volatilities: [0.18, 0.1],
-    tail_risks: [-0.04, -0.03],
-    strategies: ["Large blend", "Large blend"],
-    classification_note: "Test universe",
-  };
-}
-
 function peers(): FundPeers {
   return {
     instrument_id: "fund-id",
     cohort_label: "Large blend",
-    count: 2,
+    count: 3,
     classification_note: "Test cohort",
     items: [
       {
@@ -256,6 +240,19 @@ function peers(): FundPeers {
         sharpe_1y: 0.6,
         max_drawdown_1y: -0.06,
         cvar_95_12m: -0.03,
+        is_target: false,
+      },
+      {
+        instrument_id: "peer-2-id",
+        ticker: "PR2",
+        name: "Peer Two",
+        strategy_label: "Large blend",
+        expense_ratio: 0.0015,
+        return_1y: 0.05,
+        volatility_1y: 0.12,
+        sharpe_1y: 0.8,
+        max_drawdown_1y: -0.05,
+        cvar_95_12m: -0.02,
         is_target: false,
       },
     ],
@@ -352,7 +349,7 @@ describe("fund dossier Highcharts builders", () => {
     expect(option.series?.[2]).toMatchObject({ type: "line", name: "Net", data: [45] });
   });
 
-  it("builds institutional holder and overlap charts", () => {
+  it("builds institutional holder and overlap charts with a uniform bar color", () => {
     const reveal = institutionalReveal();
     const holders = buildHcInstitutionalHolderOption(reveal, colors);
     const overlap = buildHcInstitutionalOverlapOption(reveal, colors);
@@ -361,22 +358,19 @@ describe("fund dossier Highcharts builders", () => {
       type: "bar",
       name: "13F value",
     });
+    const holderData = holders.series?.[0] && "data" in holders.series[0]
+      ? (holders.series[0].data as Array<{ color?: string }>)
+      : [];
+    expect(holderData.every((point) => point.color === colors.bar)).toBe(true);
+
     expect(overlap.series?.[0]).toMatchObject({
       type: "column",
       name: "Institutional value",
     });
-  });
-
-  it("builds peer scatter points from funds scatter payload arrays", () => {
-    const option = buildHcFundsScatterOption(scatter(), colors);
-
-    expect(option.series?.[0]).toMatchObject({
-      type: "scatter",
-      data: [
-        { id: "fund-id", x: 0.18, y: 0.12 },
-        { id: "peer-id", x: 0.1, y: 0.08 },
-      ],
-    });
+    const overlapData = overlap.series?.[0] && "data" in overlap.series[0]
+      ? (overlap.series[0].data as Array<{ color?: string }>)
+      : [];
+    expect(overlapData.every((point) => point.color === colors.bar)).toBe(true);
   });
 
   it("builds peer bubbles from the same twenty-row peer cohort payload", () => {
@@ -387,7 +381,22 @@ describe("fund dossier Highcharts builders", () => {
       data: [
         { id: "fund-id", x: 0.18, y: 1.1, z: 12 },
         { id: "peer-id", x: 0.1, y: 0.6, z: 4 },
+        { id: "peer-2-id", x: 0.12, y: 0.8, z: 5 },
       ],
     });
+  });
+
+  it("colors peer bubbles by target/return sign, not a rotating category palette", () => {
+    const option = buildHcPeerBubbleOption(peers(), colors);
+    const data = option.series?.[0] && "data" in option.series[0]
+      ? (option.series[0].data as Array<{ id?: string; color?: string }>)
+      : [];
+
+    // fund-id is the target fund -> accent, regardless of its own return sign.
+    expect(data.find((point) => point.id === "fund-id")?.color).toBe(colors.accent);
+    // peer-id has a negative 1Y return -> loss.
+    expect(data.find((point) => point.id === "peer-id")?.color).toBe(colors.loss);
+    // peer-2-id has a positive 1Y return and is not the target -> gain.
+    expect(data.find((point) => point.id === "peer-2-id")?.color).toBe(colors.gain);
   });
 });

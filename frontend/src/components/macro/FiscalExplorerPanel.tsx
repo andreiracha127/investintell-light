@@ -51,6 +51,10 @@ const CATEGORIES: Array<{ key: FiscalCategory; label: string; tip: string }> = [
   },
 ];
 
+/** One InfoDot next to "Category" summarizes all five — matches the page's
+ *  flat InfoDot pattern instead of native `title=` tooltips on the buttons. */
+const CATEGORY_TIP = CATEGORIES.map((cat) => `${cat.label}: ${cat.tip}`).join(" ");
+
 const LOOKBACKS: Array<{ label: string; days: number }> = [
   { label: "1Y", days: 365 },
   { label: "3Y", days: 1095 },
@@ -109,8 +113,9 @@ export function FiscalExplorerPanel() {
 
       <div className="flex flex-wrap items-end gap-[18px] border-b border-border px-[var(--ix-pad)] py-3">
         <div className="flex flex-col gap-1.5">
-          <span className="text-[10px] font-bold uppercase tracking-[0.07em] text-text-muted">
+          <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.07em] text-text-muted">
             Category
+            <InfoDot tip={CATEGORY_TIP} />
           </span>
           <div role="group" aria-label="Fiscal category" className="flex h-[34px] border border-border-strong">
             {CATEGORIES.map((cat, i) => {
@@ -120,7 +125,6 @@ export function FiscalExplorerPanel() {
                   key={cat.key}
                   type="button"
                   aria-pressed={active}
-                  title={cat.tip}
                   onClick={() => setCategory(cat.key)}
                   className={`px-[13px] text-[11.5px] font-bold transition-colors ${
                     i === 0 ? "" : "border-l border-border-strong"

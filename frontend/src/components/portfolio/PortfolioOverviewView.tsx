@@ -199,13 +199,21 @@ export function PortfolioOverviewView() {
   return (
     <div className={PAGE_CONTAINER_CLASS}>
       <PageTitle title="Portfolio Overview">
-        {portfolios && portfolios.length > 0 && (
-          <PortfolioSwitcher
-            portfolios={portfolios}
-            selected={selected}
-            onSelect={setSelectedId}
-          />
-        )}
+        <div className="flex items-center gap-2.5">
+          <Link
+            href="/portfolio/static"
+            className="flex h-[30px] items-center border border-border-strong bg-field px-3 text-[12px] text-text-secondary transition-colors hover:bg-layer-hover hover:text-text-primary"
+          >
+            Static analysis
+          </Link>
+          {portfolios && portfolios.length > 0 && (
+            <PortfolioSwitcher
+              portfolios={portfolios}
+              selected={selected}
+              onSelect={setSelectedId}
+            />
+          )}
+        </div>
       </PageTitle>
 
       {portfoliosQuery.isPending ? (

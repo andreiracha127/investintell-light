@@ -67,6 +67,19 @@ export function toAssetRef(draft: AssetRefDraft): AssetRef | null {
   return draft.id !== null ? { kind: "portfolio", id: draft.id } : null;
 }
 
+/**
+ * Whether two resolved asset refs point at the same underlying asset (same
+ * kind + ticker/id). Used to block a degenerate X = Y run — e.g. regressing
+ * SPY on SPY, or correlating a portfolio with itself — which the backend
+ * accepts but produces a meaningless, trivially-perfect result.
+ */
+export function sameAssetRef(a: AssetRef | null, b: AssetRef | null): boolean {
+  if (a === null || b === null) return false;
+  if (a.kind === "ticker" && b.kind === "ticker") return a.ticker === b.ticker;
+  if (a.kind === "portfolio" && b.kind === "portfolio") return a.id === b.id;
+  return false;
+}
+
 export function AssetRefPicker({
   label,
   value,

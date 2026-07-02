@@ -16,16 +16,32 @@ import type {
   FundStyleDrift,
   FundTimeseries,
 } from "@/lib/api/client";
+import { serverRequest } from "@/lib/api/server";
 import { fetchCachedFundResource } from "@/lib/funds/dossierServer";
 import {
+  buildFundBackendPath,
   dossierQueryKeys,
   FUND_DOSSIER_DEFAULTS,
   FUND_DOSSIER_STALE_TIME_MS,
 } from "@/lib/funds/dossierQueries";
 
-export const metadata: Metadata = {
-  title: "Fund profile — Investintell Light",
-};
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  const instrumentId = decodeURIComponent(id);
+  try {
+    const profile = await serverRequest<FundProfile>(
+      buildFundBackendPath("profile", instrumentId),
+    );
+    const label = profile.ticker || profile.name;
+    return { title: `${label} · Investintell Cockpit` };
+  } catch {
+    return { title: "Fund profile · Investintell Cockpit" };
+  }
+}
 
 export default async function FundProfilePage({
   params,

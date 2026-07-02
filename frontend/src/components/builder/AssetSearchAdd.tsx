@@ -68,6 +68,13 @@ export function AssetSearchAdd({
     setOpen(false);
   };
 
+  // Render the dropdown whenever there's something to say about the current
+  // search — including "fetching" and "no matches" — so an empty or in-flight
+  // query isn't silent (the old `results.length > 0` gate hid both states).
+  const trimmed = text.trim();
+  const dropdownVisible = open && trimmed.length > 0;
+  const showEmpty = dropdownVisible && !isFetching && results.length === 0;
+
   return (
     <div ref={rootRef} className="relative flex w-full max-w-[440px] flex-col gap-1">
       <span className={FIELD_LABEL_CLASS}>Search stocks &amp; funds</span>
@@ -100,7 +107,7 @@ export function AssetSearchAdd({
         }}
         placeholder="Ticker or name — e.g. AAPL, Vanguard 500, VTI…"
         aria-label="Search stocks and funds by ticker or name"
-        aria-expanded={open && results.length > 0}
+        aria-expanded={dropdownVisible}
         aria-autocomplete="list"
         aria-controls={listId}
         aria-activedescendant={
@@ -109,7 +116,7 @@ export function AssetSearchAdd({
         role="combobox"
         className={INPUT_CLASS}
       />
-      {open && results.length > 0 && (
+      {dropdownVisible && (
         <ul
           id={listId}
           role="listbox"
@@ -117,35 +124,45 @@ export function AssetSearchAdd({
             isFetching ? "opacity-70" : ""
           }`}
         >
-          {results.map((r, i) => {
-            const added = inUniverse.has(assetKey(symbolToAsset(r)));
-            return (
-              <li key={`${r.kind}:${r.symbol}`} role="option" aria-selected={i === hi}>
-                <button
-                  type="button"
-                  disabled={added}
-                  onMouseEnter={() => setHi(i)}
-                  onClick={() => add(r)}
-                  className={`flex w-full items-baseline gap-2 px-2.5 py-1.5 text-left text-[12px] transition-colors hover:bg-accent-wash disabled:cursor-not-allowed disabled:opacity-40 ${
-                    i === hi ? "bg-layer-hover" : ""
-                  }`}
-                >
-                  <span className="w-[64px] shrink-0 font-bold tabular-nums text-accent">
-                    {r.symbol}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-text-secondary">
-                    {r.name}
-                  </span>
-                  <span className="shrink-0 text-[10px] uppercase text-text-muted">
-                    {KIND_LABEL[r.kind] ?? r.kind}
-                  </span>
-                  <span className="w-[42px] shrink-0 text-right text-[11px] text-text-muted">
-                    {added ? "Added" : "+ Add"}
-                  </span>
-                </button>
-              </li>
-            );
-          })}
+          {isFetching ? (
+            <li role="presentation" className="px-2.5 py-1.5 text-[12px] text-text-muted">
+              Searching…
+            </li>
+          ) : showEmpty ? (
+            <li role="presentation" className="px-2.5 py-1.5 text-[12px] text-text-muted">
+              No matches for &ldquo;{q}&rdquo;
+            </li>
+          ) : (
+            results.map((r, i) => {
+              const added = inUniverse.has(assetKey(symbolToAsset(r)));
+              return (
+                <li key={`${r.kind}:${r.symbol}`} role="option" aria-selected={i === hi}>
+                  <button
+                    type="button"
+                    disabled={added}
+                    onMouseEnter={() => setHi(i)}
+                    onClick={() => add(r)}
+                    className={`flex w-full items-baseline gap-2 px-2.5 py-1.5 text-left text-[12px] transition-colors hover:bg-accent-wash disabled:cursor-not-allowed disabled:opacity-40 ${
+                      i === hi ? "bg-layer-hover" : ""
+                    }`}
+                  >
+                    <span className="w-[64px] shrink-0 font-bold tabular-nums text-accent">
+                      {r.symbol}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-text-secondary">
+                      {r.name}
+                    </span>
+                    <span className="shrink-0 text-[10px] uppercase text-text-muted">
+                      {KIND_LABEL[r.kind] ?? r.kind}
+                    </span>
+                    <span className="w-[42px] shrink-0 text-right text-[11px] text-text-muted">
+                      {added ? "Added" : "+ Add"}
+                    </span>
+                  </button>
+                </li>
+              );
+            })
+          )}
         </ul>
       )}
     </div>

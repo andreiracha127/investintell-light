@@ -15,24 +15,6 @@ import { formatNumber, formatPercent } from "@/lib/format";
 import { InfoDot, StatRow } from "@/components/ui/panels";
 import { useEffect, useMemo, useState } from "react";
 
-function forceScaleMax(...values: number[]): number {
-  const max = Math.max(...values.map((v) => Math.abs(v)), 0.1);
-  return Math.min(1, Math.max(0.2, Math.ceil(max * 1.18 * 10) / 10));
-}
-
-function ForceScale({ max }: { max: number }) {
-  const labels = [-max, -max / 2, 0, max / 2, max];
-  return (
-    <div className="mt-1 border-t border-border-strong pt-1">
-      <div className="flex justify-between text-[10px] tabular-nums text-text-muted">
-        {labels.map((value) => (
-          <span key={value}>{formatPercent(Math.abs(value), 0)}</span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export function MarketBreadthPanel({ breadth }: { breadth: MarketBreadth | null }) {
   const [colors, setColors] = useState<ChartColors | null>(null);
   useEffect(() => setColors(chartColors()), []);
@@ -46,13 +28,6 @@ export function MarketBreadthPanel({ breadth }: { breadth: MarketBreadth | null 
     [breadth, colors],
   );
   if (!breadth) return null;
-  const tracked = breadth.tracked || 1;
-  const advShare = breadth.advancing / tracked;
-  const decShare = breadth.declining / tracked;
-  const upVolumeShare = breadth.up_volume_share;
-  const downVolumeShare = Math.max(0, 1 - upVolumeShare);
-  const priceScaleMax = forceScaleMax(advShare, decShare);
-  const volumeScaleMax = forceScaleMax(upVolumeShare, downVolumeShare);
 
   return (
     <div className="ix-pad bg-surface-2">
@@ -81,7 +56,6 @@ export function MarketBreadthPanel({ breadth }: { breadth: MarketBreadth | null 
               Preparing price breadth...
             </div>
           )}
-          <ForceScale max={priceScaleMax} />
         </div>
         <div>
           <div className="mb-1 flex justify-between text-[10px] font-bold uppercase tracking-[0.08em] text-text-muted">
@@ -95,7 +69,6 @@ export function MarketBreadthPanel({ breadth }: { breadth: MarketBreadth | null 
               Preparing volume breadth...
             </div>
           )}
-          <ForceScale max={volumeScaleMax} />
         </div>
       </div>
       <dl className="mt-4">

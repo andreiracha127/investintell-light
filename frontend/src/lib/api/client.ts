@@ -520,7 +520,7 @@ async function request<T>(
     if (err instanceof DOMException && err.name === "AbortError") {
       // Distinguish a timeout from a caller-triggered abort (e.g. unmount).
       if (timeoutSignal.aborted) {
-        throw new Error("Request timed out — is the backend running?");
+        throw new Error("The data service took too long to respond. Check your connection and retry.");
       }
       throw new Error("Request cancelled");
     }
@@ -566,7 +566,7 @@ async function requestSameOrigin<T>(
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       if (timeoutSignal.aborted) {
-        throw new Error("Request timed out — is the backend running?");
+        throw new Error("The data service took too long to respond. Check your connection and retry.");
       }
       throw new Error("Request cancelled");
     }

@@ -101,6 +101,42 @@ export function buildHcExposureSunburstOption(
     ]),
   );
 
+  // The tree only carries a sampled subset of holdings per asset class (e.g.
+  // the top-25 largest positions), but `assetTotals` above holds the true
+  // dimension totals. Left alone, each asset-class arc would only be sized by
+  // the sampled leaves it contains, disagreeing with the true total shown in
+  // its own tooltip and in the exposure table. Close the gap with a synthetic
+  // "Other holdings" residual leaf per asset class so the arc sums to the
+  // true total.
+  const OTHER_HOLDINGS_EPSILON = 0.005;
+  const leafSumByAsset = new Map<string, number>();
+  for (const node of tree) {
+    if (!leaves.has(node.id)) continue;
+    const topId = topAssetId(node, byId);
+    leafSumByAsset.set(topId, (leafSumByAsset.get(topId) ?? 0) + node.value_pct);
+  }
+  const residualData: PointOptionsObject[] = assetNodes.flatMap((node) => {
+    const assetTotal = assetTotals.get(node.key.trim().toUpperCase());
+    if (!assetTotal) return [];
+    const sampled = leafSumByAsset.get(node.id) ?? 0;
+    const residual = round4(Math.max(0, assetTotal.total - sampled));
+    if (residual <= OTHER_HOLDINGS_EPSILON) return [];
+    return [
+      {
+        id: `${node.id}|__other__`,
+        parent: node.id,
+        name: "Other holdings",
+        value: residual,
+        color: colors.barMute,
+        custom: {
+          rawKey: node.key,
+          kind: "other_holdings",
+          valuePct: residual,
+        },
+      },
+    ];
+  });
+
   const data: PointOptionsObject[] = [
     {
       id: "portfolio-root",
@@ -132,6 +168,7 @@ export function buildHcExposureSunburstOption(
         },
       };
     }),
+    ...residualData,
   ];
 
   return {
@@ -155,10 +192,13 @@ export function buildHcExposureSunburstOption(
           }
         ).point;
         const value = point.options.custom?.valuePct ?? 0;
+        const note = point.options.custom?.kind === "other_holdings"
+          ? `<br/><span style="color:${colors.textMuted}">Holdings beyond the top-25 sample</span>`
+          : "";
         return `<div style="font-size:12px"><b>${point.name}</b><br/>${formatNumber(
           value,
           2,
-        )}${opts.valueLabel ?? "% of NAV"}</div>`;
+        )}${opts.valueLabel ?? "% of NAV"}${note}</div>`;
       },
     },
     plotOptions: {

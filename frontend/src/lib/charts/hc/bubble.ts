@@ -12,7 +12,6 @@
 import type { Options, PointOptionsObject } from "highcharts";
 
 import type { ChartColors } from "@/lib/charts/chartColors";
-import type { RiskContribution } from "@/lib/api/client";
 import { formatCurrency, formatPercent } from "@/lib/format";
 
 export interface BubbleItem {
@@ -110,99 +109,3 @@ export function buildHcContributionBubbleOption(
   };
 }
 
-/**
- * Build a packed-bubble chart of per-holding risk contributions (Builder Risk
- * tab look-through).
- *
- * Each bubble is one holding, sized by its share of total portfolio risk (the
- * `contribution` fraction normalised across holdings). Filled with the accent
- * token; the tooltip reads "x% of total risk". Negative contributions (rare
- * diversifiers) use their magnitude for area and the loss token so they read
- * apart. Distinct from {@link buildHcContributionBubbleOption}, which is the
- * P&L-signed performance bubble.
- *
- * @param contributions Per-holding risk contributions (`contribution` fraction).
- * @param colors        Design-token color bag (from chartColors()).
- */
-export function buildHcRiskBubbleOption(
-  contributions: RiskContribution[],
-  colors: ChartColors,
-): Options {
-  const total = contributions.reduce((sum, c) => sum + Math.abs(c.contribution), 0);
-
-  const data: PointOptionsObject[] = contributions
-    .filter((c) => Math.abs(c.contribution) > 0)
-    .sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution))
-    .map((c) => ({
-      name: c.ticker,
-      // Area ∝ magnitude of the risk share.
-      value: Math.abs(c.contribution),
-      color: c.contribution >= 0 ? colors.accent : colors.loss,
-      custom: {
-        contribution: c.contribution,
-        // Share of the summed |contributions| — guards a zero denominator.
-        share: total > 0 ? Math.abs(c.contribution) / total : 0,
-      },
-    }));
-
-  return {
-    chart: { type: "packedbubble" },
-    legend: { enabled: false },
-    tooltip: {
-      useHTML: true,
-      formatter() {
-        const point = (
-          this as unknown as {
-            point: {
-              name: string;
-              options: { custom?: { contribution?: number } };
-            };
-          }
-        ).point;
-        const contribution = point.options.custom?.contribution ?? 0;
-        return [
-          `<div style="font-size:12px">`,
-          `<b>${point.name}</b>`,
-          `<br/><span style="color:${colors.textMuted}">${formatPercent(
-            contribution,
-            1,
-          )} of total risk</span>`,
-          `</div>`,
-        ].join("");
-      },
-    },
-    plotOptions: {
-      packedbubble: {
-        minSize: "30%",
-        maxSize: "120%",
-        zMin: 0,
-        layoutAlgorithm: {
-          gravitationalConstant: 0.05,
-          splitSeries: false,
-          seriesInteraction: false,
-          dragBetweenSeries: false,
-          parentNodeLimit: true,
-        },
-        marker: { fillOpacity: 0.6, lineWidth: 1.5, lineColor: colors.surface },
-        dataLabels: {
-          enabled: true,
-          format: "{point.name}",
-          filter: { property: "value", operator: ">", value: 0.01 },
-          style: {
-            color: colors.textOnAccent,
-            textOutline: "none",
-            fontWeight: "bold",
-            fontSize: "11px",
-          },
-        },
-      },
-    },
-    series: [
-      {
-        type: "packedbubble",
-        name: "Risk share",
-        data,
-      },
-    ],
-  };
-}

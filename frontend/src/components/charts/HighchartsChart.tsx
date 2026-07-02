@@ -157,7 +157,7 @@ export function HighchartsChart({
   const showEmpty = !!emptyMessage && !!isEmpty;
 
   return (
-    <div className={`relative ${className ?? ""}`}>
+    <div className={`relative ${className ?? ""}`} aria-busy={!isReady || undefined}>
       <div ref={containerRef} className="h-full w-full" />
       {!isReady && (
         <div

@@ -50,7 +50,7 @@ export function highchartsTheme(colors: ChartColors): Options {
     tooltip: {
       backgroundColor: colors.surface,
       borderColor: colors.grid,
-      borderRadius: 2,
+      borderRadius: 0,
       padding: 10,
       shadow: false,
       style: { color: colors.text, fontSize: "12px" },

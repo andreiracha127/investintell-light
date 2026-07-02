@@ -403,6 +403,25 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
     return buildHcHistogramOption(analysisQuery.data.histogram, colors);
   }, [analysisQuery.data, colors]);
 
+  const rollingVolatilityOption = useMemo(() => {
+    if (!colors || !analysisQuery.data?.rolling_volatility.length) return null;
+    return buildHcRollingOption(
+      analysisQuery.data.rolling_volatility,
+      "Rolling volatility",
+      colors,
+      { yPercent: true },
+    );
+  }, [analysisQuery.data, colors]);
+
+  const rollingSharpeOption = useMemo(() => {
+    if (!colors || !analysisQuery.data?.rolling_sharpe.length) return null;
+    return buildHcRollingOption(
+      analysisQuery.data.rolling_sharpe,
+      "Rolling Sharpe",
+      colors,
+    );
+  }, [analysisQuery.data, colors]);
+
   // Return distribution: fitted-normal bell with ±1σ shading and Mean / VaR-95
   // reference lines (Funds.dc.html #ix-dist). `stats.var_95` is a signed loss
   // fraction; the bell builder wants the positive magnitude.
@@ -655,6 +674,9 @@ export function FundProfileView({ instrumentId }: { instrumentId: string }) {
           risk={risk}
           fundType={fund.fund_type}
           assetClass={fund.asset_class}
+          rollingVolatilityOption={rollingVolatilityOption}
+          rollingSharpeOption={rollingSharpeOption}
+          monthlyReturns={analysisQuery.data?.monthly_returns ?? []}
         />
       )}
 
@@ -735,6 +757,9 @@ function PerformanceTab({
   risk,
   fundType,
   assetClass,
+  rollingVolatilityOption,
+  rollingSharpeOption,
+  monthlyReturns,
 }: {
   chartBars: ReturnType<typeof fundTimeseriesToHistoryBars>;
   fundLabel: string;
@@ -750,6 +775,9 @@ function PerformanceTab({
   risk: FundRisk | null;
   fundType: string;
   assetClass: string | null;
+  rollingVolatilityOption: Highcharts.Options | null;
+  rollingSharpeOption: Highcharts.Options | null;
+  monthlyReturns: [string, number][];
 }) {
   const isRefreshing =
     (timeseriesQuery.isFetching && !timeseriesQuery.isPending) ||
@@ -761,7 +789,7 @@ function PerformanceTab({
         {chartBars.length > 0 ? (
           <div className="relative">
             {isRefreshing ? (
-              <span className="absolute right-2 top-2 z-10 rounded bg-surface px-2 py-0.5 text-[11px] text-text-muted">
+              <span className="absolute right-2 top-2 z-10 bg-surface px-2 py-0.5 text-[11px] text-text-muted">
                 Updating…
               </span>
             ) : null}
@@ -813,6 +841,35 @@ function PerformanceTab({
             "No risk timeseries available for this fund."
           }
         />
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          <ChartCard
+            title="Rolling volatility"
+            subtitle="annualized"
+            option={rollingVolatilityOption}
+            query={analysisQuery}
+            emptyMessage="No rolling volatility series for this window."
+          />
+          <ChartCard
+            title="Rolling Sharpe"
+            subtitle="zero risk-free rate"
+            option={rollingSharpeOption}
+            query={analysisQuery}
+            emptyMessage="No rolling Sharpe series for this window."
+          />
+        </div>
+
+        <Card title="Monthly returns">
+          {monthlyReturns.length > 0 ? (
+            <MonthlyReturnsTable data={monthlyReturns} />
+          ) : (
+            <QueryMessage
+              query={analysisQuery}
+              emptyMessage="No monthly returns for this window."
+              loadingMessage="Loading monthly returns..."
+            />
+          )}
+        </Card>
       </div>
 
       <div className="flex flex-col gap-4">
@@ -878,11 +935,152 @@ function HoldingsTab({
 }) {
   return (
     <div className="flex flex-col gap-4">
+      <Card
+        title="Top holdings"
+        subtitle={holdingsTopQuery.data?.report_date ? formatDate(holdingsTopQuery.data.report_date) : undefined}
+      >
+        {holdingsTopQuery.data ? (
+          <TopHoldingsTable data={holdingsTopQuery.data} />
+        ) : (
+          <QueryMessage
+            query={holdingsTopQuery}
+            emptyMessage="No top holdings returned for this fund."
+            loadingMessage="Loading top holdings..."
+          />
+        )}
+      </Card>
       <FundLookthroughSection
         instrumentId={instrumentId}
         holdingsTop={holdingsTopQuery.data}
       />
       <ActiveSharePanel query={activeShareQuery} />
+    </div>
+  );
+}
+
+function TopHoldingsTable({ data }: { data: FundHoldingsTop }) {
+  const holdings = data.top_holdings;
+  if (holdings.length === 0) {
+    return <EmptyMessage message="No top holdings returned." />;
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-[640px] w-full border-collapse ix-fs tabular-nums lining-nums">
+        <thead>
+          <tr className="bg-field">
+            <Th align="right">#</Th>
+            <Th>Issuer</Th>
+            <Th>Sector</Th>
+            <Th align="right">% of NAV</Th>
+            <Th align="right">Market value</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {holdings.map((holding, index) => (
+            <tr
+              key={holding.cusip ?? holding.isin ?? `${holding.rank}`}
+              className={`border-b border-border transition-colors hover:bg-accent-wash ${
+                index % 2 === 1 ? "bg-zebra" : ""
+              }`}
+            >
+              <Td align="right" className="text-text-muted">{holding.rank}</Td>
+              <Td>
+                <span className="block max-w-[280px] truncate font-bold">
+                  {holding.issuer_name ?? holding.cusip ?? holding.isin ?? "—"}
+                </span>
+                {(holding.cusip ?? holding.isin) && (
+                  <span className="block text-[10px] text-text-muted">
+                    {holding.cusip ?? holding.isin}
+                  </span>
+                )}
+              </Td>
+              <Td>{holding.sector_label ?? holding.gics_sector ?? holding.sector ?? "—"}</Td>
+              <Td align="right">
+                {holding.pct_of_nav !== null
+                  ? `${formatNumber(holding.pct_of_nav, 2)}%`
+                  : "—"}
+              </Td>
+              <Td align="right">
+                {holding.market_value !== null
+                  ? `$${formatCompact(holding.market_value)}`
+                  : "—"}
+              </Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const MONTH_LABELS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/**
+ * `monthly_returns` arrives as a flat [month_end_date, fraction] series
+ * (see FundAnalysisResponse). Reshape it into a year x month grid so it
+ * reads like a standard monthly-returns table; months without a data point
+ * (partial years) render as a dash rather than a fabricated zero.
+ */
+function MonthlyReturnsTable({ data }: { data: [string, number][] }) {
+  const byYear = new Map<number, (number | null)[]>();
+  for (const [date, value] of data) {
+    const parsed = new Date(`${date.slice(0, 10)}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime())) continue;
+    const year = parsed.getUTCFullYear();
+    const month = parsed.getUTCMonth();
+    const row = byYear.get(year) ?? new Array<number | null>(12).fill(null);
+    row[month] = value;
+    byYear.set(year, row);
+  }
+  const years = Array.from(byYear.keys()).sort((a, b) => b - a);
+
+  if (years.length === 0) {
+    return <EmptyMessage message="No monthly returns returned." />;
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-[760px] w-full border-collapse ix-fs tabular-nums lining-nums">
+        <thead>
+          <tr className="bg-field">
+            <Th align="right">Year</Th>
+            {MONTH_LABELS.map((label) => (
+              <Th key={label} align="right">{label}</Th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {years.map((year, index) => (
+            <tr
+              key={year}
+              className={`border-b border-border ${index % 2 === 1 ? "bg-zebra" : ""}`}
+            >
+              <Td align="right" className="font-bold">{year}</Td>
+              {(byYear.get(year) ?? []).map((value, month) => (
+                <Td
+                  key={month}
+                  align="right"
+                  className={
+                    value === null
+                      ? "text-text-muted"
+                      : value > 0
+                        ? "text-gain"
+                        : value < 0
+                          ? "text-loss"
+                          : ""
+                  }
+                >
+                  {value !== null ? formatPercent(value, 1, { signed: true }) : "—"}
+                </Td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

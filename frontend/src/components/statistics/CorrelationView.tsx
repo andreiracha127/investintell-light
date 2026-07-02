@@ -21,11 +21,16 @@ import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { Card, KpiTile } from "@/components/ui/panels";
 import {
   AssetRefPicker,
+  sameAssetRef,
   toAssetRef,
   useDefaultAssetY,
   type AssetRefDraft,
 } from "@/components/statistics/AssetRefPicker";
-import { DateRangeInputs, defaultDateRange } from "@/components/statistics/DateRangeInputs";
+import {
+  DateRangeInputs,
+  defaultDateRange,
+  isDateRangeValid,
+} from "@/components/statistics/DateRangeInputs";
 import { StatisticsShell } from "@/components/statistics/StatisticsShell";
 import { WindowInput, parseWindow } from "@/components/statistics/WindowInput";
 import { ErrorPanel, ParamsPanel, RunButton } from "@/components/statistics/ui";
@@ -52,13 +57,16 @@ export function CorrelationView() {
 
   const assetX = toAssetRef(draftX);
   const assetY = toAssetRef(draftY);
+  const degenerate = sameAssetRef(assetX, assetY);
   const window = parseWindow(windowText);
   const canRun =
     assetX !== null &&
     assetY !== null &&
+    !degenerate &&
     window !== null &&
     startDate !== "" &&
-    endDate !== "";
+    endDate !== "" &&
+    isDateRangeValid(startDate, endDate);
   const onRun = () => {
     if (!canRun || mutation.isPending) return;
     mutation.mutate({
@@ -87,6 +95,9 @@ export function CorrelationView() {
           disabled={!canRun}
           onClick={onRun}
         />
+        {degenerate && (
+          <span className="ix-fs text-loss">Pick two different assets.</span>
+        )}
       </ParamsPanel>
 
       {mutation.isPending ? (

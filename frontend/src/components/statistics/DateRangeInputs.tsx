@@ -23,6 +23,17 @@ export function defaultDateRange(): { start: string; end: string } {
   return { start: toIsoDate(start), end: toIsoDate(end) };
 }
 
+/**
+ * Whether a start/end pair is a usable range: either side may be blank
+ * (callers gate that separately), but when BOTH are filled, start must not
+ * be after end. Shared by every tool's `canRun` so a backwards range is
+ * caught before the request goes out instead of surfacing as a raw 422.
+ */
+export function isDateRangeValid(start: string, end: string): boolean {
+  if (start === "" || end === "") return true;
+  return start <= end;
+}
+
 export function DateRangeInputs({
   start,
   end,
@@ -34,6 +45,11 @@ export function DateRangeInputs({
   onStartChange: (value: string) => void;
   onEndChange: (value: string) => void;
 }) {
+  const invalid = !isDateRangeValid(start, end);
+  // Inline style (not a `border-loss` class) so the override always wins over
+  // INPUT_CLASS's baked-in border-border-strong regardless of Tailwind's
+  // generated rule order — same pattern as ErrorPanel's borderLeftColor.
+  const invalidStyle = invalid ? { borderColor: "var(--color-loss)" } : undefined;
   return (
     <>
       <label className={LABEL_CLASS}>
@@ -43,6 +59,8 @@ export function DateRangeInputs({
           value={start}
           onChange={(e) => onStartChange(e.target.value)}
           aria-label="Start date"
+          aria-invalid={invalid || undefined}
+          style={invalidStyle}
           className={`w-[140px] tabular-nums ${INPUT_CLASS}`}
         />
       </label>
@@ -53,9 +71,16 @@ export function DateRangeInputs({
           value={end}
           onChange={(e) => onEndChange(e.target.value)}
           aria-label="End date"
+          aria-invalid={invalid || undefined}
+          style={invalidStyle}
           className={`w-[140px] tabular-nums ${INPUT_CLASS}`}
         />
       </label>
+      {invalid && (
+        <span className="ix-fs self-end pb-[7px] text-loss">
+          Start must be on or before end.
+        </span>
+      )}
     </>
   );
 }

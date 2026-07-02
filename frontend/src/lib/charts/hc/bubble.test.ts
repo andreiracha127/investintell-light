@@ -3,12 +3,9 @@ import type { SeriesPackedbubbleOptions } from "highcharts";
 
 import {
   buildHcContributionBubbleOption,
-  buildHcRiskBubbleOption,
   type BubbleItem,
 } from "@/lib/charts/hc/bubble";
 import type { ChartColors } from "@/lib/charts/chartColors";
-import type { RiskContribution } from "@/lib/api/client";
-import { formatPercent } from "@/lib/format";
 
 const COLORS: ChartColors = {
   gain: "#198038",
@@ -78,70 +75,5 @@ describe("buildHcContributionBubbleOption", () => {
     const input = [...ITEMS];
     buildHcContributionBubbleOption(input, COLORS);
     expect(input).toEqual(ITEMS);
-  });
-});
-
-const RISK: RiskContribution[] = [
-  { ticker: "NVDA", contribution: 0.34 },
-  { ticker: "MSFT", contribution: 0.22 },
-  { ticker: "AGG", contribution: -0.04 },
-  { ticker: "CASHX", contribution: 0 },
-] as RiskContribution[];
-
-describe("buildHcRiskBubbleOption", () => {
-  it("renders a packedbubble series", () => {
-    const opt = buildHcRiskBubbleOption(RISK, COLORS);
-    expect(opt.chart?.type).toBe("packedbubble");
-    const series = opt.series?.[0] as SeriesPackedbubbleOptions;
-    expect(series.type).toBe("packedbubble");
-    expect(series.name).toBe("Risk share");
-  });
-
-  it("sizes bubbles by |contribution| and drops zero/empty holdings, sorted desc", () => {
-    const opt = buildHcRiskBubbleOption(RISK, COLORS);
-    const series = opt.series?.[0] as SeriesPackedbubbleOptions;
-    const data = series.data as Array<{ name: string; value: number }>;
-    expect(data.map((d) => d.name)).toEqual(["NVDA", "MSFT", "AGG"]);
-    expect(data.map((d) => d.value)).toEqual([0.34, 0.22, 0.04]);
-  });
-
-  it("colors positive contributions with the accent and negatives with loss", () => {
-    const opt = buildHcRiskBubbleOption(RISK, COLORS);
-    const series = opt.series?.[0] as SeriesPackedbubbleOptions;
-    const data = series.data as Array<{ name: string; color: string }>;
-    const byName = Object.fromEntries(data.map((d) => [d.name, d.color]));
-    expect(byName.NVDA).toBe(COLORS.accent);
-    expect(byName.AGG).toBe(COLORS.loss);
-  });
-
-  it("carries the signed contribution and computed share on point.custom", () => {
-    const opt = buildHcRiskBubbleOption(RISK, COLORS);
-    const series = opt.series?.[0] as SeriesPackedbubbleOptions;
-    const data = series.data as Array<{
-      name: string;
-      custom?: { contribution: number; share: number };
-    }>;
-    const nvda = data.find((d) => d.name === "NVDA");
-    const totalAbs = 0.34 + 0.22 + 0.04;
-    expect(nvda?.custom?.contribution).toBe(0.34);
-    expect(nvda?.custom?.share).toBeCloseTo(0.34 / totalAbs, 10);
-  });
-
-  it("formats the tooltip as a percent of total risk", () => {
-    const opt = buildHcRiskBubbleOption(RISK, COLORS);
-    const tooltip = opt.tooltip as {
-      formatter?: (this: unknown) => string;
-    };
-    const out = tooltip.formatter!.call({
-      point: { name: "NVDA", options: { custom: { contribution: 0.34 } } },
-    });
-    expect(out).toContain(formatPercent(0.34, 1));
-    expect(out).toContain("of total risk");
-  });
-
-  it("does not mutate the input array", () => {
-    const input = [...RISK];
-    buildHcRiskBubbleOption(input, COLORS);
-    expect(input).toEqual(RISK);
   });
 });

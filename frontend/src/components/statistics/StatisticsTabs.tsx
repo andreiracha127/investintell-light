@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Carbon-style content switcher shared by the four Statistics tools.
+ * Carbon-style content switcher shared by the five Statistics tools.
  * Items are plain links; the active one derives from the pathname.
  * Design source: /design/investintell-cockpit/InvestintellCockpit.dc.html
  */

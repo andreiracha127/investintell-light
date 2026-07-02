@@ -43,6 +43,11 @@ describe("exposureGridOptions", () => {
     expect(columns.find((column) => column.id === "kind")?.enabled).toBe(false);
   });
 
+  it("enables column sorting like the rest of the product's grids", () => {
+    const opts = exposureGridOptions(ROWS, "asset|equity");
+    expect(opts.columnDefaults?.sorting?.enabled).toBe(true);
+  });
+
   it("renders escaped hover targets and marks the active row", () => {
     const opts = exposureGridOptions(ROWS, "asset|equity");
     const labelFormatter = opts.columns?.find((column) => column.id === "label")?.cells?.formatter;

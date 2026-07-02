@@ -25,7 +25,13 @@ import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { Card, InfoDot, KpiTile } from "@/components/ui/panels";
 import { PortfolioSelect } from "@/components/statistics/PortfolioSelect";
 import { StatisticsShell } from "@/components/statistics/StatisticsShell";
-import { LABEL_CLASS, ErrorPanel, ParamsPanel, RunButton } from "@/components/statistics/ui";
+import {
+  HeatmapLegend,
+  LABEL_CLASS,
+  ErrorPanel,
+  ParamsPanel,
+  RunButton,
+} from "@/components/statistics/ui";
 import { retryPolicy } from "@/components/screener/shared";
 
 /** Backend contract: 30..3650 calendar days, default 90. */
@@ -110,6 +116,9 @@ export function CorrelationRegimeView() {
           </span>
         </label>
         <RunButton pending={mutation.isPending} disabled={!canRun} onClick={onRun} />
+        {portfolioId !== null && overviewQuery.isPending && (
+          <span className="text-[12px] text-text-muted">Loading positions…</span>
+        )}
         {portfolioId !== null && positionCount < 2 && overviewQuery.data && (
           <span className="text-[12px] text-text-muted">
             Needs at least two positions.
@@ -117,7 +126,13 @@ export function CorrelationRegimeView() {
         )}
       </ParamsPanel>
 
-      {mutation.isPending ? (
+      {overviewQuery.isError ? (
+        <ErrorPanel
+          title="Couldn't load portfolio positions"
+          message={overviewQuery.error.message}
+          onRetry={() => overviewQuery.refetch()}
+        />
+      ) : mutation.isPending ? (
         <RegimeSkeleton />
       ) : mutation.isError ? (
         <ErrorPanel title="Correlation regime failed" message={mutation.error.message} />
@@ -161,7 +176,13 @@ function Results({
       buildHcHeatmapOption(
         { tickers: data.labels, matrix: data.correlation_matrix },
         colors,
-        { diverging: true },
+        {
+          diverging: true,
+          // Diverging scale: blue at -1 (neutral math signal, not a risk
+          // judgment), surface at 0, accent at +1 — matches RiskTab and
+          // StockCorrelationView.
+          negativeColor: colors.blue,
+        },
       ),
     [data.labels, data.correlation_matrix, colors],
   );
@@ -233,7 +254,10 @@ function Results({
         title="Correlation matrix"
         subtitle={`${data.labels.length} instruments`}
         actions={
-          <InfoDot tip="Pairwise return correlations over the trailing window. Diverging scale: accent = +1, neutral = 0, loss tone = −1." />
+          <span className="flex items-center gap-2.5">
+            <HeatmapLegend />
+            <InfoDot tip="Pairwise return correlations over the trailing window. Diverging scale: accent = +1, neutral = 0, blue = −1." />
+          </span>
         }
       >
         <HighchartsChart

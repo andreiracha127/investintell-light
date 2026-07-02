@@ -6,7 +6,7 @@ import type { XAxisOptions } from "highcharts";
 
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { ErrorPanel } from "@/components/screener/shared";
-import { KpiTile } from "@/components/ui/panels";
+import { InfoDot, KpiTile } from "@/components/ui/panels";
 import {
   postBacktestWalkForward,
   type BuilderObjective,
@@ -24,6 +24,7 @@ import {
 import { buildHcNavOption } from "@/lib/charts/hc/nav";
 import { formatDate, formatNumber, formatPercent } from "@/lib/format";
 
+import { OBJECTIVE_COPY } from "./BuilderCopy";
 import { ChartCard, TabSkeleton, type UsedConstraints } from "./tabShared";
 
 const BACKTESTABLE: ReadonlySet<BuilderObjective> = new Set<BuilderObjective>([
@@ -93,9 +94,13 @@ export function BacktestTab({
   return (
     <div className="flex flex-col gap-px">
       {downgraded && (
-        <p className="ix-fs m-0 border-l-[3px] border-border-strong bg-surface-2 px-3 py-2 text-text-secondary">
+        <p className="ix-fs m-0 flex items-center gap-1.5 border-l-[3px] border-border-strong bg-surface-2 px-3 py-2 text-text-secondary">
           Backtest objective adjusted to{" "}
-          <span className="font-bold text-text-primary">min_cvar</span>.
+          <span className="font-bold text-text-primary">
+            {OBJECTIVE_COPY[backtestObjective].label}
+          </span>
+          .
+          <InfoDot tip={`"${OBJECTIVE_COPY[objective].label}" needs your market views, but a walk-forward backtest re-optimizes on each fold's own training window — views entered once aren't reproducible fold by fold, so this objective can't be backtested as-is.`} />
         </p>
       )}
 

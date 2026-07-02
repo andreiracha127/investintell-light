@@ -144,15 +144,21 @@ export function DistributionPanel({
           {(["min", "max"] as const).map((which) => {
             const text = which === "min" ? minText : maxText;
             const setText = which === "min" ? setMinText : setMaxText;
+            const invalid = parseBound(text, isPercent) === undefined;
             return (
               <label key={which} className="flex w-[130px] flex-col gap-[6px]">
                 <span className={FIELD_LABEL_CLASS}>{which === "min" ? "Minimum" : "Maximum"}</span>
-                <div className="flex h-[36px] items-center bg-field border-b border-border-strong focus-within:border-b-2 focus-within:border-b-accent">
+                <div
+                  className={`flex h-[36px] items-center bg-field border-b focus-within:border-b-2 focus-within:border-b-accent ${
+                    invalid ? "border-loss" : "border-border-strong"
+                  }`}
+                >
                   {prefix && <span className="pl-2 text-[11px] text-text-muted">{prefix}</span>}
                   <input value={text} onChange={(e) => setText(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") commit(which, text); }}
                     onBlur={() => commit(which, text)} placeholder="—"
                     aria-label={`${which === "min" ? "Minimum" : "Maximum"} ${metric.name}${isPercent ? " in percent" : ""}`}
+                    aria-invalid={invalid}
                     className="h-full w-full min-w-0 border-none bg-transparent px-2 text-right text-[14px] tabular-nums text-text-primary placeholder:text-text-muted outline-none" />
                   {unit && <span className="pr-2 text-[11px] text-text-muted">{unit}</span>}
                 </div>

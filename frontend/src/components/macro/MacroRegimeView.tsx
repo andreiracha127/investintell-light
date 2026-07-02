@@ -720,7 +720,7 @@ function RegimeTimeline({ data, range }: { data: MacroRegime; range: RangePreset
             Risk-on
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <span className="h-[11px] w-[13px] bg-loss" />
+            <span className="h-[11px] w-[13px] border border-loss bg-loss-muted" />
             Risk-off
           </span>
         </div>
@@ -733,7 +733,7 @@ function RegimeTimeline({ data, range }: { data: MacroRegime; range: RangePreset
             <div
               key={`${seg.start}-${i}`}
               title={`${on ? "Risk-on" : "Risk-off"} · ${formatDate(seg.start)} → ${formatDate(seg.end)} · ${daysBetween(seg.start, seg.end)} days`}
-              className={`h-full transition-[filter] hover:brightness-95 ${on ? "bg-gain-muted" : "bg-loss"}`}
+              className={`h-full transition-[filter] hover:brightness-95 ${on ? "bg-gain-muted" : "bg-loss-muted"}`}
               style={{ flex: `0 0 ${width}%` }}
             />
           );

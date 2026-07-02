@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef } from "react";
 
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { ErrorPanel } from "@/components/screener/shared";
+import { HeatmapLegend } from "@/components/statistics/ui";
 import { KpiTile, valueTone } from "@/components/ui/panels";
 import {
   postPortfolioAnalysis,
@@ -14,8 +15,8 @@ import {
   type WeightOut,
 } from "@/lib/api/client";
 import type { ChartColors } from "@/lib/charts/chartColors";
-import { buildHcRiskBubbleOption } from "@/lib/charts/hc/bubble";
 import { buildHcCumulativeOption } from "@/lib/charts/hc/cumulative";
+import { buildHcRiskContributionsOption } from "@/lib/charts/hc/contributions";
 import { buildHcHeatmapOption } from "@/lib/charts/hc/heatmap";
 import { formatNumber, formatPercent } from "@/lib/format";
 
@@ -136,12 +137,14 @@ function RiskBody({
 }) {
   const { stats } = data;
   const contributionsOption = colors
-    ? buildHcRiskBubbleOption(data.risk_contributions, colors)
+    ? buildHcRiskContributionsOption(data.risk_contributions, colors)
     : null;
   const heatmapOption = colors
     ? buildHcHeatmapOption(data.correlation_matrix, colors, {
         diverging: true,
-        // Diverging scale: blue at -1, surface at 0, accent at +1 (mockup).
+        // Diverging scale: blue at -1 (neutral math signal, not a risk
+        // judgment), surface at 0, accent at +1. Matches CorrelationRegimeView
+        // and StockCorrelationView.
         negativeColor: colors.blue,
         zeroColor: colors.surface,
       })
@@ -161,10 +164,12 @@ function RiskBody({
 
   return (
     <div className="flex flex-col gap-px">
+      <p className="ix-fs m-0 mb-0.5 text-text-muted">1Y window · vs SPY</p>
       <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
         <KpiTile
           label={METRIC_COPY.vol_ann.label}
           value={formatPercent(stats.annualized_volatility)}
+          detail={METRIC_COPY.vol_ann.detail}
           tip={METRIC_COPY.vol_ann.tip}
           tone="text-accent"
         />
@@ -181,7 +186,7 @@ function RiskBody({
         <KpiTile
           label={METRIC_COPY.cvar_95.label}
           value={formatPercent(stats.cvar_95)}
-          detail="1-day, worst 5%"
+          detail={METRIC_COPY.cvar_95.detail}
           tip={METRIC_COPY.cvar_95.tip}
         />
         <KpiTile
@@ -230,29 +235,15 @@ function RiskBody({
       <ChartCard
         title="How holdings move together"
         tip="Correlation from -1 to +1."
+        actions={heatmapOption ? <HeatmapLegend /> : undefined}
       >
         {heatmapOption ? (
-          <>
-            <HighchartsChart
-              options={heatmapOption}
-              className="h-[360px] w-full"
-              isEmpty={data.correlation_matrix.tickers.length === 0}
-              emptyMessage="No correlation matrix returned."
-            />
-            {/* Diverging −1 → 0 → +1 gradient legend (tokens only): grey-blue
-                negative end, surface zero, accent positive. */}
-            <div className="mt-3 flex items-center justify-center gap-2 text-[10px] text-text-muted">
-              <span>−1.0</span>
-              <span
-                className="h-2 w-[160px]"
-                style={{
-                  background:
-                    "linear-gradient(90deg, var(--color-chart-blue), var(--color-surface-3), var(--color-accent))",
-                }}
-              />
-              <span>+1.0</span>
-            </div>
-          </>
+          <HighchartsChart
+            options={heatmapOption}
+            className="h-[360px] w-full"
+            isEmpty={data.correlation_matrix.tickers.length === 0}
+            emptyMessage="No correlation matrix returned."
+          />
         ) : (
           <p className="py-8 text-center text-[13px] text-text-muted">
             Preparing chart

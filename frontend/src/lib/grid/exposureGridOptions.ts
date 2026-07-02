@@ -88,7 +88,11 @@ export function exposureGridOptions(
       theme: GRAPHITE_THEME,
       rows: { strictHeights: false, virtualization: true, virtualizationThreshold: 60 },
     },
-    columnDefaults: { sorting: { enabled: false } },
+    // Sorting only reorders the currently-displayed sibling rows (children of
+    // the active drill node); each row still carries its own `data-exposure-id`
+    // via the cell formatters below, so the sunburst hover/drill sync (which
+    // reads that attribute, not row position) is unaffected by re-ordering.
+    columnDefaults: { sorting: { enabled: true } },
     columns,
     data,
   };

@@ -205,7 +205,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             type="button"
             aria-label="Toggle navigation menu"
             aria-expanded={navOpen}
-            aria-pressed={navOpen}
             onClick={() => {
               setNavOpen((v) => !v);
               setSettingsOpen(false);
@@ -321,6 +320,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <nav
           aria-label="Primary"
           aria-hidden={!navOpen}
+          onBlur={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget)) setNavOpen(false);
+          }}
           className="absolute left-2 top-2 z-50 flex w-[242px] flex-col overflow-hidden rounded-[10px] border border-border-strong bg-surface-1 pb-1 shadow-[0_18px_44px_rgba(0,0,0,0.22)]"
           style={{
             willChange: "clip-path, opacity",

@@ -45,7 +45,18 @@ describe("buildHcSectorPerformanceOption", () => {
     expect(yAxis.plotBands).toHaveLength(2);
     expect(yAxis.plotLines).toHaveLength(1);
     expect(yAxis.plotLines?.[0].value).toBe(0);
-    expect(yAxis.labels?.enabled).toBe(false);
+    expect(yAxis.labels?.enabled).toBe(true);
+  });
+
+  it("formats the native yAxis labels as signed percents matching the gridlines", () => {
+    const option = buildHcSectorPerformanceOption(SECTORS, TEST_COLORS);
+    const yAxis = option?.yAxis as {
+      labels?: { formatter?: (this: { value: number }) => string };
+    };
+    const formatter = yAxis.labels?.formatter;
+    expect(formatter?.call({ value: 0.03 })).toBe("+3%");
+    expect(formatter?.call({ value: -0.03 })).toBe("-3%");
+    expect(formatter?.call({ value: 0 })).toBe("0%");
   });
 
   it("uses the sector labels and signed median changes as the series data", () => {
@@ -73,6 +84,30 @@ describe("buildHcMarketBreadthOption", () => {
     expect(xAxis.categories).toEqual([""]);
     expect(xAxis.labels?.enabled).toBe(false);
     expect(plotOptions.bar?.stacking).toBe("normal");
+  });
+
+  it("enables native yAxis labels, matching the gridlines they sit on", () => {
+    const option = buildHcMarketBreadthOption(BREADTH, TEST_COLORS);
+    const yAxis = option.yAxis as {
+      labels?: { enabled?: boolean; formatter?: (this: { value: number }) => string };
+    };
+
+    expect(yAxis.labels?.enabled).toBe(true);
+    expect(yAxis.labels?.formatter?.call({ value: -0.31 })).toBe("31%");
+    expect(yAxis.labels?.formatter?.call({ value: 0.62 })).toBe("62%");
+  });
+
+  it("always renders the bar data label, even for small shares", () => {
+    const option = buildHcMarketBreadthOption(BREADTH, TEST_COLORS);
+    const plotOptions = option.plotOptions as {
+      bar?: { dataLabels?: { formatter?: (this: { y: number }) => string } };
+    };
+    const formatter = plotOptions.bar?.dataLabels?.formatter;
+
+    // Previously hidden below an 8% magnitude — now always shown.
+    expect(formatter?.call({ y: 0.03 })).toBe("3%");
+    expect(formatter?.call({ y: -0.03 })).toBe("3%");
+    expect(formatter?.call({ y: 0 })).toBe("0%");
   });
 
   it("maps price breadth into declining and advancing force segments", () => {

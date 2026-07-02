@@ -202,6 +202,16 @@ function AnalysisContent({
 }) {
   const { header, params, stats } = data;
   const [tab, setTab] = useState<"analysis" | "holders">("analysis");
+  // Holders mounts lazily on first activation (13F/N-PORT grids are heavy),
+  // but once mounted it stays mounted — switching back to Analysis just hides
+  // it via CSS. Same for Analysis: it starts mounted and is never unmounted,
+  // so the native StockChart never loses its annotations/comparisons/scale
+  // when the user hops to Holders and back.
+  const [holdersMounted, setHoldersMounted] = useState(false);
+  const selectTab = useCallback((id: "analysis" | "holders") => {
+    setTab(id);
+    if (id === "holders") setHoldersMounted(true);
+  }, []);
 
   const volatilityOption = useMemo(
     () =>
@@ -267,7 +277,7 @@ function AnalysisContent({
             type="button"
             role="tab"
             aria-selected={tab === id}
-            onClick={() => setTab(id)}
+            onClick={() => selectTab(id)}
             className={`px-4 py-2 text-[13px] font-semibold capitalize transition-colors ${
               tab === id
                 ? "border-b-2 border-b-accent text-text-primary"
@@ -279,12 +289,16 @@ function AnalysisContent({
         ))}
       </div>
 
-      {tab === "holders" ? (
-        <div className="mt-px">
+      {holdersMounted && (
+        <div className="mt-px" hidden={tab !== "holders"} aria-hidden={tab !== "holders"}>
           <HoldersTab ticker={header.ticker} />
         </div>
-      ) : (
-      <>
+      )}
+
+      {/* Analysis stays mounted (never unmounted) so the native StockChart
+          keeps its annotations/comparisons/user zoom when Holders is active —
+          only visibility toggles via the `hidden` attribute. */}
+      <div hidden={tab !== "analysis"} aria-hidden={tab !== "analysis"}>
       {/* ── Interactive chart (native Highstock + livefeed) ── */}
       <div className="mb-px">
         <StockChart
@@ -437,8 +451,7 @@ function AnalysisContent({
       <div className="mt-px">
         <NewsPanel ticker={header.ticker} />
       </div>
-      </>
-      )}
+      </div>
     </div>
   );
 }
@@ -461,6 +474,10 @@ function StockHeaderBar({ header }: { header: StockQuote }) {
       : shownChange < 0
         ? "text-loss"
         : "text-neutral-value";
+  // One-shot flash on each live tick (keyed remount re-triggers the
+  // animation); resolves to the static tone — same pattern as LeadersTable.
+  const priceFlash =
+    live?.dir === 1 ? "ix-flash text-gain" : live?.dir === -1 ? "ix-flash text-loss" : "text-text-primary";
 
   return (
     <div className="mb-[18px] flex flex-wrap items-start justify-between gap-4">
@@ -474,7 +491,7 @@ function StockHeaderBar({ header }: { header: StockQuote }) {
           )}
         </div>
         <div className="mt-2 flex flex-wrap items-baseline gap-3 tabular-nums">
-          <span className="text-[30px] font-bold text-text-primary">
+          <span key={shownLast} className={`inline-block px-0.5 text-[30px] font-bold ${priceFlash}`}>
             {formatCurrency(shownLast)}
           </span>
           <span className={`text-[15px] font-bold ${changeTone}`}>

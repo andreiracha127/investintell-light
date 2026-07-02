@@ -63,6 +63,28 @@ export function NewsSection({
   );
 }
 
+const MS_PER_MINUTE = 60_000;
+const MS_PER_HOUR = 60 * MS_PER_MINUTE;
+const MS_PER_DAY = 24 * MS_PER_HOUR;
+
+/**
+ * Recency label for a full ISO timestamp: relative ("2h ago", "35m ago")
+ * under 24h old (when the hour actually matters), a plain date otherwise.
+ * Pure — `now` is injectable for tests, defaulting to the real clock.
+ */
+export function formatNewsRecency(publishedAt: string, now: number = Date.now()): string {
+  const publishedMs = Date.parse(publishedAt);
+  if (!Number.isFinite(publishedMs)) return formatDate(publishedAt.slice(0, 10));
+
+  const ageMs = now - publishedMs;
+  if (ageMs < 0 || ageMs >= MS_PER_DAY) return formatDate(publishedAt.slice(0, 10));
+
+  const ageMinutes = Math.floor(ageMs / MS_PER_MINUTE);
+  if (ageMinutes < 1) return "just now";
+  if (ageMinutes < 60) return `${ageMinutes}m ago`;
+  return `${Math.floor(ageMinutes / 60)}h ago`;
+}
+
 function NewsRow({ item }: { item: NewsArticle }) {
   return (
     <li className="border-b border-border last:border-b-0">
@@ -81,7 +103,7 @@ function NewsRow({ item }: { item: NewsArticle }) {
           {item.title}
         </span>
         <span className="flex-none text-[10.5px] tabular-nums text-text-muted">
-          {formatDate(item.published_at.slice(0, 10))}
+          {formatNewsRecency(item.published_at)}
         </span>
       </a>
     </li>

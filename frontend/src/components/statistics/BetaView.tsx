@@ -18,11 +18,16 @@ import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { Card, KpiTile, valueTone } from "@/components/ui/panels";
 import {
   AssetRefPicker,
+  sameAssetRef,
   toAssetRef,
   useDefaultAssetY,
   type AssetRefDraft,
 } from "@/components/statistics/AssetRefPicker";
-import { DateRangeInputs, defaultDateRange } from "@/components/statistics/DateRangeInputs";
+import {
+  DateRangeInputs,
+  defaultDateRange,
+  isDateRangeValid,
+} from "@/components/statistics/DateRangeInputs";
 import { StatisticsShell } from "@/components/statistics/StatisticsShell";
 import { ErrorPanel, ParamsPanel, RunButton } from "@/components/statistics/ui";
 
@@ -47,8 +52,14 @@ export function BetaView() {
 
   const assetX = toAssetRef(draftX);
   const assetY = toAssetRef(draftY);
+  const degenerate = sameAssetRef(assetX, assetY);
   const canRun =
-    assetX !== null && assetY !== null && startDate !== "" && endDate !== "";
+    assetX !== null &&
+    assetY !== null &&
+    !degenerate &&
+    startDate !== "" &&
+    endDate !== "" &&
+    isDateRangeValid(startDate, endDate);
   const onRun = () => {
     if (!canRun || mutation.isPending) return;
     mutation.mutate({
@@ -75,6 +86,9 @@ export function BetaView() {
           disabled={!canRun}
           onClick={onRun}
         />
+        {degenerate && (
+          <span className="ix-fs text-loss">Pick two different assets.</span>
+        )}
       </ParamsPanel>
 
       {mutation.isPending ? (

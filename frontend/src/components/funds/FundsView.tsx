@@ -334,6 +334,7 @@ export function FundsView() {
           />
           <BoundField
             label="Min assets ($M)"
+            tip="Total net assets under management, in millions of dollars."
             value={aumMinM}
             onChange={setAumMinM}
             placeholder="100"
@@ -359,7 +360,7 @@ export function FundsView() {
       {/* ── Table ───────────────────────────────────────────────────────── */}
       {fundsQuery.isPending ? (
         <div aria-busy="true" aria-label="Loading funds">
-          <GridSkeleton className="h-[420px]" />
+          <GridSkeleton cols={FUND_COLUMNS.length} className="h-[420px]" />
         </div>
       ) : fundsQuery.isError ? (
         <ErrorPanel
@@ -408,6 +409,9 @@ function BoundField({
   tip?: string;
   suffix?: string;
 }) {
+  // Non-empty, non-numeric text parses to no filter (silently ignored by the
+  // query) — flag it visibly rather than letting the input look accepted.
+  const invalid = value.trim() !== "" && parseBound(value) === undefined;
   return (
     <label className="flex min-w-0 flex-col gap-1.5">
       <span className={`${FIELD_LABEL_CLASS} flex items-center gap-1.5`}>
@@ -421,7 +425,10 @@ function BoundField({
           placeholder={placeholder}
           inputMode="decimal"
           aria-label={label}
-          className={`${INPUT_CLASS} w-full tabular-nums ${suffix ? "pr-6" : ""}`}
+          aria-invalid={invalid}
+          className={`${INPUT_CLASS} w-full tabular-nums ${suffix ? "pr-6" : ""} ${
+            invalid ? "!border-loss" : ""
+          }`}
         />
         {suffix && (
           <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-text-muted">

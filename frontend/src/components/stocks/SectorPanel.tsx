@@ -7,28 +7,8 @@ import type { SectorPerf } from "@/lib/api/client";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { buildHcSectorPerformanceOption } from "@/lib/charts/hc/stock-overview";
-import { formatPercent } from "@/lib/format";
 import { InfoDot } from "@/components/ui/panels";
 import { useEffect, useMemo, useState } from "react";
-
-function sectorScaleValues(sectors: SectorPerf[]): number[] {
-  const maxPct = Math.max(...sectors.map((s) => Math.abs(s.change_pct_median * 100)), 1);
-  const outerPct = Math.ceil(maxPct);
-  const innerPct = Math.ceil(outerPct / 2);
-  return [-outerPct / 100, -innerPct / 100, 0, innerPct / 100, outerPct / 100];
-}
-
-function SectorScale({ values }: { values: number[] }) {
-  return (
-    <div className="mt-1 border-t border-border-strong pt-1">
-      <div className="flex justify-between text-[10px] tabular-nums text-text-muted">
-        {values.map((value) => (
-          <span key={value}>{formatPercent(value, 0, { signed: value !== 0 })}</span>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 export function SectorPanel({ sectors }: { sectors: SectorPerf[] }) {
   const [colors, setColors] = useState<ChartColors | null>(null);
@@ -40,7 +20,6 @@ export function SectorPanel({ sectors }: { sectors: SectorPerf[] }) {
   );
 
   if (!sectors.length) return null;
-  const scaleValues = sectorScaleValues(sectors);
   return (
     <div className="ix-pad bg-surface-2">
       <h2 className="ix-label m-0 flex items-center gap-1.5">
@@ -55,7 +34,6 @@ export function SectorPanel({ sectors }: { sectors: SectorPerf[] }) {
           Preparing sector chart...
         </div>
       )}
-      <SectorScale values={scaleValues} />
     </div>
   );
 }

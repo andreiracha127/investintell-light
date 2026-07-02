@@ -30,13 +30,9 @@ function LoginForm() {
 
   return (
     <div
-      className="ix-carbon-scope relative flex min-h-screen items-center justify-center px-4"
-      style={{
-        background:
-          "radial-gradient(125% 90% at 50% -8%, var(--color-surface-1) 0%, var(--color-surface-0) 42%, var(--color-gradient-outer) 100%)",
-      }}
+      className="ix-carbon-scope relative flex min-h-screen items-center justify-center bg-surface-0 px-4"
     >
-      <div className="w-full max-w-[396px] border border-border bg-surface-1 px-10 pb-10 pt-11 shadow-[0_1px_1px_rgba(22,22,22,0.04),0_4px_10px_rgba(22,22,22,0.05),0_18px_40px_rgba(22,22,22,0.10)]">
+      <div className="w-full max-w-[396px] border border-border bg-surface-1 px-10 pb-10 pt-11">
         {/* Brand */}
         <div className="mb-[30px] flex items-center gap-2">
           <span className="h-3.5 w-3.5 flex-none bg-accent" aria-hidden />
