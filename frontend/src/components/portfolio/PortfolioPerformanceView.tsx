@@ -12,11 +12,27 @@ import { chartColors, type ChartColors } from "@/lib/charts/chartColors";
 import { HighchartsChart } from "@/components/charts/HighchartsChart";
 import { buildHcContributionBubbleOption } from "@/lib/charts/hc/bubble";
 import { buildHcContributionWaterfallOption } from "@/lib/charts/hc/waterfall";
-import { compactDatetimeXAxis, formatTimestampDate } from "@/lib/charts/hc/dateAxis";
+import { buildHcUnderwaterOption } from "@/lib/charts/hc/underwater";
+import {
+  compactDatetimeXAxis,
+  dateToUtcMs,
+  formatTimestampDate,
+} from "@/lib/charts/hc/dateAxis";
 import { periodContributions, periodTotal } from "@/lib/portfolio/performance";
+import {
+  navDrawdownSeries,
+  navPointsFrom,
+  navWindowStats,
+} from "@/lib/portfolio/navAnalytics";
 import { usePortfolioNav } from "@/components/portfolio/usePortfolioNav";
-import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
-import { InfoDot, valueTone } from "@/components/ui/panels";
+import {
+  formatCompact,
+  formatCurrency,
+  formatDate,
+  formatNumber,
+  formatPercent,
+} from "@/lib/format";
+import { InfoDot, KpiTile, valueTone } from "@/components/ui/panels";
 
 const NAV_TIP =
   "Persisted daily portfolio NAV index from the real transaction ledger and portfolio inception date.";
@@ -61,12 +77,21 @@ export function PortfolioPerformanceView({
     setColors(chartColors());
   }, []);
 
-  const { holdings, recon, isLoading, isError } = usePortfolioNav(portfolioId);
+  const { holdings, recon, response, isLoading, isError } =
+    usePortfolioNav(portfolioId);
   const [range, setRange] = useState<PerfRangeKey>("1Y");
   const navWindow = useMemo(
     () => navWindowForRange(recon.nav, range),
     [recon.nav, range],
   );
+
+  // Raw persisted points (nav index + dollar composition) over the same window.
+  const windowPoints = useMemo(() => {
+    const points = response?.points ?? [];
+    const startTs = navWindow[0]?.[0];
+    return startTs === undefined ? points : navPointsFrom(points, startTs);
+  }, [response, navWindow]);
+  const windowStats = useMemo(() => navWindowStats(windowPoints), [windowPoints]);
 
   const minTs = navWindow[0]?.[0] ?? recon.startTs;
   const maxTs = navWindow[navWindow.length - 1]?.[0] ?? recon.endTs;
@@ -124,6 +149,72 @@ export function PortfolioPerformanceView({
       ],
     };
   }, [navWindow, colors]);
+
+  // Underwater plot of the persisted NAV window.
+  const underwaterOption = useMemo<Options | null>(() => {
+    if (!colors || windowPoints.length < 2) return null;
+    return buildHcUnderwaterOption(
+      navDrawdownSeries(windowPoints),
+      "NAV drawdown",
+      colors,
+    );
+  }, [windowPoints, colors]);
+
+  // Dollar composition: invested market value + cash stacked to total value.
+  const compositionOption = useMemo<Options | null>(() => {
+    if (!colors || windowPoints.length < 2) return null;
+    return {
+      chart: { type: "area" },
+      legend: { enabled: true },
+      xAxis: compactDatetimeXAxis({ crosshair: { color: colors.grid } }),
+      yAxis: {
+        title: { text: undefined },
+        labels: {
+          formatter() {
+            return `$${formatCompact(this.value as number)}`;
+          },
+        },
+      },
+      tooltip: {
+        shared: true,
+        formatter() {
+          const points = this.points ?? [];
+          const total = points.reduce((acc, p) => acc + ((p.y as number) ?? 0), 0);
+          const rows = points
+            .map(
+              (p) =>
+                `<span style="color:${p.color}">●</span> ${p.series.name}: <b>${formatCurrency(
+                  p.y as number,
+                )}</b>`,
+            )
+            .join("<br/>");
+          return `${formatTimestampDate(this.x)}<br/>${rows}<br/>Total: <b>${formatCurrency(total)}</b>`;
+        },
+      },
+      plotOptions: {
+        area: {
+          stacking: "normal",
+          lineWidth: 1,
+          marker: { enabled: false },
+          fillOpacity: 0.35,
+        },
+      },
+      series: [
+        {
+          type: "area",
+          name: "Invested",
+          data: windowPoints.map((p) => [dateToUtcMs(p.date), p.market_value]),
+          color: colors.accent,
+        },
+        {
+          type: "area",
+          name: "Cash",
+          data: windowPoints.map((p) => [dateToUtcMs(p.date), p.cash]),
+          color: colors.barMute,
+        },
+      ],
+    };
+  }, [windowPoints, colors]);
 
   const waterfallOption = useMemo<Options | null>(
     () =>
@@ -215,6 +306,100 @@ export function PortfolioPerformanceView({
           </div>
         )}
       </section>
+
+      {/* NAV analytics KPI strip (derived from the persisted window) */}
+      {windowPoints.length >= 2 && (
+        <div className="grid gap-px border border-t-0 border-border bg-border [grid-template-columns:repeat(auto-fit,minmax(170px,1fr))]">
+          <KpiTile
+            label={`Return · ${range}`}
+            value={
+              windowStats.periodReturn !== null
+                ? formatPercent(windowStats.periodReturn, 2, { signed: true })
+                : "--"
+            }
+            tone={
+              windowStats.periodReturn !== null
+                ? valueTone(windowStats.periodReturn)
+                : "text-text-primary"
+            }
+            tip="Total NAV return over the selected window."
+          />
+          <KpiTile
+            label="CAGR"
+            value={
+              windowStats.cagr !== null
+                ? formatPercent(windowStats.cagr, 2, { signed: true })
+                : "--"
+            }
+            tone={
+              windowStats.cagr !== null
+                ? valueTone(windowStats.cagr)
+                : "text-text-primary"
+            }
+            tip="Window return annualized over calendar time."
+          />
+          <KpiTile
+            label="Ann. Volatility"
+            value={
+              windowStats.annualizedVolatility !== null
+                ? formatPercent(windowStats.annualizedVolatility)
+                : "--"
+            }
+            tip="Annualized standard deviation of daily NAV returns over the window."
+          />
+          <KpiTile
+            label="Max Drawdown"
+            value={
+              windowStats.maxDrawdown
+                ? formatPercent(windowStats.maxDrawdown.depth)
+                : "0.00%"
+            }
+            tone={windowStats.maxDrawdown ? "text-loss" : "text-text-primary"}
+            detail={
+              windowStats.maxDrawdown
+                ? `${formatDate(windowStats.maxDrawdown.peakDate)} → ${formatDate(windowStats.maxDrawdown.troughDate)}`
+                : "no decline in window"
+            }
+            tip="Largest peak-to-trough NAV decline inside the selected window."
+          />
+        </div>
+      )}
+
+      {/* NAV drawdown + dollar composition */}
+      {(underwaterOption || compositionOption) && (
+        <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))]">
+          <section className="ix-pad flex flex-col border border-border bg-surface-2">
+            <h3 className="ix-label m-0 flex items-center gap-1.5">
+              NAV drawdown
+              <InfoDot tip="How far the NAV sits below its running peak at each date — the classic underwater plot. 0 means a new high." />
+            </h3>
+            <p className="mb-2 mt-0.5 text-[11px] text-text-muted">
+              Decline from the running peak over the selected window.
+            </p>
+            {underwaterOption && (
+              <HighchartsChart
+                options={underwaterOption}
+                className="h-[240px] w-full flex-1"
+              />
+            )}
+          </section>
+          <section className="ix-pad flex flex-col border border-border bg-surface-2">
+            <h3 className="ix-label m-0 flex items-center gap-1.5">
+              Value composition
+              <InfoDot tip="Total portfolio value split into invested market value and cash, from the persisted daily ledger." />
+            </h3>
+            <p className="mb-2 mt-0.5 text-[11px] text-text-muted">
+              Invested vs cash, stacked to total value.
+            </p>
+            {compositionOption && (
+              <HighchartsChart
+                options={compositionOption}
+                className="h-[240px] w-full flex-1"
+              />
+            )}
+          </section>
+        </div>
+      )}
 
       {/* Contribution waterfall + return-contributors bubble */}
       <div className="grid gap-px bg-border [grid-template-columns:repeat(auto-fit,minmax(320px,1fr))]">

@@ -21,12 +21,14 @@
  * This is display-only arithmetic on backend-provided numbers; no finance.
  */
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   fetchPortfolioOverview,
   fetchRebalancePreview,
+  putRebalancePolicy,
   type PositionDrift,
+  type RebalanceFrequency,
   type RebalancePreview,
   type RebalancePolicy,
   type PortfolioOverview,
@@ -285,6 +287,150 @@ function ProposalTable({
   );
 }
 
+// ── Policy editor ─────────────────────────────────────────────────────────────
+
+const FREQUENCIES: RebalanceFrequency[] = ["weekly", "monthly", "quarterly"];
+
+const FIELD_LABEL =
+  "text-[10px] font-bold uppercase tracking-[0.07em] text-text-muted";
+const FIELD_INPUT =
+  "h-[32px] w-full border-0 border-b border-border-strong bg-field px-2 text-[13px] " +
+  "tabular-nums text-text-primary outline-none focus:border-b-2 focus:border-accent";
+
+/**
+ * Inline editor over PUT /portfolios/{id}/rebalance/policy. Band inputs are in
+ * percent points for the user (5 = 5%) and converted to the backend's decimal
+ * fractions on save. Saving invalidates the preview so the effective policy,
+ * drifts and proposal re-evaluate against the stored policy.
+ */
+function PolicyEditor({
+  portfolioId,
+  policy,
+  onClose,
+}: {
+  portfolioId: number;
+  policy: RebalancePolicy;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [frequency, setFrequency] = useState<RebalanceFrequency>(policy.frequency);
+  const [bandAbsPct, setBandAbsPct] = useState(String((policy.band_abs * 100).toFixed(2)));
+  const [bandRelPct, setBandRelPct] = useState(String((policy.band_rel * 100).toFixed(2)));
+  const [macroTrigger, setMacroTrigger] = useState(policy.macro_trigger_enabled);
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      putRebalancePolicy(portfolioId, {
+        frequency,
+        band_abs: Number(bandAbsPct) / 100,
+        band_rel: Number(bandRelPct) / 100,
+        macro_trigger_enabled: macroTrigger,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["rebalance-preview", portfolioId],
+      });
+      onClose();
+    },
+  });
+
+  const bandAbs = Number(bandAbsPct);
+  const bandRel = Number(bandRelPct);
+  const bandsValid =
+    Number.isFinite(bandAbs) &&
+    bandAbs > 0 &&
+    bandAbs <= 100 &&
+    Number.isFinite(bandRel) &&
+    bandRel > 0 &&
+    bandRel <= 100;
+
+  return (
+    <div className="mt-3 border border-border bg-field p-3">
+      <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
+        <label className="flex flex-col gap-1.5">
+          <span className={FIELD_LABEL}>Frequency</span>
+          <select
+            value={frequency}
+            onChange={(e) => setFrequency(e.target.value as RebalanceFrequency)}
+            className={FIELD_INPUT}
+          >
+            {FREQUENCIES.map((f) => (
+              <option key={f} value={f}>
+                {f.charAt(0).toUpperCase() + f.slice(1)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1.5">
+          <span className={FIELD_LABEL}>Abs band (%)</span>
+          <input
+            type="number"
+            min={0.01}
+            max={100}
+            step={0.5}
+            value={bandAbsPct}
+            onChange={(e) => setBandAbsPct(e.target.value)}
+            className={FIELD_INPUT}
+            aria-invalid={!bandsValid || undefined}
+          />
+        </label>
+        <label className="flex flex-col gap-1.5">
+          <span className={FIELD_LABEL}>Rel band (%)</span>
+          <input
+            type="number"
+            min={0.01}
+            max={100}
+            step={1}
+            value={bandRelPct}
+            onChange={(e) => setBandRelPct(e.target.value)}
+            className={FIELD_INPUT}
+            aria-invalid={!bandsValid || undefined}
+          />
+        </label>
+        <label className="flex flex-col gap-1.5">
+          <span className={FIELD_LABEL}>Macro trigger</span>
+          <span className="flex h-[32px] items-center gap-2">
+            <input
+              type="checkbox"
+              checked={macroTrigger}
+              onChange={(e) => setMacroTrigger(e.target.checked)}
+              className="h-4 w-4 accent-[var(--color-accent)]"
+            />
+            <span className="text-[12px] text-text-secondary">
+              Rebalance on risk-off flips
+            </span>
+          </span>
+        </label>
+      </div>
+
+      {mutation.isError && (
+        <p role="alert" className="mt-2 text-[12px] text-loss">
+          {mutation.error.message}
+        </p>
+      )}
+
+      <div className="mt-3 flex gap-px">
+        <button
+          type="button"
+          disabled={!bandsValid || mutation.isPending}
+          onClick={() => mutation.mutate()}
+          className="h-[30px] border border-accent bg-accent px-4 text-[12px] font-bold text-on-accent transition-colors hover:bg-accent-muted disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {mutation.isPending ? "Saving…" : "Save policy"}
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={mutation.isPending}
+          className="h-[30px] border border-border-strong bg-field px-4 text-[12px] text-text-secondary transition-colors hover:bg-layer-hover"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main section ──────────────────────────────────────────────────────────────
 
 export function PortfolioRebalanceSection({
@@ -297,6 +443,7 @@ export function PortfolioRebalanceSection({
   useEffect(() => {
     setColors(chartColors());
   }, []);
+  const [editingPolicy, setEditingPolicy] = useState(false);
 
   const previewQuery = useQuery({
     queryKey: ["rebalance-preview", portfolioId],
@@ -364,19 +511,40 @@ export function PortfolioRebalanceSection({
           {hasBandBreach && <TriggerPill label="Band breach" />}
         </div>
 
-        {/* Policy summary line */}
-        <p className="mt-2 text-[12px] text-text-secondary">
-          {policyLine(policy)}
-          {policy.last_evaluated_at && (
-            <>
-              {" · "}
-              <span className="text-text-muted">
-                Last evaluated{" "}
-                {formatDate(policy.last_evaluated_at.split("T")[0]!)}
-              </span>
-            </>
-          )}
+        {/* Policy summary line + editor toggle */}
+        <p className="mt-2 flex flex-wrap items-center gap-x-2 text-[12px] text-text-secondary">
+          <span>
+            {policyLine(policy)}
+            {policy.is_default && (
+              <span className="text-text-muted"> · Defaults (no saved policy)</span>
+            )}
+            {policy.last_evaluated_at && (
+              <>
+                {" · "}
+                <span className="text-text-muted">
+                  Last evaluated{" "}
+                  {formatDate(policy.last_evaluated_at.split("T")[0]!)}
+                </span>
+              </>
+            )}
+          </span>
+          <button
+            type="button"
+            onClick={() => setEditingPolicy((prev) => !prev)}
+            aria-expanded={editingPolicy}
+            className="border border-border-strong bg-field px-2 py-[2px] text-[11px] font-bold text-text-secondary transition-colors hover:bg-layer-hover hover:text-text-primary"
+          >
+            {editingPolicy ? "Close" : "Edit policy"}
+          </button>
         </p>
+
+        {editingPolicy && (
+          <PolicyEditor
+            portfolioId={portfolioId}
+            policy={policy}
+            onClose={() => setEditingPolicy(false)}
+          />
+        )}
 
         {/* Drift chart */}
         {preview.drifts.length > 0 && colors && driftOption && (

@@ -317,6 +317,10 @@ export type CorrelationRegimeResponse =
 export type PairCorrelation = CorrelationRegimeResponse["pair_correlations"][number];
 export type RebalancePolicy =
   RebalancePolicyOperation["responses"]["200"]["content"]["application/json"];
+export type RebalancePolicyPut = NonNullable<
+  paths["/portfolios/{portfolio_id}/rebalance/policy"]["put"]["requestBody"]
+>["content"]["application/json"];
+export type RebalanceFrequency = RebalancePolicy["frequency"];
 export type RebalancePreview =
   RebalancePreviewOperation["responses"]["200"]["content"]["application/json"];
 export type PositionDrift = components["schemas"]["PositionDriftOut"];
@@ -1458,6 +1462,19 @@ export function fetchRebalancePolicy(
   return request<RebalancePolicy>(
     `/portfolios/${portfolioId}/rebalance/policy`,
     signal,
+  );
+}
+
+/** Save the rebalance policy (bands, frequency, macro trigger). */
+export function putRebalancePolicy(
+  portfolioId: number,
+  body: RebalancePolicyPut,
+  signal?: AbortSignal,
+): Promise<RebalancePolicy> {
+  return request<RebalancePolicy>(
+    `/portfolios/${portfolioId}/rebalance/policy`,
+    signal,
+    { method: "PUT", json: body },
   );
 }
 
