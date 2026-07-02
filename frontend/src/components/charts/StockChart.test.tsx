@@ -18,10 +18,11 @@ const stockChart = vi.fn(() => ({
   update: vi.fn(),
   redraw: vi.fn(),
   series: [],
+  xAxis: [{ getExtremes: () => ({ min: 0, max: 0 }) }],
 }));
 
 vi.mock("highcharts/esm/highstock.js", () => ({
-  default: { stockChart, setOptions: vi.fn() },
+  default: { stockChart, setOptions: vi.fn(), addEvent: vi.fn() },
 }));
 vi.mock("highcharts/esm/highcharts-more.js", () => ({}));
 vi.mock("highcharts/esm/indicators/indicators-all.js", () => ({}));

@@ -265,23 +265,42 @@ function periodBucketStart(timeMs: number, period: PricePeriod): number {
 }
 
 /**
- * Latest first-timestamp across the main series and every compare series —
- * the only start date at which ALL rebased curves can begin together. Series
- * with different inceptions rebased at their own first point would start at
- * 0% on different dates and stop being comparable.
+ * First timestamp PRESENT IN EVERY series (main + each compare) — the earliest
+ * bar at which all rebased curves can start on the SAME day. Highstock's
+ * percent compare rebases each series at its own first bar in range, so it is
+ * not enough to clip to the latest inception: when calendars differ (a
+ * mutual-fund NAV missing a holiday the equity trades), the latest inception
+ * may be a date the main series lacks, leaving each series rebased on a
+ * different first bar. We therefore return the first main-series bar at/after
+ * the latest inception that every compare also has. Falls back to the latest
+ * inception when no shared bar exists.
  */
 export function commonCompareStart(
   bars: PriceBar[],
   compares: PriceCompareSelection[],
   compareData: Record<string, PriceBar[]>,
 ): number | null {
-  const firsts: number[] = [];
-  if (bars.length > 0) firsts.push(bars[0].t);
-  for (const compare of compares) {
-    const compareBars = compareData[compare.key] ?? [];
-    if (compareBars.length > 0) firsts.push(compareBars[0].t);
+  const compareBarsList = compares
+    .map((compare) => compareData[compare.key] ?? [])
+    .filter((cb) => cb.length > 0);
+
+  if (bars.length === 0) {
+    const firsts = compareBarsList.map((cb) => cb[0].t);
+    return firsts.length > 0 ? Math.max(...firsts) : null;
   }
-  return firsts.length > 0 ? Math.max(...firsts) : null;
+  if (compareBarsList.length === 0) return bars[0].t;
+
+  const latestInception = Math.max(
+    bars[0].t,
+    ...compareBarsList.map((cb) => cb[0].t),
+  );
+  const compareSets = compareBarsList.map((cb) => new Set(cb.map((bar) => bar.t)));
+  for (const bar of bars) {
+    if (bar.t < latestInception) continue;
+    if (compareSets.every((set) => set.has(bar.t))) return bar.t;
+  }
+  // No bar shared by all series at/after the latest inception — best effort.
+  return latestInception;
 }
 
 /** Bars on/after the alignment start (no-op when alignment is off). */

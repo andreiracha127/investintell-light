@@ -314,12 +314,26 @@ describe("priceStock option builder", () => {
 describe("compare start alignment", () => {
   const LATER_BARS: PriceBar[] = BARS.slice(1); // compare history starts one bar later
 
-  it("commonCompareStart returns the latest inception across all series", () => {
+  it("commonCompareStart returns the latest inception when calendars align", () => {
     expect(
       commonCompareStart(BARS, [COMPARE], { [COMPARE.key]: LATER_BARS }),
     ).toBe(LATER_BARS[0].t);
     expect(commonCompareStart(BARS, [], {})).toBe(BARS[0].t);
     expect(commonCompareStart([], [], {})).toBeNull();
+  });
+
+  it("commonCompareStart returns the first bar SHARED by all series when calendars differ", () => {
+    // Compare starts earlier (Jan 1) than the main series (Jan 2) but is
+    // missing Jan 2 — so the latest inception (Jan 2) is not a shared bar.
+    // The first bar present in both is Jan 3.
+    const crossCalendar: PriceBar[] = [
+      { t: Date.UTC(2024, 0, 1), o: 1, h: 1, l: 1, c: 1, v: 0 },
+      { t: Date.UTC(2024, 0, 3), o: 1, h: 1, l: 1, c: 1, v: 0 },
+      { t: Date.UTC(2024, 0, 4), o: 1, h: 1, l: 1, c: 1, v: 0 },
+    ];
+    expect(
+      commonCompareStart(BARS, [COMPARE], { [COMPARE.key]: crossCalendar }),
+    ).toBe(Date.UTC(2024, 0, 3));
   });
 
   it("clipBarsFrom drops bars before the alignment start and is a no-op on null", () => {

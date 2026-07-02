@@ -244,4 +244,30 @@ describe("buildHcMacroPerformanceOption", () => {
     expect(series[1].data?.[0]).toEqual([ms("2024-01-02"), 100]);
     expect(series[1].data?.[1][1]).toBeCloseTo((66 / 55) * 100);
   });
+
+  it("rebases both series at the first SHARED date when calendars differ", () => {
+    const opt = buildHcMacroPerformanceOption({
+      // Portfolio's later inception (Jan-02) is a date the asset is MISSING
+      // (a holiday); the first date present in both is Jan-03.
+      portfolio: [
+        ["2024-01-02", 900],
+        ["2024-01-03", 990],
+      ],
+      asset: [
+        ["2024-01-01", 50],
+        ["2024-01-03", 66],
+      ],
+      regimes: HISTORY,
+      colors: TEST_COLORS,
+      portfolioLabel: "Portfolio",
+      assetLabel: "SPY",
+    })!;
+    const series = opt.series as Array<{ data?: Array<[number, number]> }>;
+    // Both start at 100 on Jan-03 (first shared observation), NOT Jan-02 which
+    // only the portfolio has — so the two curves are comparable.
+    expect(series[0].data?.[0]).toEqual([ms("2024-01-03"), 100]);
+    expect(series[1].data?.[0]).toEqual([ms("2024-01-03"), 100]);
+    expect(series[0].data).toHaveLength(1);
+    expect(series[1].data).toHaveLength(1);
+  });
 });

@@ -71,7 +71,10 @@ export function navWindowStats(points: PortfolioNavPoint[]): NavWindowStats {
     if (point.nav > peakNav) {
       peakNav = point.nav;
       peakDate = point.date;
-    } else if (peakNav > 0) {
+    } else if (peakNav > 0 && point.nav < peakNav) {
+      // Only genuine declines count — a point equal to the running high is not
+      // a drawdown. Recording it would report a red "0.00%" with peak→trough
+      // dates for a flat/cash window instead of the "no decline" state.
       const depth = point.nav / peakNav - 1;
       if (maxDrawdown === null || depth < maxDrawdown.depth) {
         maxDrawdown = { depth, peakDate, troughDate: point.date };

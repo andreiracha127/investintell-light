@@ -48,10 +48,14 @@ function normalizeSeries(points: DatePoint[]): Array<[number, number]> {
 }
 
 /**
- * Clip both series to their first COMMON date so "Indexed to 100" curves are
- * rebased on the same day. Two series rebased at different inceptions both
- * start at 100 on different dates and stop being comparable. No-op when either
- * series is empty (the panel gates rendering on both being present anyway).
+ * Clip both series to their first SHARED observation so "Indexed to 100"
+ * curves rebase (and drawdowns peak-track) from the same day. Clipping to the
+ * later inception alone is not enough: `normalizeSeries`/`drawdownSeries`
+ * rebase at each series' own first remaining point, so when calendars differ
+ * (a fund missing a holiday the portfolio NAV has) the two could still start
+ * on different dates. We instead find the first date present in BOTH series
+ * and start both there. No-op when either series is empty; falls back to the
+ * later inception when the two never share a date.
  */
 function clipToCommonStart(
   a: DatePoint[],
@@ -65,9 +69,23 @@ function clipToCommonStart(
   const firstB = firstValid(b);
   if (firstA === null || firstB === null) return [a, b];
   const start = Math.max(firstA, firstB);
+
+  const bDates = new Set(
+    b.filter(([, value]) => Number.isFinite(value)).map(([date]) => dateToUtcMs(date)),
+  );
+  let shared: number | null = null;
+  for (const [date, value] of a) {
+    if (!Number.isFinite(value)) continue;
+    const ms = dateToUtcMs(date);
+    if (ms >= start && bDates.has(ms)) {
+      shared = ms;
+      break;
+    }
+  }
+  const from = shared ?? start;
   return [
-    a.filter(([date]) => dateToUtcMs(date) >= start),
-    b.filter(([date]) => dateToUtcMs(date) >= start),
+    a.filter(([date]) => dateToUtcMs(date) >= from),
+    b.filter(([date]) => dateToUtcMs(date) >= from),
   ];
 }
 

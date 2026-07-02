@@ -78,6 +78,15 @@ describe("navWindowStats", () => {
     ]);
     expect(stats.maxDrawdown).toBeNull();
   });
+
+  it("reports null maxDrawdown for a flat (cash-only) NAV — a plateau is not a decline", () => {
+    const stats = navWindowStats([
+      point("2024-01-01", 100),
+      point("2024-02-01", 100),
+      point("2024-03-01", 100),
+    ]);
+    expect(stats.maxDrawdown).toBeNull();
+  });
 });
 
 describe("navDrawdownSeries", () => {

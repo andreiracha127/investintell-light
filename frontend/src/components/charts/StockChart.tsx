@@ -240,12 +240,14 @@ export function StockChart({
   const comparesRef = useRef<CompareEntry[]>(compares);
   comparesRef.current = compares;
 
-  // Compare-mode x-axis floor bookkeeping: the floor we imposed (if any) and
-  // the visible min we saw before imposing it, so removal can restore the
-  // user's prior view instead of leaving the chart clipped to a removed
-  // compare's inception.
+  // Compare-mode x-axis floor bookkeeping: the floor we imposed (if any), the
+  // view we saw before imposing it, and the user's live selected min (tracked
+  // via afterSetExtremes). Together these let compare add/remove restore the
+  // user's CURRENT range instead of a stale one, even if they changed range or
+  // zoomed while a compare floor was active.
   const imposedFloorRef = useRef<number | null>(null);
   const preFloorMinRef = useRef<number | null>(null);
+  const userMinRef = useRef<number | null>(null);
 
   const [feed, setFeed] = useState<FeedStatus>("off");
 
@@ -313,6 +315,32 @@ export function StockChart({
         return;
       }
       chartRef.current = chart;
+      // Track the user's own range changes (range buttons, navigator, zoom,
+      // scrollbar, pan). When the user re-ranges while a compare floor is
+      // active, the native rangeSelector overrides our imposed min — so we
+      // forget the imposed-floor bookkeeping, record the fresh view, and
+      // re-impose an appropriate floor for the new range if compares remain.
+      // Our own programmatic min (chart.update) fires with no user trigger and
+      // is ignored here, so this never recurses.
+      const USER_EXTREME_TRIGGERS = new Set([
+        "rangeSelectorButton",
+        "navigator",
+        "zoom",
+        "pan",
+        "scrollbar",
+        "rangeSelectorInput",
+      ]);
+      const primaryAxis = chart.xAxis?.[0];
+      if (primaryAxis && typeof Highcharts.addEvent === "function") {
+        Highcharts.addEvent(primaryAxis, "afterSetExtremes", (e: unknown) => {
+          const event = e as { trigger?: string; min?: number };
+          if (!event.trigger || !USER_EXTREME_TRIGGERS.has(event.trigger)) return;
+          userMinRef.current = typeof event.min === "number" ? event.min : null;
+          imposedFloorRef.current = null;
+          preFloorMinRef.current = null;
+          if (comparesRef.current.length > 0) applyCompareMode(comparesRef.current);
+        });
+      }
       // Initial High/Low marker (no-op until bars arrive; the bars effect below
       // refreshes once data populates).
       refreshHighLowAnnotation(chart, barsRef.current, colors);
@@ -427,8 +455,12 @@ export function StockChart({
     // Decisions are made against the USER's selected view, not the current
     // visible min — while a floor is imposed the visible min IS that floor, so
     // using it would keep clearing/lowering incorrectly when compares change.
+    // When no floor is active, prefer the tracked user min (kept fresh on
+    // every user range change) and fall back to the current visible min.
     const referenceMin =
-      imposedFloorRef.current !== null ? preFloorMinRef.current : currentVisibleMin;
+      imposedFloorRef.current !== null
+        ? preFloorMinRef.current
+        : userMinRef.current ?? currentVisibleMin;
 
     let floor: number | null = null;
     if (count > 0) {
