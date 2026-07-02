@@ -404,23 +404,35 @@ export function StockChart({
     const chart = chartRef.current;
     if (!chart) return;
     const count = entries.length;
-    // Percent-rebased curves must all start on the same date. Highstock
-    // rebases each series at its own first point in range, so a compare whose
-    // history begins later would start at 0% on a different day. Floor the
-    // axis at the latest inception across the main series and every loaded
-    // compare; lift the floor when the last compare is removed.
-    const firsts = [
-      barsRef.current[0]?.t,
-      ...entries.map((entry) => entry.bars[0]?.t),
-    ].filter((t): t is number => typeof t === "number");
-    const commonStart = count > 0 && firsts.length > 0 ? Math.max(...firsts) : null;
-    chart.update(
-      {
-        plotOptions: { series: { compare: count > 0 ? "percent" : undefined } },
-        xAxis: { min: commonStart },
-      },
-      true,
-    );
+    // Percent-rebased curves must share a baseline. Highstock rebases each
+    // series at the first point IN THE VISIBLE RANGE, so a compare whose
+    // history starts after that first point would rebase on a different day.
+    // We only need to move the left edge FORWARD when a series actually starts
+    // inside the current window — never backward to an absolute inception,
+    // which would zoom the user out of their selected range just for adding a
+    // compare. So floor = max(visibleMin, latest inception), applied only when
+    // that latest inception falls after the visible minimum.
+    const update: Parameters<Chart["update"]>[0] = {
+      plotOptions: { series: { compare: count > 0 ? "percent" : undefined } },
+    };
+    if (count > 0) {
+      const inceptions = [
+        barsRef.current[0]?.t,
+        ...entries.map((entry) => entry.bars[0]?.t),
+      ].filter((t): t is number => typeof t === "number");
+      const latestInception = inceptions.length > 0 ? Math.max(...inceptions) : null;
+      const extremes = chart.xAxis[0]?.getExtremes();
+      const visibleMin =
+        extremes && typeof extremes.min === "number" ? extremes.min : null;
+      if (
+        latestInception !== null &&
+        visibleMin !== null &&
+        latestInception > visibleMin
+      ) {
+        update.xAxis = { min: latestInception };
+      }
+    }
+    chart.update(update, true);
   }
 
   async function addCompare(item: SymbolSearchResult): Promise<void> {

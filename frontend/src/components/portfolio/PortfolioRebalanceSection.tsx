@@ -327,8 +327,15 @@ function PolicyEditor({
         macro_trigger_enabled: macroTrigger,
       }),
     onSuccess: () => {
+      // Re-evaluate the preview (effective policy, drifts, proposal) AND the
+      // persisted drift alerts against the just-saved bands/trigger — the
+      // Drift & alerts card above shares the alerts query and would otherwise
+      // keep showing breaches from the old policy until its stale time lapses.
       void queryClient.invalidateQueries({
         queryKey: ["rebalance-preview", portfolioId],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["portfolio", portfolioId, "alerts"],
       });
       onClose();
     },
@@ -539,7 +546,12 @@ export function PortfolioRebalanceSection({
         </p>
 
         {editingPolicy && (
+          // Key by portfolio so switching portfolios (with a cached preview)
+          // remounts the editor and re-seeds its draft from the new policy —
+          // `useState` initializers don't rerun, so without this the editor
+          // would PUT the previous portfolio's bands onto the new one.
           <PolicyEditor
+            key={portfolioId}
             portfolioId={portfolioId}
             policy={policy}
             onClose={() => setEditingPolicy(false)}
