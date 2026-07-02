@@ -414,18 +414,21 @@ export function StockChart({
     // Percent-rebased curves must share a baseline. Highstock rebases each
     // series at the first point IN THE VISIBLE RANGE, so a compare whose
     // history starts after that first point would rebase on a different day.
-    // We only need to move the left edge FORWARD when a series actually starts
-    // inside the current window — never backward to an absolute inception,
-    // which would zoom the user out of their selected range just for adding a
-    // compare. So floor = max(visibleMin, latest inception), applied only when
-    // that latest inception falls after the visible minimum.
+    // We only move the left edge FORWARD when a series actually starts inside
+    // the user's selected window — never backward to an absolute inception,
+    // which would zoom the user out just for adding a compare.
     const update: Parameters<Chart["update"]>[0] = {
       plotOptions: { series: { compare: count > 0 ? "percent" : undefined } },
     };
 
     const extremes = chart.xAxis[0]?.getExtremes();
-    const visibleMin =
+    const currentVisibleMin =
       extremes && typeof extremes.min === "number" ? extremes.min : null;
+    // Decisions are made against the USER's selected view, not the current
+    // visible min — while a floor is imposed the visible min IS that floor, so
+    // using it would keep clearing/lowering incorrectly when compares change.
+    const referenceMin =
+      imposedFloorRef.current !== null ? preFloorMinRef.current : currentVisibleMin;
 
     let floor: number | null = null;
     if (count > 0) {
@@ -434,10 +437,14 @@ export function StockChart({
         ...entries.map((entry) => entry.bars[0]?.t),
       ].filter((t): t is number => typeof t === "number");
       const latestInception = inceptions.length > 0 ? Math.max(...inceptions) : null;
+      // Floor forward only when the latest-starting series begins after the
+      // user's view. This also correctly LOWERS the floor (rather than clearing
+      // it) when the newest of several short-history compares is removed and an
+      // earlier-but-still-late compare remains.
       if (
         latestInception !== null &&
-        visibleMin !== null &&
-        latestInception > visibleMin
+        referenceMin !== null &&
+        latestInception > referenceMin
       ) {
         floor = latestInception;
       }
@@ -445,14 +452,13 @@ export function StockChart({
 
     if (floor !== null) {
       // Capture the pre-floor view once, so removal can restore it.
-      if (imposedFloorRef.current === null) preFloorMinRef.current = visibleMin;
+      if (imposedFloorRef.current === null) preFloorMinRef.current = referenceMin;
       update.xAxis = { min: floor };
       imposedFloorRef.current = floor;
     } else if (imposedFloorRef.current !== null) {
-      // A floor we previously imposed is no longer needed (compare removed or
-      // no series starts inside the window) — restore the pre-floor min so the
-      // chart isn't left clipped to a removed compare's inception.
-      update.xAxis = { min: preFloorMinRef.current };
+      // No series starts inside the user's view anymore — restore that view
+      // instead of leaving the chart clipped to a removed compare's inception.
+      update.xAxis = { min: referenceMin };
       imposedFloorRef.current = null;
       preFloorMinRef.current = null;
     }

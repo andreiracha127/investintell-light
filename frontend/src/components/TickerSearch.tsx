@@ -49,6 +49,14 @@ export function TickerSearch() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // `results` belong to the debounced query `q`, which lags `text` by 250ms.
+  // Only treat them as valid for navigation/display when they match exactly
+  // what's typed — this hides stale suggestions during the debounce window so
+  // neither a click nor an Enter can route to the previous query's hit.
+  const trimmedText = text.trim();
+  const resultsCurrent = q === trimmedText;
+  const showResults = open && results.length > 0 && resultsCurrent;
+
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -97,19 +105,16 @@ export function TickerSearch() {
             setHi((i) => Math.max(i - 1, -1));
           } else if (event.key === "Enter") {
             event.preventDefault();
-            const trimmed = text.trim();
-            // `results` belong to the debounced query `q`; they may still lag
-            // the current input. Only auto-pick the top hit when the results
-            // are for exactly what's typed — otherwise treat the raw text as a
-            // ticker so a fast Enter never routes to a stale suggestion.
-            const resultsCurrent = q === trimmed;
+            // Only act on suggestions when they belong to the current input
+            // (see `resultsCurrent`); otherwise treat the raw text as a ticker
+            // so a fast Enter never routes to a stale suggestion.
             if (hi >= 0 && results[hi] && resultsCurrent) {
               go(results[hi]);
             } else if (results.length > 0 && open && resultsCurrent) {
               go(results[0]);
-            } else if (trimmed) {
+            } else if (trimmedText) {
               go({
-                symbol: trimmed.toUpperCase(),
+                symbol: trimmedText.toUpperCase(),
                 name: null,
                 kind: "stock",
                 instrument_id: null,
@@ -122,7 +127,7 @@ export function TickerSearch() {
         }}
         placeholder="Search stocks & funds…"
         aria-label="Search stocks and funds"
-        aria-expanded={open && results.length > 0}
+        aria-expanded={showResults}
         aria-autocomplete="list"
         aria-controls={listId}
         role="combobox"
@@ -130,7 +135,7 @@ export function TickerSearch() {
         spellCheck={false}
         className="h-9 w-full max-w-[440px] border-0 border-b border-border-strong bg-field pl-[34px] pr-3 text-[13px] text-text-primary outline-none placeholder:text-text-muted focus:border-b-2 focus:border-accent"
       />
-      {open && results.length > 0 && (
+      {showResults && (
         <ul
           id={listId}
           role="listbox"
